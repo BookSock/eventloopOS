@@ -26,6 +26,8 @@ pnpm run test:e2e:live
 
 Live proof covers seeded queue, MCP source discovery, MCP poll-and-route, Slack-specific and generic MCP source poll -> route -> done, poll-all MCP sweep -> route -> done, Slack/MCP task-hinted events injecting into an existing task session without creating a human queue item, voice transcript -> task-session followup routing, passive browser context `store_only`, task-attached browser context search, task-session discovery + idempotent followup, native-host forwarding, workspace status/capture/restore-plan contracts, workspace snapshot context through the queue API, workspace status/restore-disabled smoke in the live harness, and macOS manual-mode queue state with `Cmd-Option-Shift-M` global hotkey wiring. The macOS view model auto-renews queue leases, plans selected workspace restores, and skips workspace restore planning while manual mode is active.
 
+Run `pnpm --filter @eventloopos/orchestrator run dev:doctor` after build to get machine-readable readiness for local live checks: orchestrator health, AeroSpace daemon, and Docker daemon.
+
 Workspace restore execution is disabled by default. Set `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled` and call `POST /workspace/restore` with `confirm_execute: true` plus an `idempotency-key` header to execute an AeroSpace restore plan.
 
 Set `DATABASE_URL` to run the orchestrator with Postgres-backed queue storage.
