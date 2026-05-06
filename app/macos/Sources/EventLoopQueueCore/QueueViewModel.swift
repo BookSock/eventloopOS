@@ -7,17 +7,25 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var state: QueueState
     @Published public private(set) var mode: EventLoopMode
     @Published public private(set) var shouldRestoreWorkspace: Bool
+    @Published public private(set) var workspaceRestoreState: WorkspaceRestoreState
 
     private let client: any QueueClient
+    private let workspaceClient: any WorkspaceClient
     private var leaseRenewalTask: Task<Void, Never>?
 
-    public init(client: any QueueClient, initialPackets: [ReviewPacket] = []) {
+    public init(
+        client: any QueueClient,
+        workspaceClient: any WorkspaceClient = NoOpWorkspaceClient(),
+        initialPackets: [ReviewPacket] = []
+    ) {
         self.client = client
+        self.workspaceClient = workspaceClient
         self.packets = initialPackets
         self.selectedPacketID = initialPackets.first?.id
         self.state = .idle
         self.mode = .eventLoop
         self.shouldRestoreWorkspace = true
+        self.workspaceRestoreState = .idle
     }
 
     deinit {
@@ -57,6 +65,7 @@ public final class QueueViewModel: ObservableObject {
     public func enterManualMode() {
         mode = .manual
         shouldRestoreWorkspace = false
+        workspaceRestoreState = .skippedManualMode
     }
 
     public func returnToEventLoopMode() {
@@ -128,6 +137,20 @@ public final class QueueViewModel: ObservableObject {
     public func stopAutomaticLeaseRenewal() {
         leaseRenewalTask?.cancel()
         leaseRenewalTask = nil
+    }
+
+    public func prepareWorkspaceRestore(snapshot: WorkspaceSnapshot) async {
+        guard shouldRestoreWorkspace else {
+            workspaceRestoreState = .skippedManualMode
+            return
+        }
+
+        do {
+            let response = try await workspaceClient.restorePlan(snapshot: snapshot, currentWindows: nil)
+            workspaceRestoreState = .planned(response.plan)
+        } catch {
+            workspaceRestoreState = .failed(error.localizedDescription)
+        }
     }
 
     public func moveToNext() async {

@@ -80,4 +80,45 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.mode, .eventLoop)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
     }
+
+    func testManualModeSkipsWorkspaceRestorePlanning() async {
+        let workspaceClient = FakeWorkspaceClient()
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+
+        viewModel.enterManualMode()
+        await viewModel.prepareWorkspaceRestore(snapshot: snapshot)
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .skippedManualMode)
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [])
+    }
+
+    func testEventLoopModePlansWorkspaceRestore() async {
+        let plan = WorkspaceRestorePlan(
+            commands: [WorkspaceCommand(command: "aerospace", args: ["workspace", "eventloop-blog"])],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            planEnvelope: WorkspaceRestorePlanEnvelope(plan: plan, executeSupported: false)
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+
+        await viewModel.prepareWorkspaceRestore(snapshot: snapshot)
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .planned(plan))
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [snapshot])
+    }
 }

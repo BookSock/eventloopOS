@@ -8,7 +8,10 @@ struct EventLoopQueueApp: App {
 
     init() {
         let configuration = QueueAppConfiguration.parse(arguments: CommandLine.arguments)
-        let viewModel = QueueViewModel(client: configuration.makeClient())
+        let viewModel = QueueViewModel(
+            client: configuration.makeClient(),
+            workspaceClient: configuration.makeWorkspaceClient()
+        )
         _viewModel = StateObject(wrappedValue: viewModel)
         globalHotKeyController = GlobalHotKeyController {
             viewModel.toggleManualMode()

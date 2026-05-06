@@ -37,6 +37,15 @@ public struct QueueAppConfiguration: Equatable, Sendable {
         }
     }
 
+    public func makeWorkspaceClient() -> any WorkspaceClient {
+        switch clientMode {
+        case .fake:
+            FakeWorkspaceClient()
+        case let .http(url):
+            HTTPWorkspaceClient(baseURL: url)
+        }
+    }
+
     private static func value(after flag: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: flag) else {
             return nil

@@ -164,7 +164,7 @@ Implemented:
 - `app/orchestrator/src/task_sessions`: fake task-session store plus terminal adapter for tmux and Ghostty, using audited visible input and injected command execution in tests.
 - `app/browser-extension`: shared-schema `browser_tab` capture/restore, optional task/project route hints, legacy resource normalizer, native bridge envelope/capability protocol.
 - `app/native-host`: Chrome Native Messaging stdio host, context capture JSONL sink, optional route hints (`task_hint`, `project_hint`), macOS Chrome manifest installer, and live smoke that forwards browser capture into orchestrator as `store_only` context.
-- `app/macos`: Swift queue shell using real orchestrator API shape, lease-next flow, lease renewal client method for longer human review sessions, and manual-mode toggle (`Cmd-Option-Shift-M`) that pauses workspace restore state without clearing queue. Carbon global hotkey wiring exists in the app target without third-party dependency.
+- `app/macos`: Swift queue shell using real orchestrator API shape, lease-next flow, automatic lease renewal, workspace status/restore-plan client, and manual-mode toggle (`Cmd-Option-Shift-M`) that skips workspace restore planning without clearing queue. Carbon global hotkey wiring exists in the app target without third-party dependency.
 - `app/test-harness`: `seeded_queue`, `mcp_poll_route_done`, `mcp_source_poll_route_done`, `browser_context_store_only`, `browser_context_attach_task`, `task_session_followup`, and `workspace_status_smoke` fixture/live scenarios with artifacts.
 - `config`: documented read-only MCP source config example for Slack/GitHub-like poll sources, validated by orchestrator tests.
 
@@ -179,8 +179,8 @@ Known gaps:
 
 - Real persistent orchestrator wiring should replace in-memory store for HTTP routes.
 - Persistent Postgres HTTP mode exists behind `DATABASE_URL`; needs full live local proof once Docker/Postgres runtime available.
-- macOS UI needs menu bar polish and automatic lease renewal timer.
-- macOS UI has manual-mode toggle state and global hotkey wiring; next gap is actual workspace restore pause/resume integration.
+- macOS UI needs menu bar polish and visible workspace restore status.
+- macOS UI has manual-mode toggle state, global hotkey wiring, automatic lease renewal, and restore-plan pause gate; next gap is actual workspace restore execution with explicit confirmation.
 - Native host forwards context/event data to orchestrator when `EVENTLOOPOS_ORCHESTRATOR_URL` is set; next gap is richer context ranking/search and task attachment UI.
 - MCP source registry loads local config files and can run real read-only poll tools through the SDK runtime; next gap is adapter/mapping helper for user-installed MCP servers whose tool output is not already `items[]`.
 - Aerospace adapter has unit/API coverage, daemon status endpoint, and live harness smoke; next gap is explicit execute-confirm flow.

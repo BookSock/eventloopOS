@@ -51,6 +51,27 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(config.clientMode, .http(URL(string: "http://127.0.0.1:9999")!))
     }
 
+    func testWorkspaceStatusEnvelopeDecodesExecuteFlag() throws {
+        let data = """
+        {
+          "status": {
+            "available": false,
+            "backend": "aerospace",
+            "reason": "server_unavailable",
+            "detail": "AeroSpace app is not running"
+          },
+          "execute_supported": false
+        }
+        """.data(using: .utf8)!
+
+        let envelope = try QueueCoders.makeDecoder().decode(WorkspaceStatusEnvelope.self, from: data)
+
+        XCTAssertEqual(envelope.status.available, false)
+        XCTAssertEqual(envelope.status.backend, "aerospace")
+        XCTAssertEqual(envelope.status.reason, "server_unavailable")
+        XCTAssertEqual(envelope.executeSupported, false)
+    }
+
     private func loadFixturePackets() throws -> [ReviewPacket] {
         let url = Bundle.module.url(forResource: "fake_orchestrator_queue", withExtension: "json")!
         let data = try Data(contentsOf: url)
