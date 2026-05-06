@@ -14,6 +14,30 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedPacket?.title, "Review blog feedback draft")
     }
 
+    func testLoadQueueLeasesSelectedPacketBeforeRenewal() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.loadQueue()
+        await viewModel.renewSelectedLease()
+
+        XCTAssertEqual(client.leasedPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(client.renewedPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(viewModel.state, .loaded)
+    }
+
+    func testRefreshKeepsExistingLeasedSelection() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.loadQueue()
+        await viewModel.loadQueue()
+
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(client.leasedPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(client.renewedPacketIds, ["packet-blog-feedback"])
+    }
+
     func testSelectIgnoresUnknownPacket() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
         await viewModel.loadQueue()
@@ -32,6 +56,7 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.doneAndNext()
 
         XCTAssertEqual(client.completedPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(client.leasedPacketIds, ["packet-blog-feedback", "packet-ci-failed"])
         XCTAssertEqual(viewModel.state, .loaded)
         XCTAssertEqual(viewModel.packets.map(\.id), ["packet-ci-failed", "packet-external-send"])
         XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")

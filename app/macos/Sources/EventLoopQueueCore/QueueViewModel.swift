@@ -55,8 +55,9 @@ public final class QueueViewModel: ObservableObject {
     public func loadQueue() async {
         state = .loading
         do {
+            let leasedPacketID = try await leasedSelectionID(preferredPacketID: selectedPacketID)
             packets = try await client.fetchQueue()
-            selectedPacketID = packets.first?.id
+            selectedPacketID = leasedPacketID ?? packets.first?.id
             state = .loaded
         } catch {
             state = .failed(error.localizedDescription)
@@ -97,12 +98,26 @@ public final class QueueViewModel: ObservableObject {
         state = .loading
         do {
             _ = try await client.complete(packetId: packetId)
+            let leasedPacket = try await client.next(after: nil)
             packets = try await client.fetchQueue()
-            selectedPacketID = packets.first?.id
+            selectedPacketID = leasedPacket?.id ?? packets.first?.id
             state = .loaded
         } catch {
             state = .failed(error.localizedDescription)
         }
+    }
+
+    private func leasedSelectionID(preferredPacketID: String?) async throws -> String? {
+        if let preferredPacketID {
+            do {
+                _ = try await client.renewLease(packetId: preferredPacketID)
+                return preferredPacketID
+            } catch {
+                // Selection may be stale or not leased yet. Fall back to leasing the next ready item.
+            }
+        }
+
+        return try await client.next(after: nil)?.id
     }
 
     public func renewSelectedLease() async {

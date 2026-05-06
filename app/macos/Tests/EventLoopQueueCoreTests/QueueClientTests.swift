@@ -33,11 +33,23 @@ final class QueueClientTests: XCTestCase {
     func testFakeQueueClientRenewsSelectedPacketLease() async throws {
         let client = FakeQueueClient(packets: try loadFixturePackets())
 
+        _ = try await client.next(after: nil)
         let result = try await client.renewLease(packetId: "qit_blog_feedback")
 
         XCTAssertTrue(result.ok)
         XCTAssertNil(result.completedPacketId)
         XCTAssertEqual(result.nextPacket?.id, "qit_blog_feedback")
+    }
+
+    func testFakeQueueClientRejectsRenewalBeforeLease() async throws {
+        let client = FakeQueueClient(packets: try loadFixturePackets())
+
+        do {
+            _ = try await client.renewLease(packetId: "qit_blog_feedback")
+            XCTFail("expected unleased renew to fail")
+        } catch QueueClientError.httpStatus(409) {
+            XCTAssertEqual(client.renewedPacketIds, [])
+        }
     }
 
     func testConfigurationUsesFakeClientInTestMode() {

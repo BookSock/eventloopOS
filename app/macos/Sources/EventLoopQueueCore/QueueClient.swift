@@ -107,6 +107,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private let lock = NSLock()
     private var packets: [ReviewPacket]
     private var completedIds: [String] = []
+    private var leasedIds: Set<String> = []
+    private var leaseOrder: [String] = []
     private var renewedIds: [String] = []
 
     public init(packets: [ReviewPacket] = SeededQueue.packets) {
@@ -115,6 +117,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public var completedPacketIds: [String] {
         lock.withLock { completedIds }
+    }
+
+    public var leasedPacketIds: [String] {
+        lock.withLock { leaseOrder }
     }
 
     public var renewedPacketIds: [String] {
@@ -131,6 +137,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
                 throw QueueClientError.packetNotFound(packetId)
             }
             packets.remove(at: index)
+            leasedIds.remove(packetId)
             completedIds.append(packetId)
             return QueueActionResult(ok: true, completedPacketId: packetId, nextPacket: packets.first)
         }
@@ -141,6 +148,9 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
             guard packets.contains(where: { $0.id == packetId }) else {
                 throw QueueClientError.packetNotFound(packetId)
             }
+            guard leasedIds.contains(packetId) else {
+                throw QueueClientError.httpStatus(409)
+            }
             renewedIds.append(packetId)
             return QueueActionResult(ok: true, completedPacketId: nil, nextPacket: packets.first)
         }
@@ -148,13 +158,18 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public func next(after packetId: String?) async throws -> ReviewPacket? {
         lock.withLock {
-            guard let packetId else {
-                return packets.first
+            let candidates: [ReviewPacket]
+            if let packetId, let index = packets.firstIndex(where: { $0.id == packetId }) {
+                candidates = Array(packets.dropFirst(index + 1)) + Array(packets.prefix(index + 1))
+            } else {
+                candidates = packets
             }
-            guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
-                return packets.first
+            guard let packet = candidates.first(where: { !leasedIds.contains($0.id) }) else {
+                return nil
             }
-            return packets.dropFirst(index + 1).first ?? packets.first
+            leasedIds.insert(packet.id)
+            leaseOrder.append(packet.id)
+            return packet
         }
     }
 }
