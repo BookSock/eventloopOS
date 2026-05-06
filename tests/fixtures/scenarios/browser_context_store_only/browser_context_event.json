@@ -1,0 +1,42 @@
+{
+  "id": "evt_browser_context_store_only",
+  "source": "browser",
+  "source_id": "browser:ctx_store_only",
+  "idempotency_key": "browser:ctx_store_only",
+  "occurred_at": "2026-01-15T09:29:58Z",
+  "received_at": "2026-01-15T09:30:00Z",
+  "actor": {
+    "id": "actor_browser_extension",
+    "type": "system",
+    "name": "Chrome Extension"
+  },
+  "type": "browser.context_captured",
+  "title": "Browser context: Launch doc",
+  "summary": "https://example.test/launch",
+  "raw_ref": {
+    "id": "raw_browser_context_store_only",
+    "uri": "native-host://context/ctx_store_only",
+    "media_type": "application/json"
+  },
+  "links": [
+    {
+      "label": "Browser tab",
+      "url": "https://example.test/launch"
+    }
+  ],
+  "resources": [
+    {
+      "id": "ctx_browser_context_store_only",
+      "kind": "browser_tab",
+      "title": "Launch doc",
+      "url": "https://example.test/launch",
+      "source": "chrome-extension",
+      "captured_at": "2026-01-15T09:30:00Z",
+      "restore_confidence": "high",
+      "window_id": "1",
+      "tab_id": "7",
+      "scroll_y": 120,
+      "text_quote": "Launch pricing note needs review later"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "schema": "Event",
+  "valid": false,
+  "data": {
+    "source": "slack",
+    "source_id": "slack:T123:C123:456.000",
+    "idempotency_key": "slack:T123:C123:456.000",
+    "occurred_at": "2026-05-06T16:58:00Z",
+    "received_at": "2026-05-06T17:00:00Z",
+    "type": "slack.message",
+    "title": "Missing id fixture",
+    "raw_ref": {
+      "id": "raw_bad_001",
+      "uri": "artifact://raw/slack/bad.json"
+    },
+    "links": [],
+    "resources": []
+  }
+}

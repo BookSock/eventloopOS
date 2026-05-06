@@ -1,0 +1,16 @@
+{
+  "schema": "HookDecision",
+  "data": {
+    "hook": "before_external_send",
+    "decision": "require_approval",
+    "reason": "External Slack send needs human approval.",
+    "evidence": [
+      {
+        "id": "evref_hook_policy",
+        "kind": "receipt",
+        "title": "Hook policy result",
+        "ref": "receipt_hook_001"
+      }
+    ]
+  }
+}

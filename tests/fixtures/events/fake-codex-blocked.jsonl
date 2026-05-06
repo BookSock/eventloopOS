@@ -1,0 +1,2 @@
+{"type":"started","run_id":"run_fake_blocked","task_id":"task_agent_adapter","thread_id":"thread_fake_codex","timestamp":"2026-05-06T19:00:00.000Z"}
+{"type":"blocked","title":"Fake Codex blocked","summary":"Fake Codex cannot proceed without human decision.","decision_needed":"Provide missing task-session match before sending followup.","risk_tags":["missing_context"]}

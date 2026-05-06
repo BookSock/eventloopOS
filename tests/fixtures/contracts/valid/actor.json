@@ -1,0 +1,10 @@
+{
+  "schema": "Actor",
+  "data": {
+    "id": "actor_jason",
+    "type": "human",
+    "name": "Jason Seibel",
+    "email": "jason@example.com",
+    "source": "manual"
+  }
+}

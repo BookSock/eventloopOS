@@ -1,0 +1,11 @@
+{
+  "name": "@eventloopos/macos",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "swift test",
+    "test:e2e": "swift test",
+    "typecheck": "swift build"
+  }
+}

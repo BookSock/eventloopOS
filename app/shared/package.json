@@ -1,0 +1,38 @@
+{
+  "name": "@eventloopos/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./json-schema": {
+      "types": "./dist/json-schema.d.ts",
+      "import": "./dist/json-schema.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:contracts": "pnpm test && pnpm test:fixtures",
+    "test:fixtures": "tsx src/cli.ts validate-fixtures ../../tests/fixtures/contracts",
+    "contracts:json-schema": "tsx src/cli.ts print-json-schema",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "validate": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.24.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.14"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

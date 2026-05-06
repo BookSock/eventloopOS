@@ -1,0 +1,75 @@
+{
+  "sources": [
+    {
+      "id": "slack_dm_source",
+      "server": {
+        "name": "slack-mcp",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-slack"],
+        "envAllowlist": ["SLACK_BOT_TOKEN", "SLACK_TEAM_ID"],
+        "stderrLogPath": "var/log/mcp/slack_dm_source.stderr.log"
+      },
+      "poll": {
+        "tool": "search_messages",
+        "args": {
+          "query": "is:dm OR mentions:me"
+        },
+        "timeoutMs": 5000
+      },
+      "cursor": {
+        "strategy": "field",
+        "field": "ts",
+        "initial": "0",
+        "dedupeWindow": 1000
+      },
+      "eventMapper": "slack_message_to_event",
+      "riskPolicy": {
+        "readOnly": true,
+        "allowWriteTools": false,
+        "maxRiskLevel": "low",
+        "untrustedTextFields": ["text"]
+      }
+    },
+    {
+      "id": "github_update_source",
+      "server": {
+        "name": "github-mcp",
+        "command": "docker",
+        "args": [
+          "run",
+          "-i",
+          "--rm",
+          "-e",
+          "GITHUB_PERSONAL_ACCESS_TOKEN",
+          "-e",
+          "GITHUB_TOOLSETS",
+          "-e",
+          "GITHUB_READ_ONLY",
+          "ghcr.io/github/github-mcp-server"
+        ],
+        "envAllowlist": ["GITHUB_PERSONAL_ACCESS_TOKEN", "GITHUB_TOOLSETS", "GITHUB_READ_ONLY"],
+        "stderrLogPath": "var/log/mcp/github_update_source.stderr.log"
+      },
+      "poll": {
+        "tool": "list_notifications",
+        "args": {
+          "participating": true
+        },
+        "timeoutMs": 5000
+      },
+      "cursor": {
+        "strategy": "field",
+        "field": "id",
+        "initial": "0",
+        "dedupeWindow": 1000
+      },
+      "eventMapper": "github_update_to_event",
+      "riskPolicy": {
+        "readOnly": true,
+        "allowWriteTools": false,
+        "maxRiskLevel": "low",
+        "untrustedTextFields": ["body", "title"]
+      }
+    }
+  ]
+}

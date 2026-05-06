@@ -1,0 +1,17 @@
+{
+  "request": {
+    "task_session_id": "task_session_blog",
+    "text": "Use stored launch context in next blog draft.",
+    "event_ids": ["evt_browser_context_attach_task"],
+    "idempotency_key": "idem_task_session_followup_001"
+  },
+  "expected_message": {
+    "id": "task_msg_idem_task_session_followup_001",
+    "task_session_id": "task_session_blog",
+    "mode": "followup",
+    "text": "Use stored launch context in next blog draft.",
+    "event_ids": ["evt_browser_context_attach_task"],
+    "idempotency_key": "idem_task_session_followup_001",
+    "status": "sent"
+  }
+}

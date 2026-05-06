@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "id": "issue-comment-99",
+      "repo": "pagerfreeglobal/pgrust",
+      "type": "github.issue_comment",
+      "title": "Comment on PR #42",
+      "body": "CI is green after rebase.",
+      "actor": "jason",
+      "occurred_at": "2026-05-06T17:01:00Z",
+      "url": "https://github.example.com/pagerfreeglobal/pgrust/pull/42#issuecomment-99",
+      "project_hint": "pagerfree",
+      "task_hint": "release PR"
+    }
+  ],
+  "nextCursor": "issue-comment-99"
+}

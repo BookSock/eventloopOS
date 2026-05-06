@@ -1,0 +1,44 @@
+{
+  "id": "evt_browser_context_attach_task",
+  "source": "browser",
+  "source_id": "browser:ctx_attach_task",
+  "idempotency_key": "browser:ctx_attach_task",
+  "occurred_at": "2026-01-15T09:29:58Z",
+  "received_at": "2026-01-15T09:30:00Z",
+  "actor": {
+    "id": "actor_browser_extension",
+    "type": "system",
+    "name": "Chrome Extension"
+  },
+  "project_hint": "launch",
+  "task_hint": "blog feedback",
+  "type": "browser.context_captured",
+  "title": "Browser context: Blog launch draft",
+  "summary": "https://example.test/blog-launch",
+  "raw_ref": {
+    "id": "raw_browser_context_attach_task",
+    "uri": "native-host://context/ctx_attach_task",
+    "media_type": "application/json"
+  },
+  "links": [
+    {
+      "label": "Browser tab",
+      "url": "https://example.test/blog-launch"
+    }
+  ],
+  "resources": [
+    {
+      "id": "ctx_browser_context_attach_task",
+      "kind": "browser_tab",
+      "title": "Blog launch draft",
+      "url": "https://example.test/blog-launch",
+      "source": "chrome-extension",
+      "captured_at": "2026-01-15T09:30:00Z",
+      "restore_confidence": "high",
+      "window_id": "1",
+      "tab_id": "8",
+      "scroll_y": 240,
+      "text_quote": "Launch details belong in blog feedback task"
+    }
+  ]
+}

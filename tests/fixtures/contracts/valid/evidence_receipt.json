@@ -1,0 +1,18 @@
+{
+  "schema": "EvidenceReceipt",
+  "data": {
+    "id": "receipt_test_001",
+    "action_type": "test_run",
+    "actor_id": "actor_agent_contracts",
+    "input_hash": "hash_input_001",
+    "output_hash": "hash_output_001",
+    "artifact_refs": [
+      {
+        "id": "raw_test_log_001",
+        "uri": "artifact://logs/contracts-test.log",
+        "media_type": "text/plain"
+      }
+    ],
+    "created_at": "2026-05-06T17:20:00Z"
+  }
+}

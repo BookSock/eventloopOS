@@ -1,0 +1,45 @@
+{
+  "source_id": "slack_dm_source",
+  "expected_event": {
+    "id": "evt_slack_T123_C123_456_000",
+    "source": "slack",
+    "source_id": "slack:T123:C123:456.000",
+    "idempotency_key": "slack:T123:C123:456.000",
+    "type": "slack.message",
+    "title": "Slack message from Malis"
+  },
+  "expected_route_decision": {
+    "id": "rte_evt_slack_t123_c123_456_000",
+    "event_id": "evt_slack_T123_C123_456_000",
+    "action": "ask_human_now",
+    "target_task_id": "task_blog_feedback",
+    "confidence": "medium"
+  },
+  "expected_review_packet": {
+    "id": "pkt_evt_slack_t123_c123_456_000",
+    "task_id": "task_blog_feedback",
+    "title": "Review Slack message from Malis",
+    "risk_level": "medium",
+    "confidence": "medium"
+  },
+  "expected_queue_item": {
+    "id": "qit_evt_slack_t123_c123_456_000",
+    "review_packet_id": "pkt_evt_slack_t123_c123_456_000",
+    "task_id": "task_blog_feedback",
+    "state": "ready",
+    "priority_score": 900,
+    "priority_reasons": [
+      "new_background_event",
+      "slack_message",
+      "task_hint_present"
+    ]
+  },
+  "expected_audit_decision": {
+    "id": "decision_mcp_source_poll_done_001",
+    "queue_item_id": "qit_evt_slack_t123_c123_456_000",
+    "review_packet_id": "pkt_evt_slack_t123_c123_456_000",
+    "action": "done",
+    "actor_id": "user_jason",
+    "decided_at": "2026-01-15T09:30:00Z"
+  }
+}

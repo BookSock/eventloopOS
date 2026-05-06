@@ -1,0 +1,21 @@
+{
+  "name": "@eventloopos/native-host",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "eventloop-native-host": "bin/eventloop-native-host",
+    "eventloop-print-chrome-host-manifest": "bin/print-chrome-host-manifest",
+    "eventloop-install-chrome-host": "bin/install-chrome-host",
+    "eventloop-native-host-live-smoke": "bin/live-forward-smoke"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "typecheck": "node --check src/protocol.js && node --check src/host.js && node --check src/install.js && node --check bin/eventloop-native-host && node --check bin/print-chrome-host-manifest && node --check bin/install-chrome-host && node --check bin/live-forward-smoke",
+    "test:e2e:live": "bin/live-forward-smoke",
+    "test:e2e": "node --test tests/*.test.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

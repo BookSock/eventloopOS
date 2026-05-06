@@ -1,0 +1,30 @@
+{
+  "id": "slack_dm_source",
+  "server": {
+    "name": "fake-slack-mcp",
+    "command": "fake-slack-mcp",
+    "args": ["--stdio"],
+    "envAllowlist": ["SLACK_MCP_TOKEN"],
+    "stderrLogPath": "var/log/mcp/slack_dm_source.stderr.log"
+  },
+  "poll": {
+    "tool": "search_messages",
+    "args": {
+      "query": "is:dm OR mentions:me"
+    },
+    "timeoutMs": 20
+  },
+  "cursor": {
+    "strategy": "field",
+    "field": "ts",
+    "initial": "0",
+    "dedupeWindow": 100
+  },
+  "eventMapper": "slack_message_to_event",
+  "riskPolicy": {
+    "readOnly": true,
+    "allowWriteTools": false,
+    "maxRiskLevel": "low",
+    "untrustedTextFields": ["text"]
+  }
+}

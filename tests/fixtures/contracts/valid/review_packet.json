@@ -1,0 +1,53 @@
+{
+  "schema": "ReviewPacket",
+  "data": {
+    "id": "pkt_feedback_001",
+    "task_id": "task_blog_feedback",
+    "agent_run_id": "run_codex_001",
+    "title": "Approve customer reply draft",
+    "summary": "Agent drafted a reply based on Slack feedback.",
+    "decision_needed": "Approve sending reply or edit draft first.",
+    "risk_level": "medium",
+    "confidence": "high",
+    "risk_tags": ["external_send"],
+    "evidence": [
+      {
+        "id": "evref_draft_001",
+        "kind": "artifact",
+        "title": "Reply draft",
+        "ref": "raw_reply_draft_001"
+      }
+    ],
+    "context": [
+      {
+        "id": "ctx_slack_001",
+        "kind": "slack_thread",
+        "title": "Slack feedback thread",
+        "url": "https://slack.example.com/archives/C123/p456",
+        "restore_confidence": "high"
+      }
+    ],
+    "recommended_action": {
+      "id": "act_approve_001",
+      "type": "approve",
+      "label": "Approve reply",
+      "requires_confirmation": true,
+      "side_effect": "external",
+      "payload": {
+        "draft_ref": "raw_reply_draft_001"
+      }
+    },
+    "alternate_actions": [
+      {
+        "id": "act_defer_001",
+        "type": "defer",
+        "label": "Defer",
+        "requires_confirmation": false,
+        "side_effect": "none",
+        "payload": {}
+      }
+    ],
+    "created_at": "2026-05-06T17:12:00Z",
+    "updated_at": "2026-05-06T17:12:00Z"
+  }
+}

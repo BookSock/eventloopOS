@@ -1,0 +1,3 @@
+{"type":"started","run_id":"run_fake_ticket_10","task_id":"task_agent_adapter","thread_id":"thread_fake_codex","timestamp":"2026-05-06T19:00:00.000Z","message":"Fake Codex run started"}
+{"type":"output","message":"Parsed fixture stream and found risky followup send."}
+{"type":"approval_request","title":"Approve fake followup send","summary":"Fake Codex prepared a followup message for the task session and needs approval before resuming.","decision_needed":"Approve resume so fake adapter can continue after waiting_approval.","risk_level":"medium","confidence":"high","risk_tags":["external_send","task_message"],"message":"waiting for approval"}

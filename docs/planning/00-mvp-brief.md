@@ -1,0 +1,85 @@
+# MVP Brief
+
+Date: May 6, 2026.
+
+## Thesis
+
+Agents cheap. Parallel work easy. Bottleneck moves from execution to human attention.
+
+Product = attention scheduler for computer work. It keeps background work moving, detects human-blocked moments, ranks them, restores exact context, gets fast decision.
+
+Position:
+
+> Superhuman for agent review, with Mac workspace restore.
+
+Not AI assistant. Not generic automation builder. Not window manager. Wedge = review queue for high-output users running many AI/coding/workflow agents.
+
+## Target User
+
+Start with agent-heavy founders + devs using:
+
+- Slack for interrupts + feedback.
+- GitHub for code review + CI.
+- local Markdown/Notion/GitHub issues for task state.
+- Chrome/Arc for docs, issues, dashboards, web apps.
+- Codex, Claude Code, Cursor, or similar agents for parallel coding/work.
+- macOS as daily work OS.
+
+Pain already sharp: agents create more output than user can inspect. Work gets lost across terminals, browser tabs, Slack threads, PRs, docs.
+
+## Core Loop
+
+1. Event enters from MCP/poll, Slack, GitHub, browser, agent log, voice, or manual capture.
+2. Router links event to task, project, workspace context, agent thread.
+3. Agents keep working until judgment/approval needed.
+4. System creates review packet: evidence, risk, confidence, next decision.
+5. Queue ranks all human-blocked work.
+6. User presses one hotkey.
+7. System opens/focuses context: Slack thread, PR, doc, terminal, agent thread, browser tab.
+8. User approves, rejects, edits, defers, or marks done.
+9. System resumes agents, advances to next queue item.
+
+Escape hatch:
+
+- User can press a manual-mode hotkey anytime.
+- Manual mode stops automatic workspace switching/restores.
+- Queue and background agents keep running.
+- Current windows stay where user left them unless user explicitly returns to event-loop mode.
+- Returning to event-loop mode snapshots the manual layout, then restores next queued task context.
+- If restore confidence is low, system shows briefing/links without moving windows.
+
+## MVP Scope
+
+Build:
+
+- Local macOS menu bar app with queue UI + global hotkey.
+- Local orchestrator with durable event log, task graph, agent runs, review packets, queue items.
+- Chrome MV3 extension with native messaging bridge for browser tab capture/restore + page anchors.
+- MCP/poll-first ingestion for Slack/GitHub/local sources.
+- Push webhooks/Socket Mode later where setup friction worth it.
+- Codex adapter first, Claude adapter second.
+- Workspace restore that opens/focuses URLs, apps, files, tabs, terminals.
+- Manual-mode escape hatch so user can leave event loop and use computer normally.
+
+Defer:
+
+- Full OS replacement.
+- Full virtual desktop/workspace manager.
+- Screen recording as primary state source.
+- Gmail full ingestion.
+- Jira.
+- Linear.
+- Safari.
+- Calendar auto-scheduling.
+- Enterprise admin/security surface.
+
+## Success Criteria
+
+MVP works if one user can run real workday loop where:
+
+- 20+ meaningful events ingested automatically.
+- 5+ review packets created from agent/workflow state.
+- Hotkey opens correct context for 80% of review packets.
+- User clears queue items with approve/reject/edit/defer/done.
+- Agent runs resume after approval without manual copy/paste.
+- Average hotkey-to-informed-decision time under 30 seconds for common cases.

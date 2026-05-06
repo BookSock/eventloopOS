@@ -1,0 +1,10 @@
+{
+  "expected_route_decision": {
+    "id": "rte_evt_browser_context_store_only",
+    "event_id": "evt_browser_context_store_only",
+    "action": "store_only",
+    "confidence": "high"
+  },
+  "expected_review_packet": null,
+  "expected_queue_item": null
+}

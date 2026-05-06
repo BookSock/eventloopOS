@@ -1,0 +1,13 @@
+{
+  "schema": "Action",
+  "data": {
+    "id": "act_resume_001",
+    "type": "resume_agent",
+    "label": "Resume agent",
+    "requires_confirmation": true,
+    "side_effect": "local",
+    "payload": {
+      "agent_run_id": "run_codex_001"
+    }
+  }
+}

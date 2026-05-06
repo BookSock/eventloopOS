@@ -1,0 +1,42 @@
+{
+  "items": [
+    {
+      "id": "qit_blog_feedback",
+      "review_packet_id": "packet-blog-feedback",
+      "priority_score": 90,
+      "created_at": "2026-01-01T17:00:00Z",
+      "review_packet": {
+        "id": "packet-blog-feedback",
+        "title": "Review blog feedback draft",
+        "summary": "Slack feedback changed positioning. Agent needs human judgment before publishing.",
+        "recommended_action": {
+          "label": "Approve revised angle or ask for another pass."
+        },
+        "context": [
+          {
+            "url": "slack://thread/blog-feedback"
+          }
+        ]
+      }
+    },
+    {
+      "id": "qit_ci_failed",
+      "review_packet_id": "packet-ci-failed",
+      "priority_score": 75,
+      "created_at": "2026-01-01T18:00:00Z",
+      "review_packet": {
+        "id": "packet-ci-failed",
+        "title": "CI failed on routing PR",
+        "summary": "GitHub check failed after agent patch. Needs owner decision before retrying.",
+        "recommended_action": {
+          "label": "Open failure, choose retry or send back to agent."
+        },
+        "context": [
+          {
+            "url": "github://pagerfree/eventloopOS/pull/12"
+          }
+        ]
+      }
+    }
+  ]
+}

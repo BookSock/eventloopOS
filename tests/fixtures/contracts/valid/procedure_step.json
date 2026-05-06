@@ -1,0 +1,11 @@
+{
+  "schema": "ProcedureStep",
+  "data": {
+    "id": "step_draft",
+    "name": "Draft reply",
+    "kind": "agent",
+    "config": {
+      "provider": "codex"
+    }
+  }
+}

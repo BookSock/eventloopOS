@@ -1,0 +1,24 @@
+{
+  "expected_queue_item": {
+    "id": "qit_seed_review",
+    "review_packet_id": "pkt_seed_review",
+    "priority_score": 1000,
+    "priority_reasons": [
+      "seeded_review_packet"
+    ]
+  },
+  "expected_review_packet": {
+    "id": "pkt_seed_review",
+    "title": "Review seeded agent change",
+    "risk_level": "medium",
+    "confidence": "high"
+  },
+  "expected_audit_decision": {
+    "id": "decision_seeded_done_001",
+    "queue_item_id": "qit_seed_review",
+    "review_packet_id": "pkt_seed_review",
+    "action": "done",
+    "actor_id": "user_jason",
+    "decided_at": "2026-01-15T09:30:00Z"
+  }
+}

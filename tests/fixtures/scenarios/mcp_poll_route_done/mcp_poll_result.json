@@ -1,0 +1,21 @@
+{
+  "source_id": "fake-slack-mcp",
+  "next_cursor": "1715011260.000",
+  "items": [
+    {
+      "id": "slack_T123_C456_1715011200_000",
+      "type": "slack.message",
+      "occurred_at": "2026-05-06T17:00:00Z",
+      "actor_id": "actor_slack_U777",
+      "actor_name": "Malis",
+      "project_hint": "pagerfree",
+      "task_hint": "pgrust Postgres support copy",
+      "title": "Slack MCP review request",
+      "summary": "Malis asked for a review packet on pgrust Postgres version support copy before marking the thread done.",
+      "thread_url": "https://slack.example.com/archives/C456/p1715011200000",
+      "workspace_id": "T123",
+      "channel_id": "C456",
+      "thread_ts": "1715011200.000"
+    }
+  ]
+}

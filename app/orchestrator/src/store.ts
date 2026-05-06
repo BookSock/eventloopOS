@@ -1,0 +1,520 @@
+import { readFile } from "node:fs/promises";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { Action, ContextResource, EvidenceRef, QueueItem, QueueItemWithPacket, ReviewPacket } from "./contracts.js";
+import type { McpEvent } from "./integrations/mcp_poll/types.js";
+
+const FIXTURE_PATH = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../..",
+  "fixtures",
+  "seed-review-packets.json",
+);
+
+export type InMemoryStore = {
+  queue: QueueItem[];
+  reviewPackets: Map<string, ReviewPacket>;
+  eventsByIdempotencyKey: Map<string, StoredEventResult>;
+  eventsById: Map<string, StoredEventResult>;
+};
+
+export type RouteDecision = {
+  id: string;
+  event_id: string;
+  action:
+    | "ignore"
+    | "store_only"
+    | "attach_to_task"
+    | "start_agent_thread"
+    | "inject_into_agent_thread"
+    | "create_review_packet"
+    | "ask_human_now"
+    | "defer_until_context";
+  target_task_id?: string;
+  target_task_session_id?: string;
+  confidence: "low" | "medium" | "high";
+  evidence: EvidenceRef[];
+  created_at: string;
+};
+
+export type StoredEventResult = {
+  event: McpEvent;
+  route_decision: RouteDecision;
+  review_packet?: ReviewPacket;
+  queue_item?: QueueItemWithPacket;
+};
+
+export type ContextEntry = {
+  event_id: string;
+  event_title: string;
+  event_source: string;
+  task_id?: string;
+  route_decision: RouteDecision;
+  resource: Record<string, unknown>;
+  captured_at: string;
+};
+
+export type ContextQuery = {
+  source?: string;
+  task_id?: string;
+  q?: string;
+  limit?: number;
+};
+
+export type ReviewArtifacts = {
+  route_decision: RouteDecision;
+  review_packet: ReviewPacket;
+  queue_item: QueueItem;
+};
+
+export async function createSeededStore(fixturePath = FIXTURE_PATH): Promise<InMemoryStore> {
+  const packets = await loadReviewPackets(fixturePath);
+  const queue = packets.map((packet, index): QueueItem => {
+    const priorityScore = 1000 - index;
+
+    return {
+      id: `qit_${packet.id.replace(/^pkt_/, "")}`,
+      review_packet_id: packet.id,
+      task_id: packet.task_id,
+      state: "ready",
+      priority_score: priorityScore,
+      priority_reasons: ["seeded_review_packet"],
+      created_at: packet.created_at,
+      updated_at: packet.updated_at,
+    };
+  });
+
+  return {
+    queue,
+    reviewPackets: new Map(packets.map((packet) => [packet.id, packet])),
+    eventsByIdempotencyKey: new Map(),
+    eventsById: new Map(),
+  };
+}
+
+export function listQueue(store: InMemoryStore): QueueItemWithPacket[] {
+  return store.queue
+    .filter((item) => item.state === "ready" || item.state === "leased")
+    .sort((left, right) => {
+      if (right.priority_score !== left.priority_score) {
+        return right.priority_score - left.priority_score;
+      }
+
+      return left.created_at.localeCompare(right.created_at);
+    })
+    .map((item) => attachPacket(store, item));
+}
+
+export function nextQueueItem(store: InMemoryStore): QueueItemWithPacket | undefined {
+  return listQueue(store).find((item) => item.state === "ready");
+}
+
+export function leaseNextQueueItem(
+  store: InMemoryStore,
+  leaseOwner: string,
+  now: Date,
+  leaseMs = 60_000,
+): QueueItemWithPacket | undefined {
+  reapExpiredLeases(store, now);
+  const item = store.queue
+    .filter((candidate) => candidate.state === "ready")
+    .sort((left, right) => {
+      if (right.priority_score !== left.priority_score) {
+        return right.priority_score - left.priority_score;
+      }
+      return left.created_at.localeCompare(right.created_at);
+    })[0];
+
+  if (!item) return undefined;
+
+  item.state = "leased";
+  item.lease_owner = leaseOwner;
+  item.lease_expires_at = new Date(now.getTime() + leaseMs).toISOString();
+  item.updated_at = now.toISOString();
+  return attachPacket(store, item);
+}
+
+export function markQueueItemDone(
+  store: InMemoryStore,
+  queueItemId: string,
+  now: Date,
+): QueueItemWithPacket | undefined {
+  const item = store.queue.find((candidate) => candidate.id === queueItemId);
+  if (!item) return undefined;
+
+  item.state = "done";
+  item.lease_owner = undefined;
+  item.lease_expires_at = undefined;
+  item.updated_at = now.toISOString();
+  return attachPacket(store, item);
+}
+
+export function renewQueueLease(
+  store: InMemoryStore,
+  queueItemId: string,
+  leaseOwner: string,
+  now: Date,
+  leaseMs = 60_000,
+): QueueItemWithPacket | undefined {
+  const item = store.queue.find((candidate) => candidate.id === queueItemId);
+  if (!item || item.state !== "leased" || item.lease_owner !== leaseOwner) return undefined;
+
+  item.lease_expires_at = new Date(now.getTime() + leaseMs).toISOString();
+  item.updated_at = now.toISOString();
+  return attachPacket(store, item);
+}
+
+export function reapExpiredLeases(store: InMemoryStore, now: Date): number {
+  let reaped = 0;
+  for (const item of store.queue) {
+    if (item.state !== "leased" || !item.lease_expires_at) continue;
+    if (new Date(item.lease_expires_at).getTime() > now.getTime()) continue;
+
+    item.state = "ready";
+    item.lease_owner = undefined;
+    item.lease_expires_at = undefined;
+    item.updated_at = now.toISOString();
+    reaped += 1;
+  }
+  return reaped;
+}
+
+export function getReviewPacket(store: InMemoryStore, id: string): ReviewPacket | undefined {
+  return store.reviewPackets.get(id);
+}
+
+export function ingestEventAsReviewPacket(
+  store: InMemoryStore,
+  event: McpEvent,
+  now: Date,
+): StoredEventResult {
+  const existing = store.eventsByIdempotencyKey.get(event.idempotency_key);
+  if (existing) {
+    return existing;
+  }
+
+  const routeDecision = decideRouteForEvent(event, now);
+  if (routeDecision.action === "ignore" || routeDecision.action === "store_only" || routeDecision.action === "attach_to_task") {
+    const result: StoredEventResult = {
+      event,
+      route_decision: routeDecision,
+    };
+    store.eventsByIdempotencyKey.set(event.idempotency_key, result);
+    store.eventsById.set(event.id, result);
+    return result;
+  }
+
+  const artifacts = buildReviewArtifactsFromEvent(event, now, routeDecision);
+  store.reviewPackets.set(artifacts.review_packet.id, artifacts.review_packet);
+  store.queue.push(artifacts.queue_item);
+
+  const result: StoredEventResult = {
+    event,
+    route_decision: artifacts.route_decision,
+    review_packet: artifacts.review_packet,
+    queue_item: attachPacket(store, artifacts.queue_item),
+  };
+  store.eventsByIdempotencyKey.set(event.idempotency_key, result);
+  store.eventsById.set(event.id, result);
+  return result;
+}
+
+export function getStoredEvent(store: InMemoryStore, eventId: string): StoredEventResult | undefined {
+  return store.eventsById.get(eventId);
+}
+
+export function listContextEntries(store: InMemoryStore, query: ContextQuery = {}): ContextEntry[] {
+  const limit = query.limit ?? 100;
+  return [...store.eventsById.values()]
+    .filter((result) => eventMatchesContextQuery(result.event, query))
+    .flatMap(contextEntriesForResult)
+    .filter((entry) => contextEntryMatchesQuery(entry, query))
+    .sort((left, right) => right.captured_at.localeCompare(left.captured_at))
+    .slice(0, limit);
+}
+
+export function buildReviewArtifactsFromEvent(
+  event: McpEvent,
+  now: Date,
+  routeDecision = decideRouteForEvent(event, now),
+): ReviewArtifacts {
+  const createdAt = now.toISOString();
+  const evidence = routeDecision.evidence.length > 0 ? routeDecision.evidence : evidenceForEvent(event);
+
+  const packet = createReviewPacketFromEvent(event, evidence, createdAt, routeDecision);
+
+  return {
+    route_decision: routeDecision,
+    review_packet: packet,
+    queue_item: {
+      id: `qit_${stableId(event.id)}`,
+      review_packet_id: packet.id,
+      task_id: packet.task_id,
+      state: "ready",
+      priority_score: scoreEventPriority(event),
+      priority_reasons: priorityReasonsForEvent(event),
+      created_at: createdAt,
+      updated_at: createdAt,
+    },
+  };
+}
+
+export function decideRouteForEvent(event: McpEvent, now: Date): RouteDecision {
+  const evidence = evidenceForEvent(event);
+  const targetTaskId = taskIdForHint(event.task_hint);
+  const action = routeActionForEvent(event);
+
+  return {
+    id: `rte_${stableId(event.id)}`,
+    event_id: event.id,
+    action,
+    target_task_id: targetTaskId,
+    confidence: routeConfidenceForEvent(event, action),
+    evidence,
+    created_at: now.toISOString(),
+  };
+}
+
+async function loadReviewPackets(path: string): Promise<ReviewPacket[]> {
+  const raw = await readFile(path, "utf8");
+  const parsed: unknown = JSON.parse(raw);
+
+  if (!Array.isArray(parsed)) {
+    throw new Error("Seed fixture must be an array");
+  }
+
+  return parsed.map((packet, index) => validateReviewPacket(packet, index));
+}
+
+function attachPacket(store: InMemoryStore, item: QueueItem): QueueItemWithPacket {
+  const reviewPacket = store.reviewPackets.get(item.review_packet_id);
+
+  if (!reviewPacket) {
+    throw new Error(`Queue item ${item.id} references missing review packet ${item.review_packet_id}`);
+  }
+
+  return { ...item, review_packet: reviewPacket };
+}
+
+function validateReviewPacket(value: unknown, index: number): ReviewPacket {
+  if (!isRecord(value)) {
+    throw new Error(`Seed fixture item ${index} must be an object`);
+  }
+
+  const requiredStringFields = [
+    "id",
+    "title",
+    "summary",
+    "decision_needed",
+    "risk_level",
+    "confidence",
+    "created_at",
+    "updated_at",
+  ];
+
+  for (const field of requiredStringFields) {
+    if (typeof value[field] !== "string" || value[field].length === 0) {
+      throw new Error(`Seed fixture item ${index}.${field} must be a non-empty string`);
+    }
+  }
+
+  if (!Array.isArray(value.risk_tags) || !Array.isArray(value.evidence) || !Array.isArray(value.context)) {
+    throw new Error(`Seed fixture item ${index} must include array risk_tags, evidence, and context`);
+  }
+
+  if (!isRecord(value.recommended_action) || !Array.isArray(value.alternate_actions)) {
+    throw new Error(`Seed fixture item ${index} must include recommended_action and alternate_actions`);
+  }
+
+  return value as ReviewPacket;
+}
+
+function createReviewPacketFromEvent(
+  event: McpEvent,
+  evidence: EvidenceRef[],
+  timestamp: string,
+  routeDecision: RouteDecision,
+): ReviewPacket {
+  const stableEventId = stableId(event.id);
+  const taskId = taskIdForHint(event.task_hint);
+  const recommendedAction: Action = {
+    id: `act_${stableEventId}_review`,
+    type: "resume_agent",
+    label: "Route to task agent",
+    requires_confirmation: true,
+    side_effect: "local",
+    payload: {
+      event_id: event.id,
+      task_hint: event.task_hint,
+      project_hint: event.project_hint,
+      route_decision_id: routeDecision.id,
+    },
+  };
+
+  return {
+    id: `pkt_${stableEventId}`,
+    task_id: taskId,
+    title: `Review ${event.title}`,
+    summary: event.summary || event.title,
+    decision_needed: decisionNeededForRoute(routeDecision),
+    risk_level: "medium",
+    confidence: routeDecision.confidence,
+    risk_tags: ["external_send"],
+    evidence,
+    context: event.resources.map(resourceFromEvent),
+    recommended_action: recommendedAction,
+    alternate_actions: [
+      {
+        id: `act_${stableEventId}_done`,
+        type: "mark_done",
+        label: "Ignore for now",
+        requires_confirmation: false,
+        side_effect: "none",
+        payload: {
+          event_id: event.id,
+        },
+      },
+    ],
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
+
+function evidenceForEvent(event: McpEvent): EvidenceRef[] {
+  return [
+    {
+      id: `ev_${stableId(event.id)}_raw`,
+      kind: "raw",
+      title: "Source event",
+      url: event.raw_ref.uri,
+    },
+  ];
+}
+
+function routeActionForEvent(event: McpEvent): RouteDecision["action"] {
+  if (event.type === "browser.context_captured") {
+    if (event.task_hint) return "attach_to_task";
+    return "store_only";
+  }
+
+  if (event.type === "browser.review_requested" || event.type === "manual.review_requested") {
+    return "ask_human_now";
+  }
+
+  return "ask_human_now";
+}
+
+function routeConfidenceForEvent(event: McpEvent, action: RouteDecision["action"]): RouteDecision["confidence"] {
+  if (action === "store_only" && event.type === "browser.context_captured") return "high";
+  if (event.task_hint || event.project_hint) return "medium";
+  return "low";
+}
+
+export function taskIdForHint(taskHint: string | undefined): string | undefined {
+  return taskHint ? `task_${stableId(taskHint)}` : undefined;
+}
+
+function eventMatchesContextQuery(event: McpEvent, query: ContextQuery): boolean {
+  if (query.source && event.source !== query.source) return false;
+  if (query.task_id && taskIdForHint(event.task_hint) !== query.task_id) return false;
+  return true;
+}
+
+function contextEntryMatchesQuery(entry: ContextEntry, query: ContextQuery): boolean {
+  if (!query.q) return true;
+  const needle = query.q.toLowerCase();
+  return contextEntrySearchText(entry).toLowerCase().includes(needle);
+}
+
+function contextEntrySearchText(entry: ContextEntry): string {
+  return [
+    entry.event_id,
+    entry.event_title,
+    entry.event_source,
+    entry.task_id,
+    ...resourceSearchParts(entry.resource),
+  ]
+    .filter((part): part is string => typeof part === "string" && part.length > 0)
+    .join("\n");
+}
+
+function resourceSearchParts(resource: Record<string, unknown>): string[] {
+  const parts: string[] = [];
+  for (const key of ["id", "kind", "title", "url", "source", "text_quote", "selector_hint"]) {
+    const value = resource[key];
+    if (typeof value === "string") parts.push(value);
+  }
+  const details = resource.details;
+  if (details && typeof details === "object") {
+    parts.push(JSON.stringify(details));
+  }
+  return parts;
+}
+
+export function contextEntriesForResult(result: StoredEventResult): ContextEntry[] {
+  return result.event.resources.map((resource): ContextEntry => {
+    const capturedAt = typeof resource.captured_at === "string" && resource.captured_at
+      ? resource.captured_at
+      : result.event.received_at;
+
+    return {
+      event_id: result.event.id,
+      event_title: result.event.title,
+      event_source: result.event.source,
+      task_id: taskIdForHint(result.event.task_hint),
+      route_decision: result.route_decision,
+      resource,
+      captured_at: capturedAt,
+    };
+  });
+}
+
+function decisionNeededForRoute(routeDecision: RouteDecision): string {
+  if (routeDecision.action === "create_review_packet") {
+    return "Review prepared work and decide next action.";
+  }
+  return "Decide whether to route this new event into a task agent now.";
+}
+
+function resourceFromEvent(resource: Record<string, unknown>): ContextResource {
+  const id = typeof resource.id === "string" && resource.id ? resource.id : "ctx_unknown";
+  const kind = typeof resource.kind === "string" && resource.kind ? resource.kind : "url";
+  const title = typeof resource.title === "string" && resource.title ? resource.title : "Source context";
+  const restoreConfidence = resource.restore_confidence;
+
+  return {
+    ...resource,
+    id,
+    kind,
+    title,
+    restore_confidence:
+      restoreConfidence === "high" || restoreConfidence === "medium" || restoreConfidence === "low"
+        ? restoreConfidence
+        : "medium",
+  } as ContextResource;
+}
+
+function scoreEventPriority(event: McpEvent): number {
+  let score = 500;
+  if (event.task_hint) score += 200;
+  if (event.project_hint) score += 100;
+  if (event.source === "slack") score += 100;
+  return score;
+}
+
+function priorityReasonsForEvent(event: McpEvent): string[] {
+  return [
+    "new_background_event",
+    event.source === "slack" ? "slack_message" : `${event.source}_event`,
+    event.task_hint ? "task_hint_present" : "needs_routing",
+  ];
+}
+
+function stableId(input: string): string {
+  const normalized = input.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return normalized || "unknown";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

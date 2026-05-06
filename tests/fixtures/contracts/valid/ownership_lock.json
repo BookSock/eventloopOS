@@ -1,0 +1,21 @@
+{
+  "schema": "OwnershipLock",
+  "data": {
+    "id": "lock_send_001",
+    "resource_key": "slack:T123:C123:456.000:reply",
+    "owner_task_id": "task_blog_feedback",
+    "owner_agent_run_id": "run_codex_001",
+    "lock_kind": "send",
+    "lease_expires_at": "2026-05-06T17:30:00Z",
+    "evidence": [
+      {
+        "id": "evref_lock_reason",
+        "kind": "receipt",
+        "title": "External send lock receipt",
+        "ref": "receipt_send_lock_001"
+      }
+    ],
+    "created_at": "2026-05-06T17:05:00Z",
+    "updated_at": "2026-05-06T17:05:00Z"
+  }
+}

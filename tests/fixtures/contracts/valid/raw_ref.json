@@ -1,0 +1,9 @@
+{
+  "schema": "RawRef",
+  "data": {
+    "id": "raw_slack_001",
+    "uri": "artifact://raw/slack/001.json",
+    "media_type": "application/json",
+    "sha256": "hash_raw_slack_001"
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "schema": "TaskMessage",
+  "data": {
+    "id": "msg_followup_001",
+    "task_session_id": "sess_codex_001",
+    "mode": "followup",
+    "text": "New Slack context arrived. Incorporate before final answer.",
+    "event_ids": ["evt_slack_001"],
+    "idempotency_key": "msg:sess_codex_001:evt_slack_001",
+    "status": "queued",
+    "evidence": [
+      {
+        "id": "evref_slack_001",
+        "kind": "raw",
+        "title": "Raw Slack event",
+        "ref": "raw_slack_001"
+      }
+    ]
+  }
+}

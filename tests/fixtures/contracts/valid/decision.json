@@ -1,0 +1,22 @@
+{
+  "schema": "Decision",
+  "data": {
+    "id": "dec_approve_001",
+    "review_packet_id": "pkt_feedback_001",
+    "queue_item_id": "qit_feedback_001",
+    "action_id": "act_approve_001",
+    "actor": {
+      "id": "actor_jason",
+      "type": "human",
+      "name": "Jason Seibel"
+    },
+    "note": "Approved with no edits.",
+    "decided_at": "2026-05-06T17:15:00Z",
+    "result_refs": [
+      {
+        "id": "raw_decision_result_001",
+        "uri": "artifact://decisions/dec_approve_001.json"
+      }
+    ]
+  }
+}

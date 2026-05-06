@@ -1,0 +1,33 @@
+{
+  "schema": "Task",
+  "data": {
+    "id": "task_blog_feedback",
+    "title": "Review blog feedback",
+    "status": "active",
+    "project": "pagerfree",
+    "owner": {
+      "id": "actor_jason",
+      "type": "human",
+      "name": "Jason Seibel"
+    },
+    "priority": 5,
+    "importance": 4,
+    "created_at": "2026-05-06T17:00:00Z",
+    "updated_at": "2026-05-06T17:00:00Z",
+    "resources": [
+      {
+        "id": "ctx_task_doc",
+        "kind": "url",
+        "title": "Task doc",
+        "url": "https://notion.example.com/task_blog_feedback",
+        "restore_confidence": "medium"
+      }
+    ],
+    "source_links": [
+      {
+        "label": "Slack thread",
+        "url": "https://slack.example.com/archives/C123/p456"
+      }
+    ]
+  }
+}

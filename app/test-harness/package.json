@@ -1,0 +1,13 @@
+{
+  "name": "@eventloopos/test-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "PYTHONPATH=. python3 -m unittest discover -s tests",
+    "test:e2e": "bin/run-scenario seeded_queue && bin/run-scenario mcp_poll_route_done && bin/run-scenario mcp_source_poll_route_done && bin/run-scenario browser_context_store_only && bin/run-scenario browser_context_attach_task && bin/run-scenario task_session_followup && bin/run-scenario workspace_status_smoke",
+    "fixtures:seed": "bin/run-scenario seeded_queue",
+    "packets:golden": "bin/self-test",
+    "typecheck": "python3 -m py_compile test_harness/*.py"
+  }
+}

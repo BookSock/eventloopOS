@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "eventloopOS Browser Context",
+  "version": "0.0.1",
+  "description": "Captures and restores browser context for eventloopOS.",
+  "permissions": ["activeTab", "nativeMessaging", "scripting", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Capture browser context"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/content-script.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

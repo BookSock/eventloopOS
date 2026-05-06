@@ -1,0 +1,23 @@
+#!/usr/bin/env node
+import { installChromeHostManifest } from "../src/install.js";
+
+const args = process.argv.slice(2);
+const dryRun = args.includes("--dry-run");
+const extensionId = args.find((arg) => !arg.startsWith("--")) ?? process.env.EVENTLOOPOS_CHROME_EXTENSION_ID;
+
+if (!extensionId) {
+  console.error("usage: eventloop-install-chrome-host <chrome-extension-id> [--dry-run]");
+  process.exit(2);
+}
+
+try {
+  const result = await installChromeHostManifest({ extensionId, dryRun });
+  if (dryRun) {
+    process.stdout.write(result.body);
+  } else {
+    process.stdout.write(`installed ${result.path}\n`);
+  }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}

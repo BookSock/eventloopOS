@@ -1,0 +1,8 @@
+{
+  "schema": "LinkRef",
+  "data": {
+    "label": "Slack thread",
+    "url": "https://slack.example.com/archives/C123/p456",
+    "source": "slack"
+  }
+}

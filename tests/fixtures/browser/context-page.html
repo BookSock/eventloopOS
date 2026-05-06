@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>eventloopOS Browser Context Fixture</title>
+    <style>
+      body {
+        color: #1f2933;
+        font-family: system-ui, sans-serif;
+        line-height: 1.5;
+        margin: 0;
+      }
+
+      main {
+        margin: 0 auto;
+        max-width: 720px;
+        padding: 48px 24px 1200px;
+      }
+
+      .spacer {
+        height: 900px;
+      }
+
+      [data-context-quote] {
+        border-left: 4px solid #0f766e;
+        padding-left: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Browser Context Fixture</h1>
+      <p>This page gives browser-extension tests deterministic URL, title, scroll, and quote state.</p>
+      <div class="spacer" aria-hidden="true"></div>
+      <p id="capture-target" data-context-quote>
+        Fixture quote alpha anchors context capture after scroll restore.
+      </p>
+      <p>Trailing content keeps scroll space after capture target.</p>
+    </main>
+  </body>
+</html>

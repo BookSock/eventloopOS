@@ -1,0 +1,30 @@
+{
+  "name": "eventloopos",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "test": "pnpm -r --if-present test",
+    "test:unit": "pnpm -r --if-present test:unit",
+    "test:integration": "pnpm -r --if-present test:integration",
+    "test:e2e": "pnpm -r --if-present test:e2e",
+    "test:e2e:browser": "pnpm --filter @eventloopos/browser-extension --if-present test:e2e",
+    "test:e2e:macos": "pnpm --filter @eventloopos/macos --if-present test:e2e",
+    "test:e2e:live": "app/test-harness/bin/run-scenario seeded_queue --orchestrator-url ${EVENTLOOPOS_ORCHESTRATOR_URL:-http://127.0.0.1:4377} && app/test-harness/bin/run-scenario mcp_poll_route_done --orchestrator-url ${EVENTLOOPOS_ORCHESTRATOR_URL:-http://127.0.0.1:4377} && app/test-harness/bin/run-scenario mcp_source_poll_route_done --orchestrator-url ${EVENTLOOPOS_ORCHESTRATOR_URL:-http://127.0.0.1:4377} && app/test-harness/bin/run-scenario browser_context_store_only --orchestrator-url ${EVENTLOOPOS_ORCHESTRATOR_URL:-http://127.0.0.1:4377} && app/test-harness/bin/run-scenario browser_context_attach_task --orchestrator-url ${EVENTLOOPOS_ORCHESTRATOR_URL:-http://127.0.0.1:4377} && app/test-harness/bin/run-scenario task_session_followup --orchestrator-url ${EVENTLOOPOS_ORCHESTRATOR_URL:-http://127.0.0.1:4377} && app/test-harness/bin/run-scenario workspace_status_smoke --orchestrator-url ${EVENTLOOPOS_ORCHESTRATOR_URL:-http://127.0.0.1:4377} && pnpm --filter @eventloopos/native-host run test:e2e:live",
+    "test:contracts": "pnpm --filter @eventloopos/shared --if-present test:contracts",
+    "test:architecture": "pnpm -r --if-present test:architecture",
+    "test:mcp-stability": "pnpm --filter @eventloopos/orchestrator --if-present test:mcp-stability",
+    "fixtures:seed": "pnpm --filter @eventloopos/test-harness --if-present fixtures:seed",
+    "packets:golden": "pnpm --filter @eventloopos/test-harness --if-present packets:golden",
+    "lint": "pnpm -r --if-present lint",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.2",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "expected_route_decision": {
+    "id": "rte_evt_browser_context_attach_task",
+    "event_id": "evt_browser_context_attach_task",
+    "action": "attach_to_task",
+    "target_task_id": "task_blog_feedback",
+    "confidence": "medium"
+  },
+  "expected_review_packet": null,
+  "expected_queue_item": null
+}

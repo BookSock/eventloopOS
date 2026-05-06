@@ -1,0 +1,45 @@
+{
+  "schema": "Event",
+  "data": {
+    "id": "evt_slack_001",
+    "source": "slack",
+    "source_id": "slack:T123:C123:456.000",
+    "idempotency_key": "slack:T123:C123:456.000",
+    "occurred_at": "2026-05-06T16:58:00Z",
+    "received_at": "2026-05-06T17:00:00Z",
+    "actor": {
+      "id": "actor_user_001",
+      "type": "human",
+      "name": "Customer"
+    },
+    "project_hint": "pagerfree",
+    "task_hint": "blog feedback",
+    "type": "slack.message",
+    "title": "New Slack feedback",
+    "summary": "Customer left product feedback in Slack.",
+    "raw_ref": {
+      "id": "raw_slack_001",
+      "uri": "artifact://raw/slack/001.json",
+      "media_type": "application/json"
+    },
+    "links": [
+      {
+        "label": "Slack thread",
+        "url": "https://slack.example.com/archives/C123/p456"
+      }
+    ],
+    "resources": [
+      {
+        "id": "ctx_slack_001",
+        "kind": "slack_thread",
+        "title": "Slack feedback thread",
+        "url": "https://slack.example.com/archives/C123/p456",
+        "captured_at": "2026-05-06T17:00:00Z",
+        "restore_confidence": "high",
+        "workspace_id": "T123",
+        "channel_id": "C123",
+        "thread_ts": "456.000"
+      }
+    ]
+  }
+}

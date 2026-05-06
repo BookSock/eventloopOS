@@ -1,0 +1,49 @@
+#!/usr/bin/env node
+import { handleNativeEnvelope } from "../src/host.js";
+
+const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377";
+const idSuffix = process.env.EVENTLOOPOS_SMOKE_ID ?? "browser_tab_live_smoke";
+const idempotencyKey = `idem_${idSuffix}`;
+
+const response = await handleNativeEnvelope({
+  schemaVersion: "eventloop.nativeBridgeEnvelope.v1",
+  request_id: `req_${idSuffix}`,
+  idempotency_key: idempotencyKey,
+  type: "eventloop.contextCaptured",
+  capabilities: ["eventloop.contextCaptured.v1"],
+  payload: {
+    resource: {
+      id: idSuffix,
+      kind: "browser_tab",
+      title: "Native host live smoke",
+      url: "https://example.test/native-host-live-smoke",
+      source: "chrome-extension",
+      captured_at: "2026-05-06T20:00:00.000Z",
+      restore_confidence: "high",
+      scroll_y: 120,
+      text_quote: "Native host live smoke"
+    }
+  }
+}, {
+  orchestratorUrl,
+  contextLogPath: process.env.EVENTLOOPOS_CONTEXT_LOG ?? "/tmp/eventloopos-native-host-live-smoke.jsonl",
+  now: () => new Date("2026-05-06T20:00:00.000Z")
+});
+
+if (!response.ok || response.payload?.forwarded !== true) {
+  console.error(JSON.stringify(response));
+  process.exit(1);
+}
+
+const routeDecision = response.payload.forward_result?.route_decision;
+if (routeDecision?.action !== "store_only") {
+  console.error(`expected store_only route decision, got ${JSON.stringify(routeDecision)}`);
+  process.exit(1);
+}
+
+if (response.payload.forward_result?.queue_item) {
+  console.error(`browser context capture should not create queue item: ${JSON.stringify(response.payload.forward_result.queue_item)}`);
+  process.exit(1);
+}
+
+console.log(`native-host live smoke passed: ${routeDecision.id}`);

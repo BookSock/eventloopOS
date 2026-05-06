@@ -1,0 +1,13 @@
+{
+  "items": [
+    {
+      "id": "slack-msg-1",
+      "ts": "1710000000.000100",
+      "text": "please review event loop handoff",
+      "channel": "D0123",
+      "user": "U0456",
+      "permalink": "https://example.slack.com/archives/D0123/p1710000000000100"
+    }
+  ],
+  "nextCursor": "1710000000.000100"
+}

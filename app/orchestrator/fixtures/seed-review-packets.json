@@ -1,0 +1,52 @@
+[
+  {
+    "id": "pkt_seed_review",
+    "task_id": "task_seed_blog",
+    "agent_run_id": "run_seed_codex",
+    "title": "Review seeded agent change",
+    "summary": "Fake agent prepared a small change and needs human approval before continuing.",
+    "decision_needed": "Approve or reject the proposed local change.",
+    "risk_level": "medium",
+    "confidence": "high",
+    "risk_tags": ["local_write"],
+    "evidence": [
+      {
+        "id": "ev_seed_test",
+        "kind": "test_run",
+        "title": "Seeded contract fixture",
+        "url": "artifact://seeded/orchestrator-contract"
+      }
+    ],
+    "context": [
+      {
+        "id": "ctx_seed_doc",
+        "kind": "url",
+        "title": "Seed planning context",
+        "url": "https://example.test/eventloopos/seed",
+        "restore_confidence": "high"
+      }
+    ],
+    "recommended_action": {
+      "id": "act_seed_approve",
+      "type": "approve",
+      "label": "Approve",
+      "requires_confirmation": true,
+      "side_effect": "local",
+      "payload": {
+        "agent_run_id": "run_seed_codex"
+      }
+    },
+    "alternate_actions": [
+      {
+        "id": "act_seed_reject",
+        "type": "reject",
+        "label": "Reject",
+        "requires_confirmation": false,
+        "side_effect": "none",
+        "payload": {}
+      }
+    ],
+    "created_at": "2026-05-06T00:00:00.000Z",
+    "updated_at": "2026-05-06T00:00:00.000Z"
+  }
+]

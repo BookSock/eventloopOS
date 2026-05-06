@@ -1,0 +1,29 @@
+{
+  "id": "github_pr_source",
+  "server": {
+    "name": "fake-github-mcp",
+    "command": "fake-github-mcp",
+    "args": ["--stdio"],
+    "envAllowlist": ["GITHUB_TOKEN"],
+    "stderrLogPath": "var/log/mcp/github_pr_source.stderr.log"
+  },
+  "poll": {
+    "tool": "search_issues",
+    "args": {
+      "query": "repo:pagerfreeglobal/pgrust is:pr updated:>=cursor"
+    },
+    "timeoutMs": 20
+  },
+  "cursor": {
+    "strategy": "field",
+    "field": "id",
+    "dedupeWindow": 100
+  },
+  "eventMapper": "github_update_to_event",
+  "riskPolicy": {
+    "readOnly": true,
+    "allowWriteTools": false,
+    "maxRiskLevel": "low",
+    "untrustedTextFields": ["body", "title"]
+  }
+}

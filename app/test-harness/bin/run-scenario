@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -eu
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+HARNESS_DIR=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
+
+PYTHONPATH="$HARNESS_DIR${PYTHONPATH:+:$PYTHONPATH}" exec python3 -m test_harness "$@"
