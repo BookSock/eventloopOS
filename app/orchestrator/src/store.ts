@@ -52,6 +52,8 @@ export type ContextEntry = {
   route_decision: RouteDecision;
   resource: Record<string, unknown>;
   captured_at: string;
+  relevance_score: number;
+  match_reasons: string[];
 };
 
 export type ContextQuery = {
@@ -244,11 +246,13 @@ export function getStoredEvent(store: InMemoryStore, eventId: string): StoredEve
 
 export function listContextEntries(store: InMemoryStore, query: ContextQuery = {}): ContextEntry[] {
   const limit = query.limit ?? 100;
-  return [...store.eventsById.values()]
+  return rankContextEntries(
+    [...store.eventsById.values()]
     .filter((result) => eventMatchesContextQuery(result.event, query))
     .flatMap(contextEntriesForResult)
-    .filter((entry) => contextEntryMatchesQuery(entry, query))
-    .sort((left, right) => right.captured_at.localeCompare(left.captured_at))
+      .filter((entry) => contextEntryMatchesQuery(entry, query)),
+    query,
+  )
     .slice(0, limit);
 }
 
@@ -439,10 +443,68 @@ function eventMatchesContextQuery(event: McpEvent, query: ContextQuery): boolean
   return true;
 }
 
-function contextEntryMatchesQuery(entry: ContextEntry, query: ContextQuery): boolean {
+export function contextEntryMatchesQuery(entry: ContextEntry, query: ContextQuery): boolean {
   if (!query.q) return true;
   const needle = query.q.toLowerCase();
   return contextEntrySearchText(entry).toLowerCase().includes(needle);
+}
+
+export function rankContextEntries(entries: ContextEntry[], query: ContextQuery = {}): ContextEntry[] {
+  return entries
+    .map((entry) => scoreContextEntry(entry, query))
+    .sort((left, right) => {
+      if (right.relevance_score !== left.relevance_score) {
+        return right.relevance_score - left.relevance_score;
+      }
+      return right.captured_at.localeCompare(left.captured_at);
+    });
+}
+
+function scoreContextEntry(entry: ContextEntry, query: ContextQuery): ContextEntry {
+  const reasons: string[] = [];
+  let score = 0;
+
+  if (query.task_id && entry.task_id === query.task_id) {
+    score += 100;
+    reasons.push("task_match");
+  }
+
+  const normalizedQuery = query.q?.toLowerCase();
+  if (normalizedQuery) {
+    const resource = entry.resource;
+    const title = `${entry.event_title}\n${typeof resource.title === "string" ? resource.title : ""}`.toLowerCase();
+    const url = typeof resource.url === "string" ? resource.url.toLowerCase() : "";
+    const textQuote = typeof resource.text_quote === "string" ? resource.text_quote.toLowerCase() : "";
+    const searchText = contextEntrySearchText(entry).toLowerCase();
+    const terms = normalizedQuery.split(/\s+/).filter(Boolean);
+
+    if (title.includes(normalizedQuery)) {
+      score += 60;
+      reasons.push("title_phrase");
+    }
+    if (textQuote.includes(normalizedQuery)) {
+      score += 40;
+      reasons.push("quote_phrase");
+    }
+    if (url.includes(normalizedQuery)) {
+      score += 30;
+      reasons.push("url_phrase");
+    }
+
+    const matchingTerms = terms.filter((term) => searchText.includes(term));
+    if (matchingTerms.length > 0) {
+      score += matchingTerms.length * 10;
+      reasons.push("term_match");
+    }
+  } else {
+    reasons.push("recent");
+  }
+
+  return {
+    ...entry,
+    relevance_score: score,
+    match_reasons: [...new Set(reasons)],
+  };
 }
 
 function contextEntrySearchText(entry: ContextEntry): string {
@@ -484,6 +546,8 @@ export function contextEntriesForResult(result: StoredEventResult): ContextEntry
       route_decision: result.route_decision,
       resource,
       captured_at: capturedAt,
+      relevance_score: 0,
+      match_reasons: [],
     };
   });
 }

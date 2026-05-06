@@ -456,14 +456,51 @@ describe("orchestrator gateway API", () => {
       assert.equal(contextsBody.entries[0].resource.kind, "browser_tab");
       assert.equal(contextsBody.entries[0].resource.url, "https://example.test/launch");
 
+      const olderTitleMatchEvent = {
+        ...event,
+        id: "evt_browser_ctx_pricing_note",
+        source_id: "browser:ctx_pricing_note",
+        idempotency_key: "browser:ctx_pricing_note",
+        occurred_at: "2026-05-06T16:29:00.000Z",
+        received_at: "2026-05-06T16:30:00.000Z",
+        title: "Browser context: Pricing note checklist",
+        resources: [
+          {
+            id: "ctx_browser_pricing_note",
+            kind: "browser_tab",
+            title: "Pricing note checklist",
+            url: "https://example.test/pricing-note",
+            source: "chrome-extension",
+            captured_at: "2026-05-06T16:30:00.000Z",
+            restore_confidence: "medium",
+            text_quote: "Old checklist for launch page.",
+          },
+        ],
+      };
+      const olderTitleMatchResponse = await fetch(`${routeBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ event: olderTitleMatchEvent }),
+      });
+      assert.equal(olderTitleMatchResponse.status, 202);
+
       const searchResponse = await fetch(`${routeBaseUrl}/contexts?source=browser&q=pricing%20note&limit=5`);
       const searchBody = await searchResponse.json() as {
         count: number;
-        entries: Array<{ event_id: string }>;
+        entries: Array<{
+          event_id: string;
+          relevance_score: number;
+          match_reasons: string[];
+        }>;
       };
       assert.equal(searchResponse.status, 200);
-      assert.equal(searchBody.count, 1);
-      assert.equal(searchBody.entries[0].event_id, "evt_browser_ctx_123");
+      assert.equal(searchBody.count, 2);
+      assert.equal(searchBody.entries[0].event_id, "evt_browser_ctx_pricing_note");
+      assert.equal(searchBody.entries[0].relevance_score > searchBody.entries[1].relevance_score, true);
+      assert.deepEqual(searchBody.entries[0].match_reasons, ["title_phrase", "term_match"]);
+      assert.deepEqual(searchBody.entries[1].match_reasons, ["quote_phrase", "term_match"]);
 
       const attachEvent = {
         ...event,

@@ -15,7 +15,9 @@ import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import {
   buildReviewArtifactsFromEvent,
   contextEntriesForResult,
+  contextEntryMatchesQuery,
   decideRouteForEvent,
+  rankContextEntries,
   taskIdForHint,
   type ContextEntry,
   type ContextQuery,
@@ -294,12 +296,9 @@ export class PostgresQueueStore {
       const eventResult = await this.getEventResult(event.id);
       if (!eventResult) continue;
       entries.push(...contextEntriesForResult(eventResult).filter((entry) => contextEntryMatchesQuery(entry, query)));
-      if (entries.length >= limit) break;
     }
 
-    return entries
-      .sort((left, right) => right.captured_at.localeCompare(left.captured_at))
-      .slice(0, limit);
+    return rankContextEntries(entries, query).slice(0, limit);
   }
 
   async leaseNext(owner: string, leaseMs = this.defaultLeaseMs): Promise<QueueItemWithPacket | undefined> {
@@ -596,11 +595,6 @@ export class PostgresQueueStore {
 
     return result.rows[0] ? rowToQueueItemWithPacket(result.rows[0]) : undefined;
   }
-}
-
-function contextEntryMatchesQuery(entry: ContextEntry, query: ContextQuery): boolean {
-  if (!query.q) return true;
-  return JSON.stringify(entry).toLowerCase().includes(query.q.toLowerCase());
 }
 
 function normalizeNewQueueItem(item: NewQueueItem, fallbackNow: string): QueueItem {
