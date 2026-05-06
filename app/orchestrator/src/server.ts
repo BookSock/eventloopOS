@@ -5,6 +5,7 @@ import type { GatewayStore } from "./gateway_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import type { McpSourcePollOutput } from "./integrations/mcp_poll/development_registry.js";
 import type { RouteDecision } from "./store.js";
+import type { TaskSessionController } from "./task_sessions/types.js";
 import { parseRestoreExecuteRequest, parseRestorePlanRequest, type WorkspaceController } from "./workspace/controller.js";
 
 export type GatewayServerOptions = {
@@ -14,17 +15,6 @@ export type GatewayServerOptions = {
   workspace?: WorkspaceController;
   workspaceExecuteEnabled?: boolean;
   now?: () => Date;
-};
-
-export type TaskSessionController = {
-  listSessions?: () => Promise<unknown[]> | unknown[];
-  getSession?: (taskSessionId: string) => Promise<unknown | undefined> | unknown | undefined;
-  sendFollowupMessage(input: {
-    task_session_id: string;
-    text: string;
-    event_ids: string[];
-    idempotency_key: string;
-  }): Promise<unknown> | unknown;
 };
 
 export type McpSourceRegistry = {

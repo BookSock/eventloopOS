@@ -155,6 +155,7 @@ Implemented:
 - `app/shared`: V0 contracts and fixture validation.
 - `app/orchestrator`: HTTP queue API, event ingestion, voice command transcript ingestion, MCP fixture poll route, async gateway store seam, Postgres queue store, `DATABASE_URL` Postgres mode with migrations, policy hooks, ownership locks, evidence receipts, fake Codex adapter, fake task session store, terminal task-session adapter.
 - `app/orchestrator`: `GET /task-sessions`, `GET /task-sessions/:id`, and `POST /task-sessions/:id/followup` support session discovery plus idempotent followup messages; daemon seeds fake `task_session_blog` by default for live local proof, and `ORCHESTRATOR_TASK_SESSIONS=off` disables it.
+- `app/orchestrator/src/task_sessions`: Codex native thread controller seam maps Codex app-server-style threads to routable task sessions and starts idempotent followup turns through an injected client. `external-resources/codex-app-server-protocol.md` captures local protocol notes from `codex app-server generate-ts --experimental`.
 - `app/orchestrator`: ambient route policy now separates passive context storage, task-session injection, and human interrupts. Browser context capture defaults to `store_only`; task-hinted Slack/GitHub/MCP/voice events inject into matching task sessions when available; explicit review requests still create human queue packets.
 - `app/orchestrator`: `GET /events/:id` retrieves stored events and route decisions, so store-only context is machine-verifiable without queue pollution.
 - `app/orchestrator`: `GET /contexts?source=&task_id=&q=&limit=` lists and text-filters stored context resources with event + route metadata, giving agents a read path for passive browser captures and task-attached browser context.
@@ -185,7 +186,7 @@ Known gaps:
 - Native host forwards context/event data to orchestrator when `EVENTLOOPOS_ORCHESTRATOR_URL` is set; next gap is richer context ranking/search and task attachment UI.
 - MCP source registry loads local config files and can run real read-only poll tools through the SDK runtime; generic item mapping, poll-all route, poll-once CLI, and bounded poll-loop CLI now support user-installed MCP servers that can emit stable event-ish `items[]`.
 - Aerospace adapter has unit/API coverage, daemon status endpoint, live harness smoke, disabled-by-default execute-confirm flow, and macOS confirmation UI; next gap is live run with AeroSpace.app installed.
-- Task session control has fake, daemon-seeded dev controller, discovery/read API, terminal-backed adapter seams, and automatic task-hinted event injection; next gap is real Codex app-server/native thread backend.
+- Task session control has fake, daemon-seeded dev controller, discovery/read API, terminal-backed adapter seams, Codex native thread controller seam, and automatic task-hinted event injection; next gap is concrete Codex app-server transport wiring.
 - Voice command HTTP ingress and env/stdin client exist for local STT/wake-word clients to submit transcripts into same router; next gap is actual always-listening local voice capture/wake-word app.
 - Postgres live tests need Docker/container runtime to execute locally.
 
