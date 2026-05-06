@@ -201,6 +201,48 @@ export const ContextResourceSchema = z.union([
 ]);
 export type ContextResource = z.infer<typeof ContextResourceSchema>;
 
+export const BrowserExtensionContextRestorePlanSchema = z
+  .object({
+    kind: z.literal("browser_extension_message"),
+    side_effect: z.literal("local"),
+    execute_supported: z.literal(false),
+    target: nonEmpty,
+    message: z
+      .object({
+        type: z.literal("eventloop.restore"),
+        resource: ContextResourceSchema
+      })
+      .strict()
+  })
+  .strict();
+
+export const OpenUrlContextRestorePlanSchema = z
+  .object({
+    kind: z.literal("open_url"),
+    side_effect: z.literal("local"),
+    execute_supported: z.literal(false),
+    url: z.string().url()
+  })
+  .strict();
+
+export const OpenFileContextRestorePlanSchema = z
+  .object({
+    kind: z.literal("open_file"),
+    side_effect: z.literal("local"),
+    execute_supported: z.literal(false),
+    path: nonEmpty,
+    line: z.number().int().positive().optional(),
+    column: z.number().int().positive().optional()
+  })
+  .strict();
+
+export const ContextRestorePlanSchema = z.union([
+  BrowserExtensionContextRestorePlanSchema,
+  OpenUrlContextRestorePlanSchema,
+  OpenFileContextRestorePlanSchema
+]);
+export type ContextRestorePlan = z.infer<typeof ContextRestorePlanSchema>;
+
 export const ActionSchema = z
   .object({
     id,
@@ -510,6 +552,7 @@ export const ContractSchemas = {
   EvidenceRef: EvidenceRefSchema,
   RiskTag: RiskTagSchema,
   ContextResource: ContextResourceSchema,
+  ContextRestorePlan: ContextRestorePlanSchema,
   Event: EventSchema,
   Task: TaskSchema,
   AgentRun: AgentRunSchema,

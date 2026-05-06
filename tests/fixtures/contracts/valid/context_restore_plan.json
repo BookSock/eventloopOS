@@ -1,0 +1,22 @@
+{
+  "schema": "ContextRestorePlan",
+  "data": {
+    "kind": "browser_extension_message",
+    "side_effect": "local",
+    "execute_supported": false,
+    "target": "eventloopOS browser extension runtime",
+    "message": {
+      "type": "eventloop.restore",
+      "resource": {
+        "id": "ctx_browser_123",
+        "kind": "browser_tab",
+        "title": "Launch doc",
+        "url": "https://example.test/launch",
+        "source": "chrome-extension",
+        "captured_at": "2026-05-06T16:59:00.000Z",
+        "restore_confidence": "high",
+        "text_quote": "Launch paragraph needs pricing note"
+      }
+    }
+  }
+}

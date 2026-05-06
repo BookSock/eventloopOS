@@ -5,6 +5,7 @@ import {
   BrowserTabResourceSchema,
   ContractJsonSchemas,
   ContractSchemas,
+  ContextRestorePlanSchema,
   ContextResourceSchema,
   EventSchema,
   ReviewPacketSchema,
@@ -67,6 +68,17 @@ describe("contract schemas", () => {
     expect(resource.kind).toBe("workspace_snapshot");
     expect(resource.snapshot.backend).toBe("aerospace");
     expect(resource.snapshot.windows[0]?.workspace).toBe("eventloop-blog");
+  });
+
+  it("validates context restore plans", () => {
+    const fixture = readFixture(join(fixturesDir, "valid/context_restore_plan.json"));
+    const plan = ContextRestorePlanSchema.parse(fixture.data);
+
+    expect(plan.kind).toBe("browser_extension_message");
+    if (plan.kind === "browser_extension_message") {
+      expect(plan.message.type).toBe("eventloop.restore");
+      expect(plan.message.resource.kind).toBe("browser_tab");
+    }
   });
 
   it("requires review-packet evidence", () => {
