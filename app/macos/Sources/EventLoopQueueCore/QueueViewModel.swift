@@ -36,6 +36,14 @@ public final class QueueViewModel: ObservableObject {
         packets.first { $0.id == selectedPacketID }
     }
 
+    public var selectedWorkspaceSnapshot: WorkspaceSnapshot? {
+        selectedPacket?.workspaceSnapshot
+    }
+
+    public var canRestoreSelectedWorkspace: Bool {
+        shouldRestoreWorkspace && selectedWorkspaceSnapshot != nil
+    }
+
     public var hasPackets: Bool {
         !packets.isEmpty
     }
@@ -151,6 +159,33 @@ public final class QueueViewModel: ObservableObject {
         } catch {
             workspaceRestoreState = .failed(error.localizedDescription)
         }
+    }
+
+    public func confirmWorkspaceRestore(snapshot: WorkspaceSnapshot) async {
+        guard shouldRestoreWorkspace else {
+            workspaceRestoreState = .skippedManualMode
+            return
+        }
+
+        do {
+            let response = try await workspaceClient.restore(
+                snapshot: snapshot,
+                currentWindows: nil,
+                idempotencyKey: "mac_workspace_restore_\(UUID().uuidString)"
+            )
+            workspaceRestoreState = .executed(response.receipt)
+        } catch {
+            workspaceRestoreState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func confirmSelectedWorkspaceRestore() async {
+        guard let snapshot = selectedWorkspaceSnapshot else {
+            workspaceRestoreState = .failed("Selected packet has no workspace snapshot")
+            return
+        }
+
+        await confirmWorkspaceRestore(snapshot: snapshot)
     }
 
     public func moveToNext() async {

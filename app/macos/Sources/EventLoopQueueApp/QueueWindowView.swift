@@ -3,6 +3,17 @@ import SwiftUI
 
 struct QueueWindowView: View {
     @ObservedObject var viewModel: QueueViewModel
+    @State private var workspaceRestoreCandidate: WorkspaceSnapshot?
+
+    private var showWorkspaceRestoreConfirmation: Binding<Bool> {
+        Binding {
+            workspaceRestoreCandidate != nil
+        } set: { isPresented in
+            if !isPresented {
+                workspaceRestoreCandidate = nil
+            }
+        }
+    }
 
     var body: some View {
         NavigationSplitView {
@@ -17,6 +28,14 @@ struct QueueWindowView: View {
             .navigationTitle("Queue")
             .toolbar {
                 ToolbarItemGroup {
+                    Button {
+                        workspaceRestoreCandidate = viewModel.selectedWorkspaceSnapshot
+                    } label: {
+                        Label("Restore Workspace", systemImage: "rectangle.3.group")
+                    }
+                    .disabled(!viewModel.canRestoreSelectedWorkspace)
+                    .accessibilityIdentifier("queue-restore-workspace-button")
+
                     Button {
                         viewModel.toggleManualMode()
                     } label: {
@@ -43,8 +62,25 @@ struct QueueWindowView: View {
             }
         }
         .overlay(alignment: .bottomLeading) {
-            StatusBanner(state: viewModel.state)
+            VStack(alignment: .leading, spacing: 8) {
+                StatusBanner(state: viewModel.state)
+                WorkspaceRestoreBanner(state: viewModel.workspaceRestoreState)
+            }
                 .padding(12)
+        }
+        .confirmationDialog(
+            "Restore workspace?",
+            isPresented: showWorkspaceRestoreConfirmation,
+            presenting: workspaceRestoreCandidate
+        ) { snapshot in
+            Button("Restore Workspace") {
+                Task {
+                    await viewModel.confirmWorkspaceRestore(snapshot: snapshot)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("eventloopOS will ask the local orchestrator to execute the restore plan for the selected queue context.")
         }
         .overlay(alignment: .topTrailing) {
             if viewModel.isManualMode {
@@ -175,6 +211,45 @@ private struct StatusBanner: View {
                 .background(.red.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityIdentifier("queue-error-message")
+        }
+    }
+}
+
+private struct WorkspaceRestoreBanner: View {
+    let state: WorkspaceRestoreState
+
+    var body: some View {
+        switch state {
+        case .idle:
+            EmptyView()
+        case .skippedManualMode:
+            Text("Workspace restore paused")
+                .font(.caption)
+                .padding(8)
+                .background(.secondary.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("workspace-restore-paused")
+        case let .planned(plan):
+            Text("Workspace plan: \(plan.commands.count) commands")
+                .font(.caption)
+                .padding(8)
+                .background(.blue.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("workspace-restore-planned")
+        case let .executed(receipt):
+            Text("Workspace restored: \(receipt.commands.count) commands")
+                .font(.caption)
+                .padding(8)
+                .background(.green.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("workspace-restore-executed")
+        case let .failed(message):
+            Text(message)
+                .font(.caption)
+                .padding(8)
+                .background(.red.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("workspace-restore-failed")
         }
     }
 }

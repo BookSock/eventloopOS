@@ -9,6 +9,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
     public let priority: Int
     public let recommendedAction: String
     public let createdAt: Date
+    public let workspaceSnapshot: WorkspaceSnapshot?
 
     public init(
         id: String,
@@ -18,7 +19,8 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
         source: String,
         priority: Int,
         recommendedAction: String,
-        createdAt: Date
+        createdAt: Date,
+        workspaceSnapshot: WorkspaceSnapshot? = nil
     ) {
         self.id = id
         self.reviewPacketId = reviewPacketId ?? id
@@ -28,6 +30,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
         self.priority = priority
         self.recommendedAction = recommendedAction
         self.createdAt = createdAt
+        self.workspaceSnapshot = workspaceSnapshot
     }
 }
 
@@ -143,7 +146,8 @@ struct QueueItemDTO: Codable, Equatable, Sendable {
             source: reviewPacket.primarySource,
             priority: priorityScore,
             recommendedAction: reviewPacket.recommendedAction.label,
-            createdAt: createdAt
+            createdAt: createdAt,
+            workspaceSnapshot: reviewPacket.workspaceSnapshot
         )
     }
 }
@@ -166,6 +170,10 @@ struct ReviewPacketDTO: Codable, Equatable, Sendable {
     var primarySource: String {
         context.compactMap(\.url).first ?? id
     }
+
+    var workspaceSnapshot: WorkspaceSnapshot? {
+        context.compactMap(\.workspaceSnapshot).first
+    }
 }
 
 struct ActionDTO: Codable, Equatable, Sendable {
@@ -174,4 +182,13 @@ struct ActionDTO: Codable, Equatable, Sendable {
 
 struct ContextResourceDTO: Codable, Equatable, Sendable {
     let url: String?
+    let kind: String?
+    let snapshot: WorkspaceSnapshot?
+
+    var workspaceSnapshot: WorkspaceSnapshot? {
+        guard kind == "workspace_snapshot" else {
+            return nil
+        }
+        return snapshot
+    }
 }

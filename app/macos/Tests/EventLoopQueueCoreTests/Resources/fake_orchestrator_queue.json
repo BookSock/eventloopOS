@@ -15,6 +15,22 @@
         "context": [
           {
             "url": "slack://thread/blog-feedback"
+          },
+          {
+            "kind": "workspace_snapshot",
+            "snapshot": {
+              "backend": "aerospace",
+              "windows": [
+                {
+                  "id": 9,
+                  "app": "Ghostty",
+                  "title": "codex",
+                  "workspace": "eventloop-blog"
+                }
+              ],
+              "activeWorkspace": "eventloop-blog",
+              "focusedWindowId": 9
+            }
           }
         ]
       }

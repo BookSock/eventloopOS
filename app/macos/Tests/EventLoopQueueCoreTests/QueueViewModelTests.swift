@@ -121,4 +121,106 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.workspaceRestoreState, .planned(plan))
         XCTAssertEqual(workspaceClient.restorePlanSnapshots, [snapshot])
     }
+
+    func testSelectedWorkspaceRestoreRequiresPacketSnapshot() async {
+        let workspaceClient = FakeWorkspaceClient()
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+
+        XCTAssertNil(viewModel.selectedWorkspaceSnapshot)
+        XCTAssertFalse(viewModel.canRestoreSelectedWorkspace)
+
+        await viewModel.confirmSelectedWorkspaceRestore()
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .failed("Selected packet has no workspace snapshot"))
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys, [])
+    }
+
+    func testSelectedWorkspaceRestoreExecutesPacketSnapshot() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+        let packet = ReviewPacket(
+            id: "packet-with-workspace",
+            title: "Review with workspace",
+            summary: "Needs workspace restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: snapshot
+        )
+        let workspaceClient = FakeWorkspaceClient()
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: [packet]),
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+
+        XCTAssertEqual(viewModel.selectedWorkspaceSnapshot, snapshot)
+        XCTAssertTrue(viewModel.canRestoreSelectedWorkspace)
+
+        await viewModel.confirmSelectedWorkspaceRestore()
+
+        guard case .executed = viewModel.workspaceRestoreState else {
+            XCTFail("expected executed workspace restore state")
+            return
+        }
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+    }
+
+    func testConfirmWorkspaceRestoreExecutesWithIdempotencyKey() async {
+        let receipt = WorkspaceRestoreReceipt(
+            commands: [WorkspaceExecutedCommand(command: "aerospace", args: ["workspace", "eventloop-blog"], stdout: "ok")],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            restoreEnvelope: WorkspaceRestoreExecutionEnvelope(
+                ok: true,
+                plan: WorkspaceRestorePlan(commands: [], skipped: []),
+                receipt: receipt,
+                executeSupported: true,
+                idempotencyKey: "idem_fake"
+            )
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+
+        await viewModel.confirmWorkspaceRestore(snapshot: snapshot)
+
+        guard case let .executed(observedReceipt) = viewModel.workspaceRestoreState else {
+            XCTFail("expected executed workspace restore state")
+            return
+        }
+        XCTAssertEqual(observedReceipt, receipt)
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+        XCTAssertTrue(workspaceClient.restoreIdempotencyKeys[0].hasPrefix("mac_workspace_restore_"))
+    }
+
+    func testManualModeSkipsConfirmedWorkspaceRestore() async {
+        let workspaceClient = FakeWorkspaceClient()
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")]
+        )
+
+        viewModel.enterManualMode()
+        await viewModel.confirmWorkspaceRestore(snapshot: snapshot)
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .skippedManualMode)
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys, [])
+    }
 }

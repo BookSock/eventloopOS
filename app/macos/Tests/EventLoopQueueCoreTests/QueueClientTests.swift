@@ -11,6 +11,10 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(loaded.map(\.id), ["qit_blog_feedback", "qit_ci_failed"])
         XCTAssertEqual(loaded.first?.reviewPacketId, "packet-blog-feedback")
         XCTAssertEqual(loaded.first?.priority, 90)
+        XCTAssertEqual(loaded.first?.workspaceSnapshot?.backend, "aerospace")
+        XCTAssertEqual(loaded.first?.workspaceSnapshot?.activeWorkspace, "eventloop-blog")
+        XCTAssertEqual(loaded.first?.workspaceSnapshot?.windows.first?.title, "codex")
+        XCTAssertNil(loaded.last?.workspaceSnapshot)
     }
 
     func testFakeQueueClientCompletesPacketAndReturnsNext() async throws {
@@ -70,6 +74,31 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.status.backend, "aerospace")
         XCTAssertEqual(envelope.status.reason, "server_unavailable")
         XCTAssertEqual(envelope.executeSupported, false)
+    }
+
+    func testWorkspaceRestoreExecutionEnvelopeDecodesReceipt() throws {
+        let data = """
+        {
+          "ok": true,
+          "plan": {
+            "commands": [{ "command": "aerospace", "args": ["workspace", "eventloop-blog"] }],
+            "skipped": []
+          },
+          "receipt": {
+            "commands": [{ "command": "aerospace", "args": ["workspace", "eventloop-blog"], "stdout": "ok" }],
+            "skipped": []
+          },
+          "execute_supported": true,
+          "idempotency_key": "idem_workspace_restore"
+        }
+        """.data(using: .utf8)!
+
+        let envelope = try QueueCoders.makeDecoder().decode(WorkspaceRestoreExecutionEnvelope.self, from: data)
+
+        XCTAssertTrue(envelope.ok)
+        XCTAssertEqual(envelope.plan.commands.first?.args, ["workspace", "eventloop-blog"])
+        XCTAssertEqual(envelope.receipt.commands.first?.stdout, "ok")
+        XCTAssertEqual(envelope.idempotencyKey, "idem_workspace_restore")
     }
 
     private func loadFixturePackets() throws -> [ReviewPacket] {

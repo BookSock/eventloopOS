@@ -3,6 +3,7 @@ import Foundation
 public protocol WorkspaceClient: Sendable {
     func status() async throws -> WorkspaceStatusEnvelope
     func restorePlan(snapshot: WorkspaceSnapshot, currentWindows: [WorkspaceWindow]?) async throws -> WorkspaceRestorePlanEnvelope
+    func restore(snapshot: WorkspaceSnapshot, currentWindows: [WorkspaceWindow]?, idempotencyKey: String) async throws -> WorkspaceRestoreExecutionEnvelope
 }
 
 public struct WorkspaceStatusEnvelope: Codable, Equatable, Sendable {
@@ -99,6 +100,46 @@ public struct WorkspaceRestorePlan: Codable, Equatable, Sendable {
     }
 }
 
+public struct WorkspaceRestoreExecutionEnvelope: Codable, Equatable, Sendable {
+    public let ok: Bool
+    public let plan: WorkspaceRestorePlan
+    public let receipt: WorkspaceRestoreReceipt
+    public let executeSupported: Bool
+    public let idempotencyKey: String
+
+    public init(
+        ok: Bool,
+        plan: WorkspaceRestorePlan,
+        receipt: WorkspaceRestoreReceipt,
+        executeSupported: Bool,
+        idempotencyKey: String
+    ) {
+        self.ok = ok
+        self.plan = plan
+        self.receipt = receipt
+        self.executeSupported = executeSupported
+        self.idempotencyKey = idempotencyKey
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case plan
+        case receipt
+        case executeSupported = "execute_supported"
+        case idempotencyKey = "idempotency_key"
+    }
+}
+
+public struct WorkspaceRestoreReceipt: Codable, Equatable, Sendable {
+    public let commands: [WorkspaceExecutedCommand]
+    public let skipped: [WorkspaceRestoreSkip]
+
+    public init(commands: [WorkspaceExecutedCommand], skipped: [WorkspaceRestoreSkip]) {
+        self.commands = commands
+        self.skipped = skipped
+    }
+}
+
 public struct WorkspaceCommand: Codable, Equatable, Sendable {
     public let command: String
     public let args: [String]
@@ -106,6 +147,20 @@ public struct WorkspaceCommand: Codable, Equatable, Sendable {
     public init(command: String, args: [String]) {
         self.command = command
         self.args = args
+    }
+}
+
+public struct WorkspaceExecutedCommand: Codable, Equatable, Sendable {
+    public let command: String
+    public let args: [String]
+    public let stdout: String?
+    public let stderr: String?
+
+    public init(command: String, args: [String], stdout: String? = nil, stderr: String? = nil) {
+        self.command = command
+        self.args = args
+        self.stdout = stdout
+        self.stderr = stderr
     }
 }
 
@@ -131,6 +186,7 @@ public enum WorkspaceRestoreState: Equatable, Sendable {
     case idle
     case skippedManualMode
     case planned(WorkspaceRestorePlan)
+    case executed(WorkspaceRestoreReceipt)
     case failed(String)
 }
 
@@ -169,6 +225,23 @@ public struct HTTPWorkspaceClient: WorkspaceClient {
         return try decoder.decode(WorkspaceRestorePlanEnvelope.self, from: data)
     }
 
+    public func restore(
+        snapshot: WorkspaceSnapshot,
+        currentWindows: [WorkspaceWindow]? = nil,
+        idempotencyKey: String
+    ) async throws -> WorkspaceRestoreExecutionEnvelope {
+        let url = baseURL.appending(path: "workspace/restore")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.httpBody = try encoder.encode(WorkspaceRestoreRequest(snapshot: snapshot, currentWindows: currentWindows))
+
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(WorkspaceRestoreExecutionEnvelope.self, from: data)
+    }
+
     private func validate(response: URLResponse) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw QueueClientError.invalidResponse
@@ -189,11 +262,25 @@ private struct WorkspaceRestorePlanRequest: Encodable {
     }
 }
 
+private struct WorkspaceRestoreRequest: Encodable {
+    let snapshot: WorkspaceSnapshot
+    let currentWindows: [WorkspaceWindow]?
+    let confirmExecute = true
+
+    enum CodingKeys: String, CodingKey {
+        case snapshot
+        case currentWindows = "current_windows"
+        case confirmExecute = "confirm_execute"
+    }
+}
+
 public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
     private let lock = NSLock()
     private let statusEnvelope: WorkspaceStatusEnvelope
     private let planEnvelope: WorkspaceRestorePlanEnvelope
+    private let restoreEnvelope: WorkspaceRestoreExecutionEnvelope
     private var requestedSnapshots: [WorkspaceSnapshot] = []
+    private var restoreKeys: [String] = []
 
     public init(
         statusEnvelope: WorkspaceStatusEnvelope = WorkspaceStatusEnvelope(
@@ -203,14 +290,26 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
         planEnvelope: WorkspaceRestorePlanEnvelope = WorkspaceRestorePlanEnvelope(
             plan: WorkspaceRestorePlan(commands: [], skipped: []),
             executeSupported: false
+        ),
+        restoreEnvelope: WorkspaceRestoreExecutionEnvelope = WorkspaceRestoreExecutionEnvelope(
+            ok: true,
+            plan: WorkspaceRestorePlan(commands: [], skipped: []),
+            receipt: WorkspaceRestoreReceipt(commands: [], skipped: []),
+            executeSupported: true,
+            idempotencyKey: "idem_fake_workspace_restore"
         )
     ) {
         self.statusEnvelope = statusEnvelope
         self.planEnvelope = planEnvelope
+        self.restoreEnvelope = restoreEnvelope
     }
 
     public var restorePlanSnapshots: [WorkspaceSnapshot] {
         lock.withLock { requestedSnapshots }
+    }
+
+    public var restoreIdempotencyKeys: [String] {
+        lock.withLock { restoreKeys }
     }
 
     public func status() async throws -> WorkspaceStatusEnvelope {
@@ -222,6 +321,17 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
             requestedSnapshots.append(snapshot)
         }
         return planEnvelope
+    }
+
+    public func restore(
+        snapshot: WorkspaceSnapshot,
+        currentWindows: [WorkspaceWindow]?,
+        idempotencyKey: String
+    ) async throws -> WorkspaceRestoreExecutionEnvelope {
+        lock.withLock {
+            restoreKeys.append(idempotencyKey)
+        }
+        return restoreEnvelope
     }
 }
 
@@ -241,5 +351,18 @@ public struct NoOpWorkspaceClient: WorkspaceClient {
             executeSupported: false
         )
     }
-}
 
+    public func restore(
+        snapshot: WorkspaceSnapshot,
+        currentWindows: [WorkspaceWindow]?,
+        idempotencyKey: String
+    ) async throws -> WorkspaceRestoreExecutionEnvelope {
+        WorkspaceRestoreExecutionEnvelope(
+            ok: false,
+            plan: WorkspaceRestorePlan(commands: [], skipped: []),
+            receipt: WorkspaceRestoreReceipt(commands: [], skipped: []),
+            executeSupported: false,
+            idempotencyKey: idempotencyKey
+        )
+    }
+}
