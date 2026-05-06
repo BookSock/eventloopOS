@@ -45,6 +45,11 @@ export type RestorePlan = {
   skipped: RestoreSkip[];
 };
 
+export type RestoreExecutionReceipt = {
+  commands: Array<AerospaceCommand & ExecResult>;
+  skipped: RestoreSkip[];
+};
+
 export type RestoreSkip = {
   reason: "stale_window_id";
   windowId: number;
@@ -76,6 +81,20 @@ export class AerospaceWorkspaceAdapter {
     return {
       backend: this.backend,
       windows: parseAerospaceWindows(result.stdout),
+    };
+  }
+
+  async executeRestorePlan(plan: RestorePlan): Promise<RestoreExecutionReceipt> {
+    const commands: RestoreExecutionReceipt["commands"] = [];
+    for (const command of plan.commands) {
+      assertSafeAerospaceCommand(command);
+      const result = await this.exec(command.command, command.args);
+      commands.push({ ...command, ...result });
+    }
+
+    return {
+      commands,
+      skipped: plan.skipped,
     };
   }
 }
@@ -243,6 +262,29 @@ function assertSafeWorkspace(workspace: string): void {
   if (!/^[A-Za-z0-9._:-]+$/.test(workspace)) {
     throw new Error(`unsafe aerospace workspace: ${workspace}`);
   }
+}
+
+function assertSafeAerospaceCommand(command: AerospaceCommand): void {
+  if (command.command !== "aerospace") {
+    throw new Error(`unsafe aerospace command: ${command.command}`);
+  }
+
+  const [subcommand, ...rest] = command.args;
+  if (subcommand === "workspace" && rest.length === 1) {
+    assertSafeWorkspace(rest[0] ?? "");
+    return;
+  }
+  if (subcommand === "focus" && rest.length === 2 && rest[0] === "--window-id") {
+    assertSafeWindowId(Number(rest[1]));
+    return;
+  }
+  if (subcommand === "move-node-to-workspace" && rest.length === 3 && rest[0] === "--window-id") {
+    assertSafeWindowId(Number(rest[1]));
+    assertSafeWorkspace(rest[2] ?? "");
+    return;
+  }
+
+  throw new Error(`unsafe aerospace args: ${command.args.join(" ")}`);
 }
 
 function capabilityStatusFromError(error: unknown): WorkspaceCapabilityStatus {

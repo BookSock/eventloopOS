@@ -653,6 +653,153 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("executes workspace restore only when enabled, confirmed, and idempotent", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const executedPlans: unknown[] = [];
+    const workspaceServer = createGatewayServer({
+      store,
+      workspaceExecuteEnabled: true,
+      workspace: {
+        status() {
+          return {
+            available: true,
+            backend: "aerospace",
+          };
+        },
+        capture() {
+          return {
+            backend: "aerospace",
+            windows: [],
+          };
+        },
+        planRestore() {
+          return {
+            commands: [
+              {
+                command: "aerospace",
+                args: ["workspace", "eventloop-blog"],
+              },
+            ],
+            skipped: [],
+          };
+        },
+        executeRestorePlan(plan) {
+          executedPlans.push(plan);
+          return {
+            commands: [
+              {
+                command: "aerospace",
+                args: ["workspace", "eventloop-blog"],
+                stdout: "ok",
+              },
+            ],
+            skipped: [],
+          };
+        },
+      },
+    });
+    await new Promise<void>((resolve) => workspaceServer.listen(0, "127.0.0.1", resolve));
+    const address = workspaceServer.address() as AddressInfo;
+    const workspaceBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const missingKeyResponse = await fetch(`${workspaceBaseUrl}/workspace/restore`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          confirm_execute: true,
+          snapshot: { backend: "aerospace", windows: [] },
+        }),
+      });
+      assert.equal(missingKeyResponse.status, 400);
+
+      const restoreResponse = await fetch(`${workspaceBaseUrl}/workspace/restore`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_workspace_restore_001",
+        },
+        body: JSON.stringify({
+          confirm_execute: true,
+          snapshot: { backend: "aerospace", windows: [] },
+        }),
+      });
+      const restoreBody = await restoreResponse.json() as {
+        ok: boolean;
+        execute_supported: boolean;
+        idempotency_key: string;
+        receipt: {
+          commands: Array<{
+            stdout: string;
+          }>;
+        };
+      };
+      assert.equal(restoreResponse.status, 200);
+      assert.equal(restoreBody.ok, true);
+      assert.equal(restoreBody.execute_supported, true);
+      assert.equal(restoreBody.idempotency_key, "idem_workspace_restore_001");
+      assert.equal(restoreBody.receipt.commands[0]?.stdout, "ok");
+      assert.equal(executedPlans.length, 1);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        workspaceServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("keeps workspace restore execution disabled by default", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const workspaceServer = createGatewayServer({
+      store,
+      workspace: {
+        status() {
+          return {
+            available: true,
+            backend: "aerospace",
+          };
+        },
+        capture() {
+          return {
+            backend: "aerospace",
+            windows: [],
+          };
+        },
+        planRestore() {
+          return { commands: [], skipped: [] };
+        },
+        executeRestorePlan() {
+          throw new Error("must not execute when disabled");
+        },
+      },
+    });
+    await new Promise<void>((resolve) => workspaceServer.listen(0, "127.0.0.1", resolve));
+    const address = workspaceServer.address() as AddressInfo;
+    const workspaceBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const statusResponse = await fetch(`${workspaceBaseUrl}/workspace/status`);
+      const statusBody = await statusResponse.json() as { execute_supported: boolean };
+      assert.equal(statusBody.execute_supported, false);
+
+      const restoreResponse = await fetch(`${workspaceBaseUrl}/workspace/restore`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_workspace_restore_disabled",
+        },
+        body: JSON.stringify({
+          confirm_execute: true,
+          snapshot: { backend: "aerospace", windows: [] },
+        }),
+      });
+      assert.equal(restoreResponse.status, 403);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        workspaceServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("sends idempotent followup into configured task session controller", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const messages = new Map<string, Record<string, unknown>>();

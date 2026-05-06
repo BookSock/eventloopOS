@@ -517,7 +517,8 @@ Current implementation:
 - macOS app has `Cmd-Option-Shift-M` global hotkey for manual/event-loop toggle.
 - macOS app auto-renews the selected queue lease while human reviews.
 - macOS app can ask orchestrator for workspace restore plans and skips that call in manual mode.
-- orchestrator exposes workspace status/capture/restore-plan and reports `execute_supported: false`.
+- orchestrator exposes workspace status/capture/restore-plan and reports `execute_supported`.
+- orchestrator can execute restore only when `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled`, request has `confirm_execute: true`, and request has an `idempotency-key`.
 - test harness has `workspace_status_smoke` fixture/live scenario so agents can verify backend status without moving windows.
 
 MVP:
@@ -525,7 +526,7 @@ MVP:
 - remember resources per task.
 - restore URLs/tabs/session.
 - AeroSpace spike maps task -> workspace.
-- add explicit confirmation path before any workspace restore execution.
+- add human-facing confirmation UI before invoking workspace restore execution.
 
 Later:
 

@@ -160,7 +160,7 @@ Implemented:
 - `app/orchestrator`: `GET /contexts?source=&task_id=&q=&limit=` lists and text-filters stored context resources with event + route metadata, giving agents a read path for passive browser captures and task-attached browser context.
 - `app/orchestrator`: `GET /mcp-sources`, `GET /mcp-sources/:id`, `POST /mcp-sources/:id/poll`, and `POST /mcp-sources/:id/poll-and-route` expose discoverable MCP polling loops; default mode uses seeded fake sources, and `ORCHESTRATOR_MCP_SOURCES_PATH` loads real read-only local MCP source configs through the SDK runtime.
 - `app/orchestrator/src/mcp_sources`: fake runtime and real MCP SDK runtime with timeout, stderr capture, env allowlist, circuit breaker.
-- `app/orchestrator/src/workspace`: deterministic AeroSpace workspace adapter, status/capture/restore-plan controller, and safe command planner. HTTP exposes `GET /workspace/status`, `POST /workspace/capture`, and `POST /workspace/restore-plan`; execute is deliberately not supported yet.
+- `app/orchestrator/src/workspace`: deterministic AeroSpace workspace adapter, status/capture/restore-plan controller, safe command planner, and opt-in restore execution. HTTP exposes `GET /workspace/status`, `POST /workspace/capture`, `POST /workspace/restore-plan`, and disabled-by-default `POST /workspace/restore` requiring `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled`, `confirm_execute: true`, and `idempotency-key`.
 - `app/orchestrator/src/task_sessions`: fake task-session store plus terminal adapter for tmux and Ghostty, using audited visible input and injected command execution in tests.
 - `app/browser-extension`: shared-schema `browser_tab` capture/restore, optional task/project route hints, legacy resource normalizer, native bridge envelope/capability protocol.
 - `app/native-host`: Chrome Native Messaging stdio host, context capture JSONL sink, optional route hints (`task_hint`, `project_hint`), macOS Chrome manifest installer, and live smoke that forwards browser capture into orchestrator as `store_only` context.
@@ -180,10 +180,10 @@ Known gaps:
 - Real persistent orchestrator wiring should replace in-memory store for HTTP routes.
 - Persistent Postgres HTTP mode exists behind `DATABASE_URL`; needs full live local proof once Docker/Postgres runtime available.
 - macOS UI needs menu bar polish and visible workspace restore status.
-- macOS UI has manual-mode toggle state, global hotkey wiring, automatic lease renewal, and restore-plan pause gate; next gap is actual workspace restore execution with explicit confirmation.
+- macOS UI has manual-mode toggle state, global hotkey wiring, automatic lease renewal, and restore-plan pause gate; next gap is visible confirmation UI for invoking workspace restore execution.
 - Native host forwards context/event data to orchestrator when `EVENTLOOPOS_ORCHESTRATOR_URL` is set; next gap is richer context ranking/search and task attachment UI.
 - MCP source registry loads local config files and can run real read-only poll tools through the SDK runtime; next gap is adapter/mapping helper for user-installed MCP servers whose tool output is not already `items[]`.
-- Aerospace adapter has unit/API coverage, daemon status endpoint, and live harness smoke; next gap is explicit execute-confirm flow.
+- Aerospace adapter has unit/API coverage, daemon status endpoint, live harness smoke, and disabled-by-default execute-confirm flow; next gap is human-facing confirmation UI and live run with AeroSpace.app installed.
 - Task session control has fake, daemon-seeded dev controller, discovery/read API, and terminal-backed adapter seams; next gap is real Codex app-server/native thread backend.
 - Voice/hotkey session controller still needs implementation.
 - Postgres live tests need Docker/container runtime to execute locally.

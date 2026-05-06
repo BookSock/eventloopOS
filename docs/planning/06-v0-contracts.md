@@ -463,6 +463,7 @@ POST /context/capture
 GET  /workspace/status
 POST /workspace/capture
 POST /workspace/restore-plan
+POST /workspace/restore
 POST /actions/:id/execute
 POST /agent-runs/:id/resume
 POST /router/route
@@ -480,7 +481,12 @@ POST /receipts
 GET  /sources/health
 ```
 
-`GET /workspace/status` returns `execute_supported: false` in v0. Workspace execution needs a separate explicit-confirm contract before any agent can move windows.
+`GET /workspace/status` and `POST /workspace/restore-plan` return `execute_supported`.
+Default is `false`. `POST /workspace/restore` is disabled unless
+`ORCHESTRATOR_WORKSPACE_EXECUTE=enabled`; when enabled, it still requires
+`confirm_execute: true` and an `idempotency-key` header. It recomputes the
+plan from snapshot/current windows before execution instead of accepting raw
+commands from a client.
 
 Later:
 

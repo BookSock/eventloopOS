@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AerospaceWorkspaceController, parseRestorePlanRequest, parseWorkspaceSnapshot } from "./controller.js";
+import {
+  AerospaceWorkspaceController,
+  parseRestoreExecuteRequest,
+  parseRestorePlanRequest,
+  parseWorkspaceSnapshot,
+} from "./controller.js";
 import type { ExecFunction, WorkspaceSnapshot } from "./aerospace.js";
 
 describe("workspace controller", () => {
@@ -77,6 +82,22 @@ describe("workspace controller", () => {
     assert.equal(request.snapshot.activeWorkspace, "eventloop-blog");
     assert.equal(request.snapshot.focusedWindowId, 9);
     assert.equal(request.currentWindows?.[0].workspace, "manual");
+  });
+
+  it("requires explicit confirmation for restore execute requests", () => {
+    assert.throws(
+      () => parseRestoreExecuteRequest({ snapshot: { backend: "aerospace", windows: [] } }),
+      /confirm_execute true/,
+    );
+
+    const request = parseRestoreExecuteRequest({
+      confirm_execute: true,
+      snapshot: {
+        backend: "aerospace",
+        windows: [{ id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog" }],
+      },
+    });
+    assert.equal(request.snapshot.windows[0]?.id, 9);
   });
 
   it("rejects malformed snapshots", () => {

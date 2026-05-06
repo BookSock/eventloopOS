@@ -4,6 +4,7 @@ import {
   restoreWorkspacePlan,
   type AerospaceWindow,
   type ExecFunction,
+  type RestoreExecutionReceipt,
   type RestorePlan,
   type WorkspaceCapabilityStatus,
   type WorkspaceSnapshot,
@@ -13,6 +14,7 @@ export type WorkspaceController = {
   status(): Promise<WorkspaceCapabilityStatus> | WorkspaceCapabilityStatus;
   capture(): Promise<WorkspaceSnapshot> | WorkspaceSnapshot;
   planRestore(snapshot: WorkspaceSnapshot, currentWindows?: AerospaceWindow[]): Promise<RestorePlan> | RestorePlan;
+  executeRestorePlan?(plan: RestorePlan): Promise<RestoreExecutionReceipt> | RestoreExecutionReceipt;
 };
 
 export class AerospaceWorkspaceController implements WorkspaceController {
@@ -33,6 +35,10 @@ export class AerospaceWorkspaceController implements WorkspaceController {
   async planRestore(snapshot: WorkspaceSnapshot, currentWindows?: AerospaceWindow[]): Promise<RestorePlan> {
     const windows = currentWindows ?? (await this.adapter.capture()).windows;
     return restoreWorkspacePlan(snapshot, windows);
+  }
+
+  async executeRestorePlan(plan: RestorePlan): Promise<RestoreExecutionReceipt> {
+    return await this.adapter.executeRestorePlan(plan);
   }
 }
 
@@ -67,6 +73,20 @@ export function parseRestorePlanRequest(input: unknown): {
     snapshot,
     currentWindows,
   };
+}
+
+export function parseRestoreExecuteRequest(input: unknown): {
+  snapshot: WorkspaceSnapshot;
+  currentWindows?: AerospaceWindow[];
+} {
+  if (!isRecord(input)) {
+    throw new Error("workspace restore request must be an object");
+  }
+  if (input.confirm_execute !== true) {
+    throw new Error("workspace restore requires confirm_execute true");
+  }
+
+  return parseRestorePlanRequest(input);
 }
 
 function readOptionalString(input: Record<string, unknown>, ...keys: string[]): string | undefined {

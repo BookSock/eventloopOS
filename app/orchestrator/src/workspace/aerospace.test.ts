@@ -199,4 +199,42 @@ describe("Aerospace workspace adapter", () => {
       ],
     });
   });
+
+  it("executes only generated safe restore commands", async () => {
+    const calls: { command: string; args: string[] }[] = [];
+    const adapter = new AerospaceWorkspaceAdapter(async (command, args) => {
+      calls.push({ command, args });
+      return { stdout: "ok", stderr: "" };
+    });
+    const plan = restoreWorkspacePlan(
+      {
+        backend: "aerospace",
+        activeWorkspace: "dev",
+        windows: [{ id: 11, app: "Terminal", title: "shell", workspace: "dev" }],
+      },
+      [{ id: 11, app: "Terminal", title: "shell", workspace: "manual" }],
+    );
+
+    const receipt = await adapter.executeRestorePlan(plan);
+
+    assert.deepEqual(calls, [
+      { command: "aerospace", args: ["move-node-to-workspace", "--window-id", "11", "dev"] },
+      { command: "aerospace", args: ["workspace", "dev"] },
+    ]);
+    assert.equal(receipt.commands[0]?.stdout, "ok");
+  });
+
+  it("blocks unsafe restore execution commands", async () => {
+    const adapter = new AerospaceWorkspaceAdapter(async () => {
+      throw new Error("exec should not be called");
+    });
+
+    await assert.rejects(
+      () => adapter.executeRestorePlan({
+        commands: [{ command: "aerospace", args: ["workspace", "dev;rm"] }],
+        skipped: [],
+      }),
+      /unsafe aerospace workspace/,
+    );
+  });
 });

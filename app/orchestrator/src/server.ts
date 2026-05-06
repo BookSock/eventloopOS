@@ -4,13 +4,14 @@ import { queueStates, type ApiErrorBody, type QueueState } from "./contracts.js"
 import type { GatewayStore } from "./gateway_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import type { McpSourcePollOutput } from "./integrations/mcp_poll/development_registry.js";
-import { parseRestorePlanRequest, type WorkspaceController } from "./workspace/controller.js";
+import { parseRestoreExecuteRequest, parseRestorePlanRequest, type WorkspaceController } from "./workspace/controller.js";
 
 export type GatewayServerOptions = {
   store: GatewayStore;
   taskSessions?: TaskSessionController;
   mcpSources?: McpSourceRegistry;
   workspace?: WorkspaceController;
+  workspaceExecuteEnabled?: boolean;
   now?: () => Date;
 };
 
@@ -97,7 +98,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
 
         return sendJson(response, 200, {
           status: await options.workspace.status(),
-          execute_supported: false,
+          execute_supported: options.workspaceExecuteEnabled === true,
           request_id: context.requestId,
         });
       }
@@ -128,7 +129,40 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           const plan = await options.workspace.planRestore(requestBody.snapshot, requestBody.currentWindows);
           return sendJson(response, 200, {
             plan,
-            execute_supported: false,
+            execute_supported: options.workspaceExecuteEnabled === true,
+            request_id: context.requestId,
+          });
+        } catch (error) {
+          return sendSchemaError(response, context, error instanceof Error ? error.message : String(error));
+        }
+      }
+
+      if (request.method === "POST" && context.url.pathname === "/workspace/restore") {
+        if (!options.workspace) {
+          return sendError(response, 501, context, "workspace_unavailable", "workspace controller is not configured");
+        }
+        if (options.workspaceExecuteEnabled !== true || !options.workspace.executeRestorePlan) {
+          return sendError(response, 403, context, "workspace_execute_disabled", "workspace restore execution is disabled");
+        }
+        if (!context.idempotencyKey) {
+          return sendError(response, 400, context, "missing_idempotency_key", "workspace restore requires idempotency-key header");
+        }
+
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) {
+          return sendSchemaError(response, context, parsed.message);
+        }
+
+        try {
+          const requestBody = parseRestoreExecuteRequest(parsed.value);
+          const plan = await options.workspace.planRestore(requestBody.snapshot, requestBody.currentWindows);
+          const receipt = await options.workspace.executeRestorePlan(plan);
+          return sendJson(response, 200, {
+            ok: true,
+            plan,
+            receipt,
+            execute_supported: true,
+            idempotency_key: context.idempotencyKey,
             request_id: context.requestId,
           });
         } catch (error) {

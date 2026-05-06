@@ -14,6 +14,7 @@ describe("orchestrator config schema", () => {
       assert.equal(result.value.taskSessions, "fake");
       assert.equal(result.value.mcpSources, "seeded");
       assert.equal(result.value.workspace, "aerospace");
+      assert.equal(result.value.workspaceExecute, "disabled");
     }
   });
 
@@ -114,6 +115,28 @@ describe("orchestrator config schema", () => {
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.deepEqual(result.issues, ["ORCHESTRATOR_WORKSPACE must be aerospace or off"]);
+    }
+  });
+
+  it("allows workspace restore execution to be explicitly enabled", () => {
+    const result = loadConfig({
+      ORCHESTRATOR_WORKSPACE_EXECUTE: "enabled",
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.value.workspaceExecute, "enabled");
+    }
+  });
+
+  it("rejects unknown workspace execution mode", () => {
+    const result = loadConfig({
+      ORCHESTRATOR_WORKSPACE_EXECUTE: "maybe",
+    });
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.deepEqual(result.issues, ["ORCHESTRATOR_WORKSPACE_EXECUTE must be disabled or enabled"]);
     }
   });
 });

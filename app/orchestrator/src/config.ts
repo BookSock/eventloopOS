@@ -7,6 +7,7 @@ export type OrchestratorConfig = {
   mcpSources: "seeded" | "config" | "off";
   mcpSourcesPath?: string;
   workspace: "aerospace" | "off";
+  workspaceExecute: "disabled" | "enabled";
 };
 
 export type ConfigValidationResult =
@@ -23,6 +24,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
   const mcpSourcesPath = env.ORCHESTRATOR_MCP_SOURCES_PATH;
   const mcpSourcesRaw = env.ORCHESTRATOR_MCP_SOURCES ?? (mcpSourcesPath ? "config" : "seeded");
   const workspaceRaw = env.ORCHESTRATOR_WORKSPACE ?? "aerospace";
+  const workspaceExecuteRaw = env.ORCHESTRATOR_WORKSPACE_EXECUTE ?? "disabled";
   const issues: string[] = [];
 
   if (!host.trim()) {
@@ -44,6 +46,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
   if (workspaceRaw !== "aerospace" && workspaceRaw !== "off") {
     issues.push("ORCHESTRATOR_WORKSPACE must be aerospace or off");
   }
+  if (workspaceExecuteRaw !== "disabled" && workspaceExecuteRaw !== "enabled") {
+    issues.push("ORCHESTRATOR_WORKSPACE_EXECUTE must be disabled or enabled");
+  }
 
   if (issues.length > 0) {
     return { ok: false, issues };
@@ -52,6 +57,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
   const taskSessions = taskSessionsRaw === "off" ? "off" : "fake";
   const mcpSources = mcpSourcesRaw === "config" ? "config" : mcpSourcesRaw === "off" ? "off" : "seeded";
   const workspace = workspaceRaw === "off" ? "off" : "aerospace";
+  const workspaceExecute = workspaceExecuteRaw === "enabled" ? "enabled" : "disabled";
 
   return {
     ok: true,
@@ -64,6 +70,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
       mcpSources,
       mcpSourcesPath,
       workspace,
+      workspaceExecute,
     },
   };
 }

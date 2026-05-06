@@ -24,7 +24,13 @@ const store = await createGatewayStore();
 const taskSessions = config.value.taskSessions === "fake" ? createSeededDevelopmentTaskSessions() : undefined;
 const mcpSources = await createMcpSourceRegistry();
 const workspace = config.value.workspace === "aerospace" ? new AerospaceWorkspaceController(execFilePromise) : undefined;
-const server = createGatewayServer({ store, taskSessions, mcpSources, workspace });
+const server = createGatewayServer({
+  store,
+  taskSessions,
+  mcpSources,
+  workspace,
+  workspaceExecuteEnabled: config.value.workspaceExecute === "enabled",
+});
 
 server.listen(config.value.port, config.value.host, () => {
   console.log(`eventloop orchestrator listening on http://${config.value.host}:${config.value.port}`);
