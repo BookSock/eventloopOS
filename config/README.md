@@ -55,3 +55,11 @@ pnpm --filter @eventloopos/orchestrator start
 ```
 
 The orchestrator reads this file on each task-session lookup. A master agent can update it while the daemon runs, then the next `/task-sessions` call sees the new binding. File entries override `ORCHESTRATOR_CODEX_TASK_MAP`; thread title/preview tags like `[task:blog feedback]` remain fallback.
+
+When the map path is configured, agents can bind through HTTP instead of editing JSON directly:
+
+```sh
+curl -X PUT http://127.0.0.1:4377/task-sessions/<task-session-id>/task-binding \
+  -H 'content-type: application/json' \
+  -d '{"task_id":"task_blog_feedback"}'
+```

@@ -29,6 +29,10 @@ export type CodexNativeThreadClient = {
   }): Promise<CodexNativeTurn> | CodexNativeTurn;
 };
 
+export type CodexTaskSessionBindingWriter = {
+  bindThreadToTask(threadId: string, taskId: string): Promise<unknown> | unknown;
+};
+
 export type CodexTaskSession = {
   id: string;
   task_id?: string;
@@ -74,12 +78,14 @@ export class CodexNativeThreadController implements TaskSessionController {
   readonly messages = new Map<string, CodexTaskMessage>();
   readonly messagesByIdempotencyKey = new Map<string, CodexTaskMessage>();
   private readonly clock: () => Date;
+  private readonly bindingWriter?: CodexTaskSessionBindingWriter;
 
   constructor(
     private readonly client: CodexNativeThreadClient,
-    { clock = () => new Date() }: { clock?: () => Date } = {},
+    { clock = () => new Date(), bindingWriter }: { clock?: () => Date; bindingWriter?: CodexTaskSessionBindingWriter } = {},
   ) {
     this.clock = clock;
+    this.bindingWriter = bindingWriter;
   }
 
   async listSessions(): Promise<CodexTaskSession[]> {
@@ -136,6 +142,46 @@ export class CodexNativeThreadController implements TaskSessionController {
         evidenceTitle: `Codex native thread turn failed: ${error instanceof Error ? error.message : String(error)}`,
       });
     }
+  }
+
+  async bindTaskSession(input: { task_session_id: string; task_id: string }): Promise<{
+    ok: boolean;
+    task_session_id: string;
+    task_id: string;
+    native_thread_id?: string;
+    session?: CodexTaskSession;
+    error?: string;
+  }> {
+    if (!this.bindingWriter) {
+      return {
+        ok: false,
+        task_session_id: input.task_session_id,
+        task_id: input.task_id,
+        error: "Codex task binding writer is not configured",
+      };
+    }
+
+    const session = await this.getSession(input.task_session_id);
+    if (!session) {
+      return {
+        ok: false,
+        task_session_id: input.task_session_id,
+        task_id: input.task_id,
+        error: `task session ${input.task_session_id} was not found`,
+      };
+    }
+
+    await this.bindingWriter.bindThreadToTask(session.native_thread_id, input.task_id);
+    return {
+      ok: true,
+      task_session_id: input.task_session_id,
+      task_id: input.task_id,
+      native_thread_id: session.native_thread_id,
+      session: {
+        ...session,
+        task_id: input.task_id,
+      },
+    };
   }
 
   private threadToSession(thread: CodexNativeThread): CodexTaskSession {

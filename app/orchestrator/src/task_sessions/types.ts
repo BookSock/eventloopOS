@@ -7,4 +7,8 @@ export type TaskSessionController = {
     event_ids: string[];
     idempotency_key: string;
   }): Promise<unknown> | unknown;
+  bindTaskSession?: (input: {
+    task_session_id: string;
+    task_id: string;
+  }) => Promise<unknown> | unknown;
 };

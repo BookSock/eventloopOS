@@ -398,6 +398,44 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         });
       }
 
+      const taskBindingMatch = context.url.pathname.match(/^\/task-sessions\/([^/]+)\/task-binding$/);
+      if (request.method === "PUT" && taskBindingMatch) {
+        if (!options.taskSessions?.bindTaskSession) {
+          return sendError(response, 501, context, "task_binding_unavailable", "task session binding is not configured");
+        }
+
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) {
+          return sendSchemaError(response, context, parsed.message);
+        }
+        const validation = validateTaskBindingRequest(parsed.value);
+        if (!validation.ok) {
+          return sendSchemaError(response, context, validation.message);
+        }
+
+        const taskSessionId = decodeURIComponent(taskBindingMatch[1] ?? "");
+        const binding = await options.taskSessions.bindTaskSession({
+          task_session_id: taskSessionId,
+          task_id: validation.taskId,
+        });
+
+        if (isRecord(binding) && binding.ok === false) {
+          return sendError(
+            response,
+            typeof binding.error === "string" && binding.error.includes("was not found") ? 404 : 409,
+            context,
+            "task_binding_failed",
+            typeof binding.error === "string" ? binding.error : "task session binding failed",
+          );
+        }
+
+        return sendJson(response, 200, {
+          ok: true,
+          binding,
+          request_id: context.requestId,
+        });
+      }
+
       if (request.method === "POST" && context.url.pathname === "/queue/lease-next") {
         const parsed = await readJsonBody(request);
         if (!parsed.ok) {
@@ -919,6 +957,28 @@ function validateTaskFollowupRequest(
     text,
     eventIds,
     idempotencyKey,
+  };
+}
+
+function validateTaskBindingRequest(input: unknown): { ok: true; taskId: string } | { ok: false; message: string } {
+  if (!isRecord(input)) {
+    return { ok: false, message: "task binding request must be an object" };
+  }
+
+  const taskId = typeof input.task_id === "string" ? input.task_id.trim() : "";
+  if (!taskId) {
+    return { ok: false, message: "task_id must be a non-empty string" };
+  }
+  if (taskId.length > 200) {
+    return { ok: false, message: "task_id must be 200 characters or fewer" };
+  }
+  if (!/^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(taskId)) {
+    return { ok: false, message: "task_id must start with task_ and contain only letters, numbers, underscores, or hyphens" };
+  }
+
+  return {
+    ok: true,
+    taskId,
   };
 }
 

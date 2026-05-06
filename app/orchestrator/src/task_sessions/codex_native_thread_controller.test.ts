@@ -132,6 +132,50 @@ describe("CodexNativeThreadController", () => {
     assert.equal(message.sent_at, undefined);
     assert.match(message.evidence[0]?.title ?? "", /app-server unavailable/);
   });
+
+  it("binds a task session to a task through native thread mapping", async () => {
+    const bindings: unknown[] = [];
+    const controller = new CodexNativeThreadController(
+      fakeClient({
+        threads: [{ id: "thread_blog_123", name: "Blog feedback" }],
+      }),
+      {
+        bindingWriter: {
+          bindThreadToTask(threadId, taskId) {
+            bindings.push({ threadId, taskId });
+          },
+        },
+      },
+    );
+
+    const result = await controller.bindTaskSession({
+      task_session_id: taskSessionIdForNativeThread("thread_blog_123"),
+      task_id: "task_blog_feedback",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.native_thread_id, "thread_blog_123");
+    assert.equal(result.session?.task_id, "task_blog_feedback");
+    assert.deepEqual(bindings, [{ threadId: "thread_blog_123", taskId: "task_blog_feedback" }]);
+  });
+
+  it("returns binding failure when task session is missing", async () => {
+    const controller = new CodexNativeThreadController(fakeClient({ threads: [] }), {
+      bindingWriter: {
+        bindThreadToTask() {
+          throw new Error("should not write");
+        },
+      },
+    });
+
+    const result = await controller.bindTaskSession({
+      task_session_id: taskSessionIdForNativeThread("missing_thread"),
+      task_id: "task_blog_feedback",
+    });
+
+    assert.equal(result.ok, false);
+    assert.match(result.error ?? "", /was not found/);
+  });
 });
 
 function fakeClient(input: {

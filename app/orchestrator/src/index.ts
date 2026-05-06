@@ -92,6 +92,7 @@ function createTaskSessionRuntime(): { controller: TaskSessionController; close?
     return {
       controller: new CodexNativeThreadController(
         new CodexAppServerThreadClient(connection.request, { taskIdForThreadId: (threadId) => taskMap.taskIdForThreadId(threadId) }),
+        { bindingWriter: taskMap },
       ),
       close: () => connection.close(),
     };

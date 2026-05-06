@@ -928,6 +928,69 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("binds a task session to a task through the task-session API", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const bindings: unknown[] = [];
+    const taskServer = createGatewayServer({
+      store,
+      taskSessions: {
+        sendFollowupMessage() {
+          throw new Error("not used");
+        },
+        bindTaskSession(input) {
+          bindings.push(input);
+          return {
+            ok: true,
+            task_session_id: input.task_session_id,
+            task_id: input.task_id,
+            native_thread_id: "thread_blog_123",
+          };
+        },
+      },
+    });
+    await new Promise<void>((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+    const address = taskServer.address() as AddressInfo;
+    const taskBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${taskBaseUrl}/task-sessions/codex_thread_abc/task-binding`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ task_id: "task_blog_feedback" }),
+      });
+      const body = await response.json() as {
+        ok: boolean;
+        binding: {
+          task_session_id: string;
+          task_id: string;
+          native_thread_id: string;
+        };
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(body.ok, true);
+      assert.equal(body.binding.task_session_id, "codex_thread_abc");
+      assert.equal(body.binding.task_id, "task_blog_feedback");
+      assert.equal(body.binding.native_thread_id, "thread_blog_123");
+      assert.deepEqual(bindings, [{ task_session_id: "codex_thread_abc", task_id: "task_blog_feedback" }]);
+
+      const malformed = await fetch(`${taskBaseUrl}/task-sessions/codex_thread_abc/task-binding`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ task_id: "blog feedback" }),
+      });
+      assert.equal(malformed.status, 400);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("routes task-hinted events into existing task sessions without queueing humans", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const messages = new Map<string, Record<string, unknown>>();
