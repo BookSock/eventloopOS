@@ -185,7 +185,8 @@ private struct PacketDetail: View {
                                         ResourceRow(
                                             title: resource.title,
                                             subtitle: resource.url ?? resource.kind,
-                                            badge: resource.restoreConfidence ?? resource.source ?? resource.kind
+                                            badge: resource.restoreConfidence ?? resource.source ?? resource.kind,
+                                            url: resource.url
                                         )
                                     }
                                 }
@@ -205,7 +206,8 @@ private struct PacketDetail: View {
                                         ResourceRow(
                                             title: evidence.title,
                                             subtitle: evidence.url ?? evidence.kind,
-                                            badge: evidence.kind
+                                            badge: evidence.kind,
+                                            url: evidence.url
                                         )
                                     }
                                 }
@@ -286,6 +288,7 @@ private struct ResourceRow: View {
     let title: String
     let subtitle: String
     let badge: String
+    let url: String?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -302,6 +305,16 @@ private struct ResourceRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+            }
+            Spacer(minLength: 8)
+            if let url, let destination = URL(string: url) {
+                Link(destination: destination) {
+                    Image(systemName: "arrow.up.right.square")
+                        .imageScale(.medium)
+                }
+                .buttonStyle(.borderless)
+                .help("Open resource")
+                .accessibilityIdentifier("resource-open-link")
             }
         }
     }
