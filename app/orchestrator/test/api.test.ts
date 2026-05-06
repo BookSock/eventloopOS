@@ -483,6 +483,54 @@ describe("orchestrator gateway API", () => {
       assert.equal(restorePlanBody.restore_plan.message.type, "eventloop.restore");
       assert.equal(restorePlanBody.restore_plan.message.resource.url, "https://example.test/launch");
 
+      const urlRestorePlanResponse = await fetch(`${routeBaseUrl}/contexts/restore-plan`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          resource: {
+            id: "ctx_url_1",
+            kind: "url",
+            title: "Launch doc",
+            url: "https://example.test/launch",
+            restore_confidence: "medium",
+          },
+        }),
+      });
+      const urlRestorePlanBody = await urlRestorePlanResponse.json() as {
+        restore_plan: { kind: string; url: string };
+      };
+      assert.equal(urlRestorePlanResponse.status, 200);
+      assert.equal(urlRestorePlanBody.restore_plan.kind, "open_url");
+      assert.equal(urlRestorePlanBody.restore_plan.url, "https://example.test/launch");
+
+      const fileRestorePlanResponse = await fetch(`${routeBaseUrl}/contexts/restore-plan`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          resource: {
+            id: "ctx_file_1",
+            kind: "file",
+            title: "Plan",
+            path: "/tmp/eventloop-plan.md",
+            line: 12,
+            column: 4,
+            restore_confidence: "medium",
+          },
+        }),
+      });
+      const fileRestorePlanBody = await fileRestorePlanResponse.json() as {
+        restore_plan: { kind: string; path: string; line: number; column: number };
+      };
+      assert.equal(fileRestorePlanResponse.status, 200);
+      assert.equal(fileRestorePlanBody.restore_plan.kind, "open_file");
+      assert.equal(fileRestorePlanBody.restore_plan.path, "/tmp/eventloop-plan.md");
+      assert.equal(fileRestorePlanBody.restore_plan.line, 12);
+      assert.equal(fileRestorePlanBody.restore_plan.column, 4);
+
       const unsupportedRestorePlanResponse = await fetch(`${routeBaseUrl}/contexts/restore-plan`, {
         method: "POST",
         headers: {
