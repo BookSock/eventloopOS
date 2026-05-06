@@ -16,6 +16,7 @@ MCP_SOURCE_POLL_ROUTE_DONE = "mcp_source_poll_route_done"
 BROWSER_CONTEXT_STORE_ONLY = "browser_context_store_only"
 BROWSER_CONTEXT_ATTACH_TASK = "browser_context_attach_task"
 TASK_SESSION_FOLLOWUP = "task_session_followup"
+VOICE_TASK_COMMAND = "voice_task_command"
 WORKSPACE_SNAPSHOT_CONTEXT = "workspace_snapshot_context"
 WORKSPACE_STATUS_SMOKE = "workspace_status_smoke"
 WORKSPACE_RESTORE_DISABLED = "workspace_restore_disabled"
@@ -26,6 +27,7 @@ SCENARIOS = (
     BROWSER_CONTEXT_STORE_ONLY,
     BROWSER_CONTEXT_ATTACH_TASK,
     TASK_SESSION_FOLLOWUP,
+    VOICE_TASK_COMMAND,
     WORKSPACE_SNAPSHOT_CONTEXT,
     WORKSPACE_STATUS_SMOKE,
     WORKSPACE_RESTORE_DISABLED,
@@ -1142,6 +1144,142 @@ class TaskSessionFollowupScenario:
                 raise ScenarioFailure(f"message {field} mismatch: expected {value!r}, got {message.get(field)!r}")
         if duplicate.get("id") != message.get("id"):
             raise ScenarioFailure("duplicate followup must return same task message id")
+
+
+class VoiceTaskCommandScenario:
+    def __init__(
+        self,
+        loader: FixtureLoader,
+        writer: ArtifactWriter,
+        clock: FakeClock,
+        orchestrator_url: str | None = None,
+    ) -> None:
+        self.loader = loader
+        self.writer = writer
+        self.clock = clock
+        self.orchestrator_url = orchestrator_url
+
+    def run(self) -> ScenarioResult:
+        mode = "orchestrator" if self.orchestrator_url else "fixture"
+        log: dict[str, Any] = {
+            "scenario": VOICE_TASK_COMMAND,
+            "mode": mode,
+            "started_at": self.clock.now_iso(),
+            "steps": [],
+        }
+        try:
+            result = self._run_orchestrator(log) if self.orchestrator_url else self._run_fixture(log)
+            log["passed"] = True
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            self.writer.write_json("summary.json", result.details)
+            return result
+        except Exception as exc:
+            log["passed"] = False
+            log["error"] = str(exc)
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            raise
+
+    def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
+        response = self._expected_response()
+        self._assert_response(response)
+        log["steps"].append({"name": "normalize_voice_command", "event_id": response["event"]["id"]})
+        log["steps"].append({"name": "inject_task_session", "task_message_id": response["task_message"]["id"]})
+        self.writer.write_json("observed.json", response)
+        return ScenarioResult(
+            scenario=VOICE_TASK_COMMAND,
+            mode="fixture",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": response["event"]["id"],
+                "task_message_id": response["task_message"]["id"],
+                "task_session_id": response["task_message"]["task_session_id"],
+            },
+        )
+
+    def _run_orchestrator(self, log: dict[str, Any]) -> ScenarioResult:
+        if self.orchestrator_url is None:
+            raise ScenarioFailure("orchestrator_url required")
+        client = OrchestratorClient(self.orchestrator_url)
+        response = client.route_voice_command(self._request(), "idem_voice_task_command_harness")
+        self._assert_response(response)
+        log["steps"].append({"name": "normalize_voice_command", "event_id": response["event"]["id"]})
+        log["steps"].append({"name": "inject_task_session", "task_message_id": response["task_message"]["id"]})
+        self.writer.write_json("observed.json", response)
+        return ScenarioResult(
+            scenario=VOICE_TASK_COMMAND,
+            mode="orchestrator",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": response["event"]["id"],
+                "task_message_id": response["task_message"]["id"],
+                "task_session_id": response["task_message"]["task_session_id"],
+            },
+        )
+
+    @staticmethod
+    def _request() -> dict[str, Any]:
+        return {
+            "transcript": "Blog post is priority and should include launch date in two weeks.",
+            "task_hint": "blog feedback",
+            "project_hint": "pagerfree",
+        }
+
+    def _expected_response(self) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "event": {
+                "id": "evt_voice_idem_voice_task_command_harness",
+                "source": "voice",
+                "type": "voice.command",
+                "summary": self._request()["transcript"],
+                "resources": [
+                    {
+                        "kind": "voice_command",
+                        "details": {
+                            "transcript": self._request()["transcript"],
+                        },
+                    },
+                ],
+            },
+            "route_decision": {
+                "action": "inject_into_agent_thread",
+                "target_task_id": "task_blog_feedback",
+                "target_task_session_id": "task_session_blog",
+            },
+            "task_message": {
+                "id": "task_msg_inject_idem_voice_task_command_harness",
+                "task_session_id": "task_session_blog",
+                "event_ids": ["evt_voice_idem_voice_task_command_harness"],
+                "idempotency_key": "inject_idem_voice_task_command_harness",
+                "status": "sent",
+            },
+        }
+
+    def _assert_response(self, response: dict[str, Any]) -> None:
+        event = response.get("event")
+        route_decision = response.get("route_decision")
+        task_message = response.get("task_message")
+        if not isinstance(event, dict) or not isinstance(route_decision, dict) or not isinstance(task_message, dict):
+            raise ScenarioFailure("voice command response missing event, route_decision, or task_message")
+        expected = self._expected_response()
+        for key in ("id", "source", "type", "summary"):
+            if event.get(key) != expected["event"][key]:
+                raise ScenarioFailure(f"voice event {key} mismatch: expected {expected['event'][key]!r}, got {event.get(key)!r}")
+        resources = event.get("resources")
+        if not isinstance(resources, list) or not resources or resources[0].get("kind") != "voice_command":
+            raise ScenarioFailure("voice event missing voice_command resource")
+        for key, value in expected["route_decision"].items():
+            if route_decision.get(key) != value:
+                raise ScenarioFailure(f"route_decision {key} mismatch: expected {value!r}, got {route_decision.get(key)!r}")
+        for key, value in expected["task_message"].items():
+            if task_message.get(key) != value:
+                raise ScenarioFailure(f"task_message {key} mismatch: expected {value!r}, got {task_message.get(key)!r}")
+        if response.get("queue_item") is not None:
+            raise ScenarioFailure("voice task command should not create human queue item")
 
 
 class WorkspaceSnapshotContextScenario:

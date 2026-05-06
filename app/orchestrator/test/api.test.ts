@@ -1060,6 +1060,119 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("normalizes voice commands into task-session followups", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const messages = new Map<string, Record<string, unknown>>();
+    const voiceServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      taskSessions: {
+        listSessions() {
+          return [
+            {
+              id: "task_session_blog",
+              task_id: "task_blog_feedback",
+              status: "idle",
+            },
+          ];
+        },
+        sendFollowupMessage(input) {
+          const existing = messages.get(input.idempotency_key);
+          if (existing) return existing;
+          const message = {
+            id: `task_msg_${messages.size + 1}`,
+            task_session_id: input.task_session_id,
+            mode: "followup",
+            text: input.text,
+            event_ids: input.event_ids,
+            idempotency_key: input.idempotency_key,
+            status: "sent",
+          };
+          messages.set(input.idempotency_key, message);
+          return message;
+        },
+      },
+    });
+    await new Promise<void>((resolve) => voiceServer.listen(0, "127.0.0.1", resolve));
+    const address = voiceServer.address() as AddressInfo;
+    const voiceBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${voiceBaseUrl}/voice/commands`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_voice_blog_priority",
+        },
+        body: JSON.stringify({
+          transcript: "Blog post is priority and should include launch date in two weeks.",
+          task_hint: "blog feedback",
+          project_hint: "pagerfree",
+        }),
+      });
+      const body = await response.json() as {
+        ok: boolean;
+        event: {
+          id: string;
+          source: string;
+          type: string;
+          summary: string;
+          resources: Array<{
+            kind: string;
+            details?: {
+              transcript?: string;
+            };
+          }>;
+        };
+        route_decision: {
+          action: string;
+          target_task_id: string;
+          target_task_session_id: string;
+        };
+        task_message: {
+          task_session_id: string;
+          event_ids: string[];
+          text: string;
+          idempotency_key: string;
+        };
+        queue_item?: unknown;
+      };
+
+      assert.equal(response.status, 202);
+      assert.equal(body.ok, true);
+      assert.equal(body.event.source, "voice");
+      assert.equal(body.event.type, "voice.command");
+      assert.equal(body.event.summary, "Blog post is priority and should include launch date in two weeks.");
+      assert.equal(body.event.resources[0]?.kind, "voice_command");
+      assert.equal(body.event.resources[0]?.details?.transcript, body.event.summary);
+      assert.equal(body.route_decision.action, "inject_into_agent_thread");
+      assert.equal(body.route_decision.target_task_id, "task_blog_feedback");
+      assert.equal(body.route_decision.target_task_session_id, "task_session_blog");
+      assert.equal(body.task_message.task_session_id, "task_session_blog");
+      assert.deepEqual(body.task_message.event_ids, [body.event.id]);
+      assert.match(body.task_message.text, /Blog post is priority/);
+      assert.equal(body.task_message.idempotency_key, "inject_idem_voice_blog_priority");
+      assert.equal(body.queue_item, undefined);
+
+      const storedResponse = await fetch(`${voiceBaseUrl}/events/${body.event.id}`);
+      const storedBody = await storedResponse.json() as {
+        event: {
+          source: string;
+        };
+        route_decision: {
+          action: string;
+        };
+      };
+      assert.equal(storedResponse.status, 200);
+      assert.equal(storedBody.event.source, "voice");
+      assert.equal(storedBody.route_decision.action, "inject_into_agent_thread");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        voiceServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("lists configured MCP sources and polls a source by id", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const mcpServer = createGatewayServer({

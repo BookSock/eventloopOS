@@ -252,24 +252,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
 
           const routed = [];
           for (const event of pollResult.events) {
-            const injected = await injectEventIntoTaskSessionIfPossible(event, options.taskSessions, now());
-            if (injected) {
-              const result = await options.store.recordEventRoute(event, injected.routeDecision, now());
-              routed.push({
-                event,
-                route_decision: result.route_decision,
-                task_message: injected.taskMessage,
-              });
-              continue;
-            }
-
-            const result = await options.store.ingestEventAsReviewPacket(event, now());
-            routed.push({
-              event,
-              route_decision: result.route_decision,
-              review_packet: result.review_packet,
-              queue_item: result.queue_item,
-            });
+            routed.push(await routeEventThroughGateway(options, event, now()));
           }
 
           return sendJson(response, 200, {
@@ -445,28 +428,31 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           return sendSchemaError(response, context, eventValidation.message);
         }
 
-        const injected = await injectEventIntoTaskSessionIfPossible(
-          eventValidation.event,
-          options.taskSessions,
-          now(),
-        );
-        if (injected) {
-          const result = await options.store.recordEventRoute(eventValidation.event, injected.routeDecision, now());
-          return sendJson(response, 202, {
-            ok: true,
-            route_decision: result.route_decision,
-            task_message: injected.taskMessage,
-            request_id: context.requestId,
-          });
-        }
-
-        const result = await options.store.ingestEventAsReviewPacket(eventValidation.event, now());
+        const routed = await routeEventThroughGateway(options, eventValidation.event, now());
 
         return sendJson(response, 202, {
           ok: true,
-          route_decision: result.route_decision,
-          review_packet: result.review_packet,
-          queue_item: result.queue_item,
+          ...routed,
+          request_id: context.requestId,
+        });
+      }
+
+      if (request.method === "POST" && context.url.pathname === "/voice/commands") {
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) {
+          return sendSchemaError(response, context, parsed.message);
+        }
+
+        const voiceValidation = validateVoiceCommandRequest(parsed.value, context.idempotencyKey, now().toISOString());
+        if (!voiceValidation.ok) {
+          return sendSchemaError(response, context, voiceValidation.message);
+        }
+
+        const routed = await routeEventThroughGateway(options, voiceValidation.event, now());
+
+        return sendJson(response, 202, {
+          ok: true,
+          ...routed,
           request_id: context.requestId,
         });
       }
@@ -660,6 +646,105 @@ function validateEventRequest(input: unknown): { ok: true; event: McpEvent } | {
   }
 
   return { ok: true, event: event as McpEvent };
+}
+
+async function routeEventThroughGateway(
+  options: GatewayServerOptions,
+  event: McpEvent,
+  now: Date,
+): Promise<{
+  event: McpEvent;
+  route_decision: RouteDecision;
+  review_packet?: unknown;
+  queue_item?: unknown;
+  task_message?: unknown;
+}> {
+  const injected = await injectEventIntoTaskSessionIfPossible(event, options.taskSessions, now);
+  if (injected) {
+    const result = await options.store.recordEventRoute(event, injected.routeDecision, now);
+    return {
+      event,
+      route_decision: result.route_decision,
+      task_message: injected.taskMessage,
+    };
+  }
+
+  const result = await options.store.ingestEventAsReviewPacket(event, now);
+  return {
+    event,
+    route_decision: result.route_decision,
+    review_packet: result.review_packet,
+    queue_item: result.queue_item,
+  };
+}
+
+function validateVoiceCommandRequest(
+  input: unknown,
+  headerIdempotencyKey: string | undefined,
+  receivedAt: string,
+): { ok: true; event: McpEvent } | { ok: false; message: string } {
+  if (!isRecord(input)) {
+    return { ok: false, message: "voice command request must be an object" };
+  }
+
+  const transcript = typeof input.transcript === "string" ? input.transcript.trim() : "";
+  if (!transcript) {
+    return { ok: false, message: "transcript must be a non-empty string" };
+  }
+
+  const bodyIdempotencyKey = typeof input.idempotency_key === "string" && input.idempotency_key
+    ? input.idempotency_key
+    : undefined;
+  const idempotencyKey = headerIdempotencyKey ?? bodyIdempotencyKey ?? `voice:${stableId(transcript)}`;
+  const sourceId = typeof input.source_id === "string" && input.source_id
+    ? input.source_id
+    : idempotencyKey;
+  const occurredAt = typeof input.occurred_at === "string" && input.occurred_at
+    ? input.occurred_at
+    : receivedAt;
+  const projectHint = readOptionalString(input, "project_hint");
+  const taskHint = readOptionalString(input, "task_hint");
+  const stableVoiceId = stableId(sourceId);
+
+  return {
+    ok: true,
+    event: {
+      id: `evt_voice_${stableVoiceId}`,
+      source: "voice",
+      source_id: sourceId,
+      idempotency_key: idempotencyKey,
+      occurred_at: occurredAt,
+      received_at: receivedAt,
+      actor: {
+        id: "user_voice",
+        type: "human",
+      },
+      project_hint: projectHint,
+      task_hint: taskHint,
+      type: "voice.command",
+      title: "Voice command",
+      summary: transcript,
+      raw_ref: {
+        id: `raw_voice_${stableVoiceId}`,
+        uri: `voice://commands/${stableVoiceId}`,
+        media_type: "text/plain",
+      },
+      links: [],
+      resources: [
+        {
+          id: `ctx_voice_${stableVoiceId}`,
+          kind: "voice_command",
+          title: "Voice command transcript",
+          source: "voice",
+          captured_at: receivedAt,
+          restore_confidence: "low",
+          details: {
+            transcript,
+          },
+        },
+      ],
+    },
+  };
 }
 
 async function injectEventIntoTaskSessionIfPossible(

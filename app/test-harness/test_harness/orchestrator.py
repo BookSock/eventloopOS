@@ -39,6 +39,14 @@ class OrchestratorClient:
     def route_event(self, event: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/events", {"event": event}) or {}
 
+    def route_voice_command(self, payload: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/voice/commands",
+            payload,
+            headers={"Idempotency-Key": idempotency_key},
+        ) or {}
+
     def get_event(self, event_id: str) -> dict[str, Any]:
         return self._request("GET", f"/events/{event_id}") or {}
 

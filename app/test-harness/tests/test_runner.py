@@ -15,6 +15,7 @@ from test_harness.scenarios import (
     MCP_SOURCE_POLL_ROUTE_DONE,
     SEEDED_QUEUE,
     TASK_SESSION_FOLLOWUP,
+    VOICE_TASK_COMMAND,
     WORKSPACE_RESTORE_DISABLED,
     WORKSPACE_SNAPSHOT_CONTEXT,
     WORKSPACE_STATUS_SMOKE,
@@ -24,6 +25,7 @@ from test_harness.scenarios import (
     McpSourcePollRouteDoneScenario,
     SeededQueueScenario,
     TaskSessionFollowupScenario,
+    VoiceTaskCommandScenario,
     WorkspaceRestoreDisabledScenario,
     WorkspaceSnapshotContextScenario,
     WorkspaceStatusSmokeScenario,
@@ -286,6 +288,41 @@ class WorkspaceStatusSmokeRunnerTests(unittest.TestCase):
 
     def _run(self, artifact_dir: Path):
         runner = WorkspaceStatusSmokeScenario(
+            loader=FixtureLoader(REPO_ROOT),
+            writer=ArtifactWriter(artifact_dir),
+            clock=FakeClock(),
+        )
+        return runner.run()
+
+
+class VoiceTaskCommandRunnerTests(unittest.TestCase):
+    def test_fixture_replay_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(Path(tmp))
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.scenario, VOICE_TASK_COMMAND)
+        self.assertEqual(result.mode, "fixture")
+        self.assertEqual(result.details["task_session_id"], "task_session_blog")
+
+    def test_artifact_generation_captures_voice_injection(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            self._run(artifact_dir)
+
+            log = json.loads((artifact_dir / "scenario-log.json").read_text(encoding="utf-8"))
+            observed = json.loads((artifact_dir / "observed.json").read_text(encoding="utf-8"))
+            summary = json.loads((artifact_dir / "summary.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(log["passed"])
+        self.assertEqual([step["name"] for step in log["steps"]], ["normalize_voice_command", "inject_task_session"])
+        self.assertEqual(observed["event"]["source"], "voice")
+        self.assertEqual(observed["route_decision"]["action"], "inject_into_agent_thread")
+        self.assertEqual(observed["task_message"]["task_session_id"], "task_session_blog")
+        self.assertEqual(summary["task_message_id"], "task_msg_inject_idem_voice_task_command_harness")
+
+    def _run(self, artifact_dir: Path):
+        runner = VoiceTaskCommandScenario(
             loader=FixtureLoader(REPO_ROOT),
             writer=ArtifactWriter(artifact_dir),
             clock=FakeClock(),
