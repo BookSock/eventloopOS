@@ -16,6 +16,7 @@ from .scenarios import (
     SEEDED_QUEUE,
     TASK_SESSION_FOLLOWUP,
     WORKSPACE_RESTORE_DISABLED,
+    WORKSPACE_SNAPSHOT_CONTEXT,
     WORKSPACE_STATUS_SMOKE,
     BrowserContextAttachTaskScenario,
     BrowserContextStoreOnlyScenario,
@@ -24,6 +25,7 @@ from .scenarios import (
     SeededQueueScenario,
     TaskSessionFollowupScenario,
     WorkspaceRestoreDisabledScenario,
+    WorkspaceSnapshotContextScenario,
     WorkspaceStatusSmokeScenario,
 )
 
@@ -50,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
         BROWSER_CONTEXT_STORE_ONLY: BrowserContextStoreOnlyScenario,
         BROWSER_CONTEXT_ATTACH_TASK: BrowserContextAttachTaskScenario,
         TASK_SESSION_FOLLOWUP: TaskSessionFollowupScenario,
+        WORKSPACE_SNAPSHOT_CONTEXT: WorkspaceSnapshotContextScenario,
         WORKSPACE_STATUS_SMOKE: WorkspaceStatusSmokeScenario,
         WORKSPACE_RESTORE_DISABLED: WorkspaceRestoreDisabledScenario,
     }[args.scenario]

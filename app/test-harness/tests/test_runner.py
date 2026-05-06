@@ -16,6 +16,7 @@ from test_harness.scenarios import (
     SEEDED_QUEUE,
     TASK_SESSION_FOLLOWUP,
     WORKSPACE_RESTORE_DISABLED,
+    WORKSPACE_SNAPSHOT_CONTEXT,
     WORKSPACE_STATUS_SMOKE,
     BrowserContextAttachTaskScenario,
     BrowserContextStoreOnlyScenario,
@@ -24,6 +25,7 @@ from test_harness.scenarios import (
     SeededQueueScenario,
     TaskSessionFollowupScenario,
     WorkspaceRestoreDisabledScenario,
+    WorkspaceSnapshotContextScenario,
     WorkspaceStatusSmokeScenario,
 )
 
@@ -284,6 +286,42 @@ class WorkspaceStatusSmokeRunnerTests(unittest.TestCase):
 
     def _run(self, artifact_dir: Path):
         runner = WorkspaceStatusSmokeScenario(
+            loader=FixtureLoader(REPO_ROOT),
+            writer=ArtifactWriter(artifact_dir),
+            clock=FakeClock(),
+        )
+        return runner.run()
+
+
+class WorkspaceSnapshotContextRunnerTests(unittest.TestCase):
+    def test_fixture_replay_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(Path(tmp))
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.scenario, WORKSPACE_SNAPSHOT_CONTEXT)
+        self.assertEqual(result.mode, "fixture")
+        self.assertEqual(result.details["workspace"], "eventloop-blog")
+
+    def test_artifact_generation_captures_snapshot_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            self._run(artifact_dir)
+
+            log = json.loads((artifact_dir / "scenario-log.json").read_text(encoding="utf-8"))
+            observed = json.loads((artifact_dir / "observed.json").read_text(encoding="utf-8"))
+            summary = json.loads((artifact_dir / "summary.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(log["passed"])
+        self.assertEqual([step["name"] for step in log["steps"]], ["build_event", "assert_workspace_snapshot_context"])
+        context = observed["review_packet"]["context"][0]
+        self.assertEqual(context["kind"], "workspace_snapshot")
+        self.assertEqual(context["snapshot"]["backend"], "aerospace")
+        self.assertEqual(context["snapshot"]["windows"][0]["workspace"], "eventloop-blog")
+        self.assertEqual(summary["review_packet_id"], "pkt_evt_workspace_snapshot_context")
+
+    def _run(self, artifact_dir: Path):
+        runner = WorkspaceSnapshotContextScenario(
             loader=FixtureLoader(REPO_ROOT),
             writer=ArtifactWriter(artifact_dir),
             clock=FakeClock(),

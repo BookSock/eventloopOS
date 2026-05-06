@@ -16,6 +16,7 @@ MCP_SOURCE_POLL_ROUTE_DONE = "mcp_source_poll_route_done"
 BROWSER_CONTEXT_STORE_ONLY = "browser_context_store_only"
 BROWSER_CONTEXT_ATTACH_TASK = "browser_context_attach_task"
 TASK_SESSION_FOLLOWUP = "task_session_followup"
+WORKSPACE_SNAPSHOT_CONTEXT = "workspace_snapshot_context"
 WORKSPACE_STATUS_SMOKE = "workspace_status_smoke"
 WORKSPACE_RESTORE_DISABLED = "workspace_restore_disabled"
 SCENARIOS = (
@@ -25,6 +26,7 @@ SCENARIOS = (
     BROWSER_CONTEXT_STORE_ONLY,
     BROWSER_CONTEXT_ATTACH_TASK,
     TASK_SESSION_FOLLOWUP,
+    WORKSPACE_SNAPSHOT_CONTEXT,
     WORKSPACE_STATUS_SMOKE,
     WORKSPACE_RESTORE_DISABLED,
 )
@@ -1101,6 +1103,181 @@ class TaskSessionFollowupScenario:
                 raise ScenarioFailure(f"message {field} mismatch: expected {value!r}, got {message.get(field)!r}")
         if duplicate.get("id") != message.get("id"):
             raise ScenarioFailure("duplicate followup must return same task message id")
+
+
+class WorkspaceSnapshotContextScenario:
+    def __init__(
+        self,
+        loader: FixtureLoader,
+        writer: ArtifactWriter,
+        clock: FakeClock,
+        orchestrator_url: str | None = None,
+    ) -> None:
+        self.loader = loader
+        self.writer = writer
+        self.clock = clock
+        self.orchestrator_url = orchestrator_url
+
+    def run(self) -> ScenarioResult:
+        mode = "orchestrator" if self.orchestrator_url else "fixture"
+        log: dict[str, Any] = {
+            "scenario": WORKSPACE_SNAPSHOT_CONTEXT,
+            "mode": mode,
+            "started_at": self.clock.now_iso(),
+            "steps": [],
+        }
+        try:
+            result = self._run_orchestrator(log) if self.orchestrator_url else self._run_fixture(log)
+            log["passed"] = True
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            self.writer.write_json("summary.json", result.details)
+            return result
+        except Exception as exc:
+            log["passed"] = False
+            log["error"] = str(exc)
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            raise
+
+    def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
+        event = self._event()
+        packet = self._packet_from_event(event)
+        log["steps"].append({"name": "build_event", "event_id": event["id"]})
+        log["steps"].append({"name": "assert_workspace_snapshot_context"})
+        self._assert_packet_has_workspace_snapshot(packet)
+
+        observed = {
+            "event": event,
+            "review_packet": packet,
+        }
+        self.writer.write_json("observed.json", observed)
+
+        return ScenarioResult(
+            scenario=WORKSPACE_SNAPSHOT_CONTEXT,
+            mode="fixture",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": event["id"],
+                "review_packet_id": packet["id"],
+                "workspace": "eventloop-blog",
+            },
+        )
+
+    def _run_orchestrator(self, log: dict[str, Any]) -> ScenarioResult:
+        if self.orchestrator_url is None:
+            raise ScenarioFailure("orchestrator_url required")
+        client = OrchestratorClient(self.orchestrator_url)
+        event = self._event()
+
+        response = client.route_event(event)
+        log["steps"].append({"name": "route_event", "event_id": event["id"]})
+        packet = response.get("review_packet")
+        queue_item = response.get("queue_item")
+        if not isinstance(packet, dict):
+            raise ScenarioFailure(f"expected review_packet object, got {packet!r}")
+        if not isinstance(queue_item, dict):
+            raise ScenarioFailure(f"expected queue_item object, got {queue_item!r}")
+
+        self._assert_packet_has_workspace_snapshot(packet)
+        log["steps"].append({"name": "assert_workspace_snapshot_context", "queue_item_id": queue_item.get("id")})
+
+        observed = {
+            "event": event,
+            "response": response,
+        }
+        self.writer.write_json("observed.json", observed)
+
+        return ScenarioResult(
+            scenario=WORKSPACE_SNAPSHOT_CONTEXT,
+            mode="orchestrator",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": event["id"],
+                "review_packet_id": packet["id"],
+                "queue_item_id": queue_item["id"],
+                "workspace": "eventloop-blog",
+            },
+        )
+
+    def _event(self) -> dict[str, Any]:
+        return {
+            "id": "evt_workspace_snapshot_context",
+            "source": "manual",
+            "source_id": "manual:workspace-snapshot-context",
+            "idempotency_key": "idem_workspace_snapshot_context",
+            "occurred_at": self.clock.now_iso(),
+            "received_at": self.clock.now_iso(),
+            "actor": {
+                "id": "user_jason",
+                "type": "human",
+            },
+            "task_hint": "blog review",
+            "type": "manual.review_requested",
+            "title": "Review blog workspace restore",
+            "summary": "Packet should carry a workspace snapshot into the queue.",
+            "raw_ref": {
+                "id": "raw_workspace_snapshot_context",
+                "uri": "manual://workspace-snapshot-context",
+                "media_type": "application/json",
+            },
+            "links": [],
+            "resources": [
+                {
+                    "id": "ctx_workspace_snapshot_context",
+                    "kind": "workspace_snapshot",
+                    "title": "Blog review workspace",
+                    "source": "harness",
+                    "captured_at": self.clock.now_iso(),
+                    "restore_confidence": "medium",
+                    "snapshot": {
+                        "backend": "aerospace",
+                        "windows": [
+                            {
+                                "id": 9,
+                                "app": "Ghostty",
+                                "title": "codex",
+                                "workspace": "eventloop-blog",
+                            }
+                        ],
+                        "activeWorkspace": "eventloop-blog",
+                        "focusedWindowId": 9,
+                    },
+                }
+            ],
+        }
+
+    @staticmethod
+    def _packet_from_event(event: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": "pkt_evt_workspace_snapshot_context",
+            "title": event["title"],
+            "summary": event["summary"],
+            "context": event["resources"],
+        }
+
+    @staticmethod
+    def _assert_packet_has_workspace_snapshot(packet: dict[str, Any]) -> None:
+        contexts = packet.get("context")
+        if not isinstance(contexts, list):
+            raise ScenarioFailure("review packet missing context list")
+        workspace_contexts = [context for context in contexts if isinstance(context, dict) and context.get("kind") == "workspace_snapshot"]
+        if len(workspace_contexts) != 1:
+            raise ScenarioFailure(f"expected one workspace_snapshot context, got {len(workspace_contexts)}")
+        snapshot = workspace_contexts[0].get("snapshot")
+        if not isinstance(snapshot, dict):
+            raise ScenarioFailure("workspace_snapshot context missing snapshot")
+        if snapshot.get("backend") != "aerospace":
+            raise ScenarioFailure(f"snapshot backend mismatch: {snapshot.get('backend')!r}")
+        if snapshot.get("activeWorkspace") != "eventloop-blog":
+            raise ScenarioFailure(f"activeWorkspace mismatch: {snapshot.get('activeWorkspace')!r}")
+        windows = snapshot.get("windows")
+        if not isinstance(windows, list) or not windows:
+            raise ScenarioFailure("workspace snapshot missing windows")
+        if windows[0].get("workspace") != "eventloop-blog":
+            raise ScenarioFailure(f"window workspace mismatch: {windows[0].get('workspace')!r}")
 
 
 class WorkspaceStatusSmokeScenario:
