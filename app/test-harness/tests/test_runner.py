@@ -9,8 +9,9 @@ from test_harness.artifacts import ArtifactWriter
 from test_harness.clock import FakeClock
 from test_harness.fixtures import FixtureLoader
 from test_harness.scenarios import (
-    BROWSER_CONTEXT_STORE_ONLY,
     BROWSER_CONTEXT_ATTACH_TASK,
+    BROWSER_CONTEXT_RANKED_SEARCH,
+    BROWSER_CONTEXT_STORE_ONLY,
     GENERIC_MCP_SOURCE_POLL_ROUTE_DONE,
     MCP_POLL_ALL_ROUTE_DONE,
     MCP_POLL_ROUTE_DONE,
@@ -22,6 +23,7 @@ from test_harness.scenarios import (
     WORKSPACE_SNAPSHOT_CONTEXT,
     WORKSPACE_STATUS_SMOKE,
     BrowserContextAttachTaskScenario,
+    BrowserContextRankedSearchScenario,
     BrowserContextStoreOnlyScenario,
     GenericMcpSourcePollRouteDoneScenario,
     McpPollAllRouteDoneScenario,
@@ -289,6 +291,36 @@ class BrowserContextAttachTaskRunnerTests(unittest.TestCase):
 
     def _run(self, artifact_dir: Path):
         runner = BrowserContextAttachTaskScenario(
+            loader=FixtureLoader(REPO_ROOT),
+            writer=ArtifactWriter(artifact_dir),
+            clock=FakeClock(),
+        )
+        return runner.run()
+
+
+class BrowserContextRankedSearchRunnerTests(unittest.TestCase):
+    def test_fixture_replay_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(Path(tmp))
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.scenario, BROWSER_CONTEXT_RANKED_SEARCH)
+        self.assertEqual(result.mode, "fixture")
+        self.assertEqual(result.details["top_event_id"], "evt_browser_context_ranked_title")
+
+    def test_runner_self_test_contract(self) -> None:
+        loader = FixtureLoader(REPO_ROOT)
+        title_event = loader.scenario_fixture(BROWSER_CONTEXT_RANKED_SEARCH, "browser_context_title_event.json")
+        quote_event = loader.scenario_fixture(BROWSER_CONTEXT_RANKED_SEARCH, "browser_context_quote_event.json")
+        golden = loader.golden_expectation(BROWSER_CONTEXT_RANKED_SEARCH)
+
+        self.assertIn("ranktoken pricing", title_event["title"].lower())
+        self.assertIn("ranktoken pricing", quote_event["resources"][0]["text_quote"].lower())
+        self.assertEqual(golden["expected_context_order"][0], "evt_browser_context_ranked_title")
+        self.assertEqual(golden["expected_match_reasons"]["evt_browser_context_ranked_title"], ["title_phrase", "term_match"])
+
+    def _run(self, artifact_dir: Path):
+        runner = BrowserContextRankedSearchScenario(
             loader=FixtureLoader(REPO_ROOT),
             writer=ArtifactWriter(artifact_dir),
             clock=FakeClock(),

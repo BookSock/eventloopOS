@@ -16,6 +16,7 @@ MCP_SOURCE_POLL_ROUTE_DONE = "mcp_source_poll_route_done"
 GENERIC_MCP_SOURCE_POLL_ROUTE_DONE = "generic_mcp_source_poll_route_done"
 MCP_POLL_ALL_ROUTE_DONE = "mcp_poll_all_route_done"
 BROWSER_CONTEXT_STORE_ONLY = "browser_context_store_only"
+BROWSER_CONTEXT_RANKED_SEARCH = "browser_context_ranked_search"
 BROWSER_CONTEXT_ATTACH_TASK = "browser_context_attach_task"
 TASK_SESSION_FOLLOWUP = "task_session_followup"
 TASK_SESSION_BINDING = "task_session_binding"
@@ -30,6 +31,7 @@ SCENARIOS = (
     GENERIC_MCP_SOURCE_POLL_ROUTE_DONE,
     MCP_POLL_ALL_ROUTE_DONE,
     BROWSER_CONTEXT_STORE_ONLY,
+    BROWSER_CONTEXT_RANKED_SEARCH,
     BROWSER_CONTEXT_ATTACH_TASK,
     TASK_SESSION_FOLLOWUP,
     TASK_SESSION_BINDING,
@@ -1193,6 +1195,137 @@ class BrowserContextAttachTaskScenario(BrowserContextStoreOnlyScenario):
     route_action = "attach_to_task"
     route_confidence = "medium"
     context_query = {"source": "browser", "task_id": "task_blog_feedback", "q": "launch"}
+
+
+class BrowserContextRankedSearchScenario(BrowserContextStoreOnlyScenario):
+    scenario_name = BROWSER_CONTEXT_RANKED_SEARCH
+    route_action = "store_only"
+    route_confidence = "high"
+    context_query = {"source": "browser", "q": "ranktoken pricing"}
+
+    def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
+        events = self._events()
+        golden = self.loader.golden_expectation(self.scenario_name)
+        route_decisions = [self._route_event(event) for event in events]
+        log["steps"].append({"name": "route_events", "event_ids": [event["id"] for event in events]})
+
+        contexts = self._fixture_contexts(events)
+        log["steps"].append({"name": "list_ranked_contexts", "count": len(contexts)})
+        self._assert_ranked_contexts(contexts, golden)
+
+        observed = {
+            "events": events,
+            "route_decisions": route_decisions,
+            "contexts": contexts,
+            "final_queue": {"item": None},
+        }
+        self.writer.write_json("observed.json", observed)
+
+        return ScenarioResult(
+            scenario=self.scenario_name,
+            mode="fixture",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "top_event_id": contexts[0]["event_id"],
+                "context_count": len(contexts),
+            },
+        )
+
+    def _run_orchestrator(self, log: dict[str, Any]) -> ScenarioResult:
+        assert self.orchestrator_url is not None
+        client = OrchestratorClient(self.orchestrator_url)
+        events = self._events()
+        golden = self.loader.golden_expectation(self.scenario_name)
+
+        self._drain_existing_queue(client, log)
+        route_decisions: list[dict[str, Any]] = []
+        for event in events:
+            route_response = client.route_event(event)
+            route_decision = route_response.get("route_decision") if isinstance(route_response, dict) else None
+            if not isinstance(route_decision, dict):
+                raise ScenarioFailure("route response missing route_decision")
+            if route_response.get("queue_item") is not None or route_response.get("review_packet") is not None:
+                raise ScenarioFailure("ranked context events must not create queue item or review packet")
+            route_decisions.append(route_decision)
+        log["steps"].append({"name": "route_events", "event_ids": [event["id"] for event in events]})
+
+        contexts_response = client.list_contexts(**self.context_query)
+        contexts = contexts_response.get("entries") if isinstance(contexts_response, dict) else None
+        if not isinstance(contexts, list):
+            raise ScenarioFailure(f"context response missing entries: {contexts_response!r}")
+        log["steps"].append({"name": "list_ranked_contexts", "count": contexts_response.get("count")})
+        self._assert_ranked_contexts(contexts, golden)
+
+        final_queue_item = client.next_queue_item()
+        log["steps"].append({"name": "assert_queue_empty"})
+        if final_queue_item is not None:
+            raise ScenarioFailure(f"expected empty queue after ranked context events, got {final_queue_item!r}")
+
+        observed = {
+            "events": events,
+            "route_decisions": route_decisions,
+            "contexts": contexts,
+            "final_queue": {"item": None},
+        }
+        self.writer.write_json("observed.json", observed)
+
+        return ScenarioResult(
+            scenario=self.scenario_name,
+            mode="orchestrator",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "top_event_id": contexts[0]["event_id"],
+                "context_count": len(contexts),
+            },
+        )
+
+    def _events(self) -> list[dict[str, Any]]:
+        return [
+            self.loader.scenario_fixture(self.scenario_name, "browser_context_title_event.json"),
+            self.loader.scenario_fixture(self.scenario_name, "browser_context_quote_event.json"),
+        ]
+
+    def _fixture_contexts(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        contexts = []
+        for event in events:
+            resource = event["resources"][0]
+            reasons = ["title_phrase", "term_match"] if event["id"].endswith("_title") else ["quote_phrase", "term_match"]
+            score = 80 if "title_phrase" in reasons else 60
+            contexts.append({
+                "event_id": event["id"],
+                "event_source": event["source"],
+                "event_title": event["title"],
+                "route_decision": self._route_event(event),
+                "resource": resource,
+                "captured_at": resource["captured_at"],
+                "relevance_score": score,
+                "match_reasons": reasons,
+            })
+        return sorted(contexts, key=lambda context: (-context["relevance_score"], context["captured_at"]), reverse=False)
+
+    def _assert_ranked_contexts(self, contexts: list[Any], golden: dict[str, Any]) -> None:
+        expected_order = golden["expected_context_order"]
+        expected_reasons = golden["expected_match_reasons"]
+        expected_ids = set(expected_order)
+        matching_contexts = [
+            context for context in contexts
+            if isinstance(context, dict) and context.get("event_id") in expected_ids
+        ]
+        if len(matching_contexts) < len(expected_order):
+            raise ScenarioFailure(f"context search missing expected entries: expected {expected_order!r}, got {matching_contexts!r}")
+        observed_order = [context["event_id"] for context in matching_contexts]
+        if observed_order[:len(expected_order)] != expected_order:
+            raise ScenarioFailure(f"context rank mismatch: expected {expected_order!r}, got {observed_order!r}")
+        for context in matching_contexts[:len(expected_order)]:
+            event_id = context["event_id"]
+            if context.get("match_reasons") != expected_reasons[event_id]:
+                raise ScenarioFailure(
+                    f"context match reasons mismatch for {event_id}: expected {expected_reasons[event_id]!r}, got {context.get('match_reasons')!r}"
+                )
+        if matching_contexts[0].get("relevance_score", 0) <= matching_contexts[1].get("relevance_score", 0):
+            raise ScenarioFailure(f"expected first ranked context to have higher relevance score: {matching_contexts!r}")
 
 
 class TaskSessionFollowupScenario:

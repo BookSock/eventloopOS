@@ -1,0 +1,42 @@
+{
+  "id": "evt_browser_context_ranked_title",
+  "source": "browser",
+  "source_id": "browser:ctx_ranked_title",
+  "idempotency_key": "browser:ctx_ranked_title",
+  "occurred_at": "2026-01-15T09:28:58Z",
+  "received_at": "2026-01-15T09:29:00Z",
+  "actor": {
+    "id": "actor_browser_extension",
+    "type": "system",
+    "name": "Chrome Extension"
+  },
+  "type": "browser.context_captured",
+  "title": "Browser context: Ranktoken pricing checklist",
+  "summary": "https://example.test/ranktoken-pricing",
+  "raw_ref": {
+    "id": "raw_browser_context_ranked_title",
+    "uri": "native-host://context/ctx_ranked_title",
+    "media_type": "application/json"
+  },
+  "links": [
+    {
+      "label": "Browser tab",
+      "url": "https://example.test/ranktoken-pricing"
+    }
+  ],
+  "resources": [
+    {
+      "id": "ctx_browser_context_ranked_title",
+      "kind": "browser_tab",
+      "title": "Ranktoken pricing checklist",
+      "url": "https://example.test/ranktoken-pricing",
+      "source": "chrome-extension",
+      "captured_at": "2026-01-15T09:29:00Z",
+      "restore_confidence": "medium",
+      "window_id": "1",
+      "tab_id": "9",
+      "scroll_y": 80,
+      "text_quote": "Checklist for launch page review"
+    }
+  ]
+}

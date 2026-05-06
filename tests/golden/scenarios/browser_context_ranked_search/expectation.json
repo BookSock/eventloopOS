@@ -1,0 +1,16 @@
+{
+  "expected_context_order": [
+    "evt_browser_context_ranked_title",
+    "evt_browser_context_ranked_quote"
+  ],
+  "expected_match_reasons": {
+    "evt_browser_context_ranked_title": [
+      "title_phrase",
+      "term_match"
+    ],
+    "evt_browser_context_ranked_quote": [
+      "quote_phrase",
+      "term_match"
+    ]
+  }
+}

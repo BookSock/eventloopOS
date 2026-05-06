@@ -58,6 +58,25 @@ Rules:
 - keep last-known-good config.
 - add `doctor` command early.
 
+## Manual Mode / Escape Hatch
+
+MVP must always let user leave event-loop orchestration and use Mac normally.
+
+Behavior:
+
+- hotkey toggles event-loop/manual mode.
+- manual mode pauses workspace restore planning and execution.
+- queue stays leased/visible so user can return without losing place.
+- returning to event-loop mode may re-plan selected workspace restore.
+- no attempt to rearrange windows while user is in manual mode.
+
+Current implementation uses macOS `RegisterEventHotKey` for the mode toggle. Keep this for MVP because it registers one explicit shortcut without broad key monitoring. Apple docs for `NSEvent.addGlobalMonitorForEvents` say key-related global monitoring needs Accessibility trust, and Quartz event taps are lower-level input stream hooks. If we need arbitrary voice/keyboard command capture later, gate it behind explicit privacy settings and `doctor` checks.
+
+References:
+
+- Apple `NSEvent.addGlobalMonitorForEvents`: https://developer.apple.com/documentation/appkit/nsevent/addglobalmonitorforevents%28matching%3Ahandler%3A%29
+- Apple Quartz Event Services: https://developer.apple.com/documentation/coregraphics/quartz-event-services
+
 Example:
 
 ```text

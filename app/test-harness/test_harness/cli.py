@@ -8,8 +8,9 @@ from .artifacts import ArtifactWriter
 from .clock import FakeClock
 from .fixtures import FixtureLoader
 from .scenarios import (
-    BROWSER_CONTEXT_STORE_ONLY,
     BROWSER_CONTEXT_ATTACH_TASK,
+    BROWSER_CONTEXT_RANKED_SEARCH,
+    BROWSER_CONTEXT_STORE_ONLY,
     GENERIC_MCP_SOURCE_POLL_ROUTE_DONE,
     MCP_POLL_ALL_ROUTE_DONE,
     MCP_POLL_ROUTE_DONE,
@@ -23,6 +24,7 @@ from .scenarios import (
     WORKSPACE_SNAPSHOT_CONTEXT,
     WORKSPACE_STATUS_SMOKE,
     BrowserContextAttachTaskScenario,
+    BrowserContextRankedSearchScenario,
     BrowserContextStoreOnlyScenario,
     GenericMcpSourcePollRouteDoneScenario,
     McpPollAllRouteDoneScenario,
@@ -60,6 +62,7 @@ def main(argv: list[str] | None = None) -> int:
         GENERIC_MCP_SOURCE_POLL_ROUTE_DONE: GenericMcpSourcePollRouteDoneScenario,
         MCP_POLL_ALL_ROUTE_DONE: McpPollAllRouteDoneScenario,
         BROWSER_CONTEXT_STORE_ONLY: BrowserContextStoreOnlyScenario,
+        BROWSER_CONTEXT_RANKED_SEARCH: BrowserContextRankedSearchScenario,
         BROWSER_CONTEXT_ATTACH_TASK: BrowserContextAttachTaskScenario,
         TASK_SESSION_FOLLOWUP: TaskSessionFollowupScenario,
         TASK_SESSION_BINDING: TaskSessionBindingScenario,
