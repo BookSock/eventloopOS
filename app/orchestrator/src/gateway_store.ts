@@ -10,13 +10,16 @@ import {
   listQueue,
   markQueueItemDone,
   nextQueueItem,
+  recordEventRoute,
   reapExpiredLeases,
   renewQueueLease,
   type InMemoryStore,
   type ContextEntry,
   type ContextQuery,
+  type RouteDecision,
   type StoredEventResult,
 } from "./store.js";
+import { eventToRecord } from "./db/postgres_queue_store.js";
 
 export type GatewayStore = {
   listQueue(state?: QueueState): Promise<QueueItemWithPacket[]>;
@@ -28,6 +31,7 @@ export type GatewayStore = {
   getEvent(eventId: string): Promise<StoredEventResult | undefined>;
   listContextEntries(query?: ContextQuery): Promise<ContextEntry[]>;
   ingestEventAsReviewPacket(event: McpEvent, now: Date): Promise<StoredEventResult>;
+  recordEventRoute(event: McpEvent, routeDecision: RouteDecision, now: Date): Promise<StoredEventResult>;
 };
 
 export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
@@ -59,6 +63,9 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     },
     async ingestEventAsReviewPacket(event, now) {
       return ingestEventAsReviewPacket(store, event, now);
+    },
+    async recordEventRoute(event, routeDecision) {
+      return recordEventRoute(store, event, routeDecision);
     },
   };
 }
@@ -98,6 +105,13 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
         route_decision: result.route_decision,
         review_packet: result.item?.review_packet,
         queue_item: result.item,
+      };
+    },
+    async recordEventRoute(event, routeDecision) {
+      const result = await store.recordRoutedEvent(eventToRecord(event), routeDecision);
+      return {
+        event,
+        route_decision: result.route_decision,
       };
     },
   };

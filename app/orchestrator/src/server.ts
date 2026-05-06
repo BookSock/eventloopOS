@@ -4,6 +4,7 @@ import { queueStates, type ApiErrorBody, type QueueState } from "./contracts.js"
 import type { GatewayStore } from "./gateway_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import type { McpSourcePollOutput } from "./integrations/mcp_poll/development_registry.js";
+import type { RouteDecision } from "./store.js";
 import { parseRestoreExecuteRequest, parseRestorePlanRequest, type WorkspaceController } from "./workspace/controller.js";
 
 export type GatewayServerOptions = {
@@ -251,6 +252,17 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
 
           const routed = [];
           for (const event of pollResult.events) {
+            const injected = await injectEventIntoTaskSessionIfPossible(event, options.taskSessions, now());
+            if (injected) {
+              const result = await options.store.recordEventRoute(event, injected.routeDecision, now());
+              routed.push({
+                event,
+                route_decision: result.route_decision,
+                task_message: injected.taskMessage,
+              });
+              continue;
+            }
+
             const result = await options.store.ingestEventAsReviewPacket(event, now());
             routed.push({
               event,
@@ -431,6 +443,21 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         const eventValidation = validateEventRequest(parsed.value);
         if (!eventValidation.ok) {
           return sendSchemaError(response, context, eventValidation.message);
+        }
+
+        const injected = await injectEventIntoTaskSessionIfPossible(
+          eventValidation.event,
+          options.taskSessions,
+          now(),
+        );
+        if (injected) {
+          const result = await options.store.recordEventRoute(eventValidation.event, injected.routeDecision, now());
+          return sendJson(response, 202, {
+            ok: true,
+            route_decision: result.route_decision,
+            task_message: injected.taskMessage,
+            request_id: context.requestId,
+          });
         }
 
         const result = await options.store.ingestEventAsReviewPacket(eventValidation.event, now());
@@ -633,6 +660,78 @@ function validateEventRequest(input: unknown): { ok: true; event: McpEvent } | {
   }
 
   return { ok: true, event: event as McpEvent };
+}
+
+async function injectEventIntoTaskSessionIfPossible(
+  event: McpEvent,
+  taskSessions: TaskSessionController | undefined,
+  now: Date,
+): Promise<{ routeDecision: RouteDecision; taskMessage: unknown } | undefined> {
+  if (!taskSessions?.listSessions) return undefined;
+  if (!event.task_hint) return undefined;
+  if (!shouldTryTaskSessionInjection(event)) return undefined;
+
+  const targetTaskId = taskIdForHint(event.task_hint);
+  const sessions = await taskSessions.listSessions();
+  const session = sessions.find((candidate) => taskSessionMatchesTask(candidate, targetTaskId));
+  if (!session) return undefined;
+
+  const taskSessionId = String((session as Record<string, unknown>).id);
+  const routeDecision: RouteDecision = {
+    id: `rte_${stableId(event.id)}`,
+    event_id: event.id,
+    action: "inject_into_agent_thread",
+    target_task_id: targetTaskId,
+    target_task_session_id: taskSessionId,
+    confidence: event.project_hint ? "high" : "medium",
+    evidence: [
+      {
+        id: `ev_${stableId(event.id)}_raw`,
+        kind: "raw",
+        title: "Source event",
+        url: event.raw_ref.uri,
+      },
+    ],
+    created_at: now.toISOString(),
+  };
+
+  const taskMessage = await taskSessions.sendFollowupMessage({
+    task_session_id: taskSessionId,
+    text: taskFollowupTextForEvent(event),
+    event_ids: [event.id],
+    idempotency_key: `inject_${event.idempotency_key}`,
+  });
+
+  return { routeDecision, taskMessage };
+}
+
+function shouldTryTaskSessionInjection(event: McpEvent): boolean {
+  if (event.type === "browser.context_captured") return false;
+  if (event.type.endsWith(".review_requested")) return false;
+  return event.source === "slack" || event.source === "github" || event.source === "mcp_poll" || event.source === "voice";
+}
+
+function taskSessionMatchesTask(candidate: unknown, taskId: string): boolean {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+  const record = candidate as Record<string, unknown>;
+  return typeof record.id === "string" && record.id.length > 0 && record.task_id === taskId;
+}
+
+function taskFollowupTextForEvent(event: McpEvent): string {
+  const lines = [
+    `New ${event.source} event for this task.`,
+    `Title: ${event.title}`,
+  ];
+  if (event.summary) lines.push(`Summary: ${event.summary}`);
+  if (event.links.length > 0) {
+    lines.push(`Links: ${event.links.map((link) => link.url).join(", ")}`);
+  }
+  lines.push(`Raw ref: ${event.raw_ref.uri}`);
+  return lines.join("\n");
+}
+
+function taskIdForHint(taskHint: string): string {
+  return `task_${stableId(taskHint)}`;
 }
 
 function validateTaskFollowupRequest(

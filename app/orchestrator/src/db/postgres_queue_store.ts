@@ -611,7 +611,7 @@ function normalizeNewQueueItem(item: NewQueueItem, fallbackNow: string): QueueIt
   };
 }
 
-function eventToRecord(event: McpEvent): EventRecord {
+export function eventToRecord(event: McpEvent): EventRecord {
   return {
     id: event.id,
     source: event.source,

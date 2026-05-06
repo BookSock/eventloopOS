@@ -155,7 +155,7 @@ Implemented:
 - `app/shared`: V0 contracts and fixture validation.
 - `app/orchestrator`: HTTP queue API, event ingestion, MCP fixture poll route, async gateway store seam, Postgres queue store, `DATABASE_URL` Postgres mode with migrations, policy hooks, ownership locks, evidence receipts, fake Codex adapter, fake task session store, terminal task-session adapter.
 - `app/orchestrator`: `GET /task-sessions`, `GET /task-sessions/:id`, and `POST /task-sessions/:id/followup` support session discovery plus idempotent followup messages; daemon seeds fake `task_session_blog` by default for live local proof, and `ORCHESTRATOR_TASK_SESSIONS=off` disables it.
-- `app/orchestrator`: ambient route policy now separates passive context storage from human interrupts. Browser context capture defaults to `store_only`; Slack/MCP/task events still create review packets until task-session injection is real.
+- `app/orchestrator`: ambient route policy now separates passive context storage, task-session injection, and human interrupts. Browser context capture defaults to `store_only`; task-hinted Slack/GitHub/MCP/voice events inject into matching task sessions when available; explicit review requests still create human queue packets.
 - `app/orchestrator`: `GET /events/:id` retrieves stored events and route decisions, so store-only context is machine-verifiable without queue pollution.
 - `app/orchestrator`: `GET /contexts?source=&task_id=&q=&limit=` lists and text-filters stored context resources with event + route metadata, giving agents a read path for passive browser captures and task-attached browser context.
 - `app/orchestrator`: `GET /mcp-sources`, `GET /mcp-sources/:id`, `POST /mcp-sources/:id/poll`, and `POST /mcp-sources/:id/poll-and-route` expose discoverable MCP polling loops; default mode uses seeded fake sources, and `ORCHESTRATOR_MCP_SOURCES_PATH` loads real read-only local MCP source configs through the SDK runtime.
@@ -164,8 +164,8 @@ Implemented:
 - `app/orchestrator/src/task_sessions`: fake task-session store plus terminal adapter for tmux and Ghostty, using audited visible input and injected command execution in tests.
 - `app/browser-extension`: shared-schema `browser_tab` capture/restore, optional task/project route hints, legacy resource normalizer, native bridge envelope/capability protocol.
 - `app/native-host`: Chrome Native Messaging stdio host, context capture JSONL sink, optional route hints (`task_hint`, `project_hint`), macOS Chrome manifest installer, and live smoke that forwards browser capture into orchestrator as `store_only` context.
-- `app/macos`: Swift queue shell using real orchestrator API shape, lease-next flow, automatic lease renewal, workspace status/restore-plan client, and manual-mode toggle (`Cmd-Option-Shift-M`) that skips workspace restore planning without clearing queue. Carbon global hotkey wiring exists in the app target without third-party dependency.
-- `app/test-harness`: `seeded_queue`, `mcp_poll_route_done`, `mcp_source_poll_route_done`, `browser_context_store_only`, `browser_context_attach_task`, `task_session_followup`, `workspace_status_smoke`, and `workspace_restore_disabled` fixture/live scenarios with artifacts.
+- `app/macos`: Swift queue shell using real orchestrator API shape, lease-next flow, automatic lease renewal, workspace status/restore-plan/restore client, selected-packet workspace restore planning, confirmation UI for restore execution, and manual-mode toggle (`Cmd-Option-Shift-M`) that skips workspace restore planning without clearing queue. Carbon global hotkey wiring exists in the app target without third-party dependency.
+- `app/test-harness`: `seeded_queue`, `mcp_poll_route_done`, `mcp_source_poll_route_done`, `browser_context_store_only`, `browser_context_attach_task`, `task_session_followup`, `workspace_snapshot_context`, `workspace_status_smoke`, and `workspace_restore_disabled` fixture/live scenarios with artifacts.
 - `config`: documented read-only MCP source config example for Slack/GitHub-like poll sources, validated by orchestrator tests.
 
 Current proof commands:
@@ -179,12 +179,12 @@ Known gaps:
 
 - Real persistent orchestrator wiring should replace in-memory store for HTTP routes.
 - Persistent Postgres HTTP mode exists behind `DATABASE_URL`; needs full live local proof once Docker/Postgres runtime available.
-- macOS UI needs menu bar polish and visible workspace restore status.
-- macOS UI has manual-mode toggle state, global hotkey wiring, automatic lease renewal, and restore-plan pause gate; next gap is visible confirmation UI for invoking workspace restore execution.
+- macOS UI needs menu bar polish and stronger empty/error/loading states.
+- macOS UI has manual-mode toggle state, global hotkey wiring, automatic lease renewal, restore-plan pause gate, selected restore planning, and confirmation UI for invoking workspace restore execution; next gap is deeper queue/detail polish around review packet context.
 - Native host forwards context/event data to orchestrator when `EVENTLOOPOS_ORCHESTRATOR_URL` is set; next gap is richer context ranking/search and task attachment UI.
 - MCP source registry loads local config files and can run real read-only poll tools through the SDK runtime; next gap is adapter/mapping helper for user-installed MCP servers whose tool output is not already `items[]`.
-- Aerospace adapter has unit/API coverage, daemon status endpoint, live harness smoke, and disabled-by-default execute-confirm flow; next gap is human-facing confirmation UI and live run with AeroSpace.app installed.
-- Task session control has fake, daemon-seeded dev controller, discovery/read API, and terminal-backed adapter seams; next gap is real Codex app-server/native thread backend.
+- Aerospace adapter has unit/API coverage, daemon status endpoint, live harness smoke, disabled-by-default execute-confirm flow, and macOS confirmation UI; next gap is live run with AeroSpace.app installed.
+- Task session control has fake, daemon-seeded dev controller, discovery/read API, terminal-backed adapter seams, and automatic task-hinted event injection; next gap is real Codex app-server/native thread backend.
 - Voice/hotkey session controller still needs implementation.
 - Postgres live tests need Docker/container runtime to execute locally.
 

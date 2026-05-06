@@ -928,6 +928,138 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("routes task-hinted events into existing task sessions without queueing humans", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const messages = new Map<string, Record<string, unknown>>();
+    const taskServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      taskSessions: {
+        listSessions() {
+          return [
+            {
+              id: "task_session_blog",
+              task_id: "task_blog_feedback",
+              status: "idle",
+            },
+          ];
+        },
+        sendFollowupMessage(input) {
+          const existing = messages.get(input.idempotency_key);
+          if (existing) return existing;
+          const message = {
+            id: `task_msg_${messages.size + 1}`,
+            task_session_id: input.task_session_id,
+            mode: "followup",
+            text: input.text,
+            event_ids: input.event_ids,
+            idempotency_key: input.idempotency_key,
+            status: "sent",
+          };
+          messages.set(input.idempotency_key, message);
+          return message;
+        },
+      },
+    });
+    await new Promise<void>((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+    const address = taskServer.address() as AddressInfo;
+    const taskBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const event = {
+        id: "evt_slack_task_inject",
+        source: "slack",
+        source_id: "slack:T123:C123:999",
+        idempotency_key: "slack:T123:C123:999",
+        occurred_at: "2026-05-06T16:59:00.000Z",
+        received_at: "2026-05-06T17:00:00.000Z",
+        task_hint: "blog feedback",
+        type: "slack.message",
+        title: "Slack message from Malis",
+        summary: "Blog needs launch date note before next draft.",
+        raw_ref: {
+          id: "raw_slack_T123_C123_999",
+          uri: "artifact://raw/slack/T123/C123/999.json",
+          media_type: "application/json",
+        },
+        links: [
+          {
+            label: "Slack thread",
+            url: "https://slack.example.com/archives/C123/p999000",
+          },
+        ],
+        resources: [],
+      };
+
+      const response = await fetch(`${taskBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ event }),
+      });
+      const body = await response.json() as {
+        ok: boolean;
+        route_decision: {
+          action: string;
+          target_task_id: string;
+          target_task_session_id: string;
+        };
+        review_packet?: unknown;
+        queue_item?: unknown;
+        task_message: {
+          task_session_id: string;
+          event_ids: string[];
+          text: string;
+          idempotency_key: string;
+        };
+      };
+
+      assert.equal(response.status, 202);
+      assert.equal(body.ok, true);
+      assert.equal(body.route_decision.action, "inject_into_agent_thread");
+      assert.equal(body.route_decision.target_task_id, "task_blog_feedback");
+      assert.equal(body.route_decision.target_task_session_id, "task_session_blog");
+      assert.equal(body.review_packet, undefined);
+      assert.equal(body.queue_item, undefined);
+      assert.equal(body.task_message.task_session_id, "task_session_blog");
+      assert.deepEqual(body.task_message.event_ids, ["evt_slack_task_inject"]);
+      assert.match(body.task_message.text, /Blog needs launch date note/);
+      assert.equal(body.task_message.idempotency_key, "inject_slack:T123:C123:999");
+
+      const duplicateResponse = await fetch(`${taskBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ event }),
+      });
+      const duplicateBody = await duplicateResponse.json() as {
+        task_message: {
+          idempotency_key: string;
+        };
+      };
+      assert.equal(duplicateResponse.status, 202);
+      assert.equal(duplicateBody.task_message.idempotency_key, body.task_message.idempotency_key);
+      assert.equal(messages.size, 1);
+
+      const storedResponse = await fetch(`${taskBaseUrl}/events/evt_slack_task_inject`);
+      const storedBody = await storedResponse.json() as {
+        route_decision: {
+          action: string;
+        };
+        queue_item?: unknown;
+      };
+      assert.equal(storedResponse.status, 200);
+      assert.equal(storedBody.route_decision.action, "inject_into_agent_thread");
+      assert.equal(storedBody.queue_item, undefined);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("lists configured MCP sources and polls a source by id", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const mcpServer = createGatewayServer({

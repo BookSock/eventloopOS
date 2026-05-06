@@ -219,6 +219,25 @@ export function ingestEventAsReviewPacket(
   return result;
 }
 
+export function recordEventRoute(
+  store: InMemoryStore,
+  event: McpEvent,
+  routeDecision: RouteDecision,
+): StoredEventResult {
+  const existing = store.eventsByIdempotencyKey.get(event.idempotency_key);
+  if (existing) {
+    return existing;
+  }
+
+  const result: StoredEventResult = {
+    event,
+    route_decision: routeDecision,
+  };
+  store.eventsByIdempotencyKey.set(event.idempotency_key, result);
+  store.eventsById.set(event.id, result);
+  return result;
+}
+
 export function getStoredEvent(store: InMemoryStore, eventId: string): StoredEventResult | undefined {
   return store.eventsById.get(eventId);
 }

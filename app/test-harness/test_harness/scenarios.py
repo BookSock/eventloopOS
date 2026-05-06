@@ -678,10 +678,49 @@ class McpSourcePollRouteDoneScenario(McpPollRouteDoneScenario):
         route_decision = first.get("route_decision")
         review_packet = first.get("review_packet")
         queue_item = first.get("queue_item")
-        if not isinstance(event, dict) or not isinstance(route_decision, dict) or not isinstance(review_packet, dict) or not isinstance(queue_item, dict):
-            raise ScenarioFailure("poll-and-route response missing routed event artifacts")
+        task_message = first.get("task_message")
+        if not isinstance(event, dict) or not isinstance(route_decision, dict):
+            raise ScenarioFailure("poll-and-route response missing routed event or route_decision")
 
         log["steps"].append({"name": "mcp_source_poll_and_route", "event_id": event.get("id")})
+
+        if isinstance(task_message, dict):
+            if route_decision.get("action") != "inject_into_agent_thread":
+                raise ScenarioFailure(f"expected inject route for task message, got {route_decision.get('action')!r}")
+            if task_message.get("task_session_id") != "task_session_blog":
+                raise ScenarioFailure(f"expected task_session_blog, got {task_message.get('task_session_id')!r}")
+            if task_message.get("event_ids") != [event.get("id")]:
+                raise ScenarioFailure(f"task message event_ids mismatch: {task_message.get('event_ids')!r}")
+
+            final_queue_item = client.next_queue_item()
+            log["steps"].append({"name": "assert_queue_empty"})
+            if final_queue_item is not None:
+                raise ScenarioFailure(f"expected empty queue after task injection, got {final_queue_item!r}")
+
+            observed = {
+                "mcp_poll": poll_response,
+                "event": event,
+                "route_decision": route_decision,
+                "task_message": task_message,
+                "final_queue": {"item": None},
+            }
+            self.writer.write_json("observed.json", observed)
+
+            return ScenarioResult(
+                scenario=MCP_SOURCE_POLL_ROUTE_DONE,
+                mode="orchestrator",
+                passed=True,
+                artifact_dir=self.writer.root,
+                details={
+                    "event_id": event["id"],
+                    "route_decision_id": route_decision["id"],
+                    "task_message_id": task_message["id"],
+                },
+            )
+
+        if not isinstance(review_packet, dict) or not isinstance(queue_item, dict):
+            raise ScenarioFailure("poll-and-route response missing routed review artifacts")
+
         done_response = client.mark_done(queue_item["id"], self._decision_for(queue_item))
         log["steps"].append({"name": "mark_done", "response": done_response})
 
