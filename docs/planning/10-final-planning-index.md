@@ -178,12 +178,11 @@ pnpm run test:e2e:live
 
 Known gaps:
 
-- Real persistent orchestrator wiring should replace in-memory store for HTTP routes.
 - Persistent Postgres HTTP mode exists behind `DATABASE_URL`; needs full live local proof once Docker/Postgres runtime available.
 - macOS UI needs menu bar polish and stronger empty/error/loading states.
 - macOS UI has manual-mode toggle state, global hotkey wiring, automatic lease renewal, restore-plan pause gate, selected restore planning, and confirmation UI for invoking workspace restore execution; next gap is deeper queue/detail polish around review packet context.
 - Native host forwards context/event data to orchestrator when `EVENTLOOPOS_ORCHESTRATOR_URL` is set; next gap is richer context ranking/search and task attachment UI.
-- MCP source registry loads local config files and can run real read-only poll tools through the SDK runtime; generic item mapping now supports user-installed MCP servers that can emit stable event-ish `items[]`.
+- MCP source registry loads local config files and can run real read-only poll tools through the SDK runtime; generic item mapping, poll-all route, and poll-once CLI now support user-installed MCP servers that can emit stable event-ish `items[]`. Next gap is an optional long-running scheduler loop.
 - Aerospace adapter has unit/API coverage, daemon status endpoint, live harness smoke, disabled-by-default execute-confirm flow, and macOS confirmation UI; next gap is live run with AeroSpace.app installed.
 - Task session control has fake, daemon-seeded dev controller, discovery/read API, terminal-backed adapter seams, and automatic task-hinted event injection; next gap is real Codex app-server/native thread backend.
 - Voice command HTTP ingress exists for local STT/wake-word clients to submit transcripts into same router; next gap is actual always-listening local voice capture/wake-word app.
