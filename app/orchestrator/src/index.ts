@@ -10,7 +10,11 @@ import {
 import { McpSdkRuntime } from "./mcp_sources/runtime/sdk_runtime.js";
 import { createGatewayServer } from "./server.js";
 import { createSeededStore } from "./store.js";
+import { CodexAppServerThreadClient } from "./task_sessions/codex_app_server_thread_client.js";
+import { createCodexAppServerStdioConnection, type CodexAppServerStdioConnection } from "./task_sessions/codex_app_server_stdio.js";
+import { CodexNativeThreadController } from "./task_sessions/codex_native_thread_controller.js";
 import { createSeededDevelopmentTaskSessions } from "./task_sessions/development_task_session_controller.js";
+import type { TaskSessionController } from "./task_sessions/types.js";
 import { AerospaceWorkspaceController } from "./workspace/controller.js";
 
 const config = loadConfig();
@@ -21,7 +25,8 @@ if (!config.ok) {
 }
 
 const store = await createGatewayStore();
-const taskSessions = config.value.taskSessions === "fake" ? createSeededDevelopmentTaskSessions() : undefined;
+const taskSessionRuntime = createTaskSessionRuntime();
+const taskSessions = taskSessionRuntime?.controller;
 const mcpSources = await createMcpSourceRegistry();
 const workspace = config.value.workspace === "aerospace" ? new AerospaceWorkspaceController(execFilePromise) : undefined;
 const server = createGatewayServer({
@@ -35,6 +40,13 @@ const server = createGatewayServer({
 server.listen(config.value.port, config.value.host, () => {
   console.log(`eventloop orchestrator listening on http://${config.value.host}:${config.value.port}`);
 });
+
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.once(signal, () => {
+    taskSessionRuntime?.close?.();
+    server.close(() => process.exit(0));
+  });
+}
 
 async function createGatewayStore() {
   if (config.ok && config.value.databaseUrl) {
@@ -57,6 +69,29 @@ async function createMcpSourceRegistry() {
   }
 
   return createSeededDevelopmentMcpSourceRegistry();
+}
+
+function createTaskSessionRuntime(): { controller: TaskSessionController; close?: () => void } | undefined {
+  if (!config.ok || config.value.taskSessions === "off") {
+    return undefined;
+  }
+
+  if (config.value.taskSessions === "codex_app_server") {
+    const connection: CodexAppServerStdioConnection = createCodexAppServerStdioConnection();
+    connection.initialized.catch((error) => {
+      console.error(`Codex app-server initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+    return {
+      controller: new CodexNativeThreadController(
+        new CodexAppServerThreadClient(connection.request, { taskIdByThreadId: config.value.codexTaskMap }),
+      ),
+      close: () => connection.close(),
+    };
+  }
+
+  return {
+    controller: createSeededDevelopmentTaskSessions(),
+  };
 }
 
 async function execFilePromise(command: string, args: string[]) {

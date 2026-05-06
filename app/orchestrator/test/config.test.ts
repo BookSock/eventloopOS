@@ -51,6 +51,32 @@ describe("orchestrator config schema", () => {
     }
   });
 
+  it("allows Codex app-server task sessions with optional task map", () => {
+    const result = loadConfig({
+      ORCHESTRATOR_TASK_SESSIONS: "codex_app_server",
+      ORCHESTRATOR_CODEX_TASK_MAP: JSON.stringify({
+        thread_blog: "task_blog_feedback",
+      }),
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.value.taskSessions, "codex_app_server");
+      assert.deepEqual(result.value.codexTaskMap, { thread_blog: "task_blog_feedback" });
+    }
+  });
+
+  it("rejects malformed Codex task map JSON", () => {
+    const result = loadConfig({
+      ORCHESTRATOR_CODEX_TASK_MAP: "{bad json",
+    });
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.deepEqual(result.issues, ["ORCHESTRATOR_CODEX_TASK_MAP must be valid JSON"]);
+    }
+  });
+
   it("accepts MCP source config path", () => {
     const result = loadConfig({
       ORCHESTRATOR_MCP_SOURCES_PATH: "config/mcp-sources.json",
@@ -92,7 +118,7 @@ describe("orchestrator config schema", () => {
 
     assert.equal(result.ok, false);
     if (!result.ok) {
-      assert.deepEqual(result.issues, ["ORCHESTRATOR_TASK_SESSIONS must be fake or off"]);
+      assert.deepEqual(result.issues, ["ORCHESTRATOR_TASK_SESSIONS must be fake, codex_app_server, or off"]);
     }
   });
 

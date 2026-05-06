@@ -3,7 +3,8 @@ export type OrchestratorConfig = {
   port: number;
   seedFixturePath?: string;
   databaseUrl?: string;
-  taskSessions: "fake" | "off";
+  taskSessions: "fake" | "codex_app_server" | "off";
+  codexTaskMap?: Record<string, string>;
   mcpSources: "seeded" | "config" | "off";
   mcpSourcesPath?: string;
   workspace: "aerospace" | "off";
@@ -34,8 +35,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     issues.push("ORCHESTRATOR_PORT must be an integer between 1 and 65535");
   }
-  if (taskSessionsRaw !== "fake" && taskSessionsRaw !== "off") {
-    issues.push("ORCHESTRATOR_TASK_SESSIONS must be fake or off");
+  const codexTaskMapRaw = env.ORCHESTRATOR_CODEX_TASK_MAP;
+  const codexTaskMap = parseCodexTaskMap(codexTaskMapRaw, issues);
+  if (taskSessionsRaw !== "fake" && taskSessionsRaw !== "codex_app_server" && taskSessionsRaw !== "off") {
+    issues.push("ORCHESTRATOR_TASK_SESSIONS must be fake, codex_app_server, or off");
   }
   if (mcpSourcesRaw !== "seeded" && mcpSourcesRaw !== "config" && mcpSourcesRaw !== "off") {
     issues.push("ORCHESTRATOR_MCP_SOURCES must be seeded, config, or off");
@@ -54,7 +57,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
     return { ok: false, issues };
   }
 
-  const taskSessions = taskSessionsRaw === "off" ? "off" : "fake";
+  const taskSessions = taskSessionsRaw === "off" ? "off" : taskSessionsRaw === "codex_app_server" ? "codex_app_server" : "fake";
   const mcpSources = mcpSourcesRaw === "config" ? "config" : mcpSourcesRaw === "off" ? "off" : "seeded";
   const workspace = workspaceRaw === "off" ? "off" : "aerospace";
   const workspaceExecute = workspaceExecuteRaw === "enabled" ? "enabled" : "disabled";
@@ -67,10 +70,34 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
       seedFixturePath: env.ORCHESTRATOR_SEED_FIXTURE,
       databaseUrl: env.DATABASE_URL,
       taskSessions,
+      codexTaskMap,
       mcpSources,
       mcpSourcesPath,
       workspace,
       workspaceExecute,
     },
   };
+}
+
+function parseCodexTaskMap(raw: string | undefined, issues: string[]): Record<string, string> | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      issues.push("ORCHESTRATOR_CODEX_TASK_MAP must be a JSON object mapping thread ids to task ids");
+      return undefined;
+    }
+    const map: Record<string, string> = {};
+    for (const [threadId, taskId] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!threadId || typeof taskId !== "string" || !taskId) {
+        issues.push("ORCHESTRATOR_CODEX_TASK_MAP entries must be non-empty string task ids");
+        return undefined;
+      }
+      map[threadId] = taskId;
+    }
+    return map;
+  } catch {
+    issues.push("ORCHESTRATOR_CODEX_TASK_MAP must be valid JSON");
+    return undefined;
+  }
 }

@@ -29,3 +29,8 @@ Implemented adapter seam:
 - Thread-to-task routing can use either explicit `taskIdByThreadId` config or a thread title/preview marker like `[task:blog feedback]`.
 
 Remaining transport gap: connect `CodexAppServerRequest` to a live `codex app-server --listen ...` process or `codex app-server proxy --sock ...` stream.
+
+Transport status:
+
+- `app/orchestrator/src/task_sessions/codex_app_server_stdio.ts` implements newline-delimited JSON RPC over `codex app-server --listen stdio://`.
+- `ORCHESTRATOR_TASK_SESSIONS=codex_app_server` wires this into daemon `/task-sessions`.

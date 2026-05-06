@@ -39,6 +39,7 @@ After `pnpm --filter @eventloopos/orchestrator build`, `pnpm --filter @eventloop
 Local STT tools can pipe transcripts into the router with `pnpm --filter @eventloopos/orchestrator run voice:send`. Use `EVENTLOOPOS_VOICE_TRANSCRIPT`, or pipe text on stdin. Optional hints: `EVENTLOOPOS_VOICE_PROJECT_HINT`, `EVENTLOOPOS_VOICE_TASK_HINT`, and `EVENTLOOPOS_VOICE_IDEMPOTENCY_KEY`.
 
 Codex native thread protocol notes from the installed local CLI live in `external-resources/codex-app-server-protocol.md`.
+Set `ORCHESTRATOR_TASK_SESSIONS=codex_app_server` to expose local Codex app-server threads through `/task-sessions`; use `[task:blog feedback]` in thread titles/previews or `ORCHESTRATOR_CODEX_TASK_MAP='{"thread_id":"task_blog_feedback"}'` for task routing.
 
 Chrome native host install:
 

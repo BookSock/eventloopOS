@@ -1,7 +1,7 @@
 import type { CodexNativeThread, CodexNativeThreadClient, CodexNativeTurn } from "./codex_native_thread_controller.js";
 
 export type CodexAppServerRequest = (request: {
-  method: "thread/list" | "thread/read" | "turn/start";
+  method: "initialize" | "thread/list" | "thread/read" | "turn/start";
   params: unknown;
 }) => Promise<unknown> | unknown;
 
