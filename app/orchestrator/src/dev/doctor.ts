@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { pathToFileURL } from "node:url";
+import { CodexAppServerThreadClient } from "../task_sessions/codex_app_server_thread_client.js";
+import { createCodexAppServerStdioConnection } from "../task_sessions/codex_app_server_stdio.js";
 
 type ExecResult = {
   stdout: string;
@@ -8,7 +10,7 @@ type ExecResult = {
 
 type ExecFunction = (command: string, args: string[]) => Promise<ExecResult>;
 
-export type DoctorCheckName = "orchestrator_health" | "aerospace_daemon" | "docker_daemon";
+export type DoctorCheckName = "orchestrator_health" | "aerospace_daemon" | "docker_daemon" | "codex_app_server";
 
 export type DoctorCheck = {
   name: DoctorCheckName;
@@ -30,6 +32,7 @@ export type DoctorOptions = {
   now?: () => Date;
   execFn?: ExecFunction;
   fetchFn?: typeof fetch;
+  codexCheckFn?: () => Promise<DoctorCheck> | DoctorCheck;
   stdout?: Pick<NodeJS.WriteStream, "write">;
   stderr?: Pick<NodeJS.WriteStream, "write">;
 };
@@ -48,6 +51,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     checkOrchestratorHealth(options.baseUrl, fetchFn),
     checkAerospaceDaemon(execFn),
     checkDockerDaemon(execFn),
+    options.codexCheckFn ? options.codexCheckFn() : checkCodexAppServer(),
   ]);
 
   return {
@@ -133,6 +137,33 @@ async function checkDockerDaemon(execFn: ExecFunction): Promise<DoctorCheck> {
       command,
       source_url: "https://docs.docker.com/reference/cli/docker/system/info/",
     };
+  }
+}
+
+async function checkCodexAppServer(): Promise<DoctorCheck> {
+  let connection: ReturnType<typeof createCodexAppServerStdioConnection> | undefined;
+  try {
+    connection = createCodexAppServerStdioConnection({ requestTimeoutMs: 5_000 });
+    await connection.initialized;
+    const threads = await new CodexAppServerThreadClient(connection.request, { threadListLimit: 1 }).listThreads();
+
+    return {
+      name: "codex_app_server",
+      ok: true,
+      detail: `Codex app-server responded; sampled ${threads.length} thread(s)`,
+      command: ["codex", "app-server", "--listen", "stdio://"],
+      source_url: "https://developers.openai.com/codex/app-server",
+    };
+  } catch (error) {
+    return {
+      name: "codex_app_server",
+      ok: false,
+      detail: errorDetail(error),
+      command: ["codex", "app-server", "--listen", "stdio://"],
+      source_url: "https://developers.openai.com/codex/app-server",
+    };
+  } finally {
+    connection?.close();
   }
 }
 

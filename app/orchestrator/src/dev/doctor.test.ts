@@ -22,6 +22,13 @@ describe("developer doctor", () => {
         }
         throw new Error(`unexpected command ${command}`);
       },
+      codexCheckFn: async () => ({
+        name: "codex_app_server",
+        ok: true,
+        detail: "Codex app-server responded; sampled 1 thread(s)",
+        command: ["codex", "app-server", "--listen", "stdio://"],
+        source_url: "https://developers.openai.com/codex/app-server",
+      }),
     });
 
     assert.deepEqual(report, {
@@ -49,6 +56,13 @@ describe("developer doctor", () => {
           command: ["docker", "info", "--format", "{{.ServerVersion}}"],
           source_url: "https://docs.docker.com/reference/cli/docker/system/info/",
         },
+        {
+          name: "codex_app_server",
+          ok: true,
+          detail: "Codex app-server responded; sampled 1 thread(s)",
+          command: ["codex", "app-server", "--listen", "stdio://"],
+          source_url: "https://developers.openai.com/codex/app-server",
+        },
       ],
     });
   });
@@ -65,6 +79,11 @@ describe("developer doctor", () => {
         error.stderr = "failed to connect to the docker API";
         throw error;
       },
+      codexCheckFn: async () => ({
+        name: "codex_app_server",
+        ok: true,
+        detail: "Codex app-server responded; sampled 1 thread(s)",
+      }),
     });
 
     assert.equal(report.ok, false);
@@ -72,6 +91,7 @@ describe("developer doctor", () => {
     assert.deepEqual(report.checks.slice(1).map((check) => [check.name, check.ok, check.detail]), [
       ["aerospace_daemon", false, "Can't connect to AeroSpace server. Is AeroSpace.app running?"],
       ["docker_daemon", false, "failed to connect to the docker API"],
+      ["codex_app_server", true, "Codex app-server responded; sampled 1 thread(s)"],
     ]);
   });
 
@@ -83,6 +103,11 @@ describe("developer doctor", () => {
         throw new Error("fetch failed");
       },
       execFn: async () => ({ stdout: "[]", stderr: "" }),
+      codexCheckFn: async () => ({
+        name: "codex_app_server",
+        ok: true,
+        detail: "Codex app-server responded; sampled 1 thread(s)",
+      }),
       stdout: {
         write(chunk: string) {
           writes.push(chunk);
