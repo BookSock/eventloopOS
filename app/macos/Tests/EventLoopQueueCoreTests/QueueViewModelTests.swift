@@ -106,6 +106,43 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
     }
 
+    func testReturningToEventLoopModePlansSelectedWorkspaceRestore() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+        let plan = WorkspaceRestorePlan(
+            commands: [WorkspaceCommand(command: "aerospace", args: ["workspace", "eventloop-blog"])],
+            skipped: []
+        )
+        let packet = ReviewPacket(
+            id: "packet-with-workspace",
+            title: "Review with workspace",
+            summary: "Needs workspace restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: snapshot
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            planEnvelope: WorkspaceRestorePlanEnvelope(plan: plan, executeSupported: false)
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: [packet]),
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+        viewModel.enterManualMode()
+
+        await viewModel.returnToEventLoopModeAndPrepareWorkspaceRestore()
+
+        XCTAssertEqual(viewModel.mode, .eventLoop)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .planned(plan))
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [snapshot])
+    }
+
     func testManualModeSkipsWorkspaceRestorePlanning() async {
         let workspaceClient = FakeWorkspaceClient()
         let viewModel = QueueViewModel(

@@ -82,11 +82,24 @@ public final class QueueViewModel: ObservableObject {
         shouldRestoreWorkspace = true
     }
 
+    public func returnToEventLoopModeAndPrepareWorkspaceRestore() async {
+        returnToEventLoopMode()
+        await prepareSelectedWorkspaceRestore()
+    }
+
     public func toggleManualMode() {
         if mode == .eventLoop {
             enterManualMode()
         } else {
             returnToEventLoopMode()
+        }
+    }
+
+    public func toggleManualModeAndPrepareWorkspaceRestoreIfNeeded() async {
+        if mode == .eventLoop {
+            enterManualMode()
+        } else {
+            await returnToEventLoopModeAndPrepareWorkspaceRestore()
         }
     }
 

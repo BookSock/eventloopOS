@@ -37,7 +37,9 @@ struct QueueWindowView: View {
                     .accessibilityIdentifier("queue-restore-workspace-button")
 
                     Button {
-                        viewModel.toggleManualMode()
+                        Task {
+                            await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+                        }
                     } label: {
                         Label(viewModel.isManualMode ? "Return to Loop" : "Manual Mode", systemImage: viewModel.isManualMode ? "play.circle" : "pause.circle")
                     }

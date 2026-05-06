@@ -14,7 +14,9 @@ struct EventLoopQueueApp: App {
         )
         _viewModel = StateObject(wrappedValue: viewModel)
         globalHotKeyController = GlobalHotKeyController {
-            viewModel.toggleManualMode()
+            Task {
+                await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+            }
         }
         globalHotKeyController.registerToggleManualModeHotKey()
     }
@@ -40,7 +42,9 @@ struct EventLoopQueueApp: App {
             .accessibilityIdentifier("queue-menu-done-next")
 
             Button(viewModel.isManualMode ? "Return to Event Loop" : "Enter Manual Mode") {
-                viewModel.toggleManualMode()
+                Task {
+                    await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+                }
             }
             .keyboardShortcut("m", modifiers: [.command, .option, .shift])
             .accessibilityIdentifier("queue-menu-mode-toggle")
@@ -62,7 +66,9 @@ struct EventLoopQueueApp: App {
                 .accessibilityIdentifier("queue-command-done-next")
 
                 Button(viewModel.isManualMode ? "Return to Event Loop" : "Enter Manual Mode") {
-                    viewModel.toggleManualMode()
+                    Task {
+                        await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+                    }
                 }
                 .keyboardShortcut("m", modifiers: [.command, .option, .shift])
                 .accessibilityIdentifier("queue-command-mode-toggle")
