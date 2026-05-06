@@ -446,7 +446,10 @@ function eventMatchesContextQuery(event: McpEvent, query: ContextQuery): boolean
 export function contextEntryMatchesQuery(entry: ContextEntry, query: ContextQuery): boolean {
   if (!query.q) return true;
   const needle = query.q.toLowerCase();
-  return contextEntrySearchText(entry).toLowerCase().includes(needle);
+  const searchText = contextEntrySearchText(entry).toLowerCase();
+  if (searchText.includes(needle)) return true;
+  const terms = contextQueryTerms(needle);
+  return terms.length > 0 && terms.every((term) => searchText.includes(term));
 }
 
 export function rankContextEntries(entries: ContextEntry[], query: ContextQuery = {}): ContextEntry[] {
@@ -476,7 +479,7 @@ function scoreContextEntry(entry: ContextEntry, query: ContextQuery): ContextEnt
     const url = typeof resource.url === "string" ? resource.url.toLowerCase() : "";
     const textQuote = typeof resource.text_quote === "string" ? resource.text_quote.toLowerCase() : "";
     const searchText = contextEntrySearchText(entry).toLowerCase();
-    const terms = normalizedQuery.split(/\s+/).filter(Boolean);
+    const terms = contextQueryTerms(normalizedQuery);
 
     if (title.includes(normalizedQuery)) {
       score += 60;
@@ -530,6 +533,10 @@ function resourceSearchParts(resource: Record<string, unknown>): string[] {
     parts.push(JSON.stringify(details));
   }
   return parts;
+}
+
+function contextQueryTerms(normalizedQuery: string): string[] {
+  return normalizedQuery.split(/\s+/).filter(Boolean);
 }
 
 export function contextEntriesForResult(result: StoredEventResult): ContextEntry[] {

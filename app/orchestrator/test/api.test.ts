@@ -502,6 +502,19 @@ describe("orchestrator gateway API", () => {
       assert.deepEqual(searchBody.entries[0].match_reasons, ["title_phrase", "term_match"]);
       assert.deepEqual(searchBody.entries[1].match_reasons, ["quote_phrase", "term_match"]);
 
+      const termSearchResponse = await fetch(`${routeBaseUrl}/contexts?source=browser&q=pricing%20launch&limit=5`);
+      const termSearchBody = await termSearchResponse.json() as {
+        count: number;
+        entries: Array<{ event_id: string; match_reasons: string[] }>;
+      };
+      assert.equal(termSearchResponse.status, 200);
+      assert.equal(termSearchBody.count, 2);
+      assert.deepEqual(
+        termSearchBody.entries.map((entry) => entry.event_id).sort(),
+        ["evt_browser_ctx_123", "evt_browser_ctx_pricing_note"],
+      );
+      assert.equal(termSearchBody.entries.every((entry) => entry.match_reasons.includes("term_match")), true);
+
       const attachEvent = {
         ...event,
         id: "evt_browser_ctx_blog",
