@@ -17,6 +17,22 @@ export type ContextResource = {
   source?: string;
   captured_at?: string;
   restore_confidence: "high" | "medium" | "low";
+  snapshot?: WorkspaceSnapshot;
+  details?: Record<string, unknown>;
+};
+
+export type WorkspaceSnapshot = {
+  backend: "aerospace";
+  windows: WorkspaceWindow[];
+  activeWorkspace?: string;
+  focusedWindowId?: number;
+};
+
+export type WorkspaceWindow = {
+  id: number;
+  app: string;
+  title: string;
+  workspace: string;
 };
 
 export type Action = {

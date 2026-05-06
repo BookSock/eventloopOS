@@ -8,6 +8,7 @@ import {
   ContextResourceSchema,
   EventSchema,
   ReviewPacketSchema,
+  WorkspaceSnapshotResourceSchema,
   getContractSchema
 } from "../src/index.js";
 import { validateFixtures } from "../src/cli.js";
@@ -56,6 +57,16 @@ describe("contract schemas", () => {
         }
       }).kind
     ).toBe("future_resource");
+  });
+
+  it("validates workspace snapshot context resources", () => {
+    const resource = WorkspaceSnapshotResourceSchema.parse(
+      readFixture(join(fixturesDir, "valid/workspace_snapshot_context_resource.json")).data
+    );
+
+    expect(resource.kind).toBe("workspace_snapshot");
+    expect(resource.snapshot.backend).toBe("aerospace");
+    expect(resource.snapshot.windows[0]?.workspace).toBe("eventloop-blog");
   });
 
   it("requires review-packet evidence", () => {

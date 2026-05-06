@@ -1,0 +1,24 @@
+{
+  "schema": "ContextResource",
+  "data": {
+    "id": "ctx_workspace_001",
+    "kind": "workspace_snapshot",
+    "title": "Blog review workspace",
+    "source": "orchestrator",
+    "captured_at": "2026-05-06T17:05:00Z",
+    "restore_confidence": "medium",
+    "snapshot": {
+      "backend": "aerospace",
+      "windows": [
+        {
+          "id": 9,
+          "app": "Ghostty",
+          "title": "codex",
+          "workspace": "eventloop-blog"
+        }
+      ],
+      "activeWorkspace": "eventloop-blog",
+      "focusedWindowId": 9
+    }
+  }
+}

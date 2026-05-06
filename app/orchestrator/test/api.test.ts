@@ -1138,6 +1138,25 @@ describe("orchestrator gateway API", () => {
           url: "https://example.test",
           restore_confidence: "high",
         },
+        {
+          id: "ctx_workspace",
+          kind: "workspace_snapshot",
+          title: "Browser review workspace",
+          restore_confidence: "medium",
+          snapshot: {
+            backend: "aerospace",
+            windows: [
+              {
+                id: 9,
+                app: "Ghostty",
+                title: "codex",
+                workspace: "eventloop-blog",
+              },
+            ],
+            activeWorkspace: "eventloop-blog",
+            focusedWindowId: 9,
+          },
+        },
       ],
     }, new Date("2026-05-06T12:00:02.000Z"));
 
@@ -1145,6 +1164,8 @@ describe("orchestrator gateway API", () => {
     assert.equal(artifacts.route_decision.target_task_id, "task_browser_review");
     assert.equal(artifacts.review_packet.id, "pkt_evt_shared_builder");
     assert.equal(artifacts.review_packet.context[0].kind, "browser_tab");
+    assert.equal(artifacts.review_packet.context[1]?.kind, "workspace_snapshot");
+    assert.equal(artifacts.review_packet.context[1]?.snapshot?.windows[0]?.workspace, "eventloop-blog");
     assert.equal(artifacts.queue_item.id, "qit_evt_shared_builder");
     assert.equal(artifacts.queue_item.review_packet_id, artifacts.review_packet.id);
   });

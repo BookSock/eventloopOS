@@ -110,6 +110,31 @@ export const AppWindowResourceSchema = ContextResourceBaseSchema.extend({
     .optional()
 }).strict();
 
+export const WorkspaceWindowSchema = z
+  .object({
+    id: z.number().int().positive(),
+    app: nonEmpty,
+    title: nonEmpty,
+    workspace: nonEmpty
+  })
+  .strict();
+export type WorkspaceWindow = z.infer<typeof WorkspaceWindowSchema>;
+
+export const WorkspaceSnapshotSchema = z
+  .object({
+    backend: z.literal("aerospace"),
+    windows: z.array(WorkspaceWindowSchema),
+    activeWorkspace: nonEmpty.optional(),
+    focusedWindowId: z.number().int().positive().optional()
+  })
+  .strict();
+export type WorkspaceSnapshot = z.infer<typeof WorkspaceSnapshotSchema>;
+
+export const WorkspaceSnapshotResourceSchema = ContextResourceBaseSchema.extend({
+  kind: z.literal("workspace_snapshot"),
+  snapshot: WorkspaceSnapshotSchema
+}).strict();
+
 export const TerminalResourceSchema = ContextResourceBaseSchema.extend({
   kind: z.literal("terminal"),
   cwd: z.string().optional(),
@@ -164,6 +189,7 @@ export const ContextResourceSchema = z.union([
   UrlResourceSchema,
   FileResourceSchema,
   AppWindowResourceSchema,
+  WorkspaceSnapshotResourceSchema,
   TerminalResourceSchema,
   SlackThreadResourceSchema,
   GitHubResourceSchema,
