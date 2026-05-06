@@ -7,6 +7,7 @@
     "build": "tsc -p tsconfig.json",
     "poll:mcp:loop": "node dist/src/mcp_sources/poll_loop.js",
     "poll:mcp:once": "node dist/src/mcp_sources/poll_once.js",
+    "voice:send": "node dist/src/voice/send_voice_command.js",
     "start": "node dist/src/index.js",
     "test": "pnpm run build && node --test dist/test/**/*.test.js dist/src/**/*.test.js src/agents/codex/*.test.mjs src/task_sessions/*.test.mjs",
     "test:db": "pnpm run build && node --test dist/test/db*.test.js",

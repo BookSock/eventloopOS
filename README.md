@@ -34,6 +34,8 @@ Set `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.json` to load read-only MC
 Use `config/mcp-sources.example.json` as the starting shape. `generic_item_to_event` supports user-installed MCP servers that can return stable event-ish `items[]`.
 After `pnpm --filter @eventloopos/orchestrator build`, `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` sweeps configured MCP sources once through `/mcp-sources/poll-all-and-route`. `pnpm --filter @eventloopos/orchestrator run poll:mcp:loop` repeats the sweep. Set `EVENTLOOPOS_MCP_SOURCE_IDS=slack_dm_source,generic_mcp_source` to limit a sweep, `EVENTLOOPOS_MCP_POLL_INTERVAL_MS=30000` to tune loop cadence, and `EVENTLOOPOS_MCP_POLL_MAX_CYCLES=1` for bounded test runs.
 
+Local STT tools can pipe transcripts into the router with `pnpm --filter @eventloopos/orchestrator run voice:send`. Use `EVENTLOOPOS_VOICE_TRANSCRIPT`, or pipe text on stdin. Optional hints: `EVENTLOOPOS_VOICE_PROJECT_HINT`, `EVENTLOOPOS_VOICE_TASK_HINT`, and `EVENTLOOPOS_VOICE_IDEMPOTENCY_KEY`.
+
 Chrome native host install:
 
 ```sh

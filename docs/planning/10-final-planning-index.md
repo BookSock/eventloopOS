@@ -160,6 +160,7 @@ Implemented:
 - `app/orchestrator`: `GET /contexts?source=&task_id=&q=&limit=` lists and text-filters stored context resources with event + route metadata, giving agents a read path for passive browser captures and task-attached browser context.
 - `app/orchestrator`: `GET /mcp-sources`, `GET /mcp-sources/:id`, `POST /mcp-sources/:id/poll`, `POST /mcp-sources/:id/poll-and-route`, and `POST /mcp-sources/poll-all-and-route` expose discoverable MCP polling loops; default mode uses seeded fake sources, and `ORCHESTRATOR_MCP_SOURCES_PATH` loads real read-only local MCP source configs through the SDK runtime.
 - `app/orchestrator`: `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` calls poll-all once and prints machine-readable JSON for master-agent/scheduler loops. `poll:mcp:loop` repeats the sweep with bounded `EVENTLOOPOS_MCP_POLL_MAX_CYCLES` for test runs.
+- `app/orchestrator`: `pnpm --filter @eventloopos/orchestrator run voice:send` forwards transcripts from env/stdin into `/voice/commands`, so local STT/wake-word tools can plug into the router without product-specific STT code.
 - `app/orchestrator/src/mcp_sources`: fake runtime and real MCP SDK runtime with timeout, stderr capture, env allowlist, circuit breaker.
 - `app/orchestrator/src/workspace`: deterministic AeroSpace workspace adapter, status/capture/restore-plan controller, safe command planner, and opt-in restore execution. HTTP exposes `GET /workspace/status`, `POST /workspace/capture`, `POST /workspace/restore-plan`, and disabled-by-default `POST /workspace/restore` requiring `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled`, `confirm_execute: true`, and `idempotency-key`.
 - `app/orchestrator/src/task_sessions`: fake task-session store plus terminal adapter for tmux and Ghostty, using audited visible input and injected command execution in tests.
@@ -185,7 +186,7 @@ Known gaps:
 - MCP source registry loads local config files and can run real read-only poll tools through the SDK runtime; generic item mapping, poll-all route, poll-once CLI, and bounded poll-loop CLI now support user-installed MCP servers that can emit stable event-ish `items[]`.
 - Aerospace adapter has unit/API coverage, daemon status endpoint, live harness smoke, disabled-by-default execute-confirm flow, and macOS confirmation UI; next gap is live run with AeroSpace.app installed.
 - Task session control has fake, daemon-seeded dev controller, discovery/read API, terminal-backed adapter seams, and automatic task-hinted event injection; next gap is real Codex app-server/native thread backend.
-- Voice command HTTP ingress exists for local STT/wake-word clients to submit transcripts into same router; next gap is actual always-listening local voice capture/wake-word app.
+- Voice command HTTP ingress and env/stdin client exist for local STT/wake-word clients to submit transcripts into same router; next gap is actual always-listening local voice capture/wake-word app.
 - Postgres live tests need Docker/container runtime to execute locally.
 
 ## Open Decisions
