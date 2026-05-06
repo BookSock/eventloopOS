@@ -13,6 +13,7 @@ from .orchestrator import OrchestratorClient
 SEEDED_QUEUE = "seeded_queue"
 MCP_POLL_ROUTE_DONE = "mcp_poll_route_done"
 MCP_SOURCE_POLL_ROUTE_DONE = "mcp_source_poll_route_done"
+GENERIC_MCP_SOURCE_POLL_ROUTE_DONE = "generic_mcp_source_poll_route_done"
 BROWSER_CONTEXT_STORE_ONLY = "browser_context_store_only"
 BROWSER_CONTEXT_ATTACH_TASK = "browser_context_attach_task"
 TASK_SESSION_FOLLOWUP = "task_session_followup"
@@ -24,6 +25,7 @@ SCENARIOS = (
     SEEDED_QUEUE,
     MCP_POLL_ROUTE_DONE,
     MCP_SOURCE_POLL_ROUTE_DONE,
+    GENERIC_MCP_SOURCE_POLL_ROUTE_DONE,
     BROWSER_CONTEXT_STORE_ONLY,
     BROWSER_CONTEXT_ATTACH_TASK,
     TASK_SESSION_FOLLOWUP,
@@ -597,10 +599,13 @@ class McpPollRouteDoneScenario:
 
 
 class McpSourcePollRouteDoneScenario(McpPollRouteDoneScenario):
+    scenario_name = MCP_SOURCE_POLL_ROUTE_DONE
+    poll_fixture_name = "mcp_source_poll_result.json"
+
     def run(self) -> ScenarioResult:
         mode = "orchestrator" if self.orchestrator_url else "fixture"
         log: dict[str, Any] = {
-            "scenario": MCP_SOURCE_POLL_ROUTE_DONE,
+            "scenario": self.scenario_name,
             "mode": mode,
             "started_at": self.clock.now_iso(),
             "steps": [],
@@ -620,8 +625,8 @@ class McpSourcePollRouteDoneScenario(McpPollRouteDoneScenario):
             raise
 
     def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
-        poll_result = self.loader.scenario_fixture(MCP_SOURCE_POLL_ROUTE_DONE, "mcp_source_poll_result.json")
-        golden = self.loader.golden_expectation(MCP_SOURCE_POLL_ROUTE_DONE)
+        poll_result = self.loader.scenario_fixture(self.scenario_name, self.poll_fixture_name)
+        golden = self.loader.golden_expectation(self.scenario_name)
 
         event = self._event_from_source_poll(poll_result)
         route_decision = self._route_event(event)
@@ -650,7 +655,7 @@ class McpSourcePollRouteDoneScenario(McpPollRouteDoneScenario):
         self.writer.write_json("observed.json", observed)
 
         return ScenarioResult(
-            scenario=MCP_SOURCE_POLL_ROUTE_DONE,
+            scenario=self.scenario_name,
             mode="fixture",
             passed=True,
             artifact_dir=self.writer.root,
@@ -666,8 +671,8 @@ class McpSourcePollRouteDoneScenario(McpPollRouteDoneScenario):
     def _run_orchestrator(self, log: dict[str, Any]) -> ScenarioResult:
         assert self.orchestrator_url is not None
         client = OrchestratorClient(self.orchestrator_url)
-        poll_result = self.loader.scenario_fixture(MCP_SOURCE_POLL_ROUTE_DONE, "mcp_source_poll_result.json")
-        golden = self.loader.golden_expectation(MCP_SOURCE_POLL_ROUTE_DONE)
+        poll_result = self.loader.scenario_fixture(self.scenario_name, self.poll_fixture_name)
+        golden = self.loader.golden_expectation(self.scenario_name)
 
         self._drain_existing_queue(client, log)
         poll_response = client.poll_and_route_mcp_source(golden["source_id"], poll_result)
@@ -709,7 +714,7 @@ class McpSourcePollRouteDoneScenario(McpPollRouteDoneScenario):
             self.writer.write_json("observed.json", observed)
 
             return ScenarioResult(
-                scenario=MCP_SOURCE_POLL_ROUTE_DONE,
+                scenario=self.scenario_name,
                 mode="orchestrator",
                 passed=True,
                 artifact_dir=self.writer.root,
@@ -744,7 +749,7 @@ class McpSourcePollRouteDoneScenario(McpPollRouteDoneScenario):
         self.writer.write_json("observed.json", observed)
 
         return ScenarioResult(
-            scenario=MCP_SOURCE_POLL_ROUTE_DONE,
+            scenario=self.scenario_name,
             mode="orchestrator",
             passed=True,
             artifact_dir=self.writer.root,
@@ -815,6 +820,54 @@ class McpSourcePollRouteDoneScenario(McpPollRouteDoneScenario):
         queue_item["priority_score"] = 900
         queue_item["priority_reasons"] = ["new_background_event", "slack_message", "task_hint_present"]
         return queue_item
+
+
+class GenericMcpSourcePollRouteDoneScenario(McpSourcePollRouteDoneScenario):
+    scenario_name = GENERIC_MCP_SOURCE_POLL_ROUTE_DONE
+
+    def _event_from_source_poll(self, poll_result: dict[str, Any]) -> dict[str, Any]:
+        items = poll_result.get("items")
+        if not isinstance(items, list) or not items or not isinstance(items[0], dict):
+            raise ScenarioFailure("mcp_source_poll_result.items[0] must be object")
+        item = items[0]
+        source_id = f"generic_mcp_source:{self._require_str(item, 'id')}"
+
+        return {
+            "id": f"evt_{self._stable_id(self._require_str(item, 'source'))}_{self._stable_id(source_id)}",
+            "source": self._require_str(item, "source"),
+            "source_id": source_id,
+            "idempotency_key": source_id,
+            "occurred_at": self._require_str(item, "occurred_at"),
+            "received_at": self.clock.now_iso(),
+            "actor": self._actor_for_generic_item(item),
+            "project_hint": self._require_str(item, "project_hint"),
+            "task_hint": self._require_str(item, "task_hint"),
+            "type": self._require_str(item, "type"),
+            "title": self._require_str(item, "title"),
+            "summary": self._require_str(item, "summary"),
+            "raw_ref": {
+                "id": f"raw_{source_id.replace(':', '_')}",
+                "uri": f"artifact://raw/{source_id}.json",
+                "media_type": "application/json",
+            },
+            "links": item["links"],
+            "resources": item["resources"],
+        }
+
+    def _queue_item_for(self, review_packet: dict[str, Any]) -> dict[str, Any]:
+        queue_item = McpPollRouteDoneScenario._queue_item_for(self, review_packet)
+        queue_item["priority_reasons"] = ["new_background_event", "voice_note_event", "task_hint_present"]
+        return queue_item
+
+    def _actor_for_generic_item(self, item: dict[str, Any]) -> dict[str, str]:
+        actor = item.get("actor")
+        if not isinstance(actor, dict):
+            raise ScenarioFailure("generic MCP item actor must be object")
+        return {
+            "id": self._require_str(actor, "id"),
+            "type": self._require_str(actor, "type"),
+            "name": self._require_str(actor, "name"),
+        }
 
 
 class BrowserContextStoreOnlyScenario:

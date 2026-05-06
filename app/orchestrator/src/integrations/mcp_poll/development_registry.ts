@@ -64,7 +64,7 @@ export class DevelopmentMcpSourceRegistry {
 }
 
 export function createSeededDevelopmentMcpSourceRegistry(): DevelopmentMcpSourceRegistry {
-  return new DevelopmentMcpSourceRegistry([slackSourceConfig(), githubSourceConfig()]);
+  return new DevelopmentMcpSourceRegistry([slackSourceConfig(), githubSourceConfig(), genericSourceConfig()]);
 }
 
 export async function readMcpSourceConfigs(path: string): Promise<McpPollSourceConfig[]> {
@@ -164,6 +164,35 @@ function githubSourceConfig(): McpPollSourceConfig {
       allowWriteTools: false,
       maxRiskLevel: "low",
       untrustedTextFields: ["body"],
+    },
+  };
+}
+
+function genericSourceConfig(): McpPollSourceConfig {
+  return {
+    id: "generic_mcp_source",
+    server: {
+      name: "fake-local-events-mcp",
+      command: "fake-local-events-mcp",
+      args: ["--stdio"],
+      envAllowlist: [],
+      stderrLogPath: "var/log/mcp/generic_mcp_source.stderr.log",
+    },
+    poll: {
+      tool: "list_events",
+      args: {},
+      timeoutMs: 5_000,
+    },
+    cursor: {
+      strategy: "hash",
+      dedupeWindow: 100,
+    },
+    eventMapper: "generic_item_to_event",
+    riskPolicy: {
+      readOnly: true,
+      allowWriteTools: false,
+      maxRiskLevel: "low",
+      untrustedTextFields: ["title", "summary", "text"],
     },
   };
 }

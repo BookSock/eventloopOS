@@ -93,6 +93,41 @@ describe("MCP poll ingestion", () => {
     assert.equal(result.events[0].resources[0].repo, "pagerfreeglobal/pgrust");
   });
 
+  it("maps generic MCP item output to Event object", async () => {
+    const config = await readConfig("../../tests/fixtures/mcp/source-generic.json");
+    const fixture = await readMcpPollFixture(join(process.cwd(), "../../tests/fixtures/events/mcp-generic-poll.json"));
+    const state = createMcpPollerState(config);
+
+    const result = await pollMcpSource({
+      config,
+      state,
+      runner: {
+        callTool: async () => fixture,
+      },
+      receivedAt: "2026-05-06T17:03:05Z",
+    });
+
+    assert.equal(result.events.length, 1);
+    assert.equal(result.duplicatesIgnored, 1);
+    assert.equal(result.events[0].id, "evt_voice_note_generic_mcp_source_office_priority_1");
+    assert.equal(result.events[0].source, "voice_note");
+    assert.equal(result.events[0].source_id, "generic_mcp_source:office-priority-1");
+    assert.equal(result.events[0].type, "voice.priority_hint");
+    assert.equal(result.events[0].task_hint, "blog feedback");
+    assert.deepEqual(result.events[0].actor, {
+      id: "actor_voice_jason",
+      type: "human",
+      name: "Jason",
+    });
+    assert.deepEqual(result.events[0].links, [
+      {
+        label: "Voice note",
+        url: "eventloop://voice/office-priority-1",
+      },
+    ]);
+    assert.equal(result.events[0].resources[0].kind, "voice_note");
+  });
+
   it("lists seeded development MCP sources and polls by source id", async () => {
     const registry = createSeededDevelopmentMcpSourceRegistry();
     const fixture = await readMcpPollFixture(join(process.cwd(), "../../tests/fixtures/events/mcp-slack-github-poll.json"));
@@ -101,8 +136,9 @@ describe("MCP poll ingestion", () => {
     const result = await registry.pollSource("slack_dm_source", fixture, "2026-05-06T17:00:00Z");
     const duplicateResult = await registry.pollSource("slack_dm_source", fixture, "2026-05-06T17:01:00Z");
 
-    assert.deepEqual(sources.map((source) => source.id), ["github_update_source", "slack_dm_source"]);
+    assert.deepEqual(sources.map((source) => source.id), ["generic_mcp_source", "github_update_source", "slack_dm_source"]);
     assert.equal(sources.find((source) => source.id === "slack_dm_source")?.risk_policy.allowWriteTools, false);
+    assert.equal(sources.find((source) => source.id === "generic_mcp_source")?.event_mapper, "generic_item_to_event");
     assert.equal(result?.events.length, 1);
     assert.equal(result?.events[0].source, "slack");
     assert.equal(result?.duplicates_ignored, 1);
@@ -115,10 +151,11 @@ describe("MCP poll ingestion", () => {
   it("validates documented MCP source config example", async () => {
     const configs = await readMcpSourceConfigs(join(process.cwd(), "../../config/mcp-sources.example.json"));
 
-    assert.deepEqual(configs.map((config) => config.id), ["slack_dm_source", "github_update_source"]);
+    assert.deepEqual(configs.map((config) => config.id), ["slack_dm_source", "github_update_source", "generic_mcp_source"]);
     assert.equal(configs[0].riskPolicy.readOnly, true);
     assert.equal(configs[0].riskPolicy.allowWriteTools, false);
     assert.equal(configs[1].server.command, "docker");
+    assert.equal(configs[2].eventMapper, "generic_item_to_event");
   });
 });
 

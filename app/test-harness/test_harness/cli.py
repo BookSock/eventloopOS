@@ -10,6 +10,7 @@ from .fixtures import FixtureLoader
 from .scenarios import (
     BROWSER_CONTEXT_STORE_ONLY,
     BROWSER_CONTEXT_ATTACH_TASK,
+    GENERIC_MCP_SOURCE_POLL_ROUTE_DONE,
     MCP_POLL_ROUTE_DONE,
     MCP_SOURCE_POLL_ROUTE_DONE,
     SCENARIOS,
@@ -21,6 +22,7 @@ from .scenarios import (
     WORKSPACE_STATUS_SMOKE,
     BrowserContextAttachTaskScenario,
     BrowserContextStoreOnlyScenario,
+    GenericMcpSourcePollRouteDoneScenario,
     McpPollRouteDoneScenario,
     McpSourcePollRouteDoneScenario,
     SeededQueueScenario,
@@ -51,6 +53,7 @@ def main(argv: list[str] | None = None) -> int:
         SEEDED_QUEUE: SeededQueueScenario,
         MCP_POLL_ROUTE_DONE: McpPollRouteDoneScenario,
         MCP_SOURCE_POLL_ROUTE_DONE: McpSourcePollRouteDoneScenario,
+        GENERIC_MCP_SOURCE_POLL_ROUTE_DONE: GenericMcpSourcePollRouteDoneScenario,
         BROWSER_CONTEXT_STORE_ONLY: BrowserContextStoreOnlyScenario,
         BROWSER_CONTEXT_ATTACH_TASK: BrowserContextAttachTaskScenario,
         TASK_SESSION_FOLLOWUP: TaskSessionFollowupScenario,

@@ -32,6 +32,8 @@ export function mapMcpPollItemToEvent(
       return slackMessageToEvent(item, receivedAt);
     case "github_update_to_event":
       return githubUpdateToEvent(item, receivedAt);
+    case "generic_item_to_event":
+      return genericItemToEvent(config, item, receivedAt);
   }
 }
 
@@ -143,8 +145,146 @@ function githubUpdateToEvent(item: Record<string, unknown>, receivedAt: string):
   };
 }
 
+function genericItemToEvent(config: McpPollSourceConfig, item: Record<string, unknown>, receivedAt: string): McpEvent {
+  const itemId = optionalString(item, "id") ?? optionalString(item, "source_id") ?? optionalString(item, "url");
+  if (!itemId) {
+    throw new Error("MCP poll item id, source_id, or url must be a non-empty string");
+  }
+
+  const source = optionalString(item, "source") ?? "mcp_poll";
+  const sourceId = optionalString(item, "source_id") ?? `${config.id}:${itemId}`;
+  const title = optionalString(item, "title") ?? optionalString(item, "name") ?? `MCP item ${itemId}`;
+  const summary = optionalString(item, "summary") ?? optionalString(item, "text") ?? title;
+  const occurredAt = optionalString(item, "occurred_at") ?? receivedAt;
+
+  return {
+    id: optionalString(item, "event_id") ?? eventId(source, sourceId),
+    source,
+    source_id: sourceId,
+    idempotency_key: optionalString(item, "idempotency_key") ?? sourceId,
+    occurred_at: occurredAt,
+    received_at: receivedAt,
+    actor: genericActor(config, item),
+    project_hint: optionalString(item, "project_hint"),
+    task_hint: optionalString(item, "task_hint"),
+    type: optionalString(item, "type") ?? "mcp.item",
+    title,
+    summary,
+    raw_ref: genericRawRef(sourceId, item),
+    links: genericLinks(item),
+    resources: genericResources(config, item, sourceId, title, receivedAt),
+  };
+}
+
+function genericActor(config: McpPollSourceConfig, item: Record<string, unknown>): McpEvent["actor"] {
+  const actor = item.actor;
+  if (isRecord(actor)) {
+    const id = optionalString(actor, "id");
+    const type = optionalString(actor, "type");
+    if (!id) {
+      throw new Error("MCP poll item actor.id must be a non-empty string");
+    }
+    if (type !== "human" && type !== "agent" && type !== "system") {
+      throw new Error("MCP poll item actor.type must be one of human, agent, system");
+    }
+    return {
+      id,
+      type,
+      name: optionalString(actor, "name"),
+    };
+  }
+
+  const actorId = optionalString(item, "actor_id");
+  const actorName = optionalString(item, "actor_name") ?? actorId;
+  if (actorId) {
+    return {
+      id: `actor_mcp_${safeId(actorId)}`,
+      type: "human",
+      name: actorName,
+    };
+  }
+
+  return {
+    id: `actor_mcp_${safeId(config.id)}`,
+    type: "system",
+    name: config.server.name,
+  };
+}
+
+function genericRawRef(sourceId: string, item: Record<string, unknown>): McpEvent["raw_ref"] {
+  const rawRef = item.raw_ref;
+  if (isRecord(rawRef)) {
+    return {
+      id: requireString(rawRef, "id"),
+      uri: requireString(rawRef, "uri"),
+      media_type: requireString(rawRef, "media_type"),
+    };
+  }
+
+  return {
+    id: `raw_${safeId(sourceId)}`,
+    uri: `artifact://raw/${sourceId}.json`,
+    media_type: "application/json",
+  };
+}
+
+function genericLinks(item: Record<string, unknown>): McpEvent["links"] {
+  const links = item.links;
+  if (Array.isArray(links)) {
+    return links.map((link, index) => {
+      if (!isRecord(link)) {
+        throw new Error("MCP poll item links must be objects");
+      }
+      return {
+        label: optionalString(link, "label") ?? `Link ${index + 1}`,
+        url: requireString(link, "url"),
+      };
+    });
+  }
+
+  const url = optionalString(item, "url");
+  return url ? [{ label: optionalString(item, "url_label") ?? "Source", url }] : [];
+}
+
+function genericResources(
+  config: McpPollSourceConfig,
+  item: Record<string, unknown>,
+  sourceId: string,
+  title: string,
+  receivedAt: string,
+): Array<Record<string, unknown>> {
+  const resources = item.resources;
+  if (Array.isArray(resources)) {
+    if (!resources.every(isRecord)) {
+      throw new Error("MCP poll item resources must be objects");
+    }
+    return resources;
+  }
+
+  const url = optionalString(item, "url");
+  if (!url) {
+    return [];
+  }
+
+  return [
+    {
+      id: `ctx_${safeId(sourceId)}`,
+      kind: optionalString(item, "resource_kind") ?? "external_resource",
+      title,
+      url,
+      source: config.id,
+      captured_at: receivedAt,
+      restore_confidence: optionalString(item, "restore_confidence") ?? "medium",
+    },
+  ];
+}
+
 function eventId(...parts: string[]): string {
   return `evt_${parts.join("_").replace(/[^a-zA-Z0-9_]/g, "_")}`;
+}
+
+function safeId(input: string): string {
+  return input.replace(/[^a-zA-Z0-9_.-]/g, "_");
 }
 
 function requireString(input: Record<string, unknown>, key: string): string {

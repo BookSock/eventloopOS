@@ -1,0 +1,66 @@
+{
+  "items": [
+    {
+      "id": "office-priority-1",
+      "source": "voice_note",
+      "type": "voice.priority_hint",
+      "title": "Blog launch detail now matters",
+      "summary": "Blog post should mention launch in two weeks.",
+      "occurred_at": "2026-05-06T17:03:00Z",
+      "actor": {
+        "id": "actor_voice_jason",
+        "type": "human",
+        "name": "Jason"
+      },
+      "project_hint": "pagerfree",
+      "task_hint": "blog feedback",
+      "links": [
+        {
+          "label": "Voice note",
+          "url": "eventloop://voice/office-priority-1"
+        }
+      ],
+      "resources": [
+        {
+          "id": "ctx_voice_office_priority_1",
+          "kind": "voice_note",
+          "title": "Blog launch detail now matters",
+          "source": "voice_note",
+          "captured_at": "2026-05-06T17:03:05Z",
+          "restore_confidence": "low"
+        }
+      ]
+    },
+    {
+      "id": "office-priority-1",
+      "source": "voice_note",
+      "type": "voice.priority_hint",
+      "title": "Blog launch detail now matters",
+      "summary": "Blog post should mention launch in two weeks.",
+      "occurred_at": "2026-05-06T17:03:00Z",
+      "actor": {
+        "id": "actor_voice_jason",
+        "type": "human",
+        "name": "Jason"
+      },
+      "project_hint": "pagerfree",
+      "task_hint": "blog feedback",
+      "links": [
+        {
+          "label": "Voice note",
+          "url": "eventloop://voice/office-priority-1"
+        }
+      ],
+      "resources": [
+        {
+          "id": "ctx_voice_office_priority_1",
+          "kind": "voice_note",
+          "title": "Blog launch detail now matters",
+          "source": "voice_note",
+          "captured_at": "2026-05-06T17:03:05Z",
+          "restore_confidence": "low"
+        }
+      ]
+    }
+  ]
+}

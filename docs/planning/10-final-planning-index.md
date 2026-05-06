@@ -165,8 +165,8 @@ Implemented:
 - `app/browser-extension`: shared-schema `browser_tab` capture/restore, optional task/project route hints, legacy resource normalizer, native bridge envelope/capability protocol.
 - `app/native-host`: Chrome Native Messaging stdio host, context capture JSONL sink, optional route hints (`task_hint`, `project_hint`), macOS Chrome manifest installer, and live smoke that forwards browser capture into orchestrator as `store_only` context.
 - `app/macos`: Swift queue shell using real orchestrator API shape, lease-next flow, automatic lease renewal, workspace status/restore-plan/restore client, selected-packet workspace restore planning, confirmation UI for restore execution, and manual-mode toggle (`Cmd-Option-Shift-M`) that skips workspace restore planning without clearing queue. Carbon global hotkey wiring exists in the app target without third-party dependency.
-- `app/test-harness`: `seeded_queue`, `mcp_poll_route_done`, `mcp_source_poll_route_done`, `browser_context_store_only`, `browser_context_attach_task`, `task_session_followup`, `voice_task_command`, `workspace_snapshot_context`, `workspace_status_smoke`, and `workspace_restore_disabled` fixture/live scenarios with artifacts.
-- `config`: documented read-only MCP source config example for Slack/GitHub-like poll sources, validated by orchestrator tests.
+- `app/test-harness`: `seeded_queue`, `mcp_poll_route_done`, `mcp_source_poll_route_done`, `generic_mcp_source_poll_route_done`, `browser_context_store_only`, `browser_context_attach_task`, `task_session_followup`, `voice_task_command`, `workspace_snapshot_context`, `workspace_status_smoke`, and `workspace_restore_disabled` fixture/live scenarios with artifacts.
+- `config`: documented read-only MCP source config example for Slack/GitHub-like and generic event-ish poll sources, validated by orchestrator tests.
 
 Current proof commands:
 
@@ -182,7 +182,7 @@ Known gaps:
 - macOS UI needs menu bar polish and stronger empty/error/loading states.
 - macOS UI has manual-mode toggle state, global hotkey wiring, automatic lease renewal, restore-plan pause gate, selected restore planning, and confirmation UI for invoking workspace restore execution; next gap is deeper queue/detail polish around review packet context.
 - Native host forwards context/event data to orchestrator when `EVENTLOOPOS_ORCHESTRATOR_URL` is set; next gap is richer context ranking/search and task attachment UI.
-- MCP source registry loads local config files and can run real read-only poll tools through the SDK runtime; next gap is adapter/mapping helper for user-installed MCP servers whose tool output is not already `items[]`.
+- MCP source registry loads local config files and can run real read-only poll tools through the SDK runtime; generic item mapping now supports user-installed MCP servers that can emit stable event-ish `items[]`.
 - Aerospace adapter has unit/API coverage, daemon status endpoint, live harness smoke, disabled-by-default execute-confirm flow, and macOS confirmation UI; next gap is live run with AeroSpace.app installed.
 - Task session control has fake, daemon-seeded dev controller, discovery/read API, terminal-backed adapter seams, and automatic task-hinted event injection; next gap is real Codex app-server/native thread backend.
 - Voice command HTTP ingress exists for local STT/wake-word clients to submit transcripts into same router; next gap is actual always-listening local voice capture/wake-word app.

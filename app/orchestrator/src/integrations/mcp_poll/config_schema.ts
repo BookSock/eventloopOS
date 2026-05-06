@@ -20,7 +20,12 @@ export function validateMcpPollSourceConfig(input: unknown): McpSourceConfigVali
   const riskPolicy = isRecord(input.riskPolicy) ? input.riskPolicy : undefined;
 
   const id = readString(input, "id", issues);
-  const eventMapper = readEnum(input, "eventMapper", ["slack_message_to_event", "github_update_to_event"], issues);
+  const eventMapper = readEnum(
+    input,
+    "eventMapper",
+    ["slack_message_to_event", "github_update_to_event", "generic_item_to_event"],
+    issues,
+  );
 
   if (!server) issues.push("server must be an object");
   if (!poll) issues.push("poll must be an object");

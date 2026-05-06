@@ -11,6 +11,7 @@ from test_harness.fixtures import FixtureLoader
 from test_harness.scenarios import (
     BROWSER_CONTEXT_STORE_ONLY,
     BROWSER_CONTEXT_ATTACH_TASK,
+    GENERIC_MCP_SOURCE_POLL_ROUTE_DONE,
     MCP_POLL_ROUTE_DONE,
     MCP_SOURCE_POLL_ROUTE_DONE,
     SEEDED_QUEUE,
@@ -21,6 +22,7 @@ from test_harness.scenarios import (
     WORKSPACE_STATUS_SMOKE,
     BrowserContextAttachTaskScenario,
     BrowserContextStoreOnlyScenario,
+    GenericMcpSourcePollRouteDoneScenario,
     McpPollRouteDoneScenario,
     McpSourcePollRouteDoneScenario,
     SeededQueueScenario,
@@ -154,6 +156,35 @@ class McpSourcePollRouteDoneRunnerTests(unittest.TestCase):
 
     def _run(self, artifact_dir: Path):
         runner = McpSourcePollRouteDoneScenario(
+            loader=FixtureLoader(REPO_ROOT),
+            writer=ArtifactWriter(artifact_dir),
+            clock=FakeClock(),
+        )
+        return runner.run()
+
+
+class GenericMcpSourcePollRouteDoneRunnerTests(unittest.TestCase):
+    def test_fixture_replay_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(Path(tmp))
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.scenario, GENERIC_MCP_SOURCE_POLL_ROUTE_DONE)
+        self.assertEqual(result.mode, "fixture")
+        self.assertEqual(result.details["event_id"], "evt_voice_note_generic_mcp_source_office_priority_1")
+        self.assertEqual(result.details["queue_item_id"], "qit_evt_voice_note_generic_mcp_source_office_priority_1")
+
+    def test_runner_self_test_contract(self) -> None:
+        loader = FixtureLoader(REPO_ROOT)
+        poll_result = loader.scenario_fixture(GENERIC_MCP_SOURCE_POLL_ROUTE_DONE, "mcp_source_poll_result.json")
+        golden = loader.golden_expectation(GENERIC_MCP_SOURCE_POLL_ROUTE_DONE)
+
+        self.assertEqual(golden["source_id"], "generic_mcp_source")
+        self.assertEqual(poll_result["items"][0]["source"], "voice_note")
+        self.assertEqual(golden["expected_queue_item"]["priority_reasons"][1], "voice_note_event")
+
+    def _run(self, artifact_dir: Path):
+        runner = GenericMcpSourcePollRouteDoneScenario(
             loader=FixtureLoader(REPO_ROOT),
             writer=ArtifactWriter(artifact_dir),
             clock=FakeClock(),

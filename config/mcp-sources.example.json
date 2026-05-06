@@ -70,6 +70,32 @@
         "maxRiskLevel": "low",
         "untrustedTextFields": ["body", "title"]
       }
+    },
+    {
+      "id": "generic_mcp_source",
+      "server": {
+        "name": "local-events-mcp",
+        "command": "node",
+        "args": ["/path/to/local-events-mcp.js"],
+        "envAllowlist": [],
+        "stderrLogPath": "var/log/mcp/generic_mcp_source.stderr.log"
+      },
+      "poll": {
+        "tool": "list_events",
+        "args": {},
+        "timeoutMs": 5000
+      },
+      "cursor": {
+        "strategy": "hash",
+        "dedupeWindow": 1000
+      },
+      "eventMapper": "generic_item_to_event",
+      "riskPolicy": {
+        "readOnly": true,
+        "allowWriteTools": false,
+        "maxRiskLevel": "low",
+        "untrustedTextFields": ["title", "summary", "text"]
+      }
     }
   ]
 }

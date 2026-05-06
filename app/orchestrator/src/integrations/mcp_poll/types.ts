@@ -56,7 +56,7 @@ export type McpPollSourceConfig = {
     initial?: string;
     dedupeWindow: number;
   };
-  eventMapper: "slack_message_to_event" | "github_update_to_event";
+  eventMapper: "slack_message_to_event" | "github_update_to_event" | "generic_item_to_event";
   riskPolicy: McpRiskPolicy;
 };
 

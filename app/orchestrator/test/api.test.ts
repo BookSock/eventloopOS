@@ -1197,10 +1197,14 @@ describe("orchestrator gateway API", () => {
         }>;
       };
       assert.equal(listResponse.status, 200);
-      assert.equal(listBody.count, 2);
-      assert.deepEqual(listBody.sources.map((source) => source.id), ["github_update_source", "slack_dm_source"]);
-      assert.equal(listBody.sources[1].server_name, "fake-slack-mcp");
-      assert.equal(listBody.sources[1].risk_policy.allowWriteTools, false);
+      assert.equal(listBody.count, 3);
+      assert.deepEqual(listBody.sources.map((source) => source.id), [
+        "generic_mcp_source",
+        "github_update_source",
+        "slack_dm_source",
+      ]);
+      assert.equal(listBody.sources[2].server_name, "fake-slack-mcp");
+      assert.equal(listBody.sources[2].risk_policy.allowWriteTools, false);
 
       const getResponse = await fetch(`${mcpBaseUrl}/mcp-sources/slack_dm_source`);
       const getBody = await getResponse.json() as {

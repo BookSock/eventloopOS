@@ -1,0 +1,45 @@
+{
+  "source_id": "generic_mcp_source",
+  "expected_event": {
+    "id": "evt_voice_note_generic_mcp_source_office_priority_1",
+    "source": "voice_note",
+    "source_id": "generic_mcp_source:office-priority-1",
+    "idempotency_key": "generic_mcp_source:office-priority-1",
+    "type": "voice.priority_hint",
+    "title": "Blog launch detail now matters"
+  },
+  "expected_route_decision": {
+    "id": "rte_evt_voice_note_generic_mcp_source_office_priority_1",
+    "event_id": "evt_voice_note_generic_mcp_source_office_priority_1",
+    "action": "ask_human_now",
+    "target_task_id": "task_blog_feedback",
+    "confidence": "medium"
+  },
+  "expected_review_packet": {
+    "id": "pkt_evt_voice_note_generic_mcp_source_office_priority_1",
+    "task_id": "task_blog_feedback",
+    "title": "Review Blog launch detail now matters",
+    "risk_level": "medium",
+    "confidence": "medium"
+  },
+  "expected_queue_item": {
+    "id": "qit_evt_voice_note_generic_mcp_source_office_priority_1",
+    "review_packet_id": "pkt_evt_voice_note_generic_mcp_source_office_priority_1",
+    "task_id": "task_blog_feedback",
+    "state": "ready",
+    "priority_score": 800,
+    "priority_reasons": [
+      "new_background_event",
+      "voice_note_event",
+      "task_hint_present"
+    ]
+  },
+  "expected_audit_decision": {
+    "id": "decision_generic_mcp_source_poll_done_001",
+    "queue_item_id": "qit_evt_voice_note_generic_mcp_source_office_priority_1",
+    "review_packet_id": "pkt_evt_voice_note_generic_mcp_source_office_priority_1",
+    "action": "done",
+    "actor_id": "user_jason",
+    "decided_at": "2026-01-15T09:30:00Z"
+  }
+}
