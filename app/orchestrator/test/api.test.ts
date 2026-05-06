@@ -456,6 +456,42 @@ describe("orchestrator gateway API", () => {
       assert.equal(contextsBody.entries[0].resource.kind, "browser_tab");
       assert.equal(contextsBody.entries[0].resource.url, "https://example.test/launch");
 
+      const restorePlanResponse = await fetch(`${routeBaseUrl}/contexts/restore-plan`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ resource: contextsBody.entries[0].resource }),
+      });
+      const restorePlanBody = await restorePlanResponse.json() as {
+        restore_plan: {
+          kind: string;
+          side_effect: string;
+          execute_supported: boolean;
+          message: {
+            type: string;
+            resource: {
+              url: string;
+            };
+          };
+        };
+      };
+      assert.equal(restorePlanResponse.status, 200);
+      assert.equal(restorePlanBody.restore_plan.kind, "browser_extension_message");
+      assert.equal(restorePlanBody.restore_plan.side_effect, "local");
+      assert.equal(restorePlanBody.restore_plan.execute_supported, false);
+      assert.equal(restorePlanBody.restore_plan.message.type, "eventloop.restore");
+      assert.equal(restorePlanBody.restore_plan.message.resource.url, "https://example.test/launch");
+
+      const unsupportedRestorePlanResponse = await fetch(`${routeBaseUrl}/contexts/restore-plan`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ resource: { id: "ctx_unknown", kind: "note", title: "Missing URL" } }),
+      });
+      assert.equal(unsupportedRestorePlanResponse.status, 422);
+
       const olderTitleMatchEvent = {
         ...event,
         id: "evt_browser_ctx_pricing_note",

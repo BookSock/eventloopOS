@@ -58,6 +58,9 @@ class OrchestratorClient:
         path = f"/contexts?{query}" if query else "/contexts"
         return self._request("GET", path) or {}
 
+    def context_restore_plan(self, resource: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/contexts/restore-plan", {"resource": resource}) or {}
+
     def list_task_sessions(self) -> dict[str, Any]:
         return self._request("GET", "/task-sessions") or {}
 

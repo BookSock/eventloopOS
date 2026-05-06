@@ -5,6 +5,11 @@
     "action": "store_only",
     "confidence": "high"
   },
+  "expected_restore_plan": {
+    "kind": "browser_extension_message",
+    "side_effect": "local",
+    "execute_supported": false
+  },
   "expected_review_packet": null,
   "expected_queue_item": null
 }

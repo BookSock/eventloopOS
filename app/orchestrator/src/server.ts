@@ -82,6 +82,26 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         });
       }
 
+      if (request.method === "POST" && context.url.pathname === "/contexts/restore-plan") {
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) {
+          return sendSchemaError(response, context, parsed.message);
+        }
+        const validation = validateContextRestorePlanRequest(parsed.value);
+        if (!validation.ok) {
+          return sendSchemaError(response, context, validation.message);
+        }
+        const plan = buildContextRestorePlan(validation.resource);
+        if (!plan) {
+          return sendError(response, 422, context, "context_restore_unsupported", "context resource is not restorable");
+        }
+
+        return sendJson(response, 200, {
+          restore_plan: plan,
+          request_id: context.requestId,
+        });
+      }
+
       if (request.method === "GET" && context.url.pathname === "/workspace/status") {
         if (!options.workspace) {
           return sendError(response, 501, context, "workspace_unavailable", "workspace controller is not configured");
@@ -718,6 +738,61 @@ function validateContextQuery(
       limit,
     },
   };
+}
+
+function validateContextRestorePlanRequest(
+  input: unknown,
+): { ok: true; resource: Record<string, unknown> } | { ok: false; message: string } {
+  if (!isRecord(input)) {
+    return { ok: false, message: "context restore-plan request must be an object" };
+  }
+  const resource = isRecord(input.resource) ? input.resource : input;
+  if (!isRecord(resource)) {
+    return { ok: false, message: "resource must be an object" };
+  }
+  if (typeof resource.kind !== "string" || !resource.kind) {
+    return { ok: false, message: "resource.kind must be a non-empty string" };
+  }
+  return { ok: true, resource };
+}
+
+function buildContextRestorePlan(resource: Record<string, unknown>): Record<string, unknown> | undefined {
+  const url = typeof resource.url === "string" && resource.url ? resource.url : undefined;
+  if (resource.kind === "browser_tab" && url) {
+    return {
+      kind: "browser_extension_message",
+      side_effect: "local",
+      execute_supported: false,
+      target: "eventloopOS browser extension runtime",
+      message: {
+        type: "eventloop.restore",
+        resource,
+      },
+    };
+  }
+
+  if (url) {
+    return {
+      kind: "open_url",
+      side_effect: "local",
+      execute_supported: false,
+      url,
+    };
+  }
+
+  const path = typeof resource.path === "string" && resource.path ? resource.path : undefined;
+  if (resource.kind === "file" && path) {
+    return {
+      kind: "open_file",
+      side_effect: "local",
+      execute_supported: false,
+      path,
+      line: resource.line,
+      column: resource.column,
+    };
+  }
+
+  return undefined;
 }
 
 function validateEventRequest(input: unknown): { ok: true; event: McpEvent } | { ok: false; message: string } {

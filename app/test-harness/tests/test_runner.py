@@ -245,8 +245,9 @@ class BrowserContextStoreOnlyRunnerTests(unittest.TestCase):
             summary = json.loads((artifact_dir / "summary.json").read_text(encoding="utf-8"))
 
         self.assertTrue(log["passed"])
-        self.assertEqual([step["name"] for step in log["steps"]], ["route_event", "assert_no_queue_item"])
+        self.assertEqual([step["name"] for step in log["steps"]], ["route_event", "assert_no_queue_item", "context_restore_plan"])
         self.assertEqual(observed["route_decision"]["action"], "store_only")
+        self.assertEqual(observed["restore_plan"]["kind"], "browser_extension_message")
         self.assertIsNone(observed["review_packet"])
         self.assertIsNone(observed["next_queue_item"])
         self.assertEqual(summary["route_action"], "store_only")
@@ -258,6 +259,7 @@ class BrowserContextStoreOnlyRunnerTests(unittest.TestCase):
 
         self.assertEqual(event["type"], "browser.context_captured")
         self.assertEqual(golden["expected_route_decision"]["action"], "store_only")
+        self.assertEqual(golden["expected_restore_plan"]["kind"], "browser_extension_message")
         self.assertIsNone(golden["expected_queue_item"])
 
     def _run(self, artifact_dir: Path):

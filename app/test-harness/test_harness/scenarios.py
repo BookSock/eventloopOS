@@ -1050,10 +1050,13 @@ class BrowserContextStoreOnlyScenario:
         route_decision = self._route_event(event)
         log["steps"].append({"name": "route_event", "route_decision_id": route_decision["id"]})
         log["steps"].append({"name": "assert_no_queue_item"})
+        restore_plan = self._restore_plan_for_resource(event["resources"][0])
+        log["steps"].append({"name": "context_restore_plan", "kind": restore_plan["kind"]})
 
         observed = {
             "event": event,
             "route_decision": route_decision,
+            "restore_plan": restore_plan,
             "review_packet": None,
             "next_queue_item": None,
             "final_queue": {"item": None},
@@ -1102,6 +1105,13 @@ class BrowserContextStoreOnlyScenario:
             raise ScenarioFailure(f"context list missing stored browser event: {contexts!r}")
         log["steps"].append({"name": "list_contexts", "count": contexts.get("count")})
 
+        matched_context = next(entry for entry in entries if isinstance(entry, dict) and entry.get("event_id") == event["id"])
+        restore_plan_response = client.context_restore_plan(matched_context["resource"])
+        restore_plan = restore_plan_response.get("restore_plan") if isinstance(restore_plan_response, dict) else None
+        if not isinstance(restore_plan, dict):
+            raise ScenarioFailure(f"context restore-plan response missing restore_plan: {restore_plan_response!r}")
+        log["steps"].append({"name": "context_restore_plan", "kind": restore_plan.get("kind")})
+
         final_queue_item = client.next_queue_item()
         log["steps"].append({"name": "assert_queue_empty"})
         if final_queue_item is not None:
@@ -1110,6 +1120,7 @@ class BrowserContextStoreOnlyScenario:
         observed = {
             "event": event,
             "route_decision": route_decision,
+            "restore_plan": restore_plan,
             "review_packet": None,
             "next_queue_item": None,
             "final_queue": {"item": None},
@@ -1158,6 +1169,14 @@ class BrowserContextStoreOnlyScenario:
             raise ScenarioFailure("expected no queue item")
         if observed["final_queue"] != {"item": None}:
             raise ScenarioFailure(f"expected final empty queue, got {observed['final_queue']!r}")
+        expected_restore_plan = golden.get("expected_restore_plan")
+        if expected_restore_plan is not None:
+            restore_plan = observed.get("restore_plan")
+            if not isinstance(restore_plan, dict):
+                raise ScenarioFailure("expected restore plan")
+            for field, value in expected_restore_plan.items():
+                if restore_plan.get(field) != value:
+                    raise ScenarioFailure(f"restore plan {field} mismatch: expected {value!r}, got {restore_plan.get(field)!r}")
 
     def _drain_existing_queue(self, client: OrchestratorClient, log: dict[str, Any]) -> None:
         drained = 0
@@ -1188,6 +1207,22 @@ class BrowserContextStoreOnlyScenario:
         if not isinstance(task_hint, str) or not task_hint:
             return None
         return f"task_{self._stable_id(task_hint)}"
+
+    @staticmethod
+    def _restore_plan_for_resource(resource: dict[str, Any]) -> dict[str, Any]:
+        if resource.get("kind") == "browser_tab" and isinstance(resource.get("url"), str):
+            return {
+                "kind": "browser_extension_message",
+                "side_effect": "local",
+                "execute_supported": False,
+            }
+        if isinstance(resource.get("url"), str):
+            return {
+                "kind": "open_url",
+                "side_effect": "local",
+                "execute_supported": False,
+            }
+        raise ScenarioFailure(f"fixture resource is not restorable: {resource!r}")
 
 
 class BrowserContextAttachTaskScenario(BrowserContextStoreOnlyScenario):
