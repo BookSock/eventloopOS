@@ -1572,4 +1572,98 @@ describe("orchestrator gateway API", () => {
       });
     }
   });
+
+  it("continues poll-all routing when one MCP source fails", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const mcpServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T17:05:00.000Z"),
+      mcpSources: {
+        listSources() {
+          return [
+            { id: "broken_source" },
+            { id: "working_source" },
+          ];
+        },
+        pollSource(sourceId) {
+          if (sourceId === "broken_source") {
+            throw new Error("broken MCP source timed out");
+          }
+          return {
+            events: [
+              {
+                id: "evt_poll_all_working",
+                source: "mcp_poll",
+                source_id: "working:item:1",
+                idempotency_key: "working:item:1",
+                occurred_at: "2026-05-06T17:04:00.000Z",
+                received_at: "2026-05-06T17:05:00.000Z",
+                actor: {
+                  id: "actor_mcp_working",
+                  type: "system",
+                },
+                type: "mcp.update",
+                title: "Working source event",
+                summary: "One source failed but this source should still route.",
+                raw_ref: {
+                  id: "raw_working_item_1",
+                  uri: "artifact://raw/working-item-1.json",
+                  media_type: "application/json",
+                },
+                links: [],
+                resources: [],
+              },
+            ],
+            duplicates_ignored: 0,
+          };
+        },
+      },
+    });
+    await new Promise<void>((resolve) => mcpServer.listen(0, "127.0.0.1", resolve));
+    const address = mcpServer.address() as AddressInfo;
+    const mcpBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${mcpBaseUrl}/mcp-sources/poll-all-and-route`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({}),
+      });
+      const body = await response.json() as {
+        ok: boolean;
+        sources_seen: number;
+        events_seen: number;
+        routed_count: number;
+        errors: number;
+        polled: Array<{
+          source_id: string;
+          ok: boolean;
+          error?: string;
+          routed?: Array<{
+            event: {
+              id: string;
+            };
+          }>;
+        }>;
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(body.ok, false);
+      assert.equal(body.sources_seen, 2);
+      assert.equal(body.events_seen, 1);
+      assert.equal(body.routed_count, 1);
+      assert.equal(body.errors, 1);
+      assert.deepEqual(body.polled.map((result) => result.ok), [false, true]);
+      assert.equal(body.polled[0].source_id, "broken_source");
+      assert.equal(body.polled[0].error, "broken MCP source timed out");
+      assert.equal(body.polled[1].source_id, "working_source");
+      assert.equal(body.polled[1].routed?.[0]?.event.id, "evt_poll_all_working");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        mcpServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
 });
