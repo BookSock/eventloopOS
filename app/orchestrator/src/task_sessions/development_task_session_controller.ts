@@ -33,6 +33,14 @@ export type DevelopmentTaskMessage = {
   }>;
 };
 
+export type DevelopmentTaskBinding = {
+  ok: boolean;
+  task_session_id: string;
+  task_id: string;
+  session?: DevelopmentTaskSession;
+  error?: string;
+};
+
 export class DevelopmentTaskSessionController {
   readonly sessions = new Map<string, DevelopmentTaskSession>();
   readonly messages = new Map<string, DevelopmentTaskMessage>();
@@ -118,6 +126,33 @@ export class DevelopmentTaskSessionController {
     }
 
     return message;
+  }
+
+  bindTaskSession(input: { task_session_id: string; task_id: string }): DevelopmentTaskBinding {
+    const session = this.sessions.get(input.task_session_id);
+    if (!session) {
+      return {
+        ok: false,
+        task_session_id: input.task_session_id,
+        task_id: input.task_id,
+        error: `task session ${input.task_session_id} was not found`,
+      };
+    }
+
+    const now = this.clock().toISOString();
+    const updated = {
+      ...session,
+      task_id: input.task_id,
+      last_seen_at: now,
+      updated_at: now,
+    };
+    this.sessions.set(updated.id, updated);
+    return {
+      ok: true,
+      task_session_id: input.task_session_id,
+      task_id: input.task_id,
+      session: updated,
+    };
   }
 }
 

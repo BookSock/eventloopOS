@@ -72,6 +72,9 @@ class OrchestratorClient:
             headers={"Idempotency-Key": idempotency_key},
         ) or {}
 
+    def bind_task_session(self, task_session_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("PUT", f"/task-sessions/{task_session_id}/task-binding", payload) or {}
+
     def workspace_status(self) -> dict[str, Any]:
         return self._request("GET", "/workspace/status") or {}
 

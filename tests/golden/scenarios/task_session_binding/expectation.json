@@ -1,0 +1,11 @@
+{
+  "request": {
+    "task_session_id": "task_session_blog",
+    "task_id": "task_blog_launch"
+  },
+  "expected_binding": {
+    "ok": true,
+    "task_session_id": "task_session_blog",
+    "task_id": "task_blog_launch"
+  }
+}

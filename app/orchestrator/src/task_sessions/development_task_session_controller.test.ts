@@ -56,4 +56,18 @@ describe("DevelopmentTaskSessionController", () => {
     assert.equal(message.sent_at, undefined);
     assert.equal(message.evidence[0].title, "Development task message blocked");
   });
+
+  it("binds seeded sessions to new task ids", () => {
+    const controller = createSeededDevelopmentTaskSessions(() => new Date("2026-05-06T22:00:00.000Z"));
+
+    const result = controller.bindTaskSession({
+      task_session_id: "task_session_blog",
+      task_id: "task_blog_launch",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.session?.task_id, "task_blog_launch");
+    assert.equal(controller.getSession("task_session_blog")?.task_id, "task_blog_launch");
+    assert.equal(controller.getSession("task_session_blog")?.updated_at, "2026-05-06T22:00:00.000Z");
+  });
 });

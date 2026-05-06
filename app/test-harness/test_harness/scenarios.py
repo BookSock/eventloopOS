@@ -18,6 +18,7 @@ MCP_POLL_ALL_ROUTE_DONE = "mcp_poll_all_route_done"
 BROWSER_CONTEXT_STORE_ONLY = "browser_context_store_only"
 BROWSER_CONTEXT_ATTACH_TASK = "browser_context_attach_task"
 TASK_SESSION_FOLLOWUP = "task_session_followup"
+TASK_SESSION_BINDING = "task_session_binding"
 VOICE_TASK_COMMAND = "voice_task_command"
 WORKSPACE_SNAPSHOT_CONTEXT = "workspace_snapshot_context"
 WORKSPACE_STATUS_SMOKE = "workspace_status_smoke"
@@ -31,6 +32,7 @@ SCENARIOS = (
     BROWSER_CONTEXT_STORE_ONLY,
     BROWSER_CONTEXT_ATTACH_TASK,
     TASK_SESSION_FOLLOWUP,
+    TASK_SESSION_BINDING,
     VOICE_TASK_COMMAND,
     WORKSPACE_SNAPSHOT_CONTEXT,
     WORKSPACE_STATUS_SMOKE,
@@ -1326,6 +1328,100 @@ class TaskSessionFollowupScenario:
                 raise ScenarioFailure(f"message {field} mismatch: expected {value!r}, got {message.get(field)!r}")
         if duplicate.get("id") != message.get("id"):
             raise ScenarioFailure("duplicate followup must return same task message id")
+
+
+class TaskSessionBindingScenario:
+    def __init__(
+        self,
+        loader: FixtureLoader,
+        writer: ArtifactWriter,
+        clock: FakeClock,
+        orchestrator_url: str | None = None,
+    ) -> None:
+        self.loader = loader
+        self.writer = writer
+        self.clock = clock
+        self.orchestrator_url = orchestrator_url
+
+    def run(self) -> ScenarioResult:
+        mode = "orchestrator" if self.orchestrator_url else "fixture"
+        log: dict[str, Any] = {
+            "scenario": TASK_SESSION_BINDING,
+            "mode": mode,
+            "started_at": self.clock.now_iso(),
+            "steps": [],
+        }
+        try:
+            result = self._run_orchestrator(log) if self.orchestrator_url else self._run_fixture(log)
+            log["passed"] = True
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            self.writer.write_json("summary.json", result.details)
+            return result
+        except Exception as exc:
+            log["passed"] = False
+            log["error"] = str(exc)
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            raise
+
+    def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
+        golden = self.loader.golden_expectation(TASK_SESSION_BINDING)
+        binding = self._expected_binding(golden)
+        log["steps"].append({"name": "bind_task_session", "task_session_id": binding["task_session_id"]})
+        observed = {"binding": binding}
+        self._assert_golden(observed, golden)
+        self.writer.write_json("observed.json", observed)
+        return ScenarioResult(
+            scenario=TASK_SESSION_BINDING,
+            mode="fixture",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "task_session_id": binding["task_session_id"],
+                "task_id": binding["task_id"],
+            },
+        )
+
+    def _run_orchestrator(self, log: dict[str, Any]) -> ScenarioResult:
+        assert self.orchestrator_url is not None
+        client = OrchestratorClient(self.orchestrator_url)
+        golden = self.loader.golden_expectation(TASK_SESSION_BINDING)
+        response = client.bind_task_session(
+            golden["request"]["task_session_id"],
+            {"task_id": golden["request"]["task_id"]},
+        )
+        log["steps"].append({"name": "bind_task_session", "task_session_id": golden["request"]["task_session_id"]})
+        observed = {"binding": response.get("binding")}
+        self._assert_golden(observed, golden)
+        self.writer.write_json("observed.json", observed)
+        return ScenarioResult(
+            scenario=TASK_SESSION_BINDING,
+            mode="orchestrator",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "task_session_id": golden["request"]["task_session_id"],
+                "task_id": golden["request"]["task_id"],
+            },
+        )
+
+    @staticmethod
+    def _expected_binding(golden: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "task_session_id": golden["request"]["task_session_id"],
+            "task_id": golden["request"]["task_id"],
+        }
+
+    @staticmethod
+    def _assert_golden(observed: dict[str, Any], golden: dict[str, Any]) -> None:
+        binding = observed["binding"]
+        if not isinstance(binding, dict):
+            raise ScenarioFailure("task binding response missing binding")
+        for field, value in golden["expected_binding"].items():
+            if binding.get(field) != value:
+                raise ScenarioFailure(f"binding {field} mismatch: expected {value!r}, got {binding.get(field)!r}")
 
 
 class VoiceTaskCommandScenario:
