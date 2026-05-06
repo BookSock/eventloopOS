@@ -13,6 +13,7 @@ import { createSeededStore } from "./store.js";
 import { CodexAppServerThreadClient } from "./task_sessions/codex_app_server_thread_client.js";
 import { createCodexAppServerStdioConnection, type CodexAppServerStdioConnection } from "./task_sessions/codex_app_server_stdio.js";
 import { CodexNativeThreadController } from "./task_sessions/codex_native_thread_controller.js";
+import { CodexTaskMapResolver } from "./task_sessions/codex_task_map.js";
 import { createSeededDevelopmentTaskSessions } from "./task_sessions/development_task_session_controller.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
 import { AerospaceWorkspaceController } from "./workspace/controller.js";
@@ -78,12 +79,19 @@ function createTaskSessionRuntime(): { controller: TaskSessionController; close?
 
   if (config.value.taskSessions === "codex_app_server") {
     const connection: CodexAppServerStdioConnection = createCodexAppServerStdioConnection();
+    const taskMap = new CodexTaskMapResolver({
+      inlineMap: config.value.codexTaskMap,
+      mapPath: config.value.codexTaskMapPath,
+      onError: (error) => {
+        console.error(`Codex task map read failed: ${error.message}`);
+      },
+    });
     connection.initialized.catch((error) => {
       console.error(`Codex app-server initialization failed: ${error instanceof Error ? error.message : String(error)}`);
     });
     return {
       controller: new CodexNativeThreadController(
-        new CodexAppServerThreadClient(connection.request, { taskIdByThreadId: config.value.codexTaskMap }),
+        new CodexAppServerThreadClient(connection.request, { taskIdForThreadId: (threadId) => taskMap.taskIdForThreadId(threadId) }),
       ),
       close: () => connection.close(),
     };

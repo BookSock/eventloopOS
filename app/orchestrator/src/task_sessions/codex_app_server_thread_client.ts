@@ -8,11 +8,13 @@ export type CodexAppServerRequest = (request: {
 export type CodexAppServerThreadClientOptions = {
   threadListLimit?: number;
   taskIdByThreadId?: Record<string, string>;
+  taskIdForThreadId?: (threadId: string) => Promise<string | undefined> | string | undefined;
 };
 
 export class CodexAppServerThreadClient implements CodexNativeThreadClient {
   private readonly threadListLimit: number;
   private readonly taskIdByThreadId: Record<string, string>;
+  private readonly taskIdForThreadId?: (threadId: string) => Promise<string | undefined> | string | undefined;
 
   constructor(
     private readonly request: CodexAppServerRequest,
@@ -20,6 +22,7 @@ export class CodexAppServerThreadClient implements CodexNativeThreadClient {
   ) {
     this.threadListLimit = options.threadListLimit ?? 100;
     this.taskIdByThreadId = options.taskIdByThreadId ?? {};
+    this.taskIdForThreadId = options.taskIdForThreadId;
   }
 
   async listThreads(): Promise<CodexNativeThread[]> {
@@ -38,7 +41,8 @@ export class CodexAppServerThreadClient implements CodexNativeThreadClient {
       });
       const envelope = requireRecord(response, "thread/list response");
       const data = requireArray(envelope.data, "thread/list response data");
-      threads.push(...data.map((thread) => this.threadFromAppServer(thread)));
+      const pageThreads = await Promise.all(data.map((thread) => this.threadFromAppServer(thread)));
+      threads.push(...pageThreads);
       cursor = typeof envelope.nextCursor === "string" && envelope.nextCursor ? envelope.nextCursor : null;
     } while (cursor);
 
@@ -58,7 +62,7 @@ export class CodexAppServerThreadClient implements CodexNativeThreadClient {
       return undefined;
     }
 
-    return this.threadFromAppServer(envelope.thread);
+    return await this.threadFromAppServer(envelope.thread);
   }
 
   async startTurn(input: {
@@ -94,7 +98,7 @@ export class CodexAppServerThreadClient implements CodexNativeThreadClient {
     };
   }
 
-  private threadFromAppServer(input: unknown): CodexNativeThread {
+  private async threadFromAppServer(input: unknown): Promise<CodexNativeThread> {
     const thread = requireRecord(input, "app-server thread");
     const id = requireString(thread.id, "app-server thread id");
     const name = readOptionalString(thread.name);
@@ -102,7 +106,7 @@ export class CodexAppServerThreadClient implements CodexNativeThreadClient {
 
     return {
       id,
-      task_id: this.taskIdByThreadId[id] ?? taskIdFromTaggedText(name) ?? taskIdFromTaggedText(preview),
+      task_id: (await this.mappedTaskIdForThread(id)) ?? taskIdFromTaggedText(name) ?? taskIdFromTaggedText(preview),
       status: codexStatusToNative(readThreadStatus(thread.status)),
       name,
       preview,
@@ -110,6 +114,10 @@ export class CodexAppServerThreadClient implements CodexNativeThreadClient {
       createdAt: readOptionalNumber(thread.createdAt),
       updatedAt: readOptionalNumber(thread.updatedAt),
     };
+  }
+
+  private async mappedTaskIdForThread(threadId: string): Promise<string | undefined> {
+    return await this.taskIdForThreadId?.(threadId) ?? this.taskIdByThreadId[threadId];
   }
 }
 

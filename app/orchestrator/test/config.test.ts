@@ -57,12 +57,14 @@ describe("orchestrator config schema", () => {
       ORCHESTRATOR_CODEX_TASK_MAP: JSON.stringify({
         thread_blog: "task_blog_feedback",
       }),
+      ORCHESTRATOR_CODEX_TASK_MAP_PATH: "state/codex-task-map.json",
     });
 
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.equal(result.value.taskSessions, "codex_app_server");
       assert.deepEqual(result.value.codexTaskMap, { thread_blog: "task_blog_feedback" });
+      assert.equal(result.value.codexTaskMapPath, "state/codex-task-map.json");
     }
   });
 
@@ -74,6 +76,17 @@ describe("orchestrator config schema", () => {
     assert.equal(result.ok, false);
     if (!result.ok) {
       assert.deepEqual(result.issues, ["ORCHESTRATOR_CODEX_TASK_MAP must be valid JSON"]);
+    }
+  });
+
+  it("rejects blank Codex task map path", () => {
+    const result = loadConfig({
+      ORCHESTRATOR_CODEX_TASK_MAP_PATH: "",
+    });
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.deepEqual(result.issues, ["ORCHESTRATOR_CODEX_TASK_MAP_PATH must be non-empty when set"]);
     }
   });
 

@@ -5,6 +5,7 @@ export type OrchestratorConfig = {
   databaseUrl?: string;
   taskSessions: "fake" | "codex_app_server" | "off";
   codexTaskMap?: Record<string, string>;
+  codexTaskMapPath?: string;
   mcpSources: "seeded" | "config" | "off";
   mcpSourcesPath?: string;
   workspace: "aerospace" | "off";
@@ -36,7 +37,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
     issues.push("ORCHESTRATOR_PORT must be an integer between 1 and 65535");
   }
   const codexTaskMapRaw = env.ORCHESTRATOR_CODEX_TASK_MAP;
+  const codexTaskMapPath = env.ORCHESTRATOR_CODEX_TASK_MAP_PATH;
   const codexTaskMap = parseCodexTaskMap(codexTaskMapRaw, issues);
+  if (codexTaskMapPath !== undefined && !codexTaskMapPath.trim()) {
+    issues.push("ORCHESTRATOR_CODEX_TASK_MAP_PATH must be non-empty when set");
+  }
   if (taskSessionsRaw !== "fake" && taskSessionsRaw !== "codex_app_server" && taskSessionsRaw !== "off") {
     issues.push("ORCHESTRATOR_TASK_SESSIONS must be fake, codex_app_server, or off");
   }
@@ -71,6 +76,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
       databaseUrl: env.DATABASE_URL,
       taskSessions,
       codexTaskMap,
+      codexTaskMapPath,
       mcpSources,
       mcpSourcesPath,
       workspace,

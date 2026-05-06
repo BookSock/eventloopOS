@@ -26,9 +26,7 @@ Implemented adapter seam:
 
 - `app/orchestrator/src/task_sessions/codex_native_thread_controller.ts` maps native threads to task sessions.
 - `app/orchestrator/src/task_sessions/codex_app_server_thread_client.ts` maps app-server request/response shapes into that native thread client.
-- Thread-to-task routing can use either explicit `taskIdByThreadId` config or a thread title/preview marker like `[task:blog feedback]`.
-
-Remaining transport gap: connect `CodexAppServerRequest` to a live `codex app-server --listen ...` process or `codex app-server proxy --sock ...` stream.
+- Thread-to-task routing can use hot-loaded `ORCHESTRATOR_CODEX_TASK_MAP_PATH`, inline `ORCHESTRATOR_CODEX_TASK_MAP`, or a thread title/preview marker like `[task:blog feedback]`.
 
 Transport status:
 

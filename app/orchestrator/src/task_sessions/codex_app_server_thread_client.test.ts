@@ -99,6 +99,48 @@ describe("CodexAppServerThreadClient", () => {
     assert.equal((await client.listThreads())[0]?.task_id, "task_blog_feedback");
   });
 
+  it("supports async task id lookup before static maps and name tags", async () => {
+    const client = new CodexAppServerThreadClient(
+      async () => ({
+        data: [
+          {
+            id: "thread_blog",
+            name: "[task:wrong] Blog draft",
+            status: { type: "idle" },
+          },
+        ],
+        nextCursor: null,
+      }),
+      {
+        taskIdByThreadId: { thread_blog: "task_blog_from_static_map" },
+        taskIdForThreadId: async () => "task_blog_from_file_map",
+      },
+    );
+
+    assert.equal((await client.listThreads())[0]?.task_id, "task_blog_from_file_map");
+  });
+
+  it("falls back to static maps when async lookup has no match", async () => {
+    const client = new CodexAppServerThreadClient(
+      async () => ({
+        data: [
+          {
+            id: "thread_blog",
+            name: "[task:wrong] Blog draft",
+            status: { type: "idle" },
+          },
+        ],
+        nextCursor: null,
+      }),
+      {
+        taskIdByThreadId: { thread_blog: "task_blog_from_static_map" },
+        taskIdForThreadId: async () => undefined,
+      },
+    );
+
+    assert.equal((await client.listThreads())[0]?.task_id, "task_blog_from_static_map");
+  });
+
   it("reads a single thread by id", async () => {
     const calls: unknown[] = [];
     const client = new CodexAppServerThreadClient(async (request) => {
