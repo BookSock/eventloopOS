@@ -139,6 +139,54 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys, [])
     }
 
+    func testSelectedWorkspaceRestorePlanningSkipsMissingSnapshot() async {
+        let workspaceClient = FakeWorkspaceClient()
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+
+        await viewModel.prepareSelectedWorkspaceRestore()
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .idle)
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [])
+    }
+
+    func testSelectedWorkspaceRestorePlanningUsesPacketSnapshot() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+        let plan = WorkspaceRestorePlan(
+            commands: [WorkspaceCommand(command: "aerospace", args: ["workspace", "eventloop-blog"])],
+            skipped: []
+        )
+        let packet = ReviewPacket(
+            id: "packet-with-workspace",
+            title: "Review with workspace",
+            summary: "Needs workspace restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: snapshot
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            planEnvelope: WorkspaceRestorePlanEnvelope(plan: plan, executeSupported: false)
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: [packet]),
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+
+        await viewModel.prepareSelectedWorkspaceRestore()
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .planned(plan))
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [snapshot])
+    }
+
     func testSelectedWorkspaceRestoreExecutesPacketSnapshot() async {
         let snapshot = WorkspaceSnapshot(
             windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],

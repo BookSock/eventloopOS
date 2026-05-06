@@ -161,6 +161,15 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    public func prepareSelectedWorkspaceRestore() async {
+        guard let snapshot = selectedWorkspaceSnapshot else {
+            workspaceRestoreState = .idle
+            return
+        }
+
+        await prepareWorkspaceRestore(snapshot: snapshot)
+    }
+
     public func confirmWorkspaceRestore(snapshot: WorkspaceSnapshot) async {
         guard shouldRestoreWorkspace else {
             workspaceRestoreState = .skippedManualMode
