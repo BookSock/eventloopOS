@@ -1,0 +1,40 @@
+{
+  "source_ids": ["github_update_source", "generic_mcp_source"],
+  "inputs_by_source_id": {
+    "generic_mcp_source": {
+      "items": [
+        {
+          "id": "office-priority-all-1",
+          "source": "voice_note",
+          "type": "voice.priority_hint",
+          "title": "Blog launch detail now matters",
+          "summary": "Blog post should mention launch in two weeks.",
+          "occurred_at": "2026-05-06T17:03:00Z",
+          "actor": {
+            "id": "actor_voice_jason",
+            "type": "human",
+            "name": "Jason"
+          },
+          "project_hint": "pagerfree",
+          "task_hint": "blog feedback",
+          "links": [
+            {
+              "label": "Voice note",
+              "url": "eventloop://voice/office-priority-all-1"
+            }
+          ],
+          "resources": [
+            {
+              "id": "ctx_voice_office_priority_all_1",
+              "kind": "voice_note",
+              "title": "Blog launch detail now matters",
+              "source": "voice_note",
+              "captured_at": "2026-05-06T17:03:05Z",
+              "restore_confidence": "low"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

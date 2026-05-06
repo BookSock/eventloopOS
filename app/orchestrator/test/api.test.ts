@@ -1476,4 +1476,100 @@ describe("orchestrator gateway API", () => {
     assert.equal(body.error.message, "request body must be valid JSON");
     assert.equal(body.request_id, "req_bad_json");
   });
+
+  it("polls selected MCP sources and routes each event without blocking on empty sources", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const mcpServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T17:03:05.000Z"),
+      mcpSources: createSeededDevelopmentMcpSourceRegistry(),
+    });
+    await new Promise<void>((resolve) => mcpServer.listen(0, "127.0.0.1", resolve));
+    const address = mcpServer.address() as AddressInfo;
+    const mcpBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${mcpBaseUrl}/mcp-sources/poll-all-and-route`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          source_ids: ["github_update_source", "generic_mcp_source"],
+          inputs_by_source_id: {
+            generic_mcp_source: {
+              items: [
+                {
+                  id: "office-priority-1",
+                  source: "voice_note",
+                  type: "voice.priority_hint",
+                  title: "Blog launch detail now matters",
+                  summary: "Blog post should mention launch in two weeks.",
+                  occurred_at: "2026-05-06T17:03:00Z",
+                  actor: {
+                    id: "actor_voice_jason",
+                    type: "human",
+                    name: "Jason",
+                  },
+                  project_hint: "pagerfree",
+                  task_hint: "blog feedback",
+                  links: [
+                    {
+                      label: "Voice note",
+                      url: "eventloop://voice/office-priority-1",
+                    },
+                  ],
+                  resources: [],
+                },
+              ],
+            },
+          },
+        }),
+      });
+      const body = await response.json() as {
+        ok: boolean;
+        sources_seen: number;
+        events_seen: number;
+        routed_count: number;
+        errors: number;
+        polled: Array<{
+          source_id: string;
+          ok: boolean;
+          events_seen?: number;
+          routed?: Array<{
+            event: {
+              source: string;
+              title: string;
+            };
+            route_decision: {
+              action: string;
+              target_task_id: string;
+            };
+            queue_item?: {
+              review_packet_id: string;
+            };
+          }>;
+        }>;
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(body.ok, true);
+      assert.equal(body.sources_seen, 2);
+      assert.equal(body.events_seen, 1);
+      assert.equal(body.routed_count, 1);
+      assert.equal(body.errors, 0);
+      assert.equal(body.polled[0].source_id, "github_update_source");
+      assert.equal(body.polled[0].events_seen, 0);
+      assert.equal(body.polled[1].source_id, "generic_mcp_source");
+      assert.equal(body.polled[1].events_seen, 1);
+      assert.equal(body.polled[1].routed?.[0]?.event.source, "voice_note");
+      assert.equal(body.polled[1].routed?.[0]?.route_decision.action, "ask_human_now");
+      assert.equal(body.polled[1].routed?.[0]?.route_decision.target_task_id, "task_blog_feedback");
+      assert.ok(body.polled[1].routed?.[0]?.queue_item?.review_packet_id);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        mcpServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
 });

@@ -12,6 +12,7 @@ from test_harness.scenarios import (
     BROWSER_CONTEXT_STORE_ONLY,
     BROWSER_CONTEXT_ATTACH_TASK,
     GENERIC_MCP_SOURCE_POLL_ROUTE_DONE,
+    MCP_POLL_ALL_ROUTE_DONE,
     MCP_POLL_ROUTE_DONE,
     MCP_SOURCE_POLL_ROUTE_DONE,
     SEEDED_QUEUE,
@@ -23,6 +24,7 @@ from test_harness.scenarios import (
     BrowserContextAttachTaskScenario,
     BrowserContextStoreOnlyScenario,
     GenericMcpSourcePollRouteDoneScenario,
+    McpPollAllRouteDoneScenario,
     McpPollRouteDoneScenario,
     McpSourcePollRouteDoneScenario,
     SeededQueueScenario,
@@ -185,6 +187,35 @@ class GenericMcpSourcePollRouteDoneRunnerTests(unittest.TestCase):
 
     def _run(self, artifact_dir: Path):
         runner = GenericMcpSourcePollRouteDoneScenario(
+            loader=FixtureLoader(REPO_ROOT),
+            writer=ArtifactWriter(artifact_dir),
+            clock=FakeClock(),
+        )
+        return runner.run()
+
+
+class McpPollAllRouteDoneRunnerTests(unittest.TestCase):
+    def test_fixture_replay_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(Path(tmp))
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.scenario, MCP_POLL_ALL_ROUTE_DONE)
+        self.assertEqual(result.mode, "fixture")
+        self.assertEqual(result.details["event_id"], "evt_voice_note_generic_mcp_source_office_priority_all_1")
+        self.assertEqual(result.details["queue_item_id"], "qit_evt_voice_note_generic_mcp_source_office_priority_all_1")
+
+    def test_runner_self_test_contract(self) -> None:
+        loader = FixtureLoader(REPO_ROOT)
+        poll_all_request = loader.scenario_fixture(MCP_POLL_ALL_ROUTE_DONE, "mcp_poll_all_result.json")
+        golden = loader.golden_expectation(MCP_POLL_ALL_ROUTE_DONE)
+
+        self.assertEqual(golden["source_id"], "generic_mcp_source")
+        self.assertEqual(poll_all_request["source_ids"], ["github_update_source", "generic_mcp_source"])
+        self.assertIn("generic_mcp_source", poll_all_request["inputs_by_source_id"])
+
+    def _run(self, artifact_dir: Path):
+        runner = McpPollAllRouteDoneScenario(
             loader=FixtureLoader(REPO_ROOT),
             writer=ArtifactWriter(artifact_dir),
             clock=FakeClock(),

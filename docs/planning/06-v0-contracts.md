@@ -471,6 +471,7 @@ GET  /agent-threads
 GET  /mcp-sources
 POST /mcp-sources/:id/poll
 POST /mcp-sources/:id/poll-and-route
+POST /mcp-sources/poll-all-and-route
 GET  /task-sessions
 GET  /task-sessions/:id
 POST /task-sessions/:id/steer

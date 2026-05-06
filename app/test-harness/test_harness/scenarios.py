@@ -14,6 +14,7 @@ SEEDED_QUEUE = "seeded_queue"
 MCP_POLL_ROUTE_DONE = "mcp_poll_route_done"
 MCP_SOURCE_POLL_ROUTE_DONE = "mcp_source_poll_route_done"
 GENERIC_MCP_SOURCE_POLL_ROUTE_DONE = "generic_mcp_source_poll_route_done"
+MCP_POLL_ALL_ROUTE_DONE = "mcp_poll_all_route_done"
 BROWSER_CONTEXT_STORE_ONLY = "browser_context_store_only"
 BROWSER_CONTEXT_ATTACH_TASK = "browser_context_attach_task"
 TASK_SESSION_FOLLOWUP = "task_session_followup"
@@ -26,6 +27,7 @@ SCENARIOS = (
     MCP_POLL_ROUTE_DONE,
     MCP_SOURCE_POLL_ROUTE_DONE,
     GENERIC_MCP_SOURCE_POLL_ROUTE_DONE,
+    MCP_POLL_ALL_ROUTE_DONE,
     BROWSER_CONTEXT_STORE_ONLY,
     BROWSER_CONTEXT_ATTACH_TASK,
     TASK_SESSION_FOLLOWUP,
@@ -868,6 +870,133 @@ class GenericMcpSourcePollRouteDoneScenario(McpSourcePollRouteDoneScenario):
             "type": self._require_str(actor, "type"),
             "name": self._require_str(actor, "name"),
         }
+
+
+class McpPollAllRouteDoneScenario(GenericMcpSourcePollRouteDoneScenario):
+    scenario_name = MCP_POLL_ALL_ROUTE_DONE
+    poll_fixture_name = "mcp_poll_all_result.json"
+
+    def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
+        poll_all_request = self.loader.scenario_fixture(self.scenario_name, self.poll_fixture_name)
+        golden = self.loader.golden_expectation(self.scenario_name)
+        source_input = self._source_input_from_poll_all_request(poll_all_request, golden["source_id"])
+
+        event = self._event_from_source_poll(source_input)
+        route_decision = self._route_event(event)
+        review_packet = self._review_packet_for(event, route_decision)
+        queue_item = self._queue_item_for(review_packet)
+        audit_decision = self._audit_decision_for(queue_item, golden)
+        log["steps"].append({"name": "mcp_poll_all_and_route", "event_id": event["id"]})
+        log["steps"].append({"name": "mark_done", "audit_decision_id": audit_decision["id"]})
+        log["steps"].append({"name": "assert_queue_empty"})
+
+        observed = {
+            "mcp_poll_all": {
+                "sources_seen": len(poll_all_request["source_ids"]),
+                "events_seen": 1,
+                "routed_count": 1,
+                "errors": 0,
+            },
+            "event": event,
+            "route_decision": route_decision,
+            "review_packet": review_packet,
+            "next_queue_item": queue_item,
+            "audit_decision": audit_decision,
+            "final_queue": {"item": None},
+        }
+        self._assert_golden(observed, golden)
+        self.writer.write_json("observed.json", observed)
+
+        return ScenarioResult(
+            scenario=self.scenario_name,
+            mode="fixture",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": event["id"],
+                "route_decision_id": route_decision["id"],
+                "queue_item_id": queue_item["id"],
+                "review_packet_id": review_packet["id"],
+                "audit_decision_id": audit_decision["id"],
+            },
+        )
+
+    def _run_orchestrator(self, log: dict[str, Any]) -> ScenarioResult:
+        assert self.orchestrator_url is not None
+        client = OrchestratorClient(self.orchestrator_url)
+        poll_all_request = self.loader.scenario_fixture(self.scenario_name, self.poll_fixture_name)
+        golden = self.loader.golden_expectation(self.scenario_name)
+
+        self._drain_existing_queue(client, log)
+        poll_response = client.poll_all_and_route_mcp_sources(poll_all_request)
+        polled = poll_response.get("polled")
+        if not isinstance(polled, list):
+            raise ScenarioFailure("expected POST /mcp-sources/poll-all-and-route response with polled list")
+
+        generic_result = self._generic_result_from_poll_all(polled, golden["source_id"])
+        routed = generic_result.get("routed")
+        if not isinstance(routed, list) or not routed or not isinstance(routed[0], dict):
+            raise ScenarioFailure("expected generic poll-all result with routed[0]")
+
+        first = routed[0]
+        event = first.get("event")
+        route_decision = first.get("route_decision")
+        review_packet = first.get("review_packet")
+        queue_item = first.get("queue_item")
+        if not isinstance(event, dict) or not isinstance(route_decision, dict):
+            raise ScenarioFailure("poll-all response missing event or route_decision")
+        if not isinstance(review_packet, dict) or not isinstance(queue_item, dict):
+            raise ScenarioFailure("poll-all response missing review artifacts")
+
+        log["steps"].append({"name": "mcp_poll_all_and_route", "event_id": event.get("id")})
+
+        done_response = client.mark_done(queue_item["id"], self._decision_for(queue_item))
+        log["steps"].append({"name": "mark_done", "response": done_response})
+
+        final_queue_item = client.next_queue_item()
+        log["steps"].append({"name": "assert_queue_empty"})
+        if final_queue_item is not None:
+            raise ScenarioFailure(f"expected empty queue after done, got {final_queue_item!r}")
+
+        observed = {
+            "mcp_poll_all": poll_response,
+            "event": event,
+            "route_decision": route_decision,
+            "review_packet": review_packet,
+            "next_queue_item": queue_item,
+            "done_response": done_response,
+            "final_queue": {"item": None},
+        }
+        self._assert_core_shapes(observed, golden)
+        self.writer.write_json("observed.json", observed)
+
+        return ScenarioResult(
+            scenario=self.scenario_name,
+            mode="orchestrator",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": event["id"],
+                "route_decision_id": route_decision["id"],
+                "queue_item_id": queue_item["id"],
+                "review_packet_id": review_packet["id"],
+            },
+        )
+
+    def _source_input_from_poll_all_request(self, poll_all_request: dict[str, Any], source_id: str) -> dict[str, Any]:
+        inputs = poll_all_request.get("inputs_by_source_id")
+        if not isinstance(inputs, dict):
+            raise ScenarioFailure("poll-all fixture inputs_by_source_id must be object")
+        source_input = inputs.get(source_id)
+        if not isinstance(source_input, dict):
+            raise ScenarioFailure(f"poll-all fixture missing input for {source_id}")
+        return source_input
+
+    def _generic_result_from_poll_all(self, polled: list[Any], source_id: str) -> dict[str, Any]:
+        for result in polled:
+            if isinstance(result, dict) and result.get("source_id") == source_id:
+                return result
+        raise ScenarioFailure(f"poll-all response missing {source_id}")
 
 
 class BrowserContextStoreOnlyScenario:

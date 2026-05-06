@@ -184,6 +184,85 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         });
       }
 
+      if (request.method === "POST" && context.url.pathname === "/mcp-sources/poll-all-and-route") {
+        if (!options.mcpSources) {
+          return sendError(response, 501, context, "mcp_sources_unavailable", "MCP source registry is not configured");
+        }
+
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) {
+          return sendSchemaError(response, context, parsed.message);
+        }
+
+        const requestBody = parseMcpPollAllRequest(parsed.value);
+        if (!requestBody.ok) {
+          return sendSchemaError(response, context, requestBody.message);
+        }
+
+        const sources = await options.mcpSources.listSources();
+        const sourceIds = sourceIdsForPollAll(sources, requestBody.sourceIds);
+        if (!sourceIds.ok) {
+          return sendSchemaError(response, context, sourceIds.message);
+        }
+
+        const polled = [];
+        let eventsSeen = 0;
+        let routedCount = 0;
+        let duplicatesIgnored = 0;
+        let errors = 0;
+
+        for (const sourceId of sourceIds.value) {
+          try {
+            const input = requestBody.inputsBySourceId[sourceId] ?? { items: [] };
+            const pollResult = await options.mcpSources.pollSource(sourceId, input, now().toISOString());
+            if (!pollResult) {
+              errors += 1;
+              polled.push({
+                source_id: sourceId,
+                ok: false,
+                error: `MCP source ${sourceId} was not found`,
+              });
+              continue;
+            }
+
+            const routed = [];
+            for (const event of pollResult.events) {
+              routed.push(await routeEventThroughGateway(options, event, now()));
+            }
+
+            eventsSeen += pollResult.events.length;
+            routedCount += routed.length;
+            duplicatesIgnored += pollResult.duplicates_ignored;
+            polled.push({
+              source_id: sourceId,
+              ok: true,
+              events_seen: pollResult.events.length,
+              routed,
+              duplicates_ignored: pollResult.duplicates_ignored,
+              cursor: pollResult.cursor,
+            });
+          } catch (error) {
+            errors += 1;
+            polled.push({
+              source_id: sourceId,
+              ok: false,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+
+        return sendJson(response, 200, {
+          ok: errors === 0,
+          sources_seen: sourceIds.value.length,
+          events_seen: eventsSeen,
+          routed_count: routedCount,
+          duplicates_ignored: duplicatesIgnored,
+          errors,
+          polled,
+          request_id: context.requestId,
+        });
+      }
+
       const getMcpSourceMatch = context.url.pathname.match(/^\/mcp-sources\/([^/]+)$/);
       if (request.method === "GET" && getMcpSourceMatch) {
         if (!options.mcpSources?.getSource) {
@@ -950,6 +1029,54 @@ function mcpPollItemToEvent(
       ],
     },
   };
+}
+
+function parseMcpPollAllRequest(
+  input: unknown,
+): { ok: true; sourceIds?: string[]; inputsBySourceId: Record<string, unknown> } | { ok: false; message: string } {
+  if (!isRecord(input)) {
+    return { ok: false, message: "poll-all request must be an object" };
+  }
+
+  const sourceIds = input.source_ids;
+  if (sourceIds !== undefined) {
+    if (!Array.isArray(sourceIds) || sourceIds.some((sourceId) => typeof sourceId !== "string" || !sourceId)) {
+      return { ok: false, message: "source_ids must be an array of non-empty strings" };
+    }
+  }
+
+  const inputsBySourceId = input.inputs_by_source_id;
+  if (inputsBySourceId !== undefined && !isRecord(inputsBySourceId)) {
+    return { ok: false, message: "inputs_by_source_id must be an object" };
+  }
+
+  return {
+    ok: true,
+    sourceIds: sourceIds as string[] | undefined,
+    inputsBySourceId: inputsBySourceId ?? {},
+  };
+}
+
+function sourceIdsForPollAll(
+  sources: unknown,
+  requestedSourceIds: string[] | undefined,
+): { ok: true; value: string[] } | { ok: false; message: string } {
+  if (requestedSourceIds) {
+    return { ok: true, value: requestedSourceIds };
+  }
+
+  if (!Array.isArray(sources)) {
+    return { ok: false, message: "MCP source registry listSources must return an array" };
+  }
+
+  const ids: string[] = [];
+  for (const source of sources) {
+    if (!isRecord(source) || typeof source.id !== "string" || !source.id) {
+      return { ok: false, message: "MCP source summaries must include non-empty id strings" };
+    }
+    ids.push(source.id);
+  }
+  return { ok: true, value: ids };
 }
 
 function readNonEmptyString(

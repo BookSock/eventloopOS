@@ -33,6 +33,9 @@ class OrchestratorClient:
     def poll_and_route_mcp_source(self, source_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", f"/mcp-sources/{source_id}/poll-and-route", payload) or {}
 
+    def poll_all_and_route_mcp_sources(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/mcp-sources/poll-all-and-route", payload) or {}
+
     def list_mcp_sources(self) -> dict[str, Any]:
         return self._request("GET", "/mcp-sources") or {}
 

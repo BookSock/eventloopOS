@@ -9,6 +9,7 @@ app/test-harness/bin/run-scenario seeded_queue
 app/test-harness/bin/run-scenario mcp_poll_route_done
 app/test-harness/bin/run-scenario mcp_source_poll_route_done
 app/test-harness/bin/run-scenario generic_mcp_source_poll_route_done
+app/test-harness/bin/run-scenario mcp_poll_all_route_done
 app/test-harness/bin/run-scenario browser_context_store_only
 app/test-harness/bin/self-test
 ```
@@ -19,6 +20,7 @@ app/test-harness/bin/self-test
 app/test-harness/bin/run-scenario seeded_queue --orchestrator-url http://127.0.0.1:3000
 app/test-harness/bin/run-scenario mcp_poll_route_done --orchestrator-url http://127.0.0.1:3000
 app/test-harness/bin/run-scenario generic_mcp_source_poll_route_done --orchestrator-url http://127.0.0.1:3000
+app/test-harness/bin/run-scenario mcp_poll_all_route_done --orchestrator-url http://127.0.0.1:3000
 app/test-harness/bin/run-scenario browser_context_store_only --orchestrator-url http://127.0.0.1:3000
 ```
 
