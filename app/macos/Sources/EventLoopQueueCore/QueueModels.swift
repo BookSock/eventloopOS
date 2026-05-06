@@ -5,8 +5,14 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
     public let reviewPacketId: String
     public let title: String
     public let summary: String
+    public let decisionNeeded: String
     public let source: String
     public let priority: Int
+    public let riskLevel: String
+    public let confidence: String
+    public let riskTags: [String]
+    public let contextResources: [ReviewContextResource]
+    public let evidence: [ReviewEvidence]
     public let recommendedAction: String
     public let createdAt: Date
     public let workspaceSnapshot: WorkspaceSnapshot?
@@ -16,8 +22,14 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
         reviewPacketId: String? = nil,
         title: String,
         summary: String,
+        decisionNeeded: String = "",
         source: String,
         priority: Int,
+        riskLevel: String = "medium",
+        confidence: String = "medium",
+        riskTags: [String] = [],
+        contextResources: [ReviewContextResource] = [],
+        evidence: [ReviewEvidence] = [],
         recommendedAction: String,
         createdAt: Date,
         workspaceSnapshot: WorkspaceSnapshot? = nil
@@ -26,11 +38,56 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
         self.reviewPacketId = reviewPacketId ?? id
         self.title = title
         self.summary = summary
+        self.decisionNeeded = decisionNeeded
         self.source = source
         self.priority = priority
+        self.riskLevel = riskLevel
+        self.confidence = confidence
+        self.riskTags = riskTags
+        self.contextResources = contextResources
+        self.evidence = evidence
         self.recommendedAction = recommendedAction
         self.createdAt = createdAt
         self.workspaceSnapshot = workspaceSnapshot
+    }
+}
+
+public struct ReviewContextResource: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let kind: String
+    public let title: String
+    public let url: String?
+    public let source: String?
+    public let restoreConfidence: String?
+
+    public init(
+        id: String,
+        kind: String,
+        title: String,
+        url: String? = nil,
+        source: String? = nil,
+        restoreConfidence: String? = nil
+    ) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.url = url
+        self.source = source
+        self.restoreConfidence = restoreConfidence
+    }
+}
+
+public struct ReviewEvidence: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let kind: String
+    public let title: String
+    public let url: String?
+
+    public init(id: String, kind: String, title: String, url: String? = nil) {
+        self.id = id
+        self.kind = kind
+        self.title = title
+        self.url = url
     }
 }
 
@@ -143,8 +200,14 @@ struct QueueItemDTO: Codable, Equatable, Sendable {
             reviewPacketId: reviewPacketId,
             title: reviewPacket.title,
             summary: reviewPacket.summary,
+            decisionNeeded: reviewPacket.decisionNeeded ?? "",
             source: reviewPacket.primarySource,
             priority: priorityScore,
+            riskLevel: reviewPacket.riskLevel ?? "medium",
+            confidence: reviewPacket.confidence ?? "medium",
+            riskTags: reviewPacket.riskTags ?? [],
+            contextResources: reviewPacket.contextResources,
+            evidence: reviewPacket.evidenceResources,
             recommendedAction: reviewPacket.recommendedAction.label,
             createdAt: createdAt,
             workspaceSnapshot: reviewPacket.workspaceSnapshot
@@ -156,6 +219,11 @@ struct ReviewPacketDTO: Codable, Equatable, Sendable {
     let id: String
     let title: String
     let summary: String
+    let decisionNeeded: String?
+    let riskLevel: String?
+    let confidence: String?
+    let riskTags: [String]?
+    let evidence: [EvidenceDTO]?
     let recommendedAction: ActionDTO
     let context: [ContextResourceDTO]
 
@@ -163,6 +231,11 @@ struct ReviewPacketDTO: Codable, Equatable, Sendable {
         case id
         case title
         case summary
+        case decisionNeeded = "decision_needed"
+        case riskLevel = "risk_level"
+        case confidence
+        case riskTags = "risk_tags"
+        case evidence
         case recommendedAction = "recommended_action"
         case context
     }
@@ -174,6 +247,30 @@ struct ReviewPacketDTO: Codable, Equatable, Sendable {
     var workspaceSnapshot: WorkspaceSnapshot? {
         context.compactMap(\.workspaceSnapshot).first
     }
+
+    var contextResources: [ReviewContextResource] {
+        context.enumerated().map { index, resource in
+            ReviewContextResource(
+                id: resource.id ?? "ctx_\(id)_\(index)",
+                kind: resource.kind ?? "url",
+                title: resource.title ?? resource.url ?? resource.kind ?? "Context",
+                url: resource.url,
+                source: resource.source,
+                restoreConfidence: resource.restoreConfidence
+            )
+        }
+    }
+
+    var evidenceResources: [ReviewEvidence] {
+        (evidence ?? []).map { item in
+            ReviewEvidence(
+                id: item.id,
+                kind: item.kind,
+                title: item.title,
+                url: item.url
+            )
+        }
+    }
 }
 
 struct ActionDTO: Codable, Equatable, Sendable {
@@ -181,9 +278,23 @@ struct ActionDTO: Codable, Equatable, Sendable {
 }
 
 struct ContextResourceDTO: Codable, Equatable, Sendable {
+    let id: String?
     let url: String?
     let kind: String?
+    let title: String?
+    let source: String?
+    let restoreConfidence: String?
     let snapshot: WorkspaceSnapshot?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case url
+        case kind
+        case title
+        case source
+        case restoreConfidence = "restore_confidence"
+        case snapshot
+    }
 
     var workspaceSnapshot: WorkspaceSnapshot? {
         guard kind == "workspace_snapshot" else {
@@ -191,4 +302,11 @@ struct ContextResourceDTO: Codable, Equatable, Sendable {
         }
         return snapshot
     }
+}
+
+struct EvidenceDTO: Codable, Equatable, Sendable {
+    let id: String
+    let kind: String
+    let title: String
+    let url: String?
 }

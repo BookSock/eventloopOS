@@ -150,19 +150,69 @@ private struct PacketDetail: View {
                     Text(packet.summary)
                         .font(.body)
                         .accessibilityIdentifier("packet-summary")
-                    Text(packet.source)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("packet-source")
+                    HStack(spacing: 8) {
+                        PacketPill(label: "P\(packet.priority)", accessibilityID: "packet-priority")
+                        PacketPill(label: packet.riskLevel, accessibilityID: "packet-risk-level")
+                        PacketPill(label: packet.confidence, accessibilityID: "packet-confidence")
+                    }
                 }
 
                 Divider()
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Recommended Action")
-                        .font(.headline)
-                    Text(packet.recommendedAction)
-                        .accessibilityIdentifier("packet-recommended-action")
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        DetailSection(title: "Decision", systemImage: "questionmark.circle") {
+                            Text(packet.decisionNeeded.isEmpty ? packet.recommendedAction : packet.decisionNeeded)
+                                .accessibilityIdentifier("packet-decision-needed")
+                        }
+
+                        DetailSection(title: "Action", systemImage: "checkmark.circle") {
+                            Text(packet.recommendedAction)
+                                .accessibilityIdentifier("packet-recommended-action")
+                        }
+
+                        if !packet.riskTags.isEmpty {
+                            DetailSection(title: "Risk", systemImage: "exclamationmark.triangle") {
+                                FlowText(items: packet.riskTags)
+                                    .accessibilityIdentifier("packet-risk-tags")
+                            }
+                        }
+
+                        if !packet.contextResources.isEmpty {
+                            DetailSection(title: "Context", systemImage: "link") {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(packet.contextResources) { resource in
+                                        ResourceRow(
+                                            title: resource.title,
+                                            subtitle: resource.url ?? resource.kind,
+                                            badge: resource.restoreConfidence ?? resource.source ?? resource.kind
+                                        )
+                                    }
+                                }
+                                .accessibilityIdentifier("packet-context-list")
+                            }
+                        } else {
+                            Text(packet.source)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("packet-source")
+                        }
+
+                        if !packet.evidence.isEmpty {
+                            DetailSection(title: "Evidence", systemImage: "doc.text.magnifyingglass") {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(packet.evidence) { evidence in
+                                        ResourceRow(
+                                            title: evidence.title,
+                                            subtitle: evidence.url ?? evidence.kind,
+                                            badge: evidence.kind
+                                        )
+                                    }
+                                }
+                                .accessibilityIdentifier("packet-evidence-list")
+                            }
+                        }
+                    }
                 }
 
                 Spacer()
@@ -193,6 +243,76 @@ private struct PacketDetail: View {
         }
         .padding(24)
         .accessibilityIdentifier("packet-detail")
+    }
+}
+
+private struct PacketPill: View {
+    let label: String
+    let accessibilityID: String
+
+    var body: some View {
+        Text(label)
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(.secondary.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .accessibilityIdentifier(accessibilityID)
+    }
+}
+
+private struct DetailSection<Content: View>: View {
+    let title: String
+    let systemImage: String
+    private let content: Content
+
+    init(title: String, systemImage: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.systemImage = systemImage
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(title, systemImage: systemImage)
+                .font(.headline)
+            content
+                .font(.body)
+        }
+    }
+}
+
+private struct ResourceRow: View {
+    let title: String
+    let subtitle: String
+    let badge: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(badge)
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 64, alignment: .leading)
+                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(2)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+}
+
+private struct FlowText: View {
+    let items: [String]
+
+    var body: some View {
+        Text(items.joined(separator: "  "))
+            .font(.callout)
     }
 }
 

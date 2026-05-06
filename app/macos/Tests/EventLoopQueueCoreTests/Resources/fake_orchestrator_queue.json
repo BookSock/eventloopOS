@@ -9,15 +9,35 @@
         "id": "packet-blog-feedback",
         "title": "Review blog feedback draft",
         "summary": "Slack feedback changed positioning. Agent needs human judgment before publishing.",
+        "decision_needed": "Choose whether launch positioning should lead with speed or reliability.",
+        "risk_level": "medium",
+        "confidence": "high",
+        "risk_tags": ["external_send", "brand_voice"],
+        "evidence": [
+          {
+            "id": "ev_slack_feedback",
+            "kind": "slack_message",
+            "title": "Malis feedback in launch thread",
+            "url": "https://slack.example.com/archives/C123/p999"
+          }
+        ],
         "recommended_action": {
           "label": "Approve revised angle or ask for another pass."
         },
         "context": [
           {
-            "url": "slack://thread/blog-feedback"
+            "id": "ctx_slack_feedback",
+            "kind": "slack_thread",
+            "title": "Blog feedback thread",
+            "url": "slack://thread/blog-feedback",
+            "source": "slack",
+            "restore_confidence": "high"
           },
           {
+            "id": "ctx_workspace_blog",
             "kind": "workspace_snapshot",
+            "title": "Blog review workspace",
+            "restore_confidence": "medium",
             "snapshot": {
               "backend": "aerospace",
               "windows": [
@@ -44,12 +64,28 @@
         "id": "packet-ci-failed",
         "title": "CI failed on routing PR",
         "summary": "GitHub check failed after agent patch. Needs owner decision before retrying.",
+        "decision_needed": "Decide whether to retry CI or send failure back to agent.",
+        "risk_level": "low",
+        "confidence": "medium",
+        "risk_tags": ["ci_failure"],
+        "evidence": [
+          {
+            "id": "ev_github_check",
+            "kind": "github_check",
+            "title": "GitHub CI failure"
+          }
+        ],
         "recommended_action": {
           "label": "Open failure, choose retry or send back to agent."
         },
         "context": [
           {
-            "url": "github://pagerfree/eventloopOS/pull/12"
+            "id": "ctx_github_pr",
+            "kind": "github",
+            "title": "Routing PR",
+            "url": "github://pagerfree/eventloopOS/pull/12",
+            "source": "github",
+            "restore_confidence": "high"
           }
         ]
       }
