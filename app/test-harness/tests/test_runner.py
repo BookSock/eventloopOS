@@ -15,6 +15,7 @@ from test_harness.scenarios import (
     MCP_SOURCE_POLL_ROUTE_DONE,
     SEEDED_QUEUE,
     TASK_SESSION_FOLLOWUP,
+    WORKSPACE_RESTORE_DISABLED,
     WORKSPACE_STATUS_SMOKE,
     BrowserContextAttachTaskScenario,
     BrowserContextStoreOnlyScenario,
@@ -22,6 +23,7 @@ from test_harness.scenarios import (
     McpSourcePollRouteDoneScenario,
     SeededQueueScenario,
     TaskSessionFollowupScenario,
+    WorkspaceRestoreDisabledScenario,
     WorkspaceStatusSmokeScenario,
 )
 
@@ -282,6 +284,26 @@ class WorkspaceStatusSmokeRunnerTests(unittest.TestCase):
 
     def _run(self, artifact_dir: Path):
         runner = WorkspaceStatusSmokeScenario(
+            loader=FixtureLoader(REPO_ROOT),
+            writer=ArtifactWriter(artifact_dir),
+            clock=FakeClock(),
+        )
+        return runner.run()
+
+
+class WorkspaceRestoreDisabledRunnerTests(unittest.TestCase):
+    def test_fixture_replay_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(Path(tmp))
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.scenario, WORKSPACE_RESTORE_DISABLED)
+        self.assertEqual(result.mode, "fixture")
+        self.assertEqual(result.details["error_code"], "workspace_execute_disabled")
+        self.assertEqual(result.details["status"], 403)
+
+    def _run(self, artifact_dir: Path):
+        runner = WorkspaceRestoreDisabledScenario(
             loader=FixtureLoader(REPO_ROOT),
             writer=ArtifactWriter(artifact_dir),
             clock=FakeClock(),

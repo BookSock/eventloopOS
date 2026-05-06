@@ -165,7 +165,7 @@ Implemented:
 - `app/browser-extension`: shared-schema `browser_tab` capture/restore, optional task/project route hints, legacy resource normalizer, native bridge envelope/capability protocol.
 - `app/native-host`: Chrome Native Messaging stdio host, context capture JSONL sink, optional route hints (`task_hint`, `project_hint`), macOS Chrome manifest installer, and live smoke that forwards browser capture into orchestrator as `store_only` context.
 - `app/macos`: Swift queue shell using real orchestrator API shape, lease-next flow, automatic lease renewal, workspace status/restore-plan client, and manual-mode toggle (`Cmd-Option-Shift-M`) that skips workspace restore planning without clearing queue. Carbon global hotkey wiring exists in the app target without third-party dependency.
-- `app/test-harness`: `seeded_queue`, `mcp_poll_route_done`, `mcp_source_poll_route_done`, `browser_context_store_only`, `browser_context_attach_task`, `task_session_followup`, and `workspace_status_smoke` fixture/live scenarios with artifacts.
+- `app/test-harness`: `seeded_queue`, `mcp_poll_route_done`, `mcp_source_poll_route_done`, `browser_context_store_only`, `browser_context_attach_task`, `task_session_followup`, `workspace_status_smoke`, and `workspace_restore_disabled` fixture/live scenarios with artifacts.
 - `config`: documented read-only MCP source config example for Slack/GitHub-like poll sources, validated by orchestrator tests.
 
 Current proof commands:

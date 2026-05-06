@@ -15,6 +15,7 @@ from .scenarios import (
     SCENARIOS,
     SEEDED_QUEUE,
     TASK_SESSION_FOLLOWUP,
+    WORKSPACE_RESTORE_DISABLED,
     WORKSPACE_STATUS_SMOKE,
     BrowserContextAttachTaskScenario,
     BrowserContextStoreOnlyScenario,
@@ -22,6 +23,7 @@ from .scenarios import (
     McpSourcePollRouteDoneScenario,
     SeededQueueScenario,
     TaskSessionFollowupScenario,
+    WorkspaceRestoreDisabledScenario,
     WorkspaceStatusSmokeScenario,
 )
 
@@ -49,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         BROWSER_CONTEXT_ATTACH_TASK: BrowserContextAttachTaskScenario,
         TASK_SESSION_FOLLOWUP: TaskSessionFollowupScenario,
         WORKSPACE_STATUS_SMOKE: WorkspaceStatusSmokeScenario,
+        WORKSPACE_RESTORE_DISABLED: WorkspaceRestoreDisabledScenario,
     }[args.scenario]
     runner = runner_class(
         loader=FixtureLoader(repo_root),

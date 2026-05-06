@@ -17,6 +17,7 @@ BROWSER_CONTEXT_STORE_ONLY = "browser_context_store_only"
 BROWSER_CONTEXT_ATTACH_TASK = "browser_context_attach_task"
 TASK_SESSION_FOLLOWUP = "task_session_followup"
 WORKSPACE_STATUS_SMOKE = "workspace_status_smoke"
+WORKSPACE_RESTORE_DISABLED = "workspace_restore_disabled"
 SCENARIOS = (
     SEEDED_QUEUE,
     MCP_POLL_ROUTE_DONE,
@@ -25,6 +26,7 @@ SCENARIOS = (
     BROWSER_CONTEXT_ATTACH_TASK,
     TASK_SESSION_FOLLOWUP,
     WORKSPACE_STATUS_SMOKE,
+    WORKSPACE_RESTORE_DISABLED,
 )
 
 
@@ -1204,3 +1206,100 @@ class WorkspaceStatusSmokeScenario:
             allowed = {"binary_missing", "permission_denied", "server_unavailable", "invalid_response", "unknown_error"}
             if status.get("reason") not in allowed:
                 raise ScenarioFailure(f"workspace status reason mismatch: {status!r}")
+
+
+class WorkspaceRestoreDisabledScenario:
+    def __init__(
+        self,
+        loader: FixtureLoader,
+        writer: ArtifactWriter,
+        clock: FakeClock,
+        orchestrator_url: str | None = None,
+    ) -> None:
+        self.loader = loader
+        self.writer = writer
+        self.clock = clock
+        self.orchestrator_url = orchestrator_url
+
+    def run(self) -> ScenarioResult:
+        mode = "orchestrator" if self.orchestrator_url else "fixture"
+        log: dict[str, Any] = {
+            "scenario": WORKSPACE_RESTORE_DISABLED,
+            "mode": mode,
+            "started_at": self.clock.now_iso(),
+            "steps": [],
+        }
+        try:
+            result = self._run_orchestrator(log) if self.orchestrator_url else self._run_fixture(log)
+            log["passed"] = True
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            self.writer.write_json("summary.json", result.details)
+            return result
+        except Exception as exc:
+            log["passed"] = False
+            log["error"] = str(exc)
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            raise
+
+    def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
+        observed = {
+            "error": {
+                "code": "workspace_execute_disabled",
+                "status": 403,
+            }
+        }
+        log["steps"].append({"name": "assert_restore_disabled", "status": 403})
+        self.writer.write_json("observed.json", observed)
+        return ScenarioResult(
+            scenario=WORKSPACE_RESTORE_DISABLED,
+            mode="fixture",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "error_code": "workspace_execute_disabled",
+                "status": 403,
+            },
+        )
+
+    def _run_orchestrator(self, log: dict[str, Any]) -> ScenarioResult:
+        if self.orchestrator_url is None:
+            raise ScenarioFailure("orchestrator_url required")
+        client = OrchestratorClient(self.orchestrator_url)
+        try:
+            client.restore_workspace(
+                {
+                    "confirm_execute": True,
+                    "snapshot": {
+                        "backend": "aerospace",
+                        "windows": [],
+                    },
+                },
+                idempotency_key="idem_workspace_restore_disabled_harness",
+            )
+        except Exception as exc:
+            message = str(exc)
+            if "HTTP 403" not in message or "workspace_execute_disabled" not in message:
+                raise ScenarioFailure(f"expected disabled workspace restore error, got {message}") from exc
+            log["steps"].append({"name": "assert_restore_disabled", "status": 403})
+            observed = {
+                "error": {
+                    "code": "workspace_execute_disabled",
+                    "status": 403,
+                    "message": message,
+                }
+            }
+            self.writer.write_json("observed.json", observed)
+            return ScenarioResult(
+                scenario=WORKSPACE_RESTORE_DISABLED,
+                mode="orchestrator",
+                passed=True,
+                artifact_dir=self.writer.root,
+                details={
+                    "error_code": "workspace_execute_disabled",
+                    "status": 403,
+                },
+            )
+
+        raise ScenarioFailure("expected workspace restore to be disabled")

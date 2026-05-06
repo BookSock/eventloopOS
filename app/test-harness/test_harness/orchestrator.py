@@ -64,6 +64,10 @@ class OrchestratorClient:
     def workspace_status(self) -> dict[str, Any]:
         return self._request("GET", "/workspace/status") or {}
 
+    def restore_workspace(self, payload: dict[str, Any], idempotency_key: str | None = None) -> dict[str, Any]:
+        headers = {"Idempotency-Key": idempotency_key} if idempotency_key else None
+        return self._request("POST", "/workspace/restore", payload, headers=headers) or {}
+
     def _request(
         self,
         method: str,

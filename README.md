@@ -24,7 +24,7 @@ pnpm --filter @eventloopos/orchestrator start
 pnpm run test:e2e:live
 ```
 
-Live proof covers seeded queue, MCP source discovery, MCP poll-and-route into queue, MCP poll -> review -> done, passive browser context `store_only`, task-attached browser context search, task-session discovery + idempotent followup, native-host forwarding, workspace status/capture/restore-plan contracts, workspace status smoke in the live harness, and macOS manual-mode queue state with `Cmd-Option-Shift-M` global hotkey wiring. The macOS view model auto-renews queue leases and skips workspace restore planning while manual mode is active.
+Live proof covers seeded queue, MCP source discovery, MCP poll-and-route into queue, MCP poll -> review -> done, passive browser context `store_only`, task-attached browser context search, task-session discovery + idempotent followup, native-host forwarding, workspace status/capture/restore-plan contracts, workspace status/restore-disabled smoke in the live harness, and macOS manual-mode queue state with `Cmd-Option-Shift-M` global hotkey wiring. The macOS view model auto-renews queue leases and skips workspace restore planning while manual mode is active.
 
 Workspace restore execution is disabled by default. Set `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled` and call `POST /workspace/restore` with `confirm_execute: true` plus an `idempotency-key` header to execute an AeroSpace restore plan.
 
