@@ -358,6 +358,11 @@ public final class QueueViewModel: ObservableObject {
         await loadTaskSessions()
     }
 
+    public func prepareSelectedPacketDetail() async {
+        await prepareSelectedWorkspaceRestore()
+        await loadLineageForSelectedPacket()
+    }
+
     public func loadLineageForSelectedPacket(limit: Int = 100) async {
         guard let packetId = selectedPacketID else {
             queueLineageState = .idle

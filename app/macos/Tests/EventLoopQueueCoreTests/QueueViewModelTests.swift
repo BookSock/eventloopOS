@@ -162,6 +162,31 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.queueLineageState, .loaded("packet-blog-feedback", lineage))
     }
 
+    func testPrepareSelectedPacketDetailPlansWorkspaceAndLoadsLineage() async {
+        let lineage = makeLineage(queueItemId: "packet-blog-feedback")
+        let client = FakeQueueClient(
+            packets: SeededQueue.packets,
+            queueLineageResult: .success(lineage)
+        )
+        let plan = WorkspaceRestorePlan(
+            commands: [WorkspaceCommand(command: "aerospace", args: ["workspace", "eventloop-blog"])],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            planEnvelope: WorkspaceRestorePlanEnvelope(plan: plan, executeSupported: false)
+        )
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-blog-feedback")
+
+        await viewModel.prepareSelectedPacketDetail()
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .planned(plan))
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [SeededQueue.blogFeedbackWorkspace])
+        XCTAssertEqual(client.requestedQueueLineagePacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(viewModel.queueLineageState, .loaded("packet-blog-feedback", lineage))
+    }
+
     func testSelectionChangeClearsLineageState() async {
         let lineage = makeLineage(queueItemId: "packet-blog-feedback")
         let client = FakeQueueClient(

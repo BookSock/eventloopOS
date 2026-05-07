@@ -194,7 +194,7 @@ struct QueueWindowView: View {
             viewModel.startAutomaticContextRestoreRefresh()
         }
         .task(id: viewModel.selectedPacketID) {
-            await viewModel.prepareSelectedWorkspaceRestore()
+            await viewModel.prepareSelectedPacketDetail()
         }
         .task(id: viewModel.selectedTaskId) {
             await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
