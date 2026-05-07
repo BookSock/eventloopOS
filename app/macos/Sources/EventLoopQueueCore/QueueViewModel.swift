@@ -216,6 +216,14 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    public func loadTaskSessionsForSelectedPacketIfNeeded() async {
+        guard selectedTaskId != nil, taskSessions.isEmpty else {
+            return
+        }
+
+        await loadTaskSessions()
+    }
+
     public func bindSelectedPacket(toTaskSessionId taskSessionId: String) async {
         guard let taskId = selectedTaskId else {
             taskBindingState = .failed("Selected packet has no task id")

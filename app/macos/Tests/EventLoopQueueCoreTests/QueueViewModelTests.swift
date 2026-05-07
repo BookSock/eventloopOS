@@ -136,6 +136,54 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedTaskSessions.map(\.id), ["task_session_blog"])
     }
 
+    func testLoadTaskSessionsForSelectedPacketIfNeededAutoLoadsTaskSessions() async {
+        let packet = ReviewPacket(
+            id: "packet-route",
+            taskId: "task_blog_feedback",
+            title: "Route feedback",
+            summary: "Human approved agent handoff.",
+            source: "manual://review",
+            priority: 90,
+            recommendedAction: "Route to task agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(
+                packets: [packet],
+                taskSessions: [
+                    TaskSession(id: "task_session_blog", taskId: "task_blog_feedback", provider: "fake", status: "idle")
+                ]
+            )
+        )
+        await viewModel.loadQueue()
+
+        await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
+
+        XCTAssertEqual(viewModel.taskBindingState, .loaded)
+        XCTAssertEqual(viewModel.selectedTaskSessions.map(\.id), ["task_session_blog"])
+    }
+
+    func testLoadTaskSessionsForSelectedPacketIfNeededSkipsPacketsWithoutTaskId() async {
+        let packet = ReviewPacket(
+            id: "packet-route",
+            title: "Route feedback",
+            summary: "Human approved agent handoff.",
+            source: "manual://review",
+            priority: 90,
+            recommendedAction: "Route to task agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let viewModel = QueueViewModel(client: FakeQueueClient(packets: [packet]))
+        await viewModel.loadQueue()
+
+        await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
+
+        XCTAssertEqual(viewModel.taskBindingState, .idle)
+        XCTAssertEqual(viewModel.taskSessions, [])
+    }
+
     func testBindSelectedPacketToTaskSessionUsesSelectedTaskId() async {
         let packet = ReviewPacket(
             id: "packet-route",

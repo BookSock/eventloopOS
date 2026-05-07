@@ -155,6 +155,9 @@ struct QueueWindowView: View {
         .task(id: viewModel.selectedPacketID) {
             await viewModel.prepareSelectedWorkspaceRestore()
         }
+        .task(id: viewModel.selectedTaskId) {
+            await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
+        }
         .onDisappear {
             viewModel.stopAutomaticQueueRefresh()
             viewModel.stopAutomaticLeaseRenewal()
