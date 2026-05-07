@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 import type { ActivityEvent, MetricsSnapshot } from "../observability.js";
 
 export type DogfoodReviewFormat = "text" | "json";
+export type DogfoodCheckFormat = "text" | "json";
 
 export type DogfoodReviewOptions = {
   baseUrl: string;
@@ -12,6 +13,26 @@ export type DogfoodReviewOptions = {
   stdout?: Pick<NodeJS.WriteStream, "write">;
   stderr?: Pick<NodeJS.WriteStream, "write">;
   now?: () => Date;
+};
+
+export type DogfoodCheckOptions = {
+  baseUrl: string;
+  limit: number;
+  since?: string;
+  format: DogfoodCheckFormat;
+  thresholds: DogfoodCheckThresholds;
+  fetchFn?: typeof fetch;
+  stdout?: Pick<NodeJS.WriteStream, "write">;
+  stderr?: Pick<NodeJS.WriteStream, "write">;
+  now?: () => Date;
+};
+
+export type DogfoodCheckThresholds = {
+  maxIgnoredRate: number;
+  minRestoreSuccessRate: number;
+  maxFollowupFailures: number;
+  maxStaleLeases: number;
+  maxPendingRestoreAgeMs: number;
 };
 
 type MetricsResponse = {
@@ -41,6 +62,22 @@ type DogfoodReviewReport = {
     queue_clearance_rate: number | null;
     task_session_route_rate: number | null;
   };
+};
+
+type DogfoodCheckReport = {
+  generated_at: string;
+  since: string;
+  passed: boolean;
+  checks: DogfoodCheckResult[];
+};
+
+type DogfoodCheckResult = {
+  name: string;
+  passed: boolean;
+  value: number | null;
+  threshold: number;
+  comparator: "<=" | ">=";
+  summary: string;
 };
 
 type RollupSummary = {
@@ -109,28 +146,28 @@ export function dogfoodReviewOptionsFromEnv(env: NodeJS.ProcessEnv): DogfoodRevi
   };
 }
 
+export function dogfoodCheckOptionsFromEnv(env: NodeJS.ProcessEnv): DogfoodCheckOptions {
+  return {
+    baseUrl: env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377",
+    limit: parsePositiveInteger(env.EVENTLOOPOS_DOGFOOD_REVIEW_LIMIT, 200),
+    since: env.EVENTLOOPOS_DOGFOOD_REVIEW_SINCE,
+    format: parseFormat(env.EVENTLOOPOS_DOGFOOD_CHECK_FORMAT),
+    thresholds: {
+      maxIgnoredRate: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_IGNORED_RATE, 0.1),
+      minRestoreSuccessRate: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MIN_RESTORE_SUCCESS_RATE, 0.8),
+      maxFollowupFailures: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_FOLLOWUP_FAILURES, 0),
+      maxStaleLeases: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_STALE_LEASES, 0),
+      maxPendingRestoreAgeMs: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_PENDING_RESTORE_AGE_MS, 30 * 60 * 1000),
+    },
+  };
+}
+
 export async function runDogfoodReview(options: DogfoodReviewOptions): Promise<number> {
-  const fetchFn = options.fetchFn ?? fetch;
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
-  const now = options.now ?? (() => new Date());
 
   try {
-    const [metrics, activity] = await Promise.all([
-      fetchJson<MetricsResponse>(fetchFn, new URL("/metrics", options.baseUrl)),
-      fetchJson<ActivityResponse>(fetchFn, new URL(`/activity?limit=${options.limit}`, options.baseUrl)),
-    ]);
-    const generatedAt = metrics.generated_at ?? now().toISOString();
-    const since = options.since ?? startOfLocalDay(now()).toISOString();
-    const events = activity.events.filter((event) => new Date(event.occurred_at).getTime() >= new Date(since).getTime());
-    const report = buildDogfoodReviewReport({
-      generated_at: generatedAt,
-      since,
-      metrics: metrics.metrics,
-      events,
-      fetched_activity_count: activity.count,
-    });
-
+    const report = await fetchDogfoodReport(options);
     if (options.format === "json") {
       stdout.write(`${JSON.stringify(report)}\n`);
     } else {
@@ -141,6 +178,45 @@ export async function runDogfoodReview(options: DogfoodReviewOptions): Promise<n
     stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
+}
+
+export async function runDogfoodCheck(options: DogfoodCheckOptions): Promise<number> {
+  const stdout = options.stdout ?? process.stdout;
+  const stderr = options.stderr ?? process.stderr;
+
+  try {
+    const review = await fetchDogfoodReport(options);
+    const report = buildDogfoodCheckReport(review, options.thresholds);
+    if (options.format === "json") {
+      stdout.write(`${JSON.stringify(report)}\n`);
+    } else {
+      stdout.write(formatCheckTextReport(report));
+    }
+    return report.passed ? 0 : 2;
+  } catch (error) {
+    stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+}
+
+async function fetchDogfoodReport(options: Pick<DogfoodReviewOptions, "baseUrl" | "limit" | "since" | "fetchFn" | "now">): Promise<DogfoodReviewReport> {
+  const fetchFn = options.fetchFn ?? fetch;
+  const now = options.now ?? (() => new Date());
+
+  const [metrics, activity] = await Promise.all([
+    fetchJson<MetricsResponse>(fetchFn, new URL("/metrics", options.baseUrl)),
+    fetchJson<ActivityResponse>(fetchFn, new URL(`/activity?limit=${options.limit}`, options.baseUrl)),
+  ]);
+  const generatedAt = metrics.generated_at ?? now().toISOString();
+  const since = options.since ?? startOfLocalDay(now()).toISOString();
+  const events = activity.events.filter((event) => new Date(event.occurred_at).getTime() >= new Date(since).getTime());
+  return buildDogfoodReviewReport({
+    generated_at: generatedAt,
+    since,
+    metrics: metrics.metrics,
+    events,
+    fetched_activity_count: activity.count,
+  });
 }
 
 async function fetchJson<T>(fetchFn: typeof fetch, url: URL): Promise<T> {
@@ -268,6 +344,88 @@ function formatTextReport(report: DogfoodReviewReport): string {
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function buildDogfoodCheckReport(report: DogfoodReviewReport, thresholds: DogfoodCheckThresholds): DogfoodCheckReport {
+  const counters = report.metrics.counters;
+  const pendingRestoreAgeMs = maxPendingRestoreAgeMs(report.events, report.generated_at);
+  const checks: DogfoodCheckResult[] = [
+    maxCheck(
+      "ignored_queue_item_rate",
+      ratio(counters.queue_items_ignored_total, counters.queue_items_created_total),
+      thresholds.maxIgnoredRate,
+      "ignored queue items divided by created queue items",
+    ),
+    minCheck(
+      "restore_success_rate",
+      report.derived.restore_success_rate,
+      thresholds.minRestoreSuccessRate,
+      "restore done divided by restore done plus failed",
+    ),
+    maxCheck(
+      "task_followup_failures",
+      counters.task_followups_failed_total ?? 0,
+      thresholds.maxFollowupFailures,
+      "failed task followup count",
+    ),
+    maxCheck(
+      "stale_queue_leases",
+      counters.queue_stale_leases_total ?? counters.stale_queue_leases_total ?? 0,
+      thresholds.maxStaleLeases,
+      "stale queue lease count",
+    ),
+    maxCheck(
+      "pending_restore_age_ms",
+      pendingRestoreAgeMs,
+      thresholds.maxPendingRestoreAgeMs,
+      "oldest pending restore request age",
+    ),
+  ];
+  return {
+    generated_at: report.generated_at,
+    since: report.since,
+    passed: checks.every((check) => check.passed),
+    checks,
+  };
+}
+
+function formatCheckTextReport(report: DogfoodCheckReport): string {
+  const lines = [
+    "EventloopOS Dogfood Check",
+    `Generated: ${report.generated_at}`,
+    `Since: ${report.since}`,
+    `Status: ${report.passed ? "pass" : "fail"}`,
+    "",
+    "Checks:",
+  ];
+  for (const check of report.checks) {
+    lines.push(
+      `- ${check.passed ? "pass" : "fail"} ${check.name}: value=${formatCheckValue(check.value)} threshold=${check.comparator}${formatCheckValue(check.threshold)} ${check.summary}`,
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function maxCheck(name: string, value: number | null, threshold: number, summary: string): DogfoodCheckResult {
+  return {
+    name,
+    passed: value === null || value <= threshold,
+    value,
+    threshold,
+    comparator: "<=",
+    summary,
+  };
+}
+
+function minCheck(name: string, value: number | null, threshold: number, summary: string): DogfoodCheckResult {
+  return {
+    name,
+    passed: value === null || value >= threshold,
+    value,
+    threshold,
+    comparator: ">=",
+    summary,
+  };
 }
 
 function rollupBy(events: ActivityEvent[], keyForEvent: (event: ActivityEvent) => string | undefined): RollupSummary[] {
@@ -418,6 +576,25 @@ function stringDetail(details: Record<string, unknown>, key: string): string | u
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
+function maxPendingRestoreAgeMs(events: ActivityEvent[], generatedAt: string): number | null {
+  const pending = new Map<string, string>();
+  for (const event of events) {
+    if (!event.type.startsWith("context_restore_")) continue;
+    const id = stringDetail(event.details, "restore_request_id");
+    if (!id) continue;
+    if (event.type === "context_restore_requested") {
+      const existing = pending.get(id);
+      if (!existing || event.occurred_at < existing) pending.set(id, event.occurred_at);
+    }
+    if (event.type === "context_restore_done" || event.type === "context_restore_failed") {
+      pending.delete(id);
+    }
+  }
+  if (pending.size === 0) return null;
+  const now = new Date(generatedAt).getTime();
+  return Math.max(...[...pending.values()].map((occurredAt) => now - new Date(occurredAt).getTime()));
+}
+
 function ratio(numerator: number | undefined, denominator: number | undefined): number | null {
   if (!denominator) return null;
   return (numerator ?? 0) / denominator;
@@ -446,6 +623,16 @@ function parsePositiveInteger(input: string | undefined, fallback: number): numb
 
 function parseFormat(input: string | undefined): DogfoodReviewFormat {
   return input === "json" ? "json" : "text";
+}
+
+function parseNonNegativeNumber(input: string | undefined, fallback: number): number {
+  if (!input) return fallback;
+  const parsed = Number(input);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function formatCheckValue(value: number | null): string {
+  return value === null ? "n/a" : Number.isInteger(value) ? String(value) : value.toFixed(3);
 }
 
 function startOfLocalDay(now: Date): Date {

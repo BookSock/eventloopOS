@@ -119,12 +119,13 @@ Current implementation:
 - Queue defer/ignore actions record `queue_item_deferred` / `queue_item_ignored` activity and increment `queue_items_deferred_total` / `queue_items_ignored_total`.
 - Task followup calls now emit attempted plus sent/blocked/failed activity with task session ID, idempotency key, event IDs, payload length, and origin (`event_route`, `queue_action`, or `task_session_api`).
 - Durable `task_messages` now persist followup status by idempotency key across Postgres restarts. The durable record stores payload hash/length and sanitized runtime metadata, not raw followup text. Duplicate retries return the stored task-message result before runtime side effects.
+- `pnpm dogfood:check` reads the same local metrics/activity and exits non-zero when dogfood thresholds fail. Current checks cover ignored queue item rate, restore success rate, task followup failures, stale queue leases, and oldest pending restore age. Use `EVENTLOOPOS_DOGFOOD_CHECK_FORMAT=json` for agent-readable output.
 
 Near-term gaps:
 
 - Add gauges for queue depth by state, stale queue leases, pending/failed restore requests, task followup status counts, and runtime failure counts.
 - Teach `dogfood:review` to read durable task-message history directly, not only recent activity rows.
-- Add dogfood threshold checks for ignored-item rate, restore success, followup failures, stale leases, and pending restore age.
+- Wire `dogfood:check` into a real dogfood daemon run once Postgres + MCP sources are the default local workflow.
 - Keep metric rows content-light: IDs, hashes, lengths, statuses, providers, and durations; raw Slack/doc content belongs in event artifacts, not metrics.
 
 ## Privacy
@@ -146,6 +147,7 @@ Tests needed:
 - Store conformance: in-memory and Postgres GatewayStore adapters share event idempotency/context search, queue lease/defer/ignore, context restore retry/done, and workspace restore receipt replay behavior.
 - CLI: `dogfood:review` filters current-day activity and fails cleanly when orchestrator is unavailable.
 - CLI: `dogfood:review` groups recent activity by task, task session, and queue item, and emits daily trend deltas when the selected window spans multiple days.
+- CLI: `dogfood:check` returns 0 for healthy metrics, 2 for threshold misses, and 1 when the orchestrator cannot be reached.
 - CLI/API: restore provider metrics and activity rollups show which restore backends are succeeding or failing.
 - API: `/activity` filters return matching in-memory and Postgres events by task session, status, and since timestamp.
 

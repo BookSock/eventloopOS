@@ -174,6 +174,7 @@ Strong tests now:
 - `gh` notifications wrapper tests prove read-only MCP tool metadata, `gh api` argv construction, cursor-to-`since`, notification-to-GitHub event item mapping, and common API URL to browser deeplink conversion without live GitHub content.
 - `pnpm proof:agent` runs a local proof bundle and writes `artifacts/proof-manifest.json` plus per-command stdout/stderr logs under `artifacts/proof-agent/<run-id>/`. Default commands are lint, typecheck, test, and test:e2e. `EVENTLOOPOS_PROOF_COMMANDS` lets CI smoke the manifest writer without recursive full proof.
 - `pnpm test:proof-agent` is wired into `ci` and proves the manifest schema/path/log contract with a cheap `node --version` command.
+- `pnpm dogfood:check` exits non-zero when local dogfood thresholds fail. Checks currently cover ignored queue rate, restore success, task followup failures, stale queue leases, and pending restore age.
 
 Weak tests:
 
@@ -188,6 +189,6 @@ Weak tests:
 
 1. Real Claude+Codex composite dogfood with harmless sessions configured together.
 2. Make the Mac queue UI more one-paper-at-a-time: current packet dominates; queue list is secondary navigation.
-3. Add dogfood threshold checker for ignored-item rate, restore success, followup failures, stale leases, and pending restore age.
+3. Wire `dogfood:check` into a real local Postgres + MCP dogfood run once those sources are active.
 4. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
 5. Later: real microphone/wake-word proof and always-listening voice UX.

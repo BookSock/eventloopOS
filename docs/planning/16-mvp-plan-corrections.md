@@ -190,6 +190,7 @@ Real gaps:
 - Manual-mode exit snapshot semantics now match product intent: entering Manual Mode pauses automation, and returning to Event Loop captures the manual layout before restoring queue context.
 - Operational metrics need useful gauges: queue depth by state, stale leases, restore pending/failed, followup status counts, runtime failure counts.
 - Agent proof handoff now has `pnpm proof:agent`: manifest, per-command logs, git metadata, redacted env summary, and CI smoke coverage.
+- Dogfood thresholds now have `pnpm dogfood:check`: ignored queue rate, restore success rate, task followup failures, stale leases, and pending restore age.
 - GatewayStore remains broad. Conformance tests reduce risk; split into smaller store ports later, after dogfood-critical safety/history patches.
 
 Latest user steering:
@@ -215,6 +216,6 @@ Release guardrails:
 
 1. Real Claude+Codex composite dogfood against harmless configured sessions.
 2. Make Mac queue focus mode more one-paper-at-a-time: current packet dominates, queue list stays secondary.
-3. Add dogfood threshold checker so bad queue/restore/followup behavior fails loudly.
+3. Wire dogfood threshold checks into a real local Postgres + MCP source dogfood session.
 4. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
 5. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.

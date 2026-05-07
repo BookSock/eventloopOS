@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { dogfoodReviewOptionsFromEnv, runDogfoodReview } from "./dogfood_review.js";
+import {
+  dogfoodCheckOptionsFromEnv,
+  dogfoodReviewOptionsFromEnv,
+  runDogfoodCheck,
+  runDogfoodReview,
+} from "./dogfood_review.js";
 
 describe("dogfood review CLI", () => {
   it("builds options from environment", () => {
@@ -14,6 +19,31 @@ describe("dogfood review CLI", () => {
       limit: 25,
       format: "json",
       since: "2026-05-06T00:00:00.000Z",
+    });
+  });
+
+  it("builds dogfood check options from environment", () => {
+    assert.deepEqual(dogfoodCheckOptionsFromEnv({
+      EVENTLOOPOS_ORCHESTRATOR_URL: "http://127.0.0.1:4999",
+      EVENTLOOPOS_DOGFOOD_REVIEW_LIMIT: "25",
+      EVENTLOOPOS_DOGFOOD_CHECK_FORMAT: "json",
+      EVENTLOOPOS_DOGFOOD_MAX_IGNORED_RATE: "0.2",
+      EVENTLOOPOS_DOGFOOD_MIN_RESTORE_SUCCESS_RATE: "0.75",
+      EVENTLOOPOS_DOGFOOD_MAX_FOLLOWUP_FAILURES: "1",
+      EVENTLOOPOS_DOGFOOD_MAX_STALE_LEASES: "2",
+      EVENTLOOPOS_DOGFOOD_MAX_PENDING_RESTORE_AGE_MS: "60000",
+    }), {
+      baseUrl: "http://127.0.0.1:4999",
+      limit: 25,
+      format: "json",
+      since: undefined,
+      thresholds: {
+        maxIgnoredRate: 0.2,
+        minRestoreSuccessRate: 0.75,
+        maxFollowupFailures: 1,
+        maxStaleLeases: 2,
+        maxPendingRestoreAgeMs: 60000,
+      },
     });
   });
 
@@ -197,6 +227,72 @@ describe("dogfood review CLI", () => {
 
     assert.equal(exitCode, 1);
     assert.match(errorOutput, /connect ECONNREFUSED/);
+  });
+
+  it("passes dogfood check when thresholds are met", async () => {
+    let output = "";
+    const exitCode = await runDogfoodCheck({
+      baseUrl: "http://orchestrator.test",
+      limit: 10,
+      format: "json",
+      since: "2026-05-06T00:00:00.000Z",
+      thresholds: {
+        maxIgnoredRate: 0.1,
+        minRestoreSuccessRate: 0.7,
+        maxFollowupFailures: 0,
+        maxStaleLeases: 0,
+        maxPendingRestoreAgeMs: 30 * 60 * 1000,
+      },
+      stdout: {
+        write(chunk: string) {
+          output += chunk;
+          return true;
+        },
+      },
+      fetchFn: async (url) => responseForUrl(String(url)),
+    });
+
+    assert.equal(exitCode, 0);
+    const parsed = JSON.parse(output) as {
+      passed: boolean;
+      checks: Array<{ name: string; passed: boolean; value: number | null }>;
+    };
+    assert.equal(parsed.passed, true);
+    assert.deepEqual(parsed.checks.map((check) => [check.name, check.passed]), [
+      ["ignored_queue_item_rate", true],
+      ["restore_success_rate", true],
+      ["task_followup_failures", true],
+      ["stale_queue_leases", true],
+      ["pending_restore_age_ms", true],
+    ]);
+  });
+
+  it("fails dogfood check when product thresholds are missed", async () => {
+    let output = "";
+    const exitCode = await runDogfoodCheck({
+      baseUrl: "http://orchestrator.test",
+      limit: 10,
+      format: "text",
+      since: "2026-05-06T00:00:00.000Z",
+      thresholds: {
+        maxIgnoredRate: 0.1,
+        minRestoreSuccessRate: 0.8,
+        maxFollowupFailures: 0,
+        maxStaleLeases: 0,
+        maxPendingRestoreAgeMs: 30 * 60 * 1000,
+      },
+      stdout: {
+        write(chunk: string) {
+          output += chunk;
+          return true;
+        },
+      },
+      fetchFn: async (url) => responseForUrl(String(url)),
+    });
+
+    assert.equal(exitCode, 2);
+    assert.match(output, /Status: fail/);
+    assert.match(output, /fail restore_success_rate: value=0.750 threshold=>=0.800/);
   });
 });
 

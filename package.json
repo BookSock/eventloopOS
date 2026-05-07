@@ -24,6 +24,7 @@
     "test:db:native": "pnpm --filter @eventloopos/orchestrator run test:db:native",
     "dev:doctor": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dev:doctor",
     "dogfood:review": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dogfood:review",
+    "dogfood:check": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dogfood:check",
     "proof:agent": "bin/proof-agent",
     "test:proof-agent": "EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"proof-agent-smoke\",\"cmd\":\"node\",\"args\":[\"--version\"]}]' bin/proof-agent --manifest artifacts/proof-agent-smoke-manifest.json",
     "dev:postgres": "pnpm --filter @eventloopos/orchestrator run dev:postgres",
