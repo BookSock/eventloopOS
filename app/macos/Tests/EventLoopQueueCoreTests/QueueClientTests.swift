@@ -17,6 +17,12 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(loaded.first?.riskTags, ["external_send", "brand_voice"])
         XCTAssertEqual(loaded.first?.contextResources.first?.title, "Blog feedback thread")
         XCTAssertEqual(loaded.first?.contextResources.first?.restoreConfidence, "high")
+        let browserResource = try XCTUnwrap(loaded.first?.contextResources.first { $0.id == "ctx_browser_launch_doc" })
+        XCTAssertEqual(browserResource.windowId, "1")
+        XCTAssertEqual(browserResource.tabId, "7")
+        XCTAssertEqual(browserResource.scrollY, 120)
+        XCTAssertEqual(browserResource.textQuote, "Launch pricing note needs review later")
+        XCTAssertEqual(browserResource.selectorHint, "[data-context-quote]")
         XCTAssertEqual(loaded.first?.evidence.first?.title, "Malis feedback in launch thread")
         XCTAssertEqual(loaded.first?.workspaceSnapshot?.backend, "aerospace")
         XCTAssertEqual(loaded.first?.workspaceSnapshot?.activeWorkspace, "eventloop-blog")
@@ -136,7 +142,12 @@ final class QueueClientTests: XCTestCase {
                 "title": "Launch doc",
                 "url": "https://example.test/launch",
                 "source": "chrome-extension",
-                "restore_confidence": "high"
+                "restore_confidence": "high",
+                "window_id": "1",
+                "tab_id": "7",
+                "scroll_y": 120,
+                "text_quote": "Launch pricing note needs review later",
+                "selector_hint": "[data-context-quote]"
               }
             }
           }
@@ -150,23 +161,43 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.restorePlan.executeSupported, false)
         XCTAssertEqual(envelope.restorePlan.message?.type, "eventloop.restore")
         XCTAssertEqual(envelope.restorePlan.message?.resource.restoreConfidence, "high")
+        XCTAssertEqual(envelope.restorePlan.message?.resource.windowId, "1")
+        XCTAssertEqual(envelope.restorePlan.message?.resource.tabId, "7")
+        XCTAssertEqual(envelope.restorePlan.message?.resource.scrollY, 120)
+        XCTAssertEqual(envelope.restorePlan.message?.resource.textQuote, "Launch pricing note needs review later")
+        XCTAssertEqual(envelope.restorePlan.message?.resource.selectorHint, "[data-context-quote]")
     }
 
-    func testContextRestorePlanRequestEncodesSnakeCaseResourceFields() throws {
+    func testContextResourceEncodesSnakeCaseRestoreFields() throws {
         let resource = ReviewContextResource(
             id: "ctx_browser_123",
             kind: "browser_tab",
             title: "Launch doc",
             url: "https://example.test/launch",
             source: "chrome-extension",
-            restoreConfidence: "high"
+            restoreConfidence: "high",
+            windowId: "1",
+            tabId: "7",
+            scrollY: 120,
+            textQuote: "Launch pricing note needs review later",
+            selectorHint: "[data-context-quote]"
         )
 
         let data = try QueueCoders.makeEncoder().encode(resource)
         let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
 
         XCTAssertEqual(json?["restore_confidence"] as? String, "high")
+        XCTAssertEqual(json?["window_id"] as? String, "1")
+        XCTAssertEqual(json?["tab_id"] as? String, "7")
+        XCTAssertEqual(json?["scroll_y"] as? Int, 120)
+        XCTAssertEqual(json?["text_quote"] as? String, "Launch pricing note needs review later")
+        XCTAssertEqual(json?["selector_hint"] as? String, "[data-context-quote]")
         XCTAssertNil(json?["restoreConfidence"])
+        XCTAssertNil(json?["windowId"])
+        XCTAssertNil(json?["tabId"])
+        XCTAssertNil(json?["scrollY"])
+        XCTAssertNil(json?["textQuote"])
+        XCTAssertNil(json?["selectorHint"])
     }
 
     private func loadFixturePackets() throws -> [ReviewPacket] {

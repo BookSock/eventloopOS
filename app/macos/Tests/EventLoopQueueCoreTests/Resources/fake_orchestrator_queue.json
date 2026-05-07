@@ -51,6 +51,19 @@
               "activeWorkspace": "eventloop-blog",
               "focusedWindowId": 9
             }
+          },
+          {
+            "id": "ctx_browser_launch_doc",
+            "kind": "browser_tab",
+            "title": "Launch doc",
+            "url": "https://example.test/launch",
+            "source": "chrome-extension",
+            "restore_confidence": "high",
+            "window_id": "1",
+            "tab_id": "7",
+            "scroll_y": 120,
+            "text_quote": "Launch pricing note needs review later",
+            "selector_hint": "[data-context-quote]"
           }
         ]
       }

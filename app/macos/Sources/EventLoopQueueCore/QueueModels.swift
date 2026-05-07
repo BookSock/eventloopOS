@@ -59,6 +59,14 @@ public struct ReviewContextResource: Codable, Equatable, Identifiable, Sendable 
     public let url: String?
     public let source: String?
     public let restoreConfidence: String?
+    public let windowId: String?
+    public let tabId: String?
+    public let scrollY: Int?
+    public let textQuote: String?
+    public let selectorHint: String?
+    public let path: String?
+    public let line: Int?
+    public let column: Int?
 
     public init(
         id: String,
@@ -66,7 +74,15 @@ public struct ReviewContextResource: Codable, Equatable, Identifiable, Sendable 
         title: String,
         url: String? = nil,
         source: String? = nil,
-        restoreConfidence: String? = nil
+        restoreConfidence: String? = nil,
+        windowId: String? = nil,
+        tabId: String? = nil,
+        scrollY: Int? = nil,
+        textQuote: String? = nil,
+        selectorHint: String? = nil,
+        path: String? = nil,
+        line: Int? = nil,
+        column: Int? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -74,6 +90,14 @@ public struct ReviewContextResource: Codable, Equatable, Identifiable, Sendable 
         self.url = url
         self.source = source
         self.restoreConfidence = restoreConfidence
+        self.windowId = windowId
+        self.tabId = tabId
+        self.scrollY = scrollY
+        self.textQuote = textQuote
+        self.selectorHint = selectorHint
+        self.path = path
+        self.line = line
+        self.column = column
     }
 
     enum CodingKeys: String, CodingKey {
@@ -83,6 +107,14 @@ public struct ReviewContextResource: Codable, Equatable, Identifiable, Sendable 
         case url
         case source
         case restoreConfidence = "restore_confidence"
+        case windowId = "window_id"
+        case tabId = "tab_id"
+        case scrollY = "scroll_y"
+        case textQuote = "text_quote"
+        case selectorHint = "selector_hint"
+        case path
+        case line
+        case column
     }
 }
 
@@ -340,7 +372,15 @@ struct ReviewPacketDTO: Codable, Equatable, Sendable {
                 title: resource.title ?? resource.url ?? resource.kind ?? "Context",
                 url: resource.url,
                 source: resource.source,
-                restoreConfidence: resource.restoreConfidence
+                restoreConfidence: resource.restoreConfidence,
+                windowId: resource.windowId,
+                tabId: resource.tabId,
+                scrollY: resource.scrollY,
+                textQuote: resource.textQuote,
+                selectorHint: resource.selectorHint,
+                path: resource.path,
+                line: resource.line,
+                column: resource.column
             )
         }
     }
@@ -368,6 +408,14 @@ struct ContextResourceDTO: Codable, Equatable, Sendable {
     let title: String?
     let source: String?
     let restoreConfidence: String?
+    let windowId: String?
+    let tabId: String?
+    let scrollY: Int?
+    let textQuote: String?
+    let selectorHint: String?
+    let path: String?
+    let line: Int?
+    let column: Int?
     let snapshot: WorkspaceSnapshot?
 
     enum CodingKeys: String, CodingKey {
@@ -377,6 +425,14 @@ struct ContextResourceDTO: Codable, Equatable, Sendable {
         case title
         case source
         case restoreConfidence = "restore_confidence"
+        case windowId = "window_id"
+        case tabId = "tab_id"
+        case scrollY = "scroll_y"
+        case textQuote = "text_quote"
+        case selectorHint = "selector_hint"
+        case path
+        case line
+        case column
         case snapshot
     }
 
