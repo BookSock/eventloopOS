@@ -1619,6 +1619,76 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("records blocked direct task followups for after-the-fact debugging", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const observability = createInMemoryObservability();
+    const taskServer = createGatewayServer({
+      store,
+      observability,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      taskSessions: {
+        sendFollowupMessage(input) {
+          return {
+            id: "task_msg_blocked",
+            task_session_id: input.task_session_id,
+            event_ids: input.event_ids,
+            idempotency_key: input.idempotency_key,
+            status: "blocked",
+          };
+        },
+      },
+    });
+    await new Promise<void>((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+    const address = taskServer.address() as AddressInfo;
+    const taskBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${taskBaseUrl}/task-sessions/task_session_blog/followup`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_task_followup_blocked",
+        },
+        body: JSON.stringify({
+          text: "Try to resume.",
+          event_ids: ["evt_blocked_followup"],
+        }),
+      });
+      const body = await response.json() as {
+        message: { status: string; idempotency_key: string };
+      };
+      assert.equal(response.status, 202);
+      assert.equal(body.message.status, "blocked");
+      assert.equal(body.message.idempotency_key, "idem_task_followup_blocked");
+
+      const metricsResponse = await fetch(`${taskBaseUrl}/metrics`);
+      const metricsBody = await metricsResponse.json() as {
+        metrics: { counters: Record<string, number> };
+      };
+      assert.equal(metricsBody.metrics.counters.task_followups_attempted_total, 1);
+      assert.equal(metricsBody.metrics.counters.task_followups_blocked_total, 1);
+
+      const activityResponse = await fetch(`${taskBaseUrl}/activity?limit=2`);
+      const activityBody = await activityResponse.json() as {
+        events: Array<{
+          type: string;
+          status?: string;
+          details: Record<string, unknown>;
+        }>;
+      };
+      assert.deepEqual(activityBody.events.map((event) => event.type), [
+        "task_followup_blocked",
+        "task_followup_attempted",
+      ]);
+      assert.equal(activityBody.events[0].status, "blocked");
+      assert.equal(activityBody.events[0].details.idempotency_key, "idem_task_followup_blocked");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("binds a task session to a task through the task-session API", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const bindings: unknown[] = [];
