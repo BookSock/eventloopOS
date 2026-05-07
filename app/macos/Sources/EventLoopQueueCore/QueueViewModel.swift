@@ -235,10 +235,39 @@ public final class QueueViewModel: ObservableObject {
         state = .loading
         do {
             _ = try await client.complete(packetId: packetId)
-            let leasedPacket = try await client.next(after: nil)
-            packets = try await client.fetchQueue()
-            selectedPacketID = leasedPacket?.id ?? packets.first?.id
-            state = .loaded
+            try await loadNextAfterQueueAction()
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+
+    public func deferSelectedPacket(until dueAt: Date) async {
+        guard let packetId = selectedPacketID else {
+            return
+        }
+
+        state = .loading
+        do {
+            _ = try await client.deferPacket(packetId: packetId, until: dueAt)
+            try await loadNextAfterQueueAction()
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+
+    public func deferSelectedPacketForOneHour(now: Date = Date()) async {
+        await deferSelectedPacket(until: now.addingTimeInterval(60 * 60))
+    }
+
+    public func ignoreSelectedPacket() async {
+        guard let packetId = selectedPacketID else {
+            return
+        }
+
+        state = .loading
+        do {
+            _ = try await client.ignorePacket(packetId: packetId)
+            try await loadNextAfterQueueAction()
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -256,13 +285,17 @@ public final class QueueViewModel: ObservableObject {
         state = .loading
         do {
             _ = try await client.executeRecommendedAction(packetId: packetId)
-            let leasedPacket = try await client.next(after: nil)
-            packets = try await client.fetchQueue()
-            selectedPacketID = leasedPacket?.id ?? packets.first?.id
-            state = .loaded
+            try await loadNextAfterQueueAction()
         } catch {
             state = .failed(error.localizedDescription)
         }
+    }
+
+    private func loadNextAfterQueueAction() async throws {
+        let leasedPacket = try await client.next(after: nil)
+        packets = try await client.fetchQueue()
+        selectedPacketID = leasedPacket?.id ?? packets.first?.id
+        state = .loaded
     }
 
     public func loadTaskSessions() async {

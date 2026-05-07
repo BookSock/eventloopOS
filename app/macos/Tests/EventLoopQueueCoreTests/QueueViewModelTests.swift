@@ -112,6 +112,36 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
     }
 
+    func testDeferSelectedPacketAdvances() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        let dueAt = Date(timeIntervalSince1970: 1_778_074_500)
+        await viewModel.loadQueue()
+
+        await viewModel.deferSelectedPacket(until: dueAt)
+
+        XCTAssertEqual(client.deferredPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(client.deferredPacketDueAts["packet-blog-feedback"], dueAt)
+        XCTAssertEqual(client.leasedPacketIds, ["packet-blog-feedback", "packet-ci-failed"])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.packets.map(\.id), ["packet-ci-failed", "packet-external-send"])
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+    }
+
+    func testIgnoreSelectedPacketAdvances() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.loadQueue()
+
+        await viewModel.ignoreSelectedPacket()
+
+        XCTAssertEqual(client.ignoredPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(client.leasedPacketIds, ["packet-blog-feedback", "packet-ci-failed"])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.packets.map(\.id), ["packet-ci-failed", "packet-external-send"])
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+    }
+
     func testMoveToNextLeasesNextWithoutCompletingCurrentPacket() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)

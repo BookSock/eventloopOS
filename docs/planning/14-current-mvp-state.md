@@ -72,6 +72,7 @@ Done:
 - Context resource rows show restore confidence plus provider confidence reason when available, so the user can see whether a restore is backed by a provider anchor or a generic browser fallback.
 - Context restore requests support failed status and retry back to pending. Browser extension marks unsupported/failed restores through `/failed`; `/retry` requeues for another claim.
 - Live Mac client + Chromium extension restore smoke exists: Mac `HTTPQueueClient` creates a real orchestrator restore request, Chromium extension claims it, restores the tab/scroll, and Mac-readable restore request status becomes `done`.
+- Queue window, menu bar, and command menu expose `Defer 1 Hour` and `Ignore Item` actions. Defer calls `POST /queue/:id/defer` with a future `due_at`, ignore calls `POST /queue/:id/ignore`, and both advance to the next leased item after the action succeeds.
 
 Gap:
 
@@ -148,7 +149,7 @@ Strong tests now:
 - `pnpm run dogfood:review` prints a local daily-ish review from `/metrics` and `/activity`; set `EVENTLOOPOS_DOGFOOD_REVIEW_FORMAT=json` for agent-readable output. The report now includes derived rates, task rollups, task-session rollups, queue rollups, and queue time-to-done.
 - Restore activity and counters include provider-specific created/done/failed/retried data, and `dogfood:review` groups provider restore success/failure.
 - Task followups record attempted plus sent/blocked/failed activity with origin, task session ID, idempotency key, event IDs, and text length, giving a lightweight outbox-style audit trail without a separate durable outbox table.
-- Queue defer/ignore API tests and Postgres tests prove deferred items disappear from active queue until due, then requeue; ignored items stop leasing.
+- Queue defer/ignore API tests and Postgres tests prove deferred items disappear from active queue until due, then requeue; ignored items stop leasing. Mac Swift tests prove `HTTPQueueClient` sends correct defer/ignore request bodies, fake client mutates active queue state, and `QueueViewModel` advances to the next item after defer/ignore.
 - Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
 - Mac unit tests cover Manual Mode workspace capture/restore through `HTTPWorkspaceClient.capture()`, `QueueViewModel.enterManualModeAndCaptureWorkspace()`, and `QueueViewModel.confirmManualWorkspaceRestore()`.
 - `pnpm run dev:dogfood:smoke` starts orchestrator + Mac queue app in empty in-memory mode, waits for health, launches the queue app, then exits automatically after a short smoke window.

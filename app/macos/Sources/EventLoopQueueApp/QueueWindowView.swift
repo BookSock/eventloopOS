@@ -102,6 +102,14 @@ struct QueueWindowView: View {
                 Task {
                     await viewModel.executeRecommendedActionAndNext()
                 }
+            } deferForOneHour: {
+                Task {
+                    await viewModel.deferSelectedPacketForOneHour()
+                }
+            } ignorePacket: {
+                Task {
+                    await viewModel.ignoreSelectedPacket()
+                }
             } moveToNext: {
                 Task {
                     await viewModel.moveToNext()
@@ -220,6 +228,8 @@ private struct PacketDetail: View {
     let recommendedActionBlockReason: String?
     let doneAndNext: () -> Void
     let executeRecommendedAction: () -> Void
+    let deferForOneHour: () -> Void
+    let ignorePacket: () -> Void
     let moveToNext: () -> Void
     let refreshQueue: () -> Void
     let restoreContextResource: (ReviewContextResource) -> Void
@@ -342,6 +352,22 @@ private struct PacketDetail: View {
                         .disabled(!canExecuteRecommendedAction)
                         .accessibilityIdentifier("queue-execute-recommended-action-button")
                     }
+                    Button {
+                        deferForOneHour()
+                    } label: {
+                        Label("Defer 1h", systemImage: "clock")
+                    }
+                    .controlSize(.large)
+                    .accessibilityIdentifier("queue-defer-one-hour-button")
+
+                    Button(role: .destructive) {
+                        ignorePacket()
+                    } label: {
+                        Label("Ignore", systemImage: "trash")
+                    }
+                    .controlSize(.large)
+                    .accessibilityIdentifier("queue-ignore-button")
+
                     Button {
                         moveToNext()
                     } label: {

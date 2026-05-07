@@ -3,6 +3,8 @@ import Foundation
 public protocol QueueClient: Sendable {
     func fetchQueue() async throws -> [ReviewPacket]
     func complete(packetId: String) async throws -> QueueActionResult
+    func deferPacket(packetId: String, until dueAt: Date) async throws -> QueueActionResult
+    func ignorePacket(packetId: String) async throws -> QueueActionResult
     func executeRecommendedAction(packetId: String) async throws -> QueueActionResult
     func renewLease(packetId: String) async throws -> QueueActionResult
     func next(after packetId: String?) async throws -> ReviewPacket?
@@ -59,6 +61,34 @@ public struct HTTPQueueClient: QueueClient {
             "action": "done",
             "actor_id": "mac_queue_app"
         ])
+
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(QueueActionResult.self, from: data)
+    }
+
+    public func deferPacket(packetId: String, until dueAt: Date) async throws -> QueueActionResult {
+        let url = baseURL.appending(path: "queue/\(packetId)/defer")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(QueueDeferRequest(
+            action: "defer",
+            actorId: "mac_queue_app",
+            dueAt: dueAt
+        ))
+
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(QueueActionResult.self, from: data)
+    }
+
+    public func ignorePacket(packetId: String) async throws -> QueueActionResult {
+        let url = baseURL.appending(path: "queue/\(packetId)/ignore")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(QueueIgnoreRequest(action: "ignore", actorId: "mac_queue_app"))
 
         let (data, response) = try await session.data(for: request)
         try validate(response: response)
@@ -177,6 +207,28 @@ private struct LeaseNextRequest: Encodable {
     }
 }
 
+private struct QueueDeferRequest: Encodable {
+    let action: String
+    let actorId: String
+    let dueAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case action
+        case actorId = "actor_id"
+        case dueAt = "due_at"
+    }
+}
+
+private struct QueueIgnoreRequest: Encodable {
+    let action: String
+    let actorId: String
+
+    enum CodingKeys: String, CodingKey {
+        case action
+        case actorId = "actor_id"
+    }
+}
+
 private struct ContextRestorePlanRequest: Encodable {
     let resource: ReviewContextResource
 }
@@ -197,6 +249,9 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private let contextRestoreStatusResult: Result<ContextRestoreRequest, Error>
     private var contextRestoreStatusResults: [Result<ContextRestoreRequest, Error>]
     private var completedIds: [String] = []
+    private var deferredIds: [String] = []
+    private var deferredDueAts: [String: Date] = [:]
+    private var ignoredIds: [String] = []
     private var leasedIds: Set<String> = []
     private var leaseOrder: [String] = []
     private var renewedIds: [String] = []
@@ -271,6 +326,18 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         lock.withLock { completedIds }
     }
 
+    public var deferredPacketIds: [String] {
+        lock.withLock { deferredIds }
+    }
+
+    public var deferredPacketDueAts: [String: Date] {
+        lock.withLock { deferredDueAts }
+    }
+
+    public var ignoredPacketIds: [String] {
+        lock.withLock { ignoredIds }
+    }
+
     public var leasedPacketIds: [String] {
         lock.withLock { leaseOrder }
     }
@@ -322,6 +389,31 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
             packets.remove(at: index)
             leasedIds.remove(packetId)
             completedIds.append(packetId)
+            return QueueActionResult(ok: true, completedPacketId: packetId, nextPacket: packets.first)
+        }
+    }
+
+    public func deferPacket(packetId: String, until dueAt: Date) async throws -> QueueActionResult {
+        try lock.withLock {
+            guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
+                throw QueueClientError.packetNotFound(packetId)
+            }
+            packets.remove(at: index)
+            leasedIds.remove(packetId)
+            deferredIds.append(packetId)
+            deferredDueAts[packetId] = dueAt
+            return QueueActionResult(ok: true, completedPacketId: packetId, nextPacket: packets.first)
+        }
+    }
+
+    public func ignorePacket(packetId: String) async throws -> QueueActionResult {
+        try lock.withLock {
+            guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
+                throw QueueClientError.packetNotFound(packetId)
+            }
+            packets.remove(at: index)
+            leasedIds.remove(packetId)
+            ignoredIds.append(packetId)
             return QueueActionResult(ok: true, completedPacketId: packetId, nextPacket: packets.first)
         }
     }

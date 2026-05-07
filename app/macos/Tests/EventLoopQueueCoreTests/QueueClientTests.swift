@@ -47,6 +47,34 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(client.completedPacketIds, ["qit_blog_feedback"])
     }
 
+    func testFakeQueueClientDefersPacketAndReturnsNext() async throws {
+        let client = FakeQueueClient(packets: try loadFixturePackets())
+        let dueAt = Date(timeIntervalSince1970: 1_778_074_500)
+
+        let result = try await client.deferPacket(packetId: "qit_blog_feedback", until: dueAt)
+        let remaining = try await client.fetchQueue()
+
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.completedPacketId, "qit_blog_feedback")
+        XCTAssertEqual(result.nextPacket?.id, "qit_ci_failed")
+        XCTAssertEqual(remaining.map(\.id), ["qit_ci_failed"])
+        XCTAssertEqual(client.deferredPacketIds, ["qit_blog_feedback"])
+        XCTAssertEqual(client.deferredPacketDueAts["qit_blog_feedback"], dueAt)
+    }
+
+    func testFakeQueueClientIgnoresPacketAndReturnsNext() async throws {
+        let client = FakeQueueClient(packets: try loadFixturePackets())
+
+        let result = try await client.ignorePacket(packetId: "qit_blog_feedback")
+        let remaining = try await client.fetchQueue()
+
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.completedPacketId, "qit_blog_feedback")
+        XCTAssertEqual(result.nextPacket?.id, "qit_ci_failed")
+        XCTAssertEqual(remaining.map(\.id), ["qit_ci_failed"])
+        XCTAssertEqual(client.ignoredPacketIds, ["qit_blog_feedback"])
+    }
+
     func testFakeQueueClientRenewsSelectedPacketLease() async throws {
         let client = FakeQueueClient(packets: try loadFixturePackets())
 
@@ -237,6 +265,96 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(binding.taskSessionId, "task_session_blog")
         XCTAssertEqual(binding.taskId, "task_blog_feedback")
         XCTAssertEqual(binding.session?.taskId, "task_blog_feedback")
+    }
+
+    func testHTTPQueueClientDefersPacket() async throws {
+        let dueAt = Date(timeIntervalSince1970: 1_778_074_500)
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/queue/qit_blog_feedback/defer")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: String])
+            XCTAssertEqual(body["action"], "defer")
+            XCTAssertEqual(body["actor_id"], "mac_queue_app")
+            XCTAssertEqual(body["due_at"], "2026-05-06T13:35:00Z")
+            return """
+            {
+              "ok": true,
+              "item": {
+                "id": "qit_blog_feedback",
+                "review_packet_id": "packet-blog-feedback",
+                "task_id": "task_blog_feedback",
+                "state": "deferred",
+                "priority_score": 90,
+                "created_at": "2026-05-06T12:00:00Z",
+                "updated_at": "2026-05-06T12:01:00Z",
+                "due_at": "2026-05-06T13:35:00Z",
+                "review_packet": {
+                  "id": "packet-blog-feedback",
+                  "task_id": "task_blog_feedback",
+                  "title": "Review blog feedback draft",
+                  "summary": "Human review needed.",
+                  "decision_needed": "Approve angle.",
+                  "recommended_action": {"label": "Review", "type": "mark_done"},
+                  "risk_level": "medium",
+                  "confidence": "high",
+                  "risk_tags": [],
+                  "evidence": [],
+                  "context": []
+                }
+              }
+            }
+            """
+        }
+
+        let result = try await client.deferPacket(packetId: "qit_blog_feedback", until: dueAt)
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.completedPacketId, "qit_blog_feedback")
+    }
+
+    func testHTTPQueueClientIgnoresPacket() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/queue/qit_blog_feedback/ignore")
+            XCTAssertEqual(
+                try JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: String],
+                ["action": "ignore", "actor_id": "mac_queue_app"]
+            )
+            return """
+            {
+              "ok": true,
+              "item": {
+                "id": "qit_blog_feedback",
+                "review_packet_id": "packet-blog-feedback",
+                "task_id": "task_blog_feedback",
+                "state": "dead",
+                "priority_score": 90,
+                "created_at": "2026-05-06T12:00:00Z",
+                "updated_at": "2026-05-06T12:01:00Z",
+                "review_packet": {
+                  "id": "packet-blog-feedback",
+                  "task_id": "task_blog_feedback",
+                  "title": "Review blog feedback draft",
+                  "summary": "Human review needed.",
+                  "decision_needed": "Approve angle.",
+                  "recommended_action": {"label": "Review", "type": "mark_done"},
+                  "risk_level": "medium",
+                  "confidence": "high",
+                  "risk_tags": [],
+                  "evidence": [],
+                  "context": []
+                }
+              }
+            }
+            """
+        }
+
+        let result = try await client.ignorePacket(packetId: "qit_blog_feedback")
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.completedPacketId, "qit_blog_feedback")
     }
 
     func testWorkspaceRestoreExecutionEnvelopeDecodesReceipt() throws {

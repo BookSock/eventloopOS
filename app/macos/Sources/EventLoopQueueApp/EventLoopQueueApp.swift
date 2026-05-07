@@ -51,6 +51,23 @@ struct EventLoopQueueApp: App {
                 .keyboardShortcut(.return, modifiers: [.command])
                 .accessibilityIdentifier("queue-command-done-next")
 
+                Button("Defer 1 Hour") {
+                    Task {
+                        await viewModel.deferSelectedPacketForOneHour()
+                    }
+                }
+                .keyboardShortcut("d", modifiers: [.command, .option])
+                .disabled(!viewModel.hasPackets)
+                .accessibilityIdentifier("queue-command-defer-one-hour")
+
+                Button("Ignore Item", role: .destructive) {
+                    Task {
+                        await viewModel.ignoreSelectedPacket()
+                    }
+                }
+                .disabled(!viewModel.hasPackets)
+                .accessibilityIdentifier("queue-command-ignore")
+
                 Button("Restore Queue Workspace") {
                     Task {
                         await viewModel.confirmSelectedWorkspaceRestore()
@@ -169,6 +186,23 @@ private struct QueueMenuView: View {
             }
             .keyboardShortcut(.return, modifiers: [.command])
             .accessibilityIdentifier("queue-menu-done-next")
+
+            Button("Defer 1 Hour") {
+                Task {
+                    await viewModel.deferSelectedPacketForOneHour()
+                }
+            }
+            .keyboardShortcut("d", modifiers: [.command, .option])
+            .disabled(!viewModel.hasPackets)
+            .accessibilityIdentifier("queue-menu-defer-one-hour")
+
+            Button("Ignore Item", role: .destructive) {
+                Task {
+                    await viewModel.ignoreSelectedPacket()
+                }
+            }
+            .disabled(!viewModel.hasPackets)
+            .accessibilityIdentifier("queue-menu-ignore")
 
             Button("Restore Queue Workspace") {
                 Task {
