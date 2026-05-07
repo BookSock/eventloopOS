@@ -862,6 +862,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           type: "queue_item_done",
           occurred_at: item.updated_at,
           actor: "human",
+          task_id: item.task_id,
           queue_item_id: item.id,
           status: "ok",
           summary: `Queue item done: ${item.review_packet.title}`,
@@ -921,7 +922,9 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
             type: "queue_item_done",
             occurred_at: completed.updated_at,
             actor: "human",
+            task_id: completed.task_id,
             queue_item_id: completed.id,
+            task_session_id: stringFromRecord(actionResult.result, "task_session_id"),
             status: "ok",
             summary: `Queue item done: ${completed.review_packet.title}`,
             details: {
@@ -1671,6 +1674,11 @@ function readNonEmptyString(
 function readOptionalString(input: Record<string, unknown>, key: string): string | undefined {
   const value = input[key];
   return typeof value === "string" && value ? value : undefined;
+}
+
+function stringFromRecord(input: Record<string, unknown>, key: string): string | undefined {
+  const value = input[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function stableId(input: string): string {

@@ -36,7 +36,11 @@ describe("dogfood review CLI", () => {
     assert.equal(exitCode, 0);
     assert.match(output, /EventloopOS Dogfood Review/);
     assert.match(output, /events_ingested_total: 2/);
-    assert.match(output, /queue_item_done ok queue=qit_review_1: Queue item done: Launch review/);
+    assert.match(output, /queue_clearance_rate: 0.50/);
+    assert.match(output, /Tasks:\n- task_blog_feedback events=2 routed=1 queued=1 done=1 followups=1 failed=0/);
+    assert.match(output, /Sessions:\n- task_session_blog events=2 routed=1 queued=1 done=1 followups=1 failed=0/);
+    assert.match(output, /Queues:\n- qit_review_1 task=task_blog_feedback session=task_session_blog events=2 done_in=20.0m: Queue item done: Launch review/);
+    assert.match(output, /queue_item_done ok task=task_blog_feedback queue=qit_review_1: Queue item done: Launch review/);
     assert.doesNotMatch(output, /Old event before window/);
   });
 
@@ -60,9 +64,31 @@ describe("dogfood review CLI", () => {
     const parsed = JSON.parse(output) as {
       metrics: { counters: Record<string, number>; activity_count: number };
       events: Array<{ id: string }>;
+      task_rollups: Array<{ id: string; done: number; followups_sent: number }>;
+      session_rollups: Array<{ id: string; routed: number }>;
+      queue_rollups: Array<{ id: string; time_to_done_ms: number }>;
+      derived: { queue_clearance_rate: number };
     };
     assert.equal(parsed.metrics.counters.events_ingested_total, 2);
     assert.deepEqual(parsed.events.map((event) => event.id), ["actv_done", "actv_routed"]);
+    assert.deepEqual(parsed.task_rollups, [
+      {
+        id: "task_blog_feedback",
+        events: 2,
+        routed: 1,
+        queued: 1,
+        done: 1,
+        followups_sent: 1,
+        failed: 0,
+        last_activity_at: "2026-05-06T12:20:00.000Z",
+      },
+    ]);
+    assert.deepEqual(parsed.session_rollups.map((rollup) => ({ id: rollup.id, routed: rollup.routed })), [
+      { id: "task_session_blog", routed: 1 },
+    ]);
+    assert.equal(parsed.queue_rollups[0]?.id, "qit_review_1");
+    assert.equal(parsed.queue_rollups[0]?.time_to_done_ms, 1_200_000);
+    assert.equal(parsed.derived.queue_clearance_rate, 0.5);
   });
 
   it("returns non-zero when orchestrator is unavailable", async () => {
@@ -93,7 +119,11 @@ function responseForUrl(url: string): Response {
       metrics: {
         counters: {
           events_ingested_total: 2,
+          events_routed_to_task_session_total: 1,
+          queue_items_created_total: 2,
           queue_items_done_total: 1,
+          restore_requests_done_total: 3,
+          restore_requests_failed_total: 1,
         },
         activity_count: 3,
       },
@@ -110,7 +140,9 @@ function responseForUrl(url: string): Response {
           type: "queue_item_done",
           occurred_at: "2026-05-06T12:20:00.000Z",
           actor: "human",
+          task_id: "task_blog_feedback",
           queue_item_id: "qit_review_1",
+          task_session_id: "task_session_blog",
           status: "ok",
           summary: "Queue item done: Launch review",
           details: {},
@@ -120,7 +152,10 @@ function responseForUrl(url: string): Response {
           type: "event_routed",
           occurred_at: "2026-05-06T12:00:00.000Z",
           actor: "system",
+          task_id: "task_blog_feedback",
+          queue_item_id: "qit_review_1",
           event_id: "evt_review_1",
+          task_session_id: "task_session_blog",
           status: "ok",
           summary: "Event routed: Launch review",
           details: {},
