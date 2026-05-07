@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377";
 const usePostgres = process.env.EVENTLOOPOS_DOGFOOD_POSTGRES !== "0";
 const smokeMs = parseOptionalPositiveInteger(process.env.EVENTLOOPOS_DOGFOOD_SMOKE_MS);
+const emptySeedFixture = "fixtures/empty-review-packets.json";
 const children = [];
 let startedPostgres = false;
 let cleaningUp = false;
@@ -26,6 +27,7 @@ try {
     ORCHESTRATOR_CODEX_TASK_MAP_PATH: process.env.ORCHESTRATOR_CODEX_TASK_MAP_PATH ?? "config/codex-task-map.json",
     ORCHESTRATOR_MCP_SOURCES: process.env.ORCHESTRATOR_MCP_SOURCES ?? defaultMcpSourcesMode(),
     ORCHESTRATOR_MCP_SOURCES_PATH: process.env.ORCHESTRATOR_MCP_SOURCES_PATH ?? defaultMcpSourcesPath(),
+    ORCHESTRATOR_SEED_FIXTURE: process.env.ORCHESTRATOR_SEED_FIXTURE ?? (usePostgres ? undefined : emptySeedFixture),
     ORCHESTRATOR_WORKSPACE: process.env.ORCHESTRATOR_WORKSPACE ?? "aerospace",
     ORCHESTRATOR_WORKSPACE_EXECUTE: process.env.ORCHESTRATOR_WORKSPACE_EXECUTE ?? "disabled",
   });
