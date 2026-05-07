@@ -22,7 +22,7 @@ Start with agent-heavy founders + devs using:
 - GitHub for code review + CI.
 - local Markdown/Notion/GitHub issues for task state.
 - Chrome/Arc for docs, issues, dashboards, web apps.
-- Codex, Claude Code, Cursor, or similar agents for parallel coding/work.
+- Codex and Claude Code for parallel coding/work. Cursor and other runtimes are later.
 - macOS as daily work OS.
 
 Pain already sharp: agents create more output than user can inspect. Work gets lost across terminals, browser tabs, Slack threads, PRs, docs.

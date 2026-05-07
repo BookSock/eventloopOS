@@ -57,6 +57,51 @@ describe("orchestrator gateway API", () => {
     });
   });
 
+  it("records route-level metrics and response route headers", async () => {
+    const observability = createInMemoryObservability();
+    const routeServer = createGatewayServer({
+      store: createInMemoryGatewayStore(await createSeededStore()),
+      observability,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+    });
+    await new Promise<void>((resolve) => routeServer.listen(0, "127.0.0.1", resolve));
+    const address = routeServer.address() as AddressInfo;
+    const routeBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const healthResponse = await fetch(`${routeBaseUrl}/health`);
+      assert.equal(healthResponse.status, 200);
+      assert.equal(healthResponse.headers.get("x-route-name"), "GET_health");
+      assert.ok(Number(healthResponse.headers.get("x-route-duration-ms")) >= 0);
+
+      const missingResponse = await fetch(`${routeBaseUrl}/missing-route`);
+      assert.equal(missingResponse.status, 404);
+      assert.equal(missingResponse.headers.get("x-route-name"), "not_found");
+      assert.ok(Number(missingResponse.headers.get("x-route-duration-ms")) >= 0);
+
+      const metricsResponse = await fetch(`${routeBaseUrl}/metrics`);
+      const metricsBody = await metricsResponse.json() as {
+        metrics: {
+          counters: Record<string, number>;
+        };
+      };
+
+      assert.equal(metricsResponse.status, 200);
+      assert.equal(metricsBody.metrics.counters.http_requests_total, 2);
+      assert.equal(metricsBody.metrics.counters.http_requests_route_get_health_total, 1);
+      assert.equal(metricsBody.metrics.counters.http_requests_status_200_total, 1);
+      assert.equal(metricsBody.metrics.counters.http_requests_status_404_total, 1);
+      assert.equal(metricsBody.metrics.counters.http_request_errors_total, 1);
+      assert.equal(metricsBody.metrics.counters.http_request_errors_route_not_found_total, 1);
+      assert.equal(metricsBody.metrics.counters.http_request_errors_code_not_found_total, 1);
+      assert.ok(metricsBody.metrics.counters.http_request_duration_ms_total >= 0);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        routeServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("lists seeded queue items with attached review packets", async () => {
     const response = await fetch(`${baseUrl}/queue`, {
       headers: {

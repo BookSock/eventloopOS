@@ -31,6 +31,12 @@ Track locally:
 - `restore_requests_failed_total`
 - `mcp_poll_cycles_total`
 - `mcp_poll_errors_total`
+- `http_requests_total`
+- `http_requests_route_<route>_total`
+- `http_requests_status_<status>_total`
+- `http_request_errors_total`
+- `http_request_errors_code_<code>_total`
+- `http_request_duration_ms_total`
 
 Derived:
 
@@ -89,6 +95,7 @@ Current implementation:
 
 - `GET /activity?limit=...` exists as recent local activity and supports filters for `task_id`, `task_session_id`, `status`, and `since` so agents can inspect one task/session history without dumping global history.
 - `GET /metrics` exists as local counters.
+- All HTTP responses include `x-route-name` and `x-route-duration-ms`, and the gateway records low-cardinality route/status/error/duration counters. This follows the same shape as OpenTelemetry HTTP server metrics: stable route labels, status/error labels, and request-duration measurement.
 - Postgres mode persists `activity_events` and `metric_counters` through `0003_observability.sql`.
 - In-memory mode remains process-local for fast tests and empty local smoke runs.
 - `pnpm run dogfood:review` reads `/metrics` and `/activity`, prints text by default, and supports `EVENTLOOPOS_DOGFOOD_REVIEW_FORMAT=json` for agents.
@@ -110,6 +117,7 @@ Tests needed:
 
 - Unit: metrics counter records expected events.
 - API: `/metrics` returns deterministic snapshot.
+- API: route-level observability sets route headers and records request/status/error/duration counters without letting `/metrics` count itself in the returned snapshot.
 - Postgres: activity/counters survive re-creating the observability adapter against the same database.
 - E2E: MCP local event poll increments ingested/routed/queue counters.
 - E2E: browser restore done increments restore counters.

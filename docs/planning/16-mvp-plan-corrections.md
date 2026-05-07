@@ -158,22 +158,22 @@ Current extraction:
 - `app/orchestrator/src/routes/workspace.ts` owns workspace status/capture/restore-plan/restore route bodies and idempotent restore receipt replay.
 - `app/orchestrator/src/routes/mcp_sources.ts` owns legacy `/mcp/poll`, MCP source list/get/poll/poll-and-route/poll-all-and-route route bodies, validation, and poll-cycle observability.
 - `app/orchestrator/src/routes/events.ts` owns event ingest/get, voice-command ingest, event routing/idempotency/fallback, and review-packet lookup route bodies.
-- `server.ts` now mostly owns route registration order, shared HTTP context, JSON body parsing, and response serialization.
+- `server.ts` now mostly owns route registration order, shared HTTP context, and JSON body parsing.
+- `app/orchestrator/src/http/route_observability.ts` owns response serialization plus the shared route observability wrapper.
 
 Keep doing behavior-preserving extraction first. Add tests before changing policy.
 
 Other architecture notes:
 
 - `gateway_store.ts` is useful as an adapter seam, but event idempotency/route semantics must stay parity-tested across in-memory and Postgres stores.
-- Add route-level observability wrapper before more API growth: route name, duration, status/error code, request ID.
+- Route-level observability wrapper now tags responses with route name/duration headers and records low-cardinality counters for request count, status, error code, and duration.
 - Extend `/activity` filters later by task/session/status/since so after-the-fact debugging does not require dumping recent global history.
 
 ## Next Best Work
 
 1. Add GatewayStore conformance tests for event idempotency, queue leasing/defer/ignore, context restore retry, workspace restore receipt replay, and context search.
-2. Add route-level observability wrapper before more API growth: route name, duration, status/error code, request ID.
-3. Enforce MCP read-only source contracts beyond config validation, especially runtime tool metadata checks for user-installed servers.
-4. Add real MCP/Slack source dogfood config around Jason's installed tools.
-5. Add trend comparisons to `dogfood:review`.
-6. Real Claude+Codex composite dogfood against harmless configured sessions.
-7. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.
+2. Enforce MCP read-only source contracts beyond config validation, especially runtime tool metadata checks for user-installed servers.
+3. Add real MCP/Slack source dogfood config around Jason's installed tools.
+4. Add trend comparisons to `dogfood:review`.
+5. Real Claude+Codex composite dogfood against harmless configured sessions.
+6. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.

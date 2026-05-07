@@ -1,7 +1,8 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import type { ApiErrorBody } from "./contracts.js";
+import { performance } from "node:perf_hooks";
 import type { GatewayStore } from "./gateway_store.js";
+import { routeNameForPath, sendObservedRouteResult } from "./http/route_observability.js";
 import { createInMemoryObservability, type Observability } from "./observability.js";
 import { handleContextRestoreRoute } from "./routes/context_restore.js";
 import { handleEventsRoute, routeEventThroughGateway } from "./routes/events.js";
@@ -9,7 +10,6 @@ import { handleMcpSourcesRoute, type McpSourceRegistry } from "./routes/mcp_sour
 import { handleActivityRoute, handleMetricsRoute } from "./routes/observability.js";
 import { handleQueueRoute } from "./routes/queue.js";
 import { handleTaskSessionsRoute } from "./routes/task_sessions.js";
-import type { RouteResult } from "./routes/types.js";
 import { handleWorkspaceRoute } from "./routes/workspace.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
 import type { WorkspaceController } from "./workspace/controller.js";
@@ -37,32 +37,37 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
 
   return createServer(async (request, response) => {
     const context = buildContext(request);
+    const startedAt = performance.now();
     applyResponseHeaders(response, context);
 
     try {
       if (request.method === "GET" && context.url.pathname === "/health") {
-        return sendJson(response, 200, {
+        return sendObservedRouteResult(response, context, observability, "GET_health", {
           ok: true,
-          service: "eventloop-orchestrator",
-          time: now().toISOString(),
-          request_id: context.requestId,
-        });
+          status: 200,
+          body: {
+            ok: true,
+            service: "eventloop-orchestrator",
+            time: now().toISOString(),
+            request_id: context.requestId,
+          },
+        }, startedAt);
       }
 
       if (request.method === "GET" && context.url.pathname === "/metrics") {
-        return sendRouteResult(response, context, await handleMetricsRoute({
+        return sendObservedRouteResult(response, context, observability, "GET_metrics", await handleMetricsRoute({
           observability,
           generatedAt: now().toISOString(),
           requestId: context.requestId,
-        }));
+        }), startedAt);
       }
 
       if (request.method === "GET" && context.url.pathname === "/activity") {
-        return sendRouteResult(response, context, await handleActivityRoute({
+        return sendObservedRouteResult(response, context, observability, "GET_activity", await handleActivityRoute({
           observability,
           url: context.url,
           requestId: context.requestId,
-        }));
+        }), startedAt);
       }
 
       const queueRoute = await handleQueueRoute({
@@ -77,7 +82,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         requestId: context.requestId,
       });
       if (queueRoute) {
-        return sendRouteResult(response, context, queueRoute);
+        return sendObservedRouteResult(response, context, observability, routeNameForPath(request.method, context.url.pathname) ?? "queue", queueRoute, startedAt);
       }
 
       const contextRestoreRoute = await handleContextRestoreRoute({
@@ -92,7 +97,14 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         idempotencyKey: context.idempotencyKey,
       });
       if (contextRestoreRoute) {
-        return sendRouteResult(response, context, contextRestoreRoute);
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "contexts",
+          contextRestoreRoute,
+          startedAt,
+        );
       }
 
       const workspaceRoute = await handleWorkspaceRoute({
@@ -107,7 +119,14 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         idempotencyKey: context.idempotencyKey,
       });
       if (workspaceRoute) {
-        return sendRouteResult(response, context, workspaceRoute);
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "workspace",
+          workspaceRoute,
+          startedAt,
+        );
       }
 
       const mcpSourcesRoute = await handleMcpSourcesRoute({
@@ -121,7 +140,14 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         routeEvent: (event, routedAt) => routeEventThroughGateway(serverOptions, event, routedAt),
       });
       if (mcpSourcesRoute) {
-        return sendRouteResult(response, context, mcpSourcesRoute);
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "mcp_sources",
+          mcpSourcesRoute,
+          startedAt,
+        );
       }
 
       const taskSessionsRoute = await handleTaskSessionsRoute({
@@ -135,7 +161,14 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         idempotencyKey: context.idempotencyKey,
       });
       if (taskSessionsRoute) {
-        return sendRouteResult(response, context, taskSessionsRoute);
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "task_sessions",
+          taskSessionsRoute,
+          startedAt,
+        );
       }
 
       const eventsRoute = await handleEventsRoute({
@@ -150,13 +183,23 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         idempotencyKey: context.idempotencyKey,
       });
       if (eventsRoute) {
-        return sendRouteResult(response, context, eventsRoute);
+        return sendObservedRouteResult(response, context, observability, routeNameForPath(request.method, context.url.pathname) ?? "events", eventsRoute, startedAt);
       }
 
-      return sendError(response, 404, context, "not_found", "route not found");
+      return sendObservedRouteResult(response, context, observability, "not_found", {
+        ok: false,
+        status: 404,
+        code: "not_found",
+        message: "route not found",
+      }, startedAt);
     } catch (error) {
       const message = error instanceof Error ? error.message : "unknown error";
-      return sendError(response, 500, context, "internal_error", message);
+      return sendObservedRouteResult(response, context, observability, routeNameForPath(request.method, context.url.pathname) ?? "internal_error", {
+        ok: false,
+        status: 500,
+        code: "internal_error",
+        message,
+      }, startedAt);
     }
   });
 }
@@ -202,51 +245,10 @@ async function readJsonBody(request: IncomingMessage): Promise<{ ok: true; value
   }
 }
 
-function sendJson(response: ServerResponse, statusCode: number, body: unknown): void {
-  response.statusCode = statusCode;
-  response.setHeader("content-type", "application/json; charset=utf-8");
-  response.end(JSON.stringify(body));
-}
-
-function sendSchemaError(response: ServerResponse, context: RequestContext, message: string): void {
-  sendError(response, 400, context, "schema_error", message);
-}
-
-function sendRouteResult(response: ServerResponse, context: RequestContext, result: RouteResult): void {
-  if (result.ok) {
-    return sendJson(response, result.status, result.body);
-  }
-  return sendError(response, result.status, context, result.code, result.message, result.details);
-}
-
-function sendError(
-  response: ServerResponse,
-  statusCode: number,
-  context: RequestContext,
-  code: string,
-  message: string,
-  details?: unknown,
-): void {
-  const body: ApiErrorBody = {
-    error: {
-      code,
-      message,
-      details,
-    },
-    request_id: context.requestId,
-  };
-
-  sendJson(response, statusCode, body);
-}
-
 function headerString(value: string | string[] | undefined): string | undefined {
   if (Array.isArray(value)) {
     return value[0];
   }
 
   return value;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

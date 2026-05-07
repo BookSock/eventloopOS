@@ -214,7 +214,7 @@ Examples:
 - Filesystem MCP: poll watched folders/files for changes.
 - Browser MCP/custom server: poll captured tabs/page snapshots.
 - Notion MCP: poll changed docs/tasks.
-- Calendar MCP: poll new events or conflicts.
+- Calendar MCP: poll new events or conflicts. Post-MVP unless product becomes ambient/interrupt-driven.
 
 Poll recipe is explicit, not magical:
 
@@ -590,7 +590,7 @@ Router:
 
 ## Voice Input
 
-Voice should be first-class later, but not in first 10 tickets.
+Voice should be first-class later, but it is below queue/MCP/task-runtime dogfood for v1.
 
 Recommended shape:
 
