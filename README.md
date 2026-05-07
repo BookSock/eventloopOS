@@ -78,7 +78,13 @@ pnpm --filter @eventloopos/native-host exec eventloop-install-chrome-host <chrom
 Use `--browser chromium` for local Chromium/Playwright smoke, or `--browser chrome-for-testing` for Google Chrome for Testing. The opt-in real browser native messaging smoke installs a temporary Chromium host manifest, launches the unpacked extension, captures a tab through `chrome.runtime.sendNativeMessage`, forwards it through the native host to the orchestrator fixture, then restores the previous manifest:
 
 ```sh
-pnpm --filter @eventloopos/browser-extension run test:e2e:native-browser
+pnpm run test:e2e:native-browser
+```
+
+Rendered Mac queue UI smoke:
+
+```sh
+pnpm run test:e2e:macos
 ```
 
 Planning docs live in `docs/planning/`. Start with:

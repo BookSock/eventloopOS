@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "swift test",
-    "test:e2e": "swift test",
+    "test:e2e": "swift test --filter QueueWindowRenderTests",
     "typecheck": "swift build"
   }
 }
