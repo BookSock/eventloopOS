@@ -5,6 +5,7 @@ import {
   BrowserTabResourceSchema,
   ContractJsonSchemas,
   ContractSchemas,
+  ContextRestoreRequestSchema,
   ContextRestorePlanSchema,
   ContextResourceSchema,
   EventSchema,
@@ -79,6 +80,15 @@ describe("contract schemas", () => {
       expect(plan.message.type).toBe("eventloop.restore");
       expect(plan.message.resource.kind).toBe("browser_tab");
     }
+  });
+
+  it("validates context restore requests", () => {
+    const fixture = readFixture(join(fixturesDir, "valid/context_restore_request.json"));
+    const request = ContextRestoreRequestSchema.parse(fixture.data);
+
+    expect(request.status).toBe("pending");
+    expect(request.restore_plan.kind).toBe("browser_extension_message");
+    expect(request.resource.kind).toBe("browser_tab");
   });
 
   it("requires review-packet evidence", () => {

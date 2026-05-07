@@ -1,0 +1,45 @@
+{
+  "schema": "ContextRestoreRequest",
+  "data": {
+    "id": "ctx_restore_123",
+    "status": "pending",
+    "created_at": "2026-05-06T17:00:00.000Z",
+    "updated_at": "2026-05-06T17:00:00.000Z",
+    "idempotency_key": "idem_browser_restore_launch",
+    "resource": {
+      "id": "ctx_browser_123",
+      "kind": "browser_tab",
+      "title": "Launch doc",
+      "url": "https://example.test/launch",
+      "source": "chrome-extension",
+      "restore_confidence": "high",
+      "window_id": "1",
+      "tab_id": "7",
+      "scroll_y": 120,
+      "text_quote": "Launch pricing note needs review later",
+      "selector_hint": "[data-context-quote]"
+    },
+    "restore_plan": {
+      "kind": "browser_extension_message",
+      "side_effect": "local",
+      "execute_supported": false,
+      "target": "eventloopOS browser extension runtime",
+      "message": {
+        "type": "eventloop.restore",
+        "resource": {
+          "id": "ctx_browser_123",
+          "kind": "browser_tab",
+          "title": "Launch doc",
+          "url": "https://example.test/launch",
+          "source": "chrome-extension",
+          "restore_confidence": "high",
+          "window_id": "1",
+          "tab_id": "7",
+          "scroll_y": 120,
+          "text_quote": "Launch pricing note needs review later",
+          "selector_hint": "[data-context-quote]"
+        }
+      }
+    }
+  }
+}

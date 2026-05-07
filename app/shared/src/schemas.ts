@@ -243,6 +243,20 @@ export const ContextRestorePlanSchema = z.union([
 ]);
 export type ContextRestorePlan = z.infer<typeof ContextRestorePlanSchema>;
 
+export const ContextRestoreRequestSchema = z
+  .object({
+    id,
+    status: z.enum(["pending", "done"]),
+    created_at: isoDateTime.optional(),
+    updated_at: isoDateTime.optional(),
+    idempotency_key: z.string().optional(),
+    resource: ContextResourceSchema,
+    restore_plan: ContextRestorePlanSchema,
+    result: unknownRecord.optional()
+  })
+  .strict();
+export type ContextRestoreRequest = z.infer<typeof ContextRestoreRequestSchema>;
+
 export const ActionSchema = z
   .object({
     id,
@@ -553,6 +567,7 @@ export const ContractSchemas = {
   RiskTag: RiskTagSchema,
   ContextResource: ContextResourceSchema,
   ContextRestorePlan: ContextRestorePlanSchema,
+  ContextRestoreRequest: ContextRestoreRequestSchema,
   Event: EventSchema,
   Task: TaskSchema,
   AgentRun: AgentRunSchema,
