@@ -46,9 +46,9 @@ Set `DATABASE_URL` to run the orchestrator with Postgres-backed queue and contex
 For local Postgres-backed tests with Docker:
 
 ```sh
-pnpm run dev:postgres -- up
+pnpm run dev:postgres:up
 pnpm run test:db:docker
-pnpm run dev:postgres -- down
+pnpm run dev:postgres:down
 ```
 
 If Docker is unavailable but local Postgres binaries are installed, run a temporary native Postgres cluster instead. This creates a throwaway cluster under the system temp directory, runs DB tests, stops Postgres, and deletes the temp data:

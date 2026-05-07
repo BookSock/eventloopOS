@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-integration test-e2e test-e2e-browser test-e2e-native-browser test-e2e-native-browser-real-orchestrator test-e2e-mac-browser-restore test-e2e-macos test-e2e-macos-launch test-e2e-macos-ui test-e2e-live test-e2e-live-boot test-e2e-live-full test-db-docker test-db-native dev-doctor dev-postgres live-aerospace voice-listen-command voice-stt-smoke test-contracts test-architecture test-mcp-stability fixtures-seed packets-golden lint typecheck ci install
+.PHONY: test test-unit test-integration test-e2e test-e2e-browser test-e2e-native-browser test-e2e-native-browser-real-orchestrator test-e2e-mac-browser-restore test-e2e-macos test-e2e-macos-launch test-e2e-macos-ui test-e2e-live test-e2e-live-boot test-e2e-live-full test-db-docker test-db-native dev-doctor dev-postgres dev-postgres-up dev-postgres-down dev-postgres-url live-aerospace voice-listen-command voice-stt-smoke test-contracts test-architecture test-mcp-stability fixtures-seed packets-golden lint typecheck ci install
 
 PNPM ?= pnpm
 
@@ -58,6 +58,15 @@ dev-doctor:
 
 dev-postgres:
 	$(PNPM) dev:postgres
+
+dev-postgres-up:
+	$(PNPM) dev:postgres:up
+
+dev-postgres-down:
+	$(PNPM) dev:postgres:down
+
+dev-postgres-url:
+	$(PNPM) dev:postgres:url
 
 live-aerospace:
 	$(PNPM) live:aerospace
