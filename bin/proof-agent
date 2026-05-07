@@ -10,6 +10,7 @@ const artifactRoot = resolve(repoRoot, options.artifactRoot);
 const manifestPath = resolve(repoRoot, options.manifest);
 const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
 const runDir = resolve(artifactRoot, "proof-agent", runId);
+const defaultCommandTimeoutMs = positiveInt(process.env.EVENTLOOPOS_PROOF_COMMAND_TIMEOUT_MS, 15 * 60 * 1000);
 const commands = parseCommands(process.env.EVENTLOOPOS_PROOF_COMMANDS);
 
 mkdirSync(runDir, { recursive: true });
@@ -34,10 +35,26 @@ const manifest = {
   passed: false,
 };
 
+let activeChild;
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, () => {
+    activeChild?.kill(signal);
+    manifest.interrupted_by = signal;
+    manifest.passed = false;
+    manifest.finished_at = new Date().toISOString();
+    manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+    writeManifest();
+    process.exit(signal === "SIGINT" ? 130 : 143);
+  });
+}
+
+writeManifest();
+
 let passed = true;
 for (const command of commands) {
   const result = await runCommand(command, runDir, repoRoot);
   manifest.commands.push(result);
+  writeManifest();
   if (result.exit_code !== 0 || result.signal) {
     passed = false;
     break;
@@ -47,7 +64,7 @@ for (const command of commands) {
 manifest.passed = passed;
 manifest.finished_at = new Date().toISOString();
 manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
-writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+writeManifest();
 console.log(`proof manifest: ${manifestPath}`);
 console.log(`proof artifacts: ${runDir}`);
 process.exitCode = passed ? 0 : 1;
@@ -60,6 +77,9 @@ async function runCommand(command, dir, cwd) {
   const stderrPath = resolve(dir, `${safeName}.stderr.log`);
   const stdout = createWriteStream(stdoutPath, { flags: "w" });
   const stderr = createWriteStream(stderrPath, { flags: "w" });
+  const timeoutMs = command.timeout_ms ?? defaultCommandTimeoutMs;
+  let timedOut = false;
+  let killTimer;
 
   console.log(`proof start: ${name}`);
   const child = spawn(command.cmd, command.args ?? [], {
@@ -67,20 +87,33 @@ async function runCommand(command, dir, cwd) {
     env: process.env,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  activeChild = child;
   child.stdout.pipe(stdout);
   child.stderr.pipe(stderr);
   child.stdout.pipe(process.stdout);
   child.stderr.pipe(process.stderr);
 
   const exit = await new Promise((resolveExit) => {
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      stderr.write(`proof command timed out after ${timeoutMs}ms\n`);
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+    }, timeoutMs);
     child.on("error", (error) => {
+      clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
       stderr.write(`${error.stack ?? error.message}\n`);
       resolveExit({ code: 1, signal: undefined, error: error.message });
     });
     child.on("exit", (code, signal) => {
-      resolveExit({ code: code ?? 1, signal: signal ?? undefined, error: undefined });
+      clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
+      const error = timedOut ? `timed out after ${timeoutMs}ms` : undefined;
+      resolveExit({ code: timedOut ? 1 : code ?? 1, signal: signal ?? undefined, error });
     });
   });
+  activeChild = undefined;
   await closeStream(stdout);
   await closeStream(stderr);
 
@@ -92,6 +125,7 @@ async function runCommand(command, dir, cwd) {
     started_at: started.toISOString(),
     finished_at: finished.toISOString(),
     duration_ms: finished.getTime() - started.getTime(),
+    timeout_ms: timeoutMs,
     exit_code: exit.code,
     signal: exit.signal,
     error: exit.error,
@@ -134,6 +168,7 @@ function normalizeCommand(command) {
     name: typeof command.name === "string" && command.name ? command.name : undefined,
     cmd,
     args,
+    timeout_ms: positiveInt(command.timeout_ms ?? command.timeoutMs, defaultCommandTimeoutMs),
   };
 }
 
@@ -191,6 +226,16 @@ function redactEnvValue(key, value) {
   if (/TOKEN|KEY|SECRET|PASSWORD|COOKIE|AUTH/i.test(key)) return "[redacted]";
   if (value.length > 200) return `${value.slice(0, 200)}...`;
   return value;
+}
+
+function positiveInt(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.floor(parsed);
+}
+
+function writeManifest() {
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 }
 
 function stableFileName(input) {

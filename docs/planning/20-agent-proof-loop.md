@@ -16,6 +16,7 @@ Each meaningful implementation agent should leave:
 - task-message lineage snapshot from `pnpm task:messages` when changing task followup/session routing
 - queue-item lineage snapshot from `pnpm queue:lineage -- --queue-item-id <id>` when changing queue actions, routing, or review packet creation
 - stale attempted task-message reconciliation proof when changing task followup durability/recovery
+- plan-scope check when touching planning/product docs: show that intake-stack, one-paper, and no-aggressive-interruption scope still hold
 
 ## Proof Commands
 
@@ -35,6 +36,15 @@ Current implementation:
 - live manifest: `artifacts/proof-live-manifest.json`
 - per-command logs: `artifacts/proof-agent/<run-id>/`
 - override for cheap tool smoke: `EVENTLOOPOS_PROOF_COMMANDS='[...]'`
+- command timeout: `timeout_ms` per command or `EVENTLOOPOS_PROOF_COMMAND_TIMEOUT_MS`; manifest writes at start and after each command so interrupted/hung runs leave partial proof
+
+Planning/product changes should also run:
+
+```bash
+rg "intake stack|one paper|aggressive interruption|human_queue_reason|dogfood metrics" docs/planning
+```
+
+This is not a correctness test by itself. It is a guardrail so agents re-read current product scope before adding calendar, notification, voice-out, budget, or multi-device work.
 
 `pnpm run ci` first runs the cheap `test:proof-agent` override to prove custom proof-command parsing and manifest writing, then runs the full `proof:agent` bundle. This means every CI pass leaves a durable proof manifest plus per-command logs.
 
