@@ -6,7 +6,8 @@ import test from "node:test";
 const execFileAsync = promisify(execFile);
 
 test("prints Chrome native messaging host manifest with explicit extension id", async () => {
-  const { stdout } = await execFileAsync("node", ["bin/print-chrome-host-manifest", "abc123"], {
+  const extensionId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  const { stdout } = await execFileAsync("node", ["bin/print-chrome-host-manifest", extensionId], {
     cwd: new URL("..", import.meta.url)
   });
   const manifest = JSON.parse(stdout);
@@ -14,5 +15,5 @@ test("prints Chrome native messaging host manifest with explicit extension id", 
   assert.equal(manifest.name, "com.eventloopos.browser_context");
   assert.equal(manifest.type, "stdio");
   assert.equal(manifest.path.endsWith("eventloop-native-host"), true);
-  assert.deepEqual(manifest.allowed_origins, ["chrome-extension://abc123/"]);
+  assert.deepEqual(manifest.allowed_origins, [`chrome-extension://${extensionId}/`]);
 });

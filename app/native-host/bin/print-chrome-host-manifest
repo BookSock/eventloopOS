@@ -1,18 +1,16 @@
 #!/usr/bin/env node
-import { realpathSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { buildChromeHostManifest, defaultHostBinaryPath, HOST_NAME } from "../src/install.js";
 
-const hostName = "com.eventloopos.browser_context";
 const extensionId = process.argv[2] ?? process.env.EVENTLOOPOS_CHROME_EXTENSION_ID ?? "replace_with_extension_id";
-const hostPath = realpathSync(resolve(dirname(fileURLToPath(import.meta.url)), "eventloop-native-host"));
-
-const manifest = {
-  name: hostName,
-  description: "eventloopOS browser context native messaging host",
-  path: hostPath,
-  type: "stdio",
-  allowed_origins: [`chrome-extension://${extensionId}/`]
-};
+const hostPath = defaultHostBinaryPath();
+const manifest = extensionId === "replace_with_extension_id"
+  ? {
+      name: HOST_NAME,
+      description: "eventloopOS browser context native messaging host",
+      path: hostPath,
+      type: "stdio",
+      allowed_origins: [`chrome-extension://${extensionId}/`]
+    }
+  : buildChromeHostManifest({ extensionId, hostPath });
 
 process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);

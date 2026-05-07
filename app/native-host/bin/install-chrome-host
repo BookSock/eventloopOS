@@ -3,15 +3,25 @@ import { installChromeHostManifest } from "../src/install.js";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
-const extensionId = args.find((arg) => !arg.startsWith("--")) ?? process.env.EVENTLOOPOS_CHROME_EXTENSION_ID;
+const browserFlagIndex = args.findIndex((arg) => arg === "--browser");
+const browser = browserFlagIndex === -1 ? process.env.EVENTLOOPOS_CHROME_BROWSER ?? "chrome" : args[browserFlagIndex + 1];
+const positionalArgs = args.filter((arg, index) =>
+  !arg.startsWith("--") && !(browserFlagIndex !== -1 && index === browserFlagIndex + 1)
+);
+const extensionId = positionalArgs[0] ?? process.env.EVENTLOOPOS_CHROME_EXTENSION_ID;
 
 if (!extensionId) {
-  console.error("usage: eventloop-install-chrome-host <chrome-extension-id> [--dry-run]");
+  console.error("usage: eventloop-install-chrome-host <chrome-extension-id> [--browser chrome|chrome-for-testing|chromium] [--dry-run]");
+  process.exit(2);
+}
+
+if (browserFlagIndex !== -1 && !browser) {
+  console.error("--browser requires a value");
   process.exit(2);
 }
 
 try {
-  const result = await installChromeHostManifest({ extensionId, dryRun });
+  const result = await installChromeHostManifest({ extensionId, browser, dryRun });
   if (dryRun) {
     process.stdout.write(result.body);
   } else {

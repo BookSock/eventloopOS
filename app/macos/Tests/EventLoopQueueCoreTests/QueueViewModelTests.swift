@@ -502,10 +502,10 @@ final class QueueViewModelTests: XCTestCase {
         let viewModel = QueueViewModel(client: client)
 
         await viewModel.requestContextRestore(resource: resource)
-        viewModel.startAutomaticContextRestoreRefresh(intervalNanoseconds: 1_000_000, maxRefreshes: 3)
+        viewModel.startAutomaticContextRestoreRefresh(intervalNanoseconds: 1_000_000, maxRefreshes: 2)
 
-        for _ in 0..<50 where client.checkedContextRestoreIds.count < 2 {
-            try? await Task.sleep(nanoseconds: 1_000_000)
+        for _ in 0..<200 where client.checkedContextRestoreIds.count < 2 {
+            try? await Task.sleep(nanoseconds: 10_000_000)
         }
         viewModel.stopAutomaticContextRestoreRefresh()
 

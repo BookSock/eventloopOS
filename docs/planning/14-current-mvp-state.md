@@ -96,6 +96,7 @@ Strong tests now:
 - Fixture E2E for agent loops.
 - Live harness scenario for browser store-only + restore request peek/claim/done status.
 - Real Chromium Playwright extension E2E.
+- Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06.
 
 Weak tests:
 
@@ -106,7 +107,6 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add installed Chrome/native-host live smoke with real extension ID.
-2. Add local Docker/Postgres runner so live Postgres restore-request tests stop skipping.
-3. Add tiny dev command that boots orchestrator + browser E2E + harness as one command.
-4. Add local voice capture/wake-word adapter behind same `/voice/commands` path.
+1. Add local Docker/Postgres runner so live Postgres restore-request tests stop skipping.
+2. Add tiny dev command that boots orchestrator + browser E2E + harness as one command.
+3. Add local voice capture/wake-word adapter behind same `/voice/commands` path.

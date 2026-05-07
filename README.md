@@ -45,7 +45,13 @@ With `ORCHESTRATOR_CODEX_TASK_MAP_PATH` configured, `PUT /task-sessions/:id/task
 Chrome native host install:
 
 ```sh
-pnpm --filter @eventloopos/native-host exec eventloop-install-chrome-host <chrome-extension-id>
+pnpm --filter @eventloopos/native-host exec eventloop-install-chrome-host <chrome-extension-id> --browser chrome
+```
+
+Use `--browser chromium` for local Chromium/Playwright smoke, or `--browser chrome-for-testing` for Google Chrome for Testing. The opt-in real browser native messaging smoke installs a temporary Chromium host manifest, launches the unpacked extension, captures a tab through `chrome.runtime.sendNativeMessage`, forwards it through the native host to the orchestrator fixture, then restores the previous manifest:
+
+```sh
+pnpm --filter @eventloopos/browser-extension run test:e2e:native-browser
 ```
 
 Planning docs live in `docs/planning/`. Start with:

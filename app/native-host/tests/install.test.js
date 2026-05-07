@@ -6,6 +6,7 @@ import test from "node:test";
 import {
   HOST_NAME,
   buildChromeHostManifest,
+  CHROME_BROWSER_FLAVORS,
   chromeNativeMessagingHostsDir,
   installChromeHostManifest
 } from "../src/install.js";
@@ -46,6 +47,34 @@ test("installs manifest under macOS Chrome native messaging path", async () => {
     join(chromeNativeMessagingHostsDir(homeDir), `${HOST_NAME}.json`)
   );
   assert.deepEqual(JSON.parse(await readFile(result.path, "utf8")), result.manifest);
+});
+
+test("installs manifests under browser-specific macOS native messaging paths", async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), "eventloop-native-host-browser-"));
+
+  const installed = await Promise.all(
+    CHROME_BROWSER_FLAVORS.map((browser) =>
+      installChromeHostManifest({
+        extensionId,
+        browser,
+        homeDir,
+        hostPath: "/tmp/eventloop-native-host"
+      })
+    )
+  );
+
+  assert.deepEqual(installed.map((result) => result.path), [
+    join(homeDir, "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts", `${HOST_NAME}.json`),
+    join(homeDir, "Library", "Application Support", "Google", "ChromeForTesting", "NativeMessagingHosts", `${HOST_NAME}.json`),
+    join(homeDir, "Library", "Application Support", "Chromium", "NativeMessagingHosts", `${HOST_NAME}.json`)
+  ]);
+});
+
+test("rejects unknown browser native messaging path flavor", () => {
+  assert.throws(
+    () => chromeNativeMessagingHostsDir("/tmp/home", "unknown"),
+    /browser must be one of: chrome, chrome-for-testing, chromium/
+  );
 });
 
 test("dry run returns manifest body without writing", async () => {

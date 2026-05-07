@@ -5,11 +5,23 @@ import { fileURLToPath } from "node:url";
 
 export const HOST_NAME = "com.eventloopos.browser_context";
 
-export function chromeNativeMessagingHostsDir(homeDir = process.env.HOME ?? "") {
+export const CHROME_BROWSER_FLAVORS = ["chrome", "chrome-for-testing", "chromium"];
+
+export function chromeNativeMessagingHostsDir(homeDir = process.env.HOME ?? "", browser = "chrome") {
   if (!homeDir) {
     throw new Error("HOME is required to install Chrome native messaging host");
   }
-  return join(homeDir, "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts");
+
+  switch (browser) {
+    case "chrome":
+      return join(homeDir, "Library", "Application Support", "Google", "Chrome", "NativeMessagingHosts");
+    case "chrome-for-testing":
+      return join(homeDir, "Library", "Application Support", "Google", "ChromeForTesting", "NativeMessagingHosts");
+    case "chromium":
+      return join(homeDir, "Library", "Application Support", "Chromium", "NativeMessagingHosts");
+    default:
+      throw new Error(`browser must be one of: ${CHROME_BROWSER_FLAVORS.join(", ")}`);
+  }
 }
 
 export function defaultHostBinaryPath() {
@@ -32,12 +44,13 @@ export function buildChromeHostManifest({ extensionId, hostPath = defaultHostBin
 
 export async function installChromeHostManifest({
   extensionId,
+  browser = "chrome",
   homeDir = process.env.HOME,
   hostPath = defaultHostBinaryPath(),
   dryRun = false
 }) {
   const manifest = buildChromeHostManifest({ extensionId, hostPath });
-  const dir = chromeNativeMessagingHostsDir(homeDir);
+  const dir = chromeNativeMessagingHostsDir(homeDir, browser);
   const path = join(dir, `${HOST_NAME}.json`);
   const body = `${JSON.stringify(manifest, null, 2)}\n`;
 
@@ -50,6 +63,7 @@ export async function installChromeHostManifest({
     path,
     manifest,
     body,
+    browser,
     dryRun
   };
 }
