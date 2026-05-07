@@ -164,8 +164,10 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           resource: validation.resource,
           restore_plan: plan,
         }, now());
+        const restoreInfo = restoreResourceInfo(created.record.resource);
         await observability.incrementCounter("restore_requests_created_total", created.inserted ? 1 : 0);
         if (created.inserted) {
+          await observability.incrementCounter(`restore_requests_created_provider_${restoreInfo.counterProvider}`);
           await observability.recordActivity({
             type: "context_restore_requested",
             occurred_at: created.record.created_at,
@@ -175,6 +177,8 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
             details: {
               restore_request_id: created.record.id,
               resource_kind: validation.resource.kind,
+              resource_provider: restoreInfo.provider,
+              confidence_reason: restoreInfo.confidenceReason,
             },
           });
         }
@@ -241,7 +245,9 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         if (!record) {
           return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
         }
+        const restoreInfo = restoreResourceInfo(record.resource);
         await observability.incrementCounter("restore_requests_done_total");
+        await observability.incrementCounter(`restore_requests_done_provider_${restoreInfo.counterProvider}`);
         await observability.recordActivity({
           type: "context_restore_done",
           occurred_at: record.updated_at,
@@ -250,6 +256,8 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           summary: `Restore completed for ${String(record.resource.title ?? record.resource.kind)}`,
           details: {
             restore_request_id: record.id,
+            resource_provider: restoreInfo.provider,
+            confidence_reason: restoreInfo.confidenceReason,
             result: record.result,
           },
         });
@@ -275,7 +283,9 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         if (!record) {
           return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
         }
+        const restoreInfo = restoreResourceInfo(record.resource);
         await observability.incrementCounter("restore_requests_failed_total");
+        await observability.incrementCounter(`restore_requests_failed_provider_${restoreInfo.counterProvider}`);
         await observability.recordActivity({
           type: "context_restore_failed",
           occurred_at: record.updated_at,
@@ -284,6 +294,8 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           summary: `Restore failed for ${String(record.resource.title ?? record.resource.kind)}`,
           details: {
             restore_request_id: record.id,
+            resource_provider: restoreInfo.provider,
+            confidence_reason: restoreInfo.confidenceReason,
             result: record.result,
           },
         });
@@ -301,7 +313,9 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         if (!record) {
           return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
         }
+        const restoreInfo = restoreResourceInfo(record.resource);
         await observability.incrementCounter("restore_requests_retried_total");
+        await observability.incrementCounter(`restore_requests_retried_provider_${restoreInfo.counterProvider}`);
         await observability.recordActivity({
           type: "context_restore_retried",
           occurred_at: record.updated_at,
@@ -310,6 +324,8 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           summary: `Restore retried for ${String(record.resource.title ?? record.resource.kind)}`,
           details: {
             restore_request_id: record.id,
+            resource_provider: restoreInfo.provider,
+            confidence_reason: restoreInfo.confidenceReason,
           },
         });
 
@@ -1679,6 +1695,23 @@ function readOptionalString(input: Record<string, unknown>, key: string): string
 function stringFromRecord(input: Record<string, unknown>, key: string): string | undefined {
   const value = input[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function restoreResourceInfo(resource: Record<string, unknown>): {
+  provider: string;
+  counterProvider: string;
+  confidenceReason?: string;
+} {
+  const details = isRecord(resource.details) ? resource.details : {};
+  const provider = stringFromRecord(details, "provider")
+    ?? stringFromRecord(resource, "source")
+    ?? stringFromRecord(resource, "kind")
+    ?? "unknown";
+  return {
+    provider,
+    counterProvider: stableId(provider),
+    confidenceReason: stringFromRecord(details, "confidence_reason"),
+  };
 }
 
 function stableId(input: string): string {

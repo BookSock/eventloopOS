@@ -141,8 +141,8 @@ Current implementation:
 - MCP poll mappers run resources through the normalizer and preserve existing top-level fields for compatibility.
 - Provider IDs and confidence reasons live in `resource.details`.
 - Mac queue context rows display restore confidence and `details.confidence_reason` when available.
+- Restore created/done/failed/retried metrics are counted by provider, and `dogfood:review` groups provider success/failure from activity history.
 
 Next:
 
-1. Track restore success/failure by provider in dogfood metrics.
-2. Dogfood provider anchors against real Slack/GitHub/Notion/Google Docs/Figma pages.
+1. Dogfood provider anchors against real Slack/GitHub/Notion/Google Docs/Figma pages.

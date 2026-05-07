@@ -33,6 +33,7 @@ type DogfoodReviewReport = {
   task_rollups: RollupSummary[];
   session_rollups: RollupSummary[];
   queue_rollups: QueueRollupSummary[];
+  restore_provider_rollups: RestoreProviderRollupSummary[];
   derived: {
     restore_success_rate: number | null;
     queue_clearance_rate: number | null;
@@ -61,6 +62,17 @@ type QueueRollupSummary = {
   events: number;
   last_activity_at?: string;
   last_summary?: string;
+};
+
+type RestoreProviderRollupSummary = {
+  provider: string;
+  requested: number;
+  done: number;
+  failed: number;
+  retried: number;
+  success_rate: number | null;
+  last_activity_at: string;
+  confidence_reasons: string[];
 };
 
 export function dogfoodReviewOptionsFromEnv(env: NodeJS.ProcessEnv): DogfoodReviewOptions {
@@ -127,6 +139,7 @@ function buildDogfoodReviewReport(input: {
     task_rollups: rollupBy(input.events, (event) => event.task_id),
     session_rollups: rollupBy(input.events, (event) => event.task_session_id),
     queue_rollups: queueRollups(input.events),
+    restore_provider_rollups: restoreProviderRollups(input.events),
     derived: {
       restore_success_rate: ratio(
         input.metrics.counters.restore_requests_done_total,
@@ -177,6 +190,18 @@ function formatTextReport(report: DogfoodReviewReport): string {
       const done = typeof queue.time_to_done_ms === "number" ? ` done_in=${formatDuration(queue.time_to_done_ms)}` : "";
       const summary = queue.last_summary ? `: ${queue.last_summary}` : "";
       lines.push(`- ${queue.id}${task}${session} events=${queue.events}${done}${summary}`);
+    }
+  }
+
+  lines.push("", "Restore Providers:");
+  if (report.restore_provider_rollups.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const rollup of report.restore_provider_rollups) {
+      const reasons = rollup.confidence_reasons.length > 0 ? ` reasons=${rollup.confidence_reasons.join(",")}` : "";
+      lines.push(
+        `- ${rollup.provider} requested=${rollup.requested} done=${rollup.done} failed=${rollup.failed} retried=${rollup.retried} success=${formatRatio(rollup.success_rate)}${reasons} last=${rollup.last_activity_at}`,
+      );
     }
   }
 
@@ -247,6 +272,37 @@ function queueRollups(events: ActivityEvent[]): QueueRollupSummary[] {
   return [...rollups.values()].sort((left, right) => (right.last_activity_at ?? "").localeCompare(left.last_activity_at ?? ""));
 }
 
+function restoreProviderRollups(events: ActivityEvent[]): RestoreProviderRollupSummary[] {
+  const rollups = new Map<string, RestoreProviderRollupSummary>();
+  for (const event of events) {
+    if (!event.type.startsWith("context_restore_")) continue;
+    const provider = stringDetail(event.details, "resource_provider") ?? "unknown";
+    const rollup = rollups.get(provider) ?? {
+      provider,
+      requested: 0,
+      done: 0,
+      failed: 0,
+      retried: 0,
+      success_rate: null,
+      last_activity_at: event.occurred_at,
+      confidence_reasons: [],
+    };
+    if (event.type === "context_restore_requested") rollup.requested += 1;
+    if (event.type === "context_restore_done") rollup.done += 1;
+    if (event.type === "context_restore_failed") rollup.failed += 1;
+    if (event.type === "context_restore_retried") rollup.retried += 1;
+    const confidenceReason = stringDetail(event.details, "confidence_reason");
+    if (confidenceReason && !rollup.confidence_reasons.includes(confidenceReason)) {
+      rollup.confidence_reasons.push(confidenceReason);
+      rollup.confidence_reasons.sort();
+    }
+    if (event.occurred_at > rollup.last_activity_at) rollup.last_activity_at = event.occurred_at;
+    rollup.success_rate = ratio(rollup.done, rollup.done + rollup.failed);
+    rollups.set(provider, rollup);
+  }
+  return [...rollups.values()].sort((left, right) => right.last_activity_at.localeCompare(left.last_activity_at));
+}
+
 function appendRollupLines(lines: string[], rollups: RollupSummary[]): void {
   if (rollups.length === 0) {
     lines.push("- none");
@@ -257,6 +313,11 @@ function appendRollupLines(lines: string[], rollups: RollupSummary[]): void {
       `- ${rollup.id} events=${rollup.events} routed=${rollup.routed} queued=${rollup.queued} done=${rollup.done} followups=${rollup.followups_sent} failed=${rollup.failed} last=${rollup.last_activity_at}`,
     );
   }
+}
+
+function stringDetail(details: Record<string, unknown>, key: string): string | undefined {
+  const value = details[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function ratio(numerator: number | undefined, denominator: number | undefined): number | null {

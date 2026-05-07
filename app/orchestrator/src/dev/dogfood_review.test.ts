@@ -40,6 +40,7 @@ describe("dogfood review CLI", () => {
     assert.match(output, /Tasks:\n- task_blog_feedback events=2 routed=1 queued=1 done=1 followups=1 failed=0/);
     assert.match(output, /Sessions:\n- task_session_blog events=2 routed=1 queued=1 done=1 followups=1 failed=0/);
     assert.match(output, /Queues:\n- qit_review_1 task=task_blog_feedback session=task_session_blog events=2 done_in=20.0m: Queue item done: Launch review/);
+    assert.match(output, /Restore Providers:\n- browser requested=1 done=1 failed=1 retried=0 success=0.50 reasons=browser_quote_fallback/);
     assert.match(output, /queue_item_done ok task=task_blog_feedback queue=qit_review_1: Queue item done: Launch review/);
     assert.doesNotMatch(output, /Old event before window/);
   });
@@ -67,10 +68,17 @@ describe("dogfood review CLI", () => {
       task_rollups: Array<{ id: string; done: number; followups_sent: number }>;
       session_rollups: Array<{ id: string; routed: number }>;
       queue_rollups: Array<{ id: string; time_to_done_ms: number }>;
+      restore_provider_rollups: Array<{ provider: string; success_rate: number }>;
       derived: { queue_clearance_rate: number };
     };
     assert.equal(parsed.metrics.counters.events_ingested_total, 2);
-    assert.deepEqual(parsed.events.map((event) => event.id), ["actv_done", "actv_routed"]);
+    assert.deepEqual(parsed.events.map((event) => event.id), [
+      "actv_restore_failed",
+      "actv_restore_done",
+      "actv_done",
+      "actv_restore_requested",
+      "actv_routed",
+    ]);
     assert.deepEqual(parsed.task_rollups, [
       {
         id: "task_blog_feedback",
@@ -88,6 +96,12 @@ describe("dogfood review CLI", () => {
     ]);
     assert.equal(parsed.queue_rollups[0]?.id, "qit_review_1");
     assert.equal(parsed.queue_rollups[0]?.time_to_done_ms, 1_200_000);
+    assert.deepEqual(parsed.restore_provider_rollups.map((rollup) => ({
+      provider: rollup.provider,
+      success_rate: rollup.success_rate,
+    })), [
+      { provider: "browser", success_rate: 0.5 },
+    ]);
     assert.equal(parsed.derived.queue_clearance_rate, 0.5);
   });
 
@@ -124,8 +138,10 @@ function responseForUrl(url: string): Response {
           queue_items_done_total: 1,
           restore_requests_done_total: 3,
           restore_requests_failed_total: 1,
+          restore_requests_done_provider_browser: 1,
+          restore_requests_failed_provider_browser: 1,
         },
-        activity_count: 3,
+        activity_count: 6,
       },
       generated_at: "2026-05-06T12:30:00.000Z",
     });
@@ -133,8 +149,34 @@ function responseForUrl(url: string): Response {
 
   if (url.endsWith("/activity?limit=10")) {
     return jsonResponse({
-      count: 3,
+      count: 6,
       events: [
+        {
+          id: "actv_restore_failed",
+          type: "context_restore_failed",
+          occurred_at: "2026-05-06T12:25:00.000Z",
+          actor: "system",
+          status: "failed",
+          summary: "Restore failed for Launch doc",
+          details: {
+            restore_request_id: "ctx_restore_2",
+            resource_provider: "browser",
+            confidence_reason: "browser_quote_fallback",
+          },
+        },
+        {
+          id: "actv_restore_done",
+          type: "context_restore_done",
+          occurred_at: "2026-05-06T12:22:00.000Z",
+          actor: "system",
+          status: "ok",
+          summary: "Restore completed for Launch doc",
+          details: {
+            restore_request_id: "ctx_restore_1",
+            resource_provider: "browser",
+            confidence_reason: "browser_quote_fallback",
+          },
+        },
         {
           id: "actv_done",
           type: "queue_item_done",
@@ -146,6 +188,19 @@ function responseForUrl(url: string): Response {
           status: "ok",
           summary: "Queue item done: Launch review",
           details: {},
+        },
+        {
+          id: "actv_restore_requested",
+          type: "context_restore_requested",
+          occurred_at: "2026-05-06T12:10:00.000Z",
+          actor: "system",
+          status: "ok",
+          summary: "Restore requested for Launch doc",
+          details: {
+            restore_request_id: "ctx_restore_1",
+            resource_provider: "browser",
+            confidence_reason: "browser_quote_fallback",
+          },
         },
         {
           id: "actv_routed",

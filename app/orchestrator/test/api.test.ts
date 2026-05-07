@@ -821,6 +821,29 @@ describe("orchestrator gateway API", () => {
       assert.equal(fetchedRestoreRequestBody.restore_request.status, "done");
       assert.deepEqual(fetchedRestoreRequestBody.restore_request.result, { ok: true, tabId: 7, restoredScroll: true });
 
+      const restoreMetricsResponse = await fetch(`${routeBaseUrl}/metrics`);
+      const restoreMetricsBody = await restoreMetricsResponse.json() as {
+        metrics: {
+          counters: Record<string, number>;
+        };
+      };
+      assert.equal(restoreMetricsResponse.status, 200);
+      assert.equal(restoreMetricsBody.metrics.counters.restore_requests_created_provider_chrome_extension, 1);
+      assert.equal(restoreMetricsBody.metrics.counters.restore_requests_failed_provider_chrome_extension, 1);
+      assert.equal(restoreMetricsBody.metrics.counters.restore_requests_retried_provider_chrome_extension, 1);
+      assert.equal(restoreMetricsBody.metrics.counters.restore_requests_done_provider_chrome_extension, 1);
+
+      const restoreActivityResponse = await fetch(`${routeBaseUrl}/activity?limit=10`);
+      const restoreActivityBody = await restoreActivityResponse.json() as {
+        events: Array<{
+          type: string;
+          details: Record<string, unknown>;
+        }>;
+      };
+      assert.equal(restoreActivityResponse.status, 200);
+      const restoreDoneActivity = restoreActivityBody.events.find((event) => event.type === "context_restore_done");
+      assert.equal(restoreDoneActivity?.details.resource_provider, "chrome-extension");
+
       const missingRestoreRequestResponse = await fetch(`${routeBaseUrl}/contexts/restore-requests/ctx_restore_missing`);
       assert.equal(missingRestoreRequestResponse.status, 404);
 
