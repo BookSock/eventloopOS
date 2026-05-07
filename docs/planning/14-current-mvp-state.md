@@ -40,6 +40,7 @@ Done:
 - Chrome alarm wakes poller.
 - Poller claims work through `/contexts/restore-requests/claim-next`.
 - Poller restores browser tab/scroll.
+- Poller/browser runtime highlights restored quote text or selector target and reports `restoredHighlight` plus `highlightStrategy`.
 - Poller POSTs `/contexts/restore-requests/:id/done`.
 - Playwright E2E loads unpacked MV3 extension in Chromium and proves capture, options save, runtime restore, alarm poll restore, and done ACK.
 
@@ -65,7 +66,7 @@ Done:
 - Context resource restore request from queue UI.
 - Restore request status refresh.
 - Automatic restore request status polling while Mac UI is open.
-- UI shows queued/done/failed restore state.
+- UI shows queued/done/highlighted/failed restore state.
 - Live Mac client + Chromium extension restore smoke exists: Mac `HTTPQueueClient` creates a real orchestrator restore request, Chromium extension claims it, restores the tab/scroll, and Mac-readable restore request status becomes `done`.
 
 Gap:
@@ -108,6 +109,7 @@ Strong tests now:
 - Fixture E2E for agent loops.
 - Live harness scenario for browser store-only + restore request peek/claim/done status.
 - Real Chromium Playwright extension E2E.
+- Real Chromium Playwright extension E2E proves restored quote highlight, not only scroll.
 - Browser E2E launches two Chromium profiles and proves different restore-request lease owners.
 - Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06 with `pnpm run test:e2e:native-browser`.
 - Real orchestrator + installed Chromium extension/native host smoke exists as `pnpm run test:e2e:native-browser-real-orchestrator`; it starts the actual orchestrator, captures a real browser tab through native messaging, verifies `store_only`, checks no human queue item was created, and checks browser context search can find the captured tab.

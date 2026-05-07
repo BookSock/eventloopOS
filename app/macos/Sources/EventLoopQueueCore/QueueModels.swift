@@ -485,6 +485,8 @@ public struct ContextRestoreResult: Codable, Equatable, Sendable {
     public let tabId: Int?
     public let url: String?
     public let restoredScroll: Bool?
+    public let restoredHighlight: Bool?
+    public let highlightStrategy: String?
     public let error: ContextRestoreError?
 
     public init(
@@ -492,12 +494,16 @@ public struct ContextRestoreResult: Codable, Equatable, Sendable {
         tabId: Int?,
         url: String?,
         restoredScroll: Bool?,
+        restoredHighlight: Bool? = nil,
+        highlightStrategy: String? = nil,
         error: ContextRestoreError? = nil
     ) {
         self.ok = ok
         self.tabId = tabId
         self.url = url
         self.restoredScroll = restoredScroll
+        self.restoredHighlight = restoredHighlight
+        self.highlightStrategy = highlightStrategy
         self.error = error
     }
 }

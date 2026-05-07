@@ -106,18 +106,29 @@ export function contextResourceToPageContext(resource) {
     },
     quote: {
       strategy: normalized.selector_hint ? "selector-hint" : "text-quote",
-      text: normalized.text_quote ?? ""
+      text: normalized.text_quote ?? "",
+      selector_hint: normalized.selector_hint
     }
   };
 }
 
-export function buildRestoreResult({ ok, tabId = null, url, restoredScroll = false, error = null }) {
+export function buildRestoreResult({
+  ok,
+  tabId = null,
+  url,
+  restoredScroll = false,
+  restoredHighlight = false,
+  highlightStrategy,
+  error = null
+}) {
   return {
     schemaVersion: RESTORE_RESULT_SCHEMA_VERSION,
     ok,
     tabId,
     url,
     restoredScroll,
+    restoredHighlight,
+    highlightStrategy,
     error
   };
 }

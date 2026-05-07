@@ -53,11 +53,14 @@ test("restore focuses existing tab by URL match and restores scroll", async () =
   assert.equal(result.ok, true);
   assert.equal(result.tabId, 7);
   assert.equal(result.restoredScroll, true);
+  assert.equal(result.restoredHighlight, true);
+  assert.equal(result.highlightStrategy, "selector");
   assert.deepEqual(chromeApi.calls.tabsUpdate, [{ id: 7, update: { active: true } }]);
   assert.deepEqual(chromeApi.calls.windowsUpdate, [{ id: 11, update: { focused: true } }]);
   assert.equal(chromeApi.calls.tabsCreate.length, 0);
   assert.equal(chromeApi.calls.restoreMessages[0].page.scroll.y, 900);
   assert.equal(chromeApi.calls.restoreMessages[0].page.quote.text, fixtureResource.text_quote);
+  assert.equal(chromeApi.calls.restoreMessages[0].page.quote.selector_hint, fixtureResource.selector_hint);
 });
 
 test("restore opens missing tab and restores scroll", async () => {
@@ -143,7 +146,7 @@ function fakeChrome({ tabs }) {
       },
       sendMessage(tabId, message, callback) {
         calls.restoreMessages.push({ tabId, ...message });
-        callback({ ok: true, restoredScroll: true });
+        callback({ ok: true, restoredScroll: true, restoredHighlight: true, highlightStrategy: "selector" });
       }
     },
     windows: {

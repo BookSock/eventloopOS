@@ -91,8 +91,16 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
     assert.equal(restoreResult.ok, true);
     assert.equal(restoreResult.url, url);
     assert.equal(restoreResult.restoredScroll, true);
+    assert.equal(restoreResult.restoredHighlight, true);
+    assert.equal(restoreResult.highlightStrategy, "text");
     await assertEventually(async () => {
       assert.equal(await page.evaluate(() => Math.round(window.scrollY)), 720);
+    });
+    await assertEventually(async () => {
+      assert.equal(
+        await page.evaluate(() => document.querySelector("[data-eventloopos-restore-highlight]")?.textContent?.trim()),
+        "Launch date moved up. Human review needed."
+      );
     });
 
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -114,6 +122,7 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
     assert.equal(pollDoneBody.result.ok, true);
     assert.equal(pollDoneBody.result.url, url);
     assert.equal(pollDoneBody.result.restoredScroll, true);
+    assert.equal(pollDoneBody.result.restoredHighlight, true);
     await assertEventually(async () => {
       assert.equal(await page.evaluate(() => Math.round(window.scrollY)), 840);
     });

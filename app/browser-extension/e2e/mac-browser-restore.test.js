@@ -81,8 +81,15 @@ test("Mac client restore request is fulfilled by Chromium extension against real
     assert.equal(completedRequest.result.ok, true);
     assert.equal(completedRequest.result.url, targetUrl);
     assert.equal(completedRequest.result.restoredScroll, true);
+    assert.equal(completedRequest.result.restoredHighlight, true);
     await assertEventually(async () => {
       assert.equal(await page.evaluate(() => Math.round(window.scrollY)), 640);
+    }, { timeoutMs: 5_000 });
+    await assertEventually(async () => {
+      assert.equal(
+        await page.evaluate(() => document.querySelector("[data-eventloopos-restore-highlight]")?.textContent?.trim()),
+        "Mac client requested browser restore."
+      );
     }, { timeoutMs: 5_000 });
   } finally {
     await context?.close();

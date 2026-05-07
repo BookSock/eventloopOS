@@ -298,7 +298,9 @@ final class QueueClientTests: XCTestCase {
               "ok": true,
               "tabId": 7,
               "url": "https://example.test/launch",
-              "restoredScroll": true
+              "restoredScroll": true,
+              "restoredHighlight": true,
+              "highlightStrategy": "text"
             },
             "restore_plan": {
               "kind": "browser_extension_message",
@@ -331,6 +333,8 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.restoreRequest.result?.tabId, 7)
         XCTAssertEqual(envelope.restoreRequest.result?.url, "https://example.test/launch")
         XCTAssertEqual(envelope.restoreRequest.result?.restoredScroll, true)
+        XCTAssertEqual(envelope.restoreRequest.result?.restoredHighlight, true)
+        XCTAssertEqual(envelope.restoreRequest.result?.highlightStrategy, "text")
     }
 
     func testContextResourceEncodesSnakeCaseRestoreFields() throws {

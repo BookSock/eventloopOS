@@ -614,6 +614,9 @@ private struct ContextRestoreBanner: View {
             if restoreRequest.result?.ok == false {
                 return "Context restore failed"
             }
+            if restoreRequest.result?.restoredHighlight == true {
+                return "Context restore done + highlighted"
+            }
             return "Context restore done"
         }
 

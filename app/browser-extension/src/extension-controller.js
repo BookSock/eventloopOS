@@ -65,6 +65,8 @@ export function createExtensionController({ chromeApi, nativeBridge, now = () =>
         tabId: tab.id,
         url,
         restoredScroll: restoreResponse?.restoredScroll === true,
+        restoredHighlight: restoreResponse?.restoredHighlight === true,
+        highlightStrategy: restoreResponse?.highlightStrategy,
         error: restoreResponse?.ok === false ? { code: "page_restore_failed", message: restoreResponse.error } : null
       });
     } catch (error) {
