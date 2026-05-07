@@ -276,7 +276,7 @@ Responsibilities:
 - maintain workspace/task registry.
 - enforce side-effect policy.
 
-Master loop should be cheap + persistent. It can use smaller/cheaper model for classification/routing, with stronger model only for hard ambiguous routing.
+Master loop should be cheap + persistent. It can use smaller/cheaper model for classification/routing, with stronger model only for hard ambiguous routing. V1 does not need budget dashboard; model choice and poll cadence config are enough until dogfood shows burn.
 
 ### Task Loops
 
@@ -345,7 +345,7 @@ Need message modes:
 - `followup`: queue later turn after active run.
 - `collect`: debounce/coalesce many compatible messages into one later turn.
 - `steer_backlog`: steer now and keep followup record.
-- `interrupt`: stop active run and start newest instruction.
+- `interrupt`: stop active run and start newest instruction. Not default v1 behavior; use only through structured runtime support and explicit policy.
 
 Use:
 
@@ -369,6 +369,7 @@ Rules:
 - terminal injection must be visible/audited.
 - never paste sensitive/external-send instructions without policy check.
 - require stable session identity before sending text.
+- require explicit terminal-control grant before auto-submit.
 - if uncertain session match, queue human.
 
 ## Ownership Locks

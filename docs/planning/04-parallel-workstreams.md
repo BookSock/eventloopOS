@@ -203,7 +203,7 @@ Owns:
 Build:
 
 - Codex adapter first.
-- Claude adapter later.
+- Claude Code adapter second, through same task-session API.
 - Normalize run state, logs, approvals, outputs.
 - Resume from user decision.
 - Task session bind/resume/status.

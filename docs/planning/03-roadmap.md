@@ -60,6 +60,7 @@ Goal: make agent work queue human only when human judgment needed.
 Deliver:
 
 - Codex adapter using App Server or `codex exec --json` fallback.
+- Claude Code configured-session adapter behind the same task-session API.
 - Agent run table.
 - Blocked state detection.
 - Structured review packet generation.
@@ -114,7 +115,7 @@ Goal: add enough breadth for 3-5 trusted users.
 Deliver:
 
 - Notion adapter.
-- Harden Claude Code adapter beyond the current configured-session MVP.
+- Harden Claude Code adapter beyond configured-session MVP.
 - Better workspace restore.
 - Optional ScreenCaptureKit context snapshot.
 - Import/export diagnostics.

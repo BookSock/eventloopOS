@@ -83,7 +83,7 @@ Later:
 - AeroSpace workspace backend.
 - Linear.
 - browser page polling.
-- Calendar-aware interrupt policy.
+- Calendar-aware interrupt policy, only if product later becomes passive all-day assistant.
 - Voice readback.
 - Budget dashboard.
 - Multi-device sync.
