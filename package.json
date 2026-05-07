@@ -36,6 +36,7 @@
     "queue:add": "pnpm --filter @eventloopos/orchestrator run queue:add",
     "task:sessions": "pnpm --filter @eventloopos/orchestrator run task:sessions",
     "task:bind": "pnpm --filter @eventloopos/orchestrator run task:bind",
+    "task:runtime-smoke": "bin/task-runtime-smoke",
     "live:aerospace": "pnpm --filter @eventloopos/orchestrator run live:aerospace",
     "voice:listen-command": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run voice:listen-command",
     "voice:stt-smoke": "pnpm --filter @eventloopos/orchestrator run voice:stt-smoke",
@@ -45,7 +46,7 @@
     "fixtures:seed": "pnpm --filter @eventloopos/test-harness --if-present fixtures:seed",
     "packets:golden": "pnpm --filter @eventloopos/test-harness --if-present packets:golden",
     "lint": "pnpm -r --if-present lint",
-    "typecheck": "node --check bin/live-smoke && node --check bin/dev-dogfood && node --check bin/proof-agent && pnpm -r --if-present typecheck",
+    "typecheck": "node --check bin/live-smoke && node --check bin/dev-dogfood && node --check bin/proof-agent && node --check bin/task-runtime-smoke && pnpm -r --if-present typecheck",
     "ci": "pnpm lint && pnpm typecheck && pnpm test:proof-agent && pnpm test && pnpm test:e2e"
   },
   "devDependencies": {

@@ -96,6 +96,7 @@ Done:
 - MCP source mappers normalize provider deeplinks for Slack, GitHub, Notion, Google Docs, Figma, and generic browser URLs into `resource.details` with stable provider IDs, confidence reasons, and browser fallback metadata.
 - `ORCHESTRATOR_TASK_SESSIONS=claude_cli` exposes configured Claude Code sessions from `ORCHESTRATOR_CLAUDE_SESSIONS` through the same task-session API; followups run `claude -p --output-format json --resume <session>` in the configured `cwd`.
 - `ORCHESTRATOR_TASK_SESSIONS` now accepts comma-separated modes, so `codex_app_server,claude_cli` exposes Codex App Server threads and configured Claude Code sessions in one daemon. A composite task-session controller lists both providers and routes followups/bindings to the owner runtime by session ID.
+- `pnpm task:runtime-smoke` starts a temporary orchestrator with `codex_app_server,claude_cli`, checks live Codex app-server sessions plus a configured Claude session are exposed together, then shuts the daemon down.
 - `GET /contexts` ranked search.
 - `POST /contexts/restore-plan`.
 - `POST /contexts/restore-requests`.
@@ -188,8 +189,8 @@ Weak tests:
 
 ## Next Best Work
 
-1. Real Claude+Codex composite dogfood with harmless sessions configured together.
-2. Wire `dogfood:check` into a real local Postgres + MCP dogfood run once those sources are active.
-3. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-4. Add deeper one-paper UI proof with screenshot artifacts and long-content layout assertions.
+1. Wire `dogfood:check` into a real local Postgres + MCP dogfood run once those sources are active.
+2. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+3. Add deeper one-paper UI proof with screenshot artifacts and long-content layout assertions.
+4. Add safe real Claude followup smoke against an explicitly supplied disposable Claude session.
 5. Later: real microphone/wake-word proof and always-listening voice UX.

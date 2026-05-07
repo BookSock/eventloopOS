@@ -1,0 +1,111 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+
+const port = process.env.EVENTLOOPOS_TASK_RUNTIME_SMOKE_PORT ?? "4381";
+const baseUrl = `http://127.0.0.1:${port}`;
+const claudeSessionId = process.env.EVENTLOOPOS_TASK_RUNTIME_SMOKE_CLAUDE_SESSION_ID ?? "00000000-0000-4000-8000-000000000001";
+const claudeSessions = process.env.ORCHESTRATOR_CLAUDE_SESSIONS ?? JSON.stringify({
+  [claudeSessionId]: {
+    task_id: "task_smoke_claude",
+    name: "Claude smoke placeholder",
+    cwd: process.cwd(),
+  },
+});
+
+let server;
+
+try {
+  await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "build"]);
+  server = spawn("pnpm", ["--filter", "@eventloopos/orchestrator", "start"], {
+    env: {
+      ...process.env,
+      ORCHESTRATOR_HOST: "127.0.0.1",
+      ORCHESTRATOR_PORT: port,
+      ORCHESTRATOR_WORKSPACE: "off",
+      ORCHESTRATOR_MCP_SOURCES: "off",
+      ORCHESTRATOR_TASK_SESSIONS: "codex_app_server,claude_cli",
+      ORCHESTRATOR_CLAUDE_SESSIONS: claudeSessions,
+    },
+    stdio: "inherit",
+  });
+
+  await waitForHealth(baseUrl, server);
+  const response = await fetch(new URL("/task-sessions", baseUrl));
+  const body = await response.json();
+  if (!response.ok) {
+    throw new Error(`/task-sessions returned ${response.status}: ${JSON.stringify(body)}`);
+  }
+
+  const sessions = Array.isArray(body.sessions) ? body.sessions : [];
+  const providers = new Set(sessions.map((session) => session?.provider).filter(Boolean));
+  if (!providers.has("codex")) throw new Error("missing live Codex app-server task session");
+  if (!providers.has("claude")) throw new Error("missing configured Claude task session");
+
+  console.log(JSON.stringify({
+    ok: true,
+    base_url: baseUrl,
+    count: body.count,
+    providers: [...providers].sort(),
+    sample: sessions.slice(0, 5).map((session) => ({
+      id: session.id,
+      provider: session.provider,
+      task_id: session.task_id,
+      name: session.name,
+    })),
+  }, null, 2));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  if (server && !server.killed) {
+    server.kill("SIGTERM");
+    await onceExit(server);
+  }
+}
+
+async function waitForHealth(url, child) {
+  const deadline = Date.now() + 20_000;
+  let exited = false;
+  child.once("exit", () => {
+    exited = true;
+  });
+
+  while (Date.now() < deadline) {
+    if (exited) throw new Error("orchestrator exited before health check passed");
+    try {
+      const response = await fetch(new URL("/health", url));
+      if (response.ok) return;
+    } catch {
+      // Server not ready yet.
+    }
+    await sleep(250);
+  }
+  throw new Error(`timed out waiting for orchestrator health at ${url}/health`);
+}
+
+async function spawnChecked(file, args, env = process.env) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      env,
+      stdio: "inherit",
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}`));
+    });
+  });
+}
+
+async function onceExit(child) {
+  return await new Promise((resolve) => {
+    child.once("exit", resolve);
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
