@@ -14,4 +14,7 @@ artifacts/traces/*
 artifacts/coverage/*
 artifacts/test-harness/*
 artifacts/voice/*
+artifacts/proof-agent/*
+artifacts/proof-manifest.json
+artifacts/proof-agent-smoke-manifest.json
 !artifacts/**/.gitkeep

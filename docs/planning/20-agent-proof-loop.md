@@ -18,7 +18,16 @@ Each meaningful implementation agent should leave:
 
 Keep `make ci` as baseline correctness.
 
-Add a stronger `proof:agent` lane for handoffs:
+Current implementation:
+
+- `pnpm proof:agent`
+- `make proof-agent`
+- default commands: lint, typecheck, test, test:e2e
+- manifest: `artifacts/proof-manifest.json`
+- per-command logs: `artifacts/proof-agent/<run-id>/`
+- override for cheap CI/tool smoke: `EVENTLOOPOS_PROOF_COMMANDS='[...]'`
+
+The handoff lane should cover:
 
 - lint
 - typecheck
@@ -61,4 +70,3 @@ Dogfood review should eventually fail loudly when:
 - stale queue leases remain after reap window
 
 This keeps agents grounded in product behavior, not only unit-test pass rate.
-

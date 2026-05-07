@@ -24,6 +24,8 @@
     "test:db:native": "pnpm --filter @eventloopos/orchestrator run test:db:native",
     "dev:doctor": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dev:doctor",
     "dogfood:review": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dogfood:review",
+    "proof:agent": "bin/proof-agent",
+    "test:proof-agent": "EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"proof-agent-smoke\",\"cmd\":\"node\",\"args\":[\"--version\"]}]' bin/proof-agent --manifest artifacts/proof-agent-smoke-manifest.json",
     "dev:postgres": "pnpm --filter @eventloopos/orchestrator run dev:postgres",
     "dev:postgres:up": "pnpm --filter @eventloopos/orchestrator run dev:postgres up",
     "dev:postgres:down": "pnpm --filter @eventloopos/orchestrator run dev:postgres down",
@@ -42,8 +44,8 @@
     "fixtures:seed": "pnpm --filter @eventloopos/test-harness --if-present fixtures:seed",
     "packets:golden": "pnpm --filter @eventloopos/test-harness --if-present packets:golden",
     "lint": "pnpm -r --if-present lint",
-    "typecheck": "node --check bin/live-smoke && node --check bin/dev-dogfood && pnpm -r --if-present typecheck",
-    "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e"
+    "typecheck": "node --check bin/live-smoke && node --check bin/dev-dogfood && node --check bin/proof-agent && pnpm -r --if-present typecheck",
+    "ci": "pnpm lint && pnpm typecheck && pnpm test:proof-agent && pnpm test && pnpm test:e2e"
   },
   "devDependencies": {
     "@types/node": "^24.10.2",

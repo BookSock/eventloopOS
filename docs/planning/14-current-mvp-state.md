@@ -172,6 +172,8 @@ Strong tests now:
 - Real local-events MCP dogfood proof passed again after the SDK read-only tool gate: started orchestrator with `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json` and `EVENTLOOPOS_LOCAL_EVENTS_PATH=config/local-events.example.json`, ran `poll:mcp:once`, saw 1 event routed into a human queue item.
 - Real agent-slack MCP no-content smoke passed with an impossible query and content cap: started orchestrator with `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.agent-slack.example.json`, `EVENTLOOPOS_AGENT_SLACK_QUERY='eventloopos-impossible-query-4388-no-results'`, `EVENTLOOPOS_AGENT_SLACK_LIMIT=1`, and `EVENTLOOPOS_AGENT_SLACK_MAX_CONTENT_CHARS=80`; `poll:mcp:once` returned 0 events, 0 errors, proving the wrapper starts and passes the read-only tool metadata gate without printing Slack content.
 - `gh` notifications wrapper tests prove read-only MCP tool metadata, `gh api` argv construction, cursor-to-`since`, notification-to-GitHub event item mapping, and common API URL to browser deeplink conversion without live GitHub content.
+- `pnpm proof:agent` runs a local proof bundle and writes `artifacts/proof-manifest.json` plus per-command stdout/stderr logs under `artifacts/proof-agent/<run-id>/`. Default commands are lint, typecheck, test, and test:e2e. `EVENTLOOPOS_PROOF_COMMANDS` lets CI smoke the manifest writer without recursive full proof.
+- `pnpm test:proof-agent` is wired into `ci` and proves the manifest schema/path/log contract with a cheap `node --version` command.
 
 Weak tests:
 
@@ -186,6 +188,6 @@ Weak tests:
 
 1. Real Claude+Codex composite dogfood with harmless sessions configured together.
 2. Make the Mac queue UI more one-paper-at-a-time: current packet dominates; queue list is secondary navigation.
-3. Add `proof:agent` manifest lane so implementation agents leave machine-checkable evidence.
+3. Add dogfood threshold checker for ignored-item rate, restore success, followup failures, stale leases, and pending restore age.
 4. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
 5. Later: real microphone/wake-word proof and always-listening voice UX.

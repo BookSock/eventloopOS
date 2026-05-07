@@ -1,0 +1,204 @@
+#!/usr/bin/env node
+import { createWriteStream, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+
+const startedAt = new Date();
+const options = parseArgs(process.argv.slice(2));
+const repoRoot = resolve(options.repoRoot);
+const artifactRoot = resolve(repoRoot, options.artifactRoot);
+const manifestPath = resolve(repoRoot, options.manifest);
+const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+const runDir = resolve(artifactRoot, "proof-agent", runId);
+const commands = parseCommands(process.env.EVENTLOOPOS_PROOF_COMMANDS);
+
+mkdirSync(runDir, { recursive: true });
+mkdirSync(dirname(manifestPath), { recursive: true });
+
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.agent_proof",
+  run_id: runId,
+  started_at: startedAt.toISOString(),
+  finished_at: undefined,
+  duration_ms: undefined,
+  repo: gitMetadata(repoRoot),
+  invocation: {
+    argv: process.argv.slice(2),
+    cwd: process.cwd(),
+    manifest_path: manifestPath,
+    artifact_dir: runDir,
+  },
+  environment: summarizeEnvironment(process.env),
+  commands: [],
+  passed: false,
+};
+
+let passed = true;
+for (const command of commands) {
+  const result = await runCommand(command, runDir, repoRoot);
+  manifest.commands.push(result);
+  if (result.exit_code !== 0 || result.signal) {
+    passed = false;
+    break;
+  }
+}
+
+manifest.passed = passed;
+manifest.finished_at = new Date().toISOString();
+manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+console.log(`proof manifest: ${manifestPath}`);
+console.log(`proof artifacts: ${runDir}`);
+process.exitCode = passed ? 0 : 1;
+
+async function runCommand(command, dir, cwd) {
+  const name = command.name ?? [command.cmd, ...(command.args ?? [])].join(" ");
+  const started = new Date();
+  const safeName = stableFileName(name);
+  const stdoutPath = resolve(dir, `${safeName}.stdout.log`);
+  const stderrPath = resolve(dir, `${safeName}.stderr.log`);
+  const stdout = createWriteStream(stdoutPath, { flags: "w" });
+  const stderr = createWriteStream(stderrPath, { flags: "w" });
+
+  console.log(`proof start: ${name}`);
+  const child = spawn(command.cmd, command.args ?? [], {
+    cwd,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.pipe(stdout);
+  child.stderr.pipe(stderr);
+  child.stdout.pipe(process.stdout);
+  child.stderr.pipe(process.stderr);
+
+  const exit = await new Promise((resolveExit) => {
+    child.on("error", (error) => {
+      stderr.write(`${error.stack ?? error.message}\n`);
+      resolveExit({ code: 1, signal: undefined, error: error.message });
+    });
+    child.on("exit", (code, signal) => {
+      resolveExit({ code: code ?? 1, signal: signal ?? undefined, error: undefined });
+    });
+  });
+  await closeStream(stdout);
+  await closeStream(stderr);
+
+  const finished = new Date();
+  const result = {
+    name,
+    cmd: command.cmd,
+    args: command.args ?? [],
+    started_at: started.toISOString(),
+    finished_at: finished.toISOString(),
+    duration_ms: finished.getTime() - started.getTime(),
+    exit_code: exit.code,
+    signal: exit.signal,
+    error: exit.error,
+    stdout_path: stdoutPath,
+    stderr_path: stderrPath,
+  };
+  console.log(`proof ${result.exit_code === 0 && !result.signal ? "pass" : "fail"}: ${name}`);
+  return result;
+}
+
+function parseCommands(value) {
+  if (value) {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) {
+      throw new Error("EVENTLOOPOS_PROOF_COMMANDS must be a JSON array");
+    }
+    return parsed.map(normalizeCommand);
+  }
+  return [
+    { name: "lint", cmd: "pnpm", args: ["lint"] },
+    { name: "typecheck", cmd: "pnpm", args: ["typecheck"] },
+    { name: "test", cmd: "pnpm", args: ["test"] },
+    { name: "test:e2e", cmd: "pnpm", args: ["test:e2e"] },
+  ];
+}
+
+function normalizeCommand(command) {
+  if (!command || typeof command !== "object" || Array.isArray(command)) {
+    throw new Error("proof command must be an object");
+  }
+  const cmd = command.cmd ?? command.command;
+  if (typeof cmd !== "string" || !cmd) {
+    throw new Error("proof command cmd must be a non-empty string");
+  }
+  const args = command.args ?? [];
+  if (!Array.isArray(args) || !args.every((arg) => typeof arg === "string")) {
+    throw new Error("proof command args must be a string array");
+  }
+  return {
+    name: typeof command.name === "string" && command.name ? command.name : undefined,
+    cmd,
+    args,
+  };
+}
+
+function parseArgs(argv) {
+  const parsed = {
+    repoRoot: ".",
+    artifactRoot: "artifacts",
+    manifest: "artifacts/proof-manifest.json",
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    const next = argv[index + 1];
+    if (arg === "--repo-root" && next) {
+      parsed.repoRoot = next;
+      index += 1;
+    } else if (arg === "--artifact-root" && next) {
+      parsed.artifactRoot = next;
+      index += 1;
+    } else if (arg === "--manifest" && next) {
+      parsed.manifest = next;
+      index += 1;
+    } else {
+      throw new Error(`unknown proof-agent argument: ${arg}`);
+    }
+  }
+  return parsed;
+}
+
+function gitMetadata(cwd) {
+  return {
+    commit: git(["rev-parse", "HEAD"], cwd),
+    branch: git(["rev-parse", "--abbrev-ref", "HEAD"], cwd),
+    status_short: git(["status", "--short"], cwd).split("\n").filter(Boolean),
+  };
+}
+
+function git(args, cwd) {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (result.status !== 0) return undefined;
+  return result.stdout.trim();
+}
+
+function summarizeEnvironment(env) {
+  const keys = Object.keys(env)
+    .filter((key) => key.startsWith("EVENTLOOPOS_") || key.startsWith("ORCHESTRATOR_") || key === "CI")
+    .sort();
+  return {
+    recorded_keys: keys,
+    values: Object.fromEntries(keys.map((key) => [key, redactEnvValue(key, env[key])])),
+  };
+}
+
+function redactEnvValue(key, value) {
+  if (value === undefined) return undefined;
+  if (/TOKEN|KEY|SECRET|PASSWORD|COOKIE|AUTH/i.test(key)) return "[redacted]";
+  if (value.length > 200) return `${value.slice(0, 200)}...`;
+  return value;
+}
+
+function stableFileName(input) {
+  return input.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "command";
+}
+
+function closeStream(stream) {
+  return new Promise((resolveClose) => {
+    stream.end(resolveClose);
+  });
+}
