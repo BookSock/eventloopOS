@@ -498,6 +498,140 @@ describe("orchestrator gateway API", () => {
     assert.equal(duplicateBody.queue_item.id, firstBody.queue_item.id);
   });
 
+  it("upserts a waiting agent run into one review queue item", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const observability = createInMemoryObservability();
+    const agentRunServer = createGatewayServer({
+      store,
+      observability,
+      now: () => new Date("2026-05-06T19:02:00.000Z"),
+    });
+    await new Promise<void>((resolve) => agentRunServer.listen(0, "127.0.0.1", resolve));
+    const address = agentRunServer.address() as AddressInfo;
+    const agentRunBaseUrl = `http://127.0.0.1:${address.port}`;
+    const run = makeAgentRun({
+      id: "run_fake_ticket_10",
+      task_id: "task_agent_adapter",
+      thread_id: "thread_fake_ticket_10",
+      status: "waiting_approval",
+      blocked_reason: "Approve fake followup send.",
+      risk_tags: ["external_send"],
+      resume_actions: [
+        {
+          id: "act_run_fake_ticket_10_resume",
+          type: "resume_agent",
+          label: "Resume fake ticket",
+          requires_approval: true,
+          side_effect: "local",
+          payload: {
+            agent_run_id: "run_fake_ticket_10",
+          },
+        },
+      ],
+    });
+
+    try {
+      const firstResponse = await fetch(`${agentRunBaseUrl}/agent-runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(run),
+      });
+      const firstBody = await firstResponse.json() as {
+        agent_run: { id: string; status: string };
+        review_packet: { id: string; agent_run_id: string; recommended_action: { type: string; requires_confirmation: boolean } };
+        queue_item: { id: string; review_packet_id: string; priority_reasons: string[] };
+      };
+      assert.equal(firstResponse.status, 200);
+      assert.equal(firstBody.agent_run.id, "run_fake_ticket_10");
+      assert.equal(firstBody.agent_run.status, "waiting_approval");
+      assert.equal(firstBody.review_packet.id, "pkt_run_fake_ticket_10_agent_waiting");
+      assert.equal(firstBody.review_packet.agent_run_id, "run_fake_ticket_10");
+      assert.equal(firstBody.review_packet.recommended_action.type, "resume_agent");
+      assert.equal(firstBody.review_packet.recommended_action.requires_confirmation, true);
+      assert.equal(firstBody.queue_item.id, "qit_run_fake_ticket_10_agent_waiting");
+      assert.equal(firstBody.queue_item.review_packet_id, firstBody.review_packet.id);
+      assert.deepEqual(firstBody.queue_item.priority_reasons, ["agent_run_waiting"]);
+
+      const duplicateResponse = await fetch(`${agentRunBaseUrl}/agent-runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: run.id,
+          provider: run.provider,
+          task_id: run.task_id,
+          thread_id: run.thread_id,
+          status: run.status,
+          updated_at: "2026-05-06T19:03:00.000Z",
+          blocked_reason: "Updated approval text.",
+        }),
+      });
+      const duplicateBody = await duplicateResponse.json() as {
+        review_packet: { summary: string; evidence: unknown[]; recommended_action: { type: string } };
+        queue_item: { id: string };
+      };
+      assert.equal(duplicateResponse.status, 200);
+      assert.equal(duplicateBody.queue_item.id, firstBody.queue_item.id);
+      assert.equal(duplicateBody.review_packet.summary, "Updated approval text.");
+      assert.equal(duplicateBody.review_packet.evidence.length, 1);
+      assert.equal(duplicateBody.review_packet.recommended_action.type, "resume_agent");
+
+      const queueResponse = await fetch(`${agentRunBaseUrl}/queue`);
+      const queueBody = await queueResponse.json() as { count: number; items: Array<{ id: string }> };
+      assert.equal(queueBody.count, 1);
+      assert.deepEqual(queueBody.items.map((item) => item.id), [firstBody.queue_item.id]);
+
+      const getResponse = await fetch(`${agentRunBaseUrl}/agent-runs/run_fake_ticket_10`);
+      const getBody = await getResponse.json() as { agent_run: { thread_id: string } };
+      assert.equal(getResponse.status, 200);
+      assert.equal(getBody.agent_run.thread_id, "thread_fake_ticket_10");
+
+      const metrics = await observability.snapshot();
+      assert.equal(metrics.counters.agent_run_human_input_upserts_total, 2);
+      assert.equal(metrics.counters.agent_run_queue_items_created_total, 1);
+
+      const runningResponse = await fetch(`${agentRunBaseUrl}/agent-runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: run.id,
+          provider: run.provider,
+          task_id: run.task_id,
+          thread_id: run.thread_id,
+          status: "running",
+          updated_at: "2026-05-06T19:04:00.000Z",
+        }),
+      });
+      assert.equal(runningResponse.status, 200);
+      const readyAfterRunning = await (await fetch(`${agentRunBaseUrl}/queue`)).json() as { count: number };
+      const doneAfterRunning = await (await fetch(`${agentRunBaseUrl}/queue?state=done`)).json() as { count: number };
+      assert.equal(readyAfterRunning.count, 0);
+      assert.equal(doneAfterRunning.count, 1);
+
+      const reblockedResponse = await fetch(`${agentRunBaseUrl}/agent-runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: run.id,
+          provider: run.provider,
+          task_id: run.task_id,
+          thread_id: run.thread_id,
+          status: "blocked",
+          updated_at: "2026-05-06T19:05:00.000Z",
+          blocked_reason: "Needs new human answer.",
+        }),
+      });
+      const reblockedBody = await reblockedResponse.json() as { queue_item: { id: string; state: string; priority_score: number } };
+      assert.equal(reblockedResponse.status, 200);
+      assert.equal(reblockedBody.queue_item.id, firstBody.queue_item.id);
+      assert.equal(reblockedBody.queue_item.state, "ready");
+      assert.equal(reblockedBody.queue_item.priority_score, 850);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        agentRunServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("records local activity and metrics for routed events and done decisions", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const observability = createInMemoryObservability();
@@ -4250,3 +4384,44 @@ describe("orchestrator gateway API", () => {
     }
   });
 });
+
+function makeAgentRun(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    id: "run_fixture",
+    provider: "fake",
+    task_id: "task_fixture",
+    thread_id: "thread_fixture",
+    status: "running",
+    started_at: "2026-05-06T19:00:00.000Z",
+    updated_at: "2026-05-06T19:02:00.000Z",
+    risk_tags: [],
+    evidence: [
+      {
+        id: "ev_run_fixture",
+        kind: "raw",
+        title: "Agent run fixture",
+        url: "artifact://raw/agent-run.jsonl",
+      },
+    ],
+    output_refs: [
+      {
+        id: "raw_run_fixture",
+        uri: "artifact://raw/agent-run.jsonl",
+        media_type: "application/jsonl",
+      },
+    ],
+    resume_actions: [
+      {
+        id: "act_run_fixture_resume",
+        type: "resume_agent",
+        label: "Resume agent run",
+        requires_confirmation: true,
+        side_effect: "local",
+        payload: {
+          agent_run_id: "run_fixture",
+        },
+      },
+    ],
+    ...overrides,
+  };
+}

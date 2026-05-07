@@ -2,6 +2,8 @@ import pg from "pg";
 import type { Pool, PoolClient, QueryResultRow } from "pg";
 import type {
   Action,
+  AgentRun,
+  AgentRunQueueResult,
   Confidence,
   ContextResource,
   EvidenceRef,
@@ -437,6 +439,100 @@ export class PostgresQueueStore {
 
     const artifacts = buildReviewArtifactsFromEvent(event, now, routeDecision);
     return this.recordRoutedEvent(eventRecord, routeDecision, artifacts.review_packet, artifacts.queue_item);
+  }
+
+  async getAgentRun(id: string): Promise<AgentRun | undefined> {
+    const result = await this.pool.query("SELECT * FROM agent_runs WHERE id = $1", [id]);
+    return result.rows[0] ? rowToAgentRun(result.rows[0]) : undefined;
+  }
+
+  async upsertAgentRun(run: AgentRun, now: Date): Promise<AgentRunQueueResult> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `
+          INSERT INTO agent_runs (
+            id,
+            provider,
+            task_id,
+            thread_id,
+            status,
+            started_at,
+            updated_at,
+            completed_at,
+            blocked_reason,
+            risk_tags,
+            evidence,
+            output_refs,
+            resume_actions
+          )
+          VALUES ($1, $2, $3, $4, $5, $6::timestamptz, $7::timestamptz, $8::timestamptz, $9, $10::text[], $11::jsonb, $12::jsonb, $13::jsonb)
+          ON CONFLICT (id) DO UPDATE SET
+            provider = EXCLUDED.provider,
+            task_id = EXCLUDED.task_id,
+            thread_id = EXCLUDED.thread_id,
+            status = EXCLUDED.status,
+            started_at = EXCLUDED.started_at,
+            updated_at = EXCLUDED.updated_at,
+            completed_at = EXCLUDED.completed_at,
+            blocked_reason = EXCLUDED.blocked_reason,
+            risk_tags = EXCLUDED.risk_tags,
+            evidence = EXCLUDED.evidence,
+            output_refs = EXCLUDED.output_refs,
+            resume_actions = EXCLUDED.resume_actions
+        `,
+        [
+          run.id,
+          run.provider,
+          run.task_id ?? null,
+          run.thread_id ?? null,
+          run.status,
+          run.started_at ?? null,
+          run.updated_at,
+          run.completed_at ?? null,
+          run.blocked_reason ?? null,
+          run.risk_tags,
+          JSON.stringify(run.evidence),
+          JSON.stringify(run.output_refs),
+          JSON.stringify(run.resume_actions),
+        ],
+      );
+
+      const storedRun = await this.getAgentRunWithClient(client, run.id);
+      if (!storedRun) throw new Error(`agent run ${run.id} was not found after upsert`);
+
+      if (storedRun.status !== "waiting_approval" && storedRun.status !== "blocked") {
+        await this.clearAgentRunQueueItem(client, storedRun.id, now.toISOString());
+        await client.query("COMMIT");
+        return { agent_run: storedRun };
+      }
+
+      const timestamp = now.toISOString();
+      const packet = buildReviewPacketFromAgentRunForPostgres(storedRun, timestamp);
+      const queueItem = buildQueueItemFromAgentRunForPostgres(storedRun, packet, timestamp);
+      const existingItem = await this.getQueueItemByReviewPacketId(client, packet.id);
+      await this.insertReviewPacket(client, packet);
+      if (!existingItem) {
+        await this.insertQueueItem(client, normalizeNewQueueItem(queueItem, timestamp));
+      } else {
+        await this.reactivateAgentRunQueueItem(client, queueItem, timestamp);
+      }
+      const item = await this.getQueueItemByReviewPacketId(client, packet.id);
+
+      await client.query("COMMIT");
+      return {
+        agent_run: storedRun,
+        review_packet: item?.review_packet ?? packet,
+        queue_item: item,
+        queue_item_created: !existingItem,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async listQueue(state?: QueueState): Promise<QueueItemWithPacket[]> {
@@ -1056,7 +1152,20 @@ export class PostgresQueueStore {
           updated_at
         )
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::text[], $10::jsonb, $11::jsonb, $12::jsonb, $13::jsonb, $14::timestamptz, $15::timestamptz)
-        ON CONFLICT (id) DO NOTHING
+        ON CONFLICT (id) DO UPDATE SET
+          task_id = EXCLUDED.task_id,
+          agent_run_id = EXCLUDED.agent_run_id,
+          title = EXCLUDED.title,
+          summary = EXCLUDED.summary,
+          decision_needed = EXCLUDED.decision_needed,
+          risk_level = EXCLUDED.risk_level,
+          confidence = EXCLUDED.confidence,
+          risk_tags = EXCLUDED.risk_tags,
+          evidence = EXCLUDED.evidence,
+          context = EXCLUDED.context,
+          recommended_action = EXCLUDED.recommended_action,
+          alternate_actions = EXCLUDED.alternate_actions,
+          updated_at = EXCLUDED.updated_at
       `,
       [
         packet.id,
@@ -1074,6 +1183,51 @@ export class PostgresQueueStore {
         JSON.stringify(packet.alternate_actions),
         packet.created_at,
         packet.updated_at,
+      ],
+    );
+  }
+
+  private async getAgentRunWithClient(client: PoolClient, id: string): Promise<AgentRun | undefined> {
+    const result = await client.query("SELECT * FROM agent_runs WHERE id = $1", [id]);
+    return result.rows[0] ? rowToAgentRun(result.rows[0]) : undefined;
+  }
+
+  private async clearAgentRunQueueItem(client: PoolClient, agentRunId: string, timestamp: string): Promise<void> {
+    await client.query(
+      `
+        UPDATE queue_items
+        SET state = 'done',
+            due_at = NULL,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            updated_at = $2::timestamptz
+        WHERE review_packet_id = $1
+          AND state IN ('ready', 'leased', 'deferred')
+      `,
+      [`pkt_${stableId(agentRunId)}_agent_waiting`, timestamp],
+    );
+  }
+
+  private async reactivateAgentRunQueueItem(client: PoolClient, item: NewQueueItem, timestamp: string): Promise<void> {
+    await client.query(
+      `
+        UPDATE queue_items
+        SET task_id = $2,
+            state = 'ready',
+            priority_score = $3,
+            priority_reasons = $4::text[],
+            due_at = NULL,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            updated_at = $5::timestamptz
+        WHERE id = $1
+      `,
+      [
+        item.id,
+        item.task_id ?? null,
+        item.priority_score,
+        item.priority_reasons,
+        timestamp,
       ],
     );
   }
@@ -1276,6 +1430,104 @@ function rowToReviewPacket(row: QueryResultRow): ReviewPacket {
     created_at: requiredDateToIso(row.p_created_at),
     updated_at: requiredDateToIso(row.p_updated_at),
   };
+}
+
+function rowToAgentRun(row: QueryResultRow): AgentRun {
+  return {
+    id: row.id,
+    provider: row.provider,
+    task_id: row.task_id ?? undefined,
+    thread_id: row.thread_id ?? undefined,
+    status: row.status,
+    started_at: dateToIso(row.started_at),
+    updated_at: requiredDateToIso(row.updated_at),
+    completed_at: dateToIso(row.completed_at),
+    blocked_reason: row.blocked_reason ?? undefined,
+    risk_tags: row.risk_tags,
+    evidence: row.evidence,
+    output_refs: row.output_refs,
+    resume_actions: row.resume_actions,
+  };
+}
+
+function buildReviewPacketFromAgentRunForPostgres(run: AgentRun, timestamp: string): ReviewPacket {
+  const stableRunId = stableId(run.id);
+  return {
+    id: `pkt_${stableRunId}_agent_waiting`,
+    task_id: run.task_id,
+    agent_run_id: run.id,
+    title: `${agentProviderLabel(run.provider)} needs human input`,
+    summary: run.blocked_reason ?? `${agentProviderLabel(run.provider)} is ${run.status.replaceAll("_", " ")}.`,
+    decision_needed: run.status === "blocked"
+      ? run.blocked_reason ?? "Unblock this agent run or send followup instructions."
+      : "Approve resume action or send followup instructions.",
+    risk_level: inferAgentRunRiskLevel(run),
+    confidence: "medium",
+    risk_tags: run.risk_tags,
+    evidence: run.evidence.length > 0 ? run.evidence : [
+      {
+        id: `ev_${stableRunId}_agent_run`,
+        kind: "agent_run",
+        title: `${agentProviderLabel(run.provider)} run state`,
+        url: run.output_refs[0]?.uri,
+      },
+    ],
+    context: [],
+    recommended_action: run.resume_actions[0] ?? {
+      id: `act_${stableRunId}_resume`,
+      type: "resume_agent",
+      label: "Resume agent run",
+      requires_confirmation: true,
+      side_effect: "local",
+      payload: {
+        agent_run_id: run.id,
+        thread_id: run.thread_id,
+      },
+    },
+    alternate_actions: [
+      {
+        id: `act_${stableRunId}_done`,
+        type: "mark_done",
+        label: "Mark handled",
+        requires_confirmation: false,
+        side_effect: "none",
+        payload: {
+          agent_run_id: run.id,
+        },
+      },
+    ],
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
+
+function buildQueueItemFromAgentRunForPostgres(run: AgentRun, packet: ReviewPacket, timestamp: string): NewQueueItem {
+  const stableRunId = stableId(run.id);
+  return {
+    id: `qit_${stableRunId}_agent_waiting`,
+    review_packet_id: packet.id,
+    task_id: run.task_id,
+    state: "ready",
+    priority_score: run.status === "blocked" ? 850 : 800,
+    priority_reasons: ["agent_run_waiting"],
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
+
+function agentProviderLabel(provider: AgentRun["provider"]): string {
+  if (provider === "codex") return "Codex";
+  if (provider === "claude") return "Claude Code";
+  if (provider === "openai") return "OpenAI";
+  if (provider === "manual") return "Manual agent";
+  return "Fake agent";
+}
+
+function inferAgentRunRiskLevel(run: AgentRun): ReviewPacket["risk_level"] {
+  if (run.risk_tags.includes("critical")) return "critical";
+  if (run.risk_tags.some((tag) => tag === "external_send" || tag === "credential" || tag === "prod")) return "high";
+  if (run.evidence.length === 0) return "medium";
+  return run.status === "blocked" || run.risk_tags.length > 0 ? "medium" : "low";
 }
 
 function rowToEvent(row: QueryResultRow): McpEvent {

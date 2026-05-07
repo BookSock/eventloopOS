@@ -60,6 +60,8 @@ export function routeNameForPath(method: string | undefined, pathname: string): 
     [/^\/task-sessions\/[^/]+\/task-binding$/, "task_session_binding"],
     [/^\/task-messages$/, "task_messages"],
     [/^\/task-messages\/reconcile-attempted$/, "task_messages_reconcile_attempted"],
+    [/^\/agent-runs$/, "agent_runs"],
+    [/^\/agent-runs\/[^/]+$/, "agent_run_get"],
     [/^\/events$/, "events"],
     [/^\/events\/[^/]+$/, "event_get"],
     [/^\/voice\/commands$/, "voice_commands"],

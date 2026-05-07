@@ -56,6 +56,9 @@ class OrchestratorClient:
     def get_event(self, event_id: str) -> dict[str, Any]:
         return self._request("GET", f"/events/{event_id}") or {}
 
+    def upsert_agent_run(self, run: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", "/agent-runs", run) or {}
+
     def list_contexts(self, **params: str) -> dict[str, Any]:
         query = urlencode({key: value for key, value in params.items() if value})
         path = f"/contexts?{query}" if query else "/contexts"

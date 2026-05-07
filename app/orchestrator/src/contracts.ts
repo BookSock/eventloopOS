@@ -7,6 +7,15 @@ export type EvidenceRef = {
   kind: string;
   title: string;
   url?: string;
+  ref?: string;
+  captured_at?: string;
+};
+
+export type RawRef = {
+  id: string;
+  uri: string;
+  mime_type?: string;
+  media_type?: string;
 };
 
 export type ContextResource = {
@@ -60,6 +69,29 @@ export type ReviewPacket = {
   alternate_actions: Action[];
   created_at: string;
   updated_at: string;
+};
+
+export type AgentRun = {
+  id: string;
+  provider: "codex" | "claude" | "openai" | "manual" | "fake";
+  task_id?: string;
+  thread_id?: string;
+  status: "queued" | "running" | "blocked" | "waiting_approval" | "completed" | "failed" | "cancelled";
+  started_at?: string;
+  updated_at: string;
+  completed_at?: string;
+  blocked_reason?: string;
+  risk_tags: string[];
+  evidence: EvidenceRef[];
+  output_refs: RawRef[];
+  resume_actions: Action[];
+};
+
+export type AgentRunQueueResult = {
+  agent_run: AgentRun;
+  review_packet?: ReviewPacket;
+  queue_item?: QueueItemWithPacket;
+  queue_item_created?: boolean;
 };
 
 export type QueueItem = {

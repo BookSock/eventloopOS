@@ -1,4 +1,4 @@
-import type { QueueItemWithPacket, QueueState, ReviewPacket } from "./contracts.js";
+import type { AgentRun, AgentRunQueueResult, QueueItemWithPacket, QueueState, ReviewPacket } from "./contracts.js";
 import type { PostgresQueueStore } from "./db/postgres_queue_store.js";
 import type { RestoreExecutionReceipt, RestorePlan } from "./workspace/aerospace.js";
 import type { WorkspaceRestoreReceiptRecord } from "./workspace/restore_receipts.js";
@@ -14,6 +14,7 @@ import {
 } from "./task_sessions/task_message_history.js";
 import {
   getReviewPacket,
+  getAgentRun,
   getStoredEvent,
   getStoredEventByIdempotencyKey,
   getContextRestoreRequest,
@@ -32,6 +33,7 @@ import {
   nextQueueItem,
   peekNextContextRestoreRequest,
   recordEventRoute,
+  upsertAgentRun,
   reapExpiredLeases,
   reapDueDeferredItems,
   retryContextRestoreRequest,
@@ -54,6 +56,8 @@ export type GatewayStore = {
   deferQueueItem(queueItemId: string, actorId: string, dueAt: Date, now: Date): Promise<QueueItemWithPacket | undefined>;
   ignoreQueueItem(queueItemId: string, actorId: string, now: Date): Promise<QueueItemWithPacket | undefined>;
   getReviewPacket(id: string): Promise<ReviewPacket | undefined>;
+  getAgentRun(id: string): Promise<AgentRun | undefined>;
+  upsertAgentRun(run: AgentRun, now: Date): Promise<AgentRunQueueResult>;
   getEvent(eventId: string): Promise<StoredEventResult | undefined>;
   getEventByIdempotencyKey(source: string, idempotencyKey: string): Promise<StoredEventResult | undefined>;
   listContextEntries(query?: ContextQuery): Promise<ContextEntry[]>;
@@ -122,6 +126,12 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     },
     async getReviewPacket(id) {
       return getReviewPacket(store, id);
+    },
+    async getAgentRun(id) {
+      return getAgentRun(store, id);
+    },
+    async upsertAgentRun(run, now) {
+      return upsertAgentRun(store, run, now);
     },
     async getEvent(eventId) {
       return getStoredEvent(store, eventId);
@@ -246,6 +256,12 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async getReviewPacket(id) {
       return store.getReviewPacket(id);
+    },
+    async getAgentRun(id) {
+      return store.getAgentRun(id);
+    },
+    async upsertAgentRun(run, now) {
+      return store.upsertAgentRun(run, now);
     },
     async getEvent(eventId) {
       return store.getEventResult(eventId);

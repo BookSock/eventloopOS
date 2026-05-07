@@ -4,6 +4,7 @@ import { performance } from "node:perf_hooks";
 import type { GatewayStore } from "./gateway_store.js";
 import { routeNameForPath, sendObservedRouteResult } from "./http/route_observability.js";
 import { createInMemoryObservability, type Observability } from "./observability.js";
+import { handleAgentRunsRoute } from "./routes/agent_runs.js";
 import { handleContextRestoreRoute } from "./routes/context_restore.js";
 import { handleEventsRoute, routeEventThroughGateway } from "./routes/events.js";
 import { handleMcpSourcesRoute, type McpSourceRegistry } from "./routes/mcp_sources.js";
@@ -169,6 +170,26 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           observability,
           routeNameForPath(request.method, context.url.pathname) ?? "task_sessions",
           taskSessionsRoute,
+          startedAt,
+        );
+      }
+
+      const agentRunsRoute = await handleAgentRunsRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        readJsonBody: () => readJsonBody(request),
+        store: options.store,
+        observability,
+        now: now(),
+        requestId: context.requestId,
+      });
+      if (agentRunsRoute) {
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "agent_runs",
+          agentRunsRoute,
           startedAt,
         );
       }

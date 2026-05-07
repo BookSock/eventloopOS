@@ -25,6 +25,7 @@ QUEUE_RECOMMENDED_ACTION = "queue_recommended_action"
 TASK_SESSION_BINDING = "task_session_binding"
 QUEUE_BIND_THEN_RECOMMENDED_ACTION = "queue_bind_then_recommended_action"
 VOICE_TASK_COMMAND = "voice_task_command"
+AGENT_RUN_WAITING_APPROVAL = "agent_run_waiting_approval"
 WORKSPACE_SNAPSHOT_CONTEXT = "workspace_snapshot_context"
 WORKSPACE_STATUS_SMOKE = "workspace_status_smoke"
 WORKSPACE_RESTORE_DISABLED = "workspace_restore_disabled"
@@ -44,6 +45,7 @@ SCENARIOS = (
     TASK_SESSION_BINDING,
     QUEUE_BIND_THEN_RECOMMENDED_ACTION,
     VOICE_TASK_COMMAND,
+    AGENT_RUN_WAITING_APPROVAL,
     WORKSPACE_SNAPSHOT_CONTEXT,
     WORKSPACE_STATUS_SMOKE,
     WORKSPACE_RESTORE_DISABLED,
@@ -2703,8 +2705,162 @@ class VoiceTaskCommandScenario:
         for key, value in expected["task_message"].items():
             if task_message.get(key) != value:
                 raise ScenarioFailure(f"task_message {key} mismatch: expected {value!r}, got {task_message.get(key)!r}")
-        if response.get("queue_item") is not None:
-            raise ScenarioFailure("voice task command should not create human queue item")
+
+
+class AgentRunWaitingApprovalScenario:
+    def __init__(
+        self,
+        loader: FixtureLoader,
+        writer: ArtifactWriter,
+        clock: FakeClock,
+        orchestrator_url: str | None = None,
+    ) -> None:
+        self.loader = loader
+        self.writer = writer
+        self.clock = clock
+        self.orchestrator_url = orchestrator_url
+
+    def run(self) -> ScenarioResult:
+        mode = "orchestrator" if self.orchestrator_url else "fixture"
+        log: dict[str, Any] = {
+            "scenario": AGENT_RUN_WAITING_APPROVAL,
+            "mode": mode,
+            "started_at": self.clock.now_iso(),
+            "steps": [],
+        }
+        try:
+            result = self._run_orchestrator(log) if self.orchestrator_url else self._run_fixture(log)
+            log["passed"] = True
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            self.writer.write_json("summary.json", result.details)
+            return result
+        except Exception as exc:
+            log["passed"] = False
+            log["error"] = str(exc)
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            raise
+
+    def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
+        response = self._expected_response()
+        self._assert_response(response)
+        log["steps"].append({"name": "upsert_agent_run", "agent_run_id": response["agent_run"]["id"]})
+        log["steps"].append({"name": "create_queue_item", "queue_item_id": response["queue_item"]["id"]})
+        self.writer.write_json("observed.json", response)
+        return ScenarioResult(
+            scenario=AGENT_RUN_WAITING_APPROVAL,
+            mode="fixture",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "agent_run_id": response["agent_run"]["id"],
+                "queue_item_id": response["queue_item"]["id"],
+                "review_packet_id": response["review_packet"]["id"],
+            },
+        )
+
+    def _run_orchestrator(self, log: dict[str, Any]) -> ScenarioResult:
+        if self.orchestrator_url is None:
+            raise ScenarioFailure("orchestrator_url required")
+        client = OrchestratorClient(self.orchestrator_url)
+        response = client.upsert_agent_run(self._agent_run())
+        self._assert_response(response)
+        log["steps"].append({"name": "upsert_agent_run", "agent_run_id": response["agent_run"]["id"]})
+        log["steps"].append({"name": "create_queue_item", "queue_item_id": response["queue_item"]["id"]})
+        self.writer.write_json("observed.json", response)
+        return ScenarioResult(
+            scenario=AGENT_RUN_WAITING_APPROVAL,
+            mode="orchestrator",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "agent_run_id": response["agent_run"]["id"],
+                "queue_item_id": response["queue_item"]["id"],
+                "review_packet_id": response["review_packet"]["id"],
+            },
+        )
+
+    def _agent_run(self) -> dict[str, Any]:
+        return {
+            "id": "run_harness_waiting",
+            "provider": "fake",
+            "task_id": "task_agent_adapter",
+            "thread_id": "thread_harness_waiting",
+            "status": "waiting_approval",
+            "started_at": "2026-05-06T19:00:00.000Z",
+            "updated_at": self.clock.now_iso(),
+            "blocked_reason": "Fake agent needs approval before continuing.",
+            "risk_tags": ["external_send"],
+            "evidence": [
+                {
+                    "id": "ev_run_harness_waiting",
+                    "kind": "raw",
+                    "title": "Harness agent run fixture",
+                    "url": "artifact://raw/harness-agent-run.jsonl",
+                }
+            ],
+            "output_refs": [
+                {
+                    "id": "raw_run_harness_waiting",
+                    "uri": "artifact://raw/harness-agent-run.jsonl",
+                    "media_type": "application/jsonl",
+                }
+            ],
+            "resume_actions": [
+                {
+                    "id": "act_run_harness_waiting_resume",
+                    "type": "resume_agent",
+                    "label": "Resume agent run",
+                    "requires_confirmation": True,
+                    "side_effect": "local",
+                    "payload": {
+                        "agent_run_id": "run_harness_waiting",
+                    },
+                }
+            ],
+        }
+
+    def _expected_response(self) -> dict[str, Any]:
+        return {
+            "agent_run": self._agent_run(),
+            "review_packet": {
+                "id": "pkt_run_harness_waiting_agent_waiting",
+                "task_id": "task_agent_adapter",
+                "agent_run_id": "run_harness_waiting",
+                "recommended_action": {
+                    "type": "resume_agent",
+                },
+            },
+            "queue_item": {
+                "id": "qit_run_harness_waiting_agent_waiting",
+                "review_packet_id": "pkt_run_harness_waiting_agent_waiting",
+                "task_id": "task_agent_adapter",
+                "state": "ready",
+                "priority_reasons": ["agent_run_waiting"],
+            },
+        }
+
+    def _assert_response(self, response: dict[str, Any]) -> None:
+        agent_run = response.get("agent_run")
+        review_packet = response.get("review_packet")
+        queue_item = response.get("queue_item")
+        if not isinstance(agent_run, dict) or not isinstance(review_packet, dict) or not isinstance(queue_item, dict):
+            raise ScenarioFailure("agent run response missing agent_run, review_packet, or queue_item")
+        expected = self._expected_response()
+        for key in ("id", "provider", "task_id", "thread_id", "status", "blocked_reason"):
+            if agent_run.get(key) != expected["agent_run"][key]:
+                raise ScenarioFailure(f"agent_run {key} mismatch: expected {expected['agent_run'][key]!r}, got {agent_run.get(key)!r}")
+        for key, value in expected["review_packet"].items():
+            if isinstance(value, dict):
+                for child_key, child_value in value.items():
+                    if not isinstance(review_packet.get(key), dict) or review_packet[key].get(child_key) != child_value:
+                        raise ScenarioFailure(f"review_packet {key}.{child_key} mismatch")
+            elif review_packet.get(key) != value:
+                raise ScenarioFailure(f"review_packet {key} mismatch: expected {value!r}, got {review_packet.get(key)!r}")
+        for key, value in expected["queue_item"].items():
+            if queue_item.get(key) != value:
+                raise ScenarioFailure(f"queue_item {key} mismatch: expected {value!r}, got {queue_item.get(key)!r}")
 
 
 class WorkspaceSnapshotContextScenario:

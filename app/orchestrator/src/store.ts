@@ -1,7 +1,17 @@
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Action, ContextResource, EvidenceRef, QueueItem, QueueItemWithPacket, QueueState, ReviewPacket } from "./contracts.js";
+import type {
+  Action,
+  AgentRun,
+  AgentRunQueueResult,
+  ContextResource,
+  EvidenceRef,
+  QueueItem,
+  QueueItemWithPacket,
+  QueueState,
+  ReviewPacket,
+} from "./contracts.js";
 import type { McpPollStateSnapshot } from "./integrations/mcp_poll/persistent_cursor_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import { findPromptInjectionPattern } from "./hooks/evaluator.js";
@@ -22,6 +32,7 @@ export type InMemoryStore = {
   eventsById: Map<string, StoredEventResult>;
   contextRestoreRequests: Map<string, ContextRestoreRequestRecord>;
   contextRestoreRequestIdsByIdempotencyKey: Map<string, string>;
+  agentRuns?: Map<string, AgentRun>;
   workspaceRestoreReceipts?: Map<string, WorkspaceRestoreReceiptRecord>;
   mcpPollStates?: Map<string, McpPollStateSnapshot>;
   taskMessagesByIdempotencyKey?: Map<string, DurableTaskMessageRecord>;
@@ -262,6 +273,55 @@ export function reapDueDeferredItems(store: InMemoryStore, now: Date): number {
 
 export function getReviewPacket(store: InMemoryStore, id: string): ReviewPacket | undefined {
   return store.reviewPackets.get(id);
+}
+
+export function getAgentRun(store: InMemoryStore, id: string): AgentRun | undefined {
+  return store.agentRuns?.get(id);
+}
+
+export function upsertAgentRun(store: InMemoryStore, run: AgentRun, now: Date): AgentRunQueueResult {
+  const agentRuns = store.agentRuns ?? new Map<string, AgentRun>();
+  store.agentRuns = agentRuns;
+  const existing = agentRuns.get(run.id);
+  const normalizedRun = {
+    ...existing,
+    ...run,
+    risk_tags: run.risk_tags ?? existing?.risk_tags ?? [],
+    evidence: run.evidence ?? existing?.evidence ?? [],
+    output_refs: run.output_refs ?? existing?.output_refs ?? [],
+    resume_actions: run.resume_actions ?? existing?.resume_actions ?? [],
+  };
+  agentRuns.set(run.id, normalizedRun);
+
+  if (normalizedRun.status !== "waiting_approval" && normalizedRun.status !== "blocked") {
+    clearAgentRunQueueItem(store, normalizedRun.id, now.toISOString());
+    return { agent_run: normalizedRun };
+  }
+
+  const createdAt = existingReviewPacketCreatedAt(store, normalizedRun.id) ?? now.toISOString();
+  const packet = buildReviewPacketFromAgentRun(normalizedRun, createdAt, now.toISOString());
+  store.reviewPackets.set(packet.id, packet);
+
+  const existingQueueItem = store.queue.find((item) => item.review_packet_id === packet.id);
+  if (existingQueueItem) {
+    reactivateAgentRunQueueItem(existingQueueItem, normalizedRun, packet, now.toISOString());
+    existingQueueItem.updated_at = now.toISOString();
+    return {
+      agent_run: normalizedRun,
+      review_packet: packet,
+      queue_item: attachPacket(store, existingQueueItem),
+      queue_item_created: false,
+    };
+  }
+
+  const queueItem = buildQueueItemFromAgentRun(normalizedRun, packet, now.toISOString());
+  store.queue.push(queueItem);
+  return {
+    agent_run: normalizedRun,
+    review_packet: packet,
+    queue_item: attachPacket(store, queueItem),
+    queue_item_created: true,
+  };
 }
 
 export function ingestEventAsReviewPacket(
@@ -618,6 +678,119 @@ function createReviewPacketFromEvent(
     created_at: timestamp,
     updated_at: timestamp,
   };
+}
+
+function buildReviewPacketFromAgentRun(run: AgentRun, createdAt: string, updatedAt: string): ReviewPacket {
+  const stableRunId = stableId(run.id);
+  const evidence = run.evidence.length > 0 ? run.evidence : [
+    {
+      id: `ev_${stableRunId}_agent_run`,
+      kind: "agent_run",
+      title: `${agentProviderLabel(run.provider)} run state`,
+      url: run.output_refs[0]?.uri,
+    },
+  ];
+
+  return {
+    id: `pkt_${stableRunId}_agent_waiting`,
+    task_id: run.task_id,
+    agent_run_id: run.id,
+    title: `${agentProviderLabel(run.provider)} needs human input`,
+    summary: run.blocked_reason ?? `${agentProviderLabel(run.provider)} is ${humanizeRunStatus(run.status)}.`,
+    decision_needed: run.status === "blocked"
+      ? run.blocked_reason ?? "Unblock this agent run or send followup instructions."
+      : "Approve resume action or send followup instructions.",
+    risk_level: inferAgentRunRiskLevel(run),
+    confidence: "medium",
+    risk_tags: run.risk_tags,
+    evidence,
+    context: [],
+    recommended_action: run.resume_actions[0] ?? {
+      id: `act_${stableRunId}_resume`,
+      type: "resume_agent",
+      label: "Resume agent run",
+      requires_confirmation: true,
+      side_effect: "local",
+      payload: {
+        agent_run_id: run.id,
+        thread_id: run.thread_id,
+      },
+    },
+    alternate_actions: [
+      {
+        id: `act_${stableRunId}_done`,
+        type: "mark_done",
+        label: "Mark handled",
+        requires_confirmation: false,
+        side_effect: "none",
+        payload: {
+          agent_run_id: run.id,
+        },
+      },
+    ],
+    created_at: createdAt,
+    updated_at: updatedAt,
+  };
+}
+
+function buildQueueItemFromAgentRun(run: AgentRun, packet: ReviewPacket, timestamp: string): QueueItem {
+  const stableRunId = stableId(run.id);
+  return {
+    id: `qit_${stableRunId}_agent_waiting`,
+    review_packet_id: packet.id,
+    task_id: run.task_id,
+    state: "ready",
+    priority_score: run.status === "blocked" ? 850 : 800,
+    priority_reasons: ["agent_run_waiting"],
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+}
+
+function existingReviewPacketCreatedAt(store: InMemoryStore, agentRunId: string): string | undefined {
+  return store.reviewPackets.get(`pkt_${stableId(agentRunId)}_agent_waiting`)?.created_at;
+}
+
+function clearAgentRunQueueItem(store: InMemoryStore, agentRunId: string, timestamp: string): void {
+  const packetId = `pkt_${stableId(agentRunId)}_agent_waiting`;
+  const item = store.queue.find((candidate) => candidate.review_packet_id === packetId);
+  if (!item || item.state === "done" || item.state === "dead") return;
+
+  item.state = "done";
+  item.lease_owner = undefined;
+  item.lease_expires_at = undefined;
+  item.due_at = undefined;
+  item.updated_at = timestamp;
+}
+
+function reactivateAgentRunQueueItem(item: QueueItem, run: AgentRun, packet: ReviewPacket, timestamp: string): void {
+  item.task_id = packet.task_id;
+  item.state = "ready";
+  item.priority_score = run.status === "blocked" ? 850 : 800;
+  item.priority_reasons = ["agent_run_waiting"];
+  item.due_at = undefined;
+  item.lease_owner = undefined;
+  item.lease_expires_at = undefined;
+  item.updated_at = timestamp;
+}
+
+function agentProviderLabel(provider: AgentRun["provider"]): string {
+  if (provider === "codex") return "Codex";
+  if (provider === "claude") return "Claude Code";
+  if (provider === "openai") return "OpenAI";
+  if (provider === "manual") return "Manual agent";
+  return "Fake agent";
+}
+
+function humanizeRunStatus(status: AgentRun["status"]): string {
+  return status.replaceAll("_", " ");
+}
+
+function inferAgentRunRiskLevel(run: AgentRun): ReviewPacket["risk_level"] {
+  if (run.risk_tags.includes("critical")) return "critical";
+  if (run.risk_tags.some((tag) => tag === "external_send" || tag === "credential" || tag === "prod")) return "high";
+  if (run.evidence.length === 0) return "medium";
+  return run.status === "blocked" || run.risk_tags.length > 0 ? "medium" : "low";
 }
 
 function evidenceForEvent(event: McpEvent): EvidenceRef[] {

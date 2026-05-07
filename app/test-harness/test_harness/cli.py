@@ -9,6 +9,7 @@ from .clock import FakeClock
 from .fixtures import FixtureLoader
 from .scenarios import (
     BROWSER_CONTEXT_ATTACH_TASK,
+    AGENT_RUN_WAITING_APPROVAL,
     AMBIENT_CONTEXT_ROUTE,
     MCP_AMBIENT_CONTEXT_ROUTE,
     BROWSER_CONTEXT_RANKED_SEARCH,
@@ -45,6 +46,7 @@ from .scenarios import (
     WorkspaceRestoreDisabledScenario,
     WorkspaceSnapshotContextScenario,
     WorkspaceStatusSmokeScenario,
+    AgentRunWaitingApprovalScenario,
 )
 
 
@@ -79,6 +81,7 @@ def main(argv: list[str] | None = None) -> int:
         TASK_SESSION_BINDING: TaskSessionBindingScenario,
         QUEUE_BIND_THEN_RECOMMENDED_ACTION: QueueBindThenRecommendedActionScenario,
         VOICE_TASK_COMMAND: VoiceTaskCommandScenario,
+        AGENT_RUN_WAITING_APPROVAL: AgentRunWaitingApprovalScenario,
         WORKSPACE_SNAPSHOT_CONTEXT: WorkspaceSnapshotContextScenario,
         WORKSPACE_STATUS_SMOKE: WorkspaceStatusSmokeScenario,
         WORKSPACE_RESTORE_DISABLED: WorkspaceRestoreDisabledScenario,

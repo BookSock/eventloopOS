@@ -65,6 +65,7 @@ describe("PostgresQueueStore", () => {
       { id: "0004_context_restore_failures.sql" },
       { id: "0005_mcp_poll_states.sql" },
       { id: "0006_task_messages.sql" },
+      { id: "0007_agent_runs.sql" },
     ]);
   });
 
@@ -646,6 +647,7 @@ async function clearTestData(store: PostgresQueueStore) {
       route_decisions,
       queue_items,
       review_packets,
+      agent_runs,
       events,
       context_restore_requests
     RESTART IDENTITY CASCADE

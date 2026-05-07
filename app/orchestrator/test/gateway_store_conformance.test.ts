@@ -3,6 +3,7 @@ import { after, before, describe, it, type TestContext } from "node:test";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { createInMemoryGatewayStore, createPostgresGatewayStore, type GatewayStore } from "../src/gateway_store.js";
 import { PostgresQueueStore } from "../src/db/postgres_queue_store.js";
+import type { AgentRun } from "../src/contracts.js";
 import type { McpEvent } from "../src/integrations/mcp_poll/types.js";
 import type { ContextRestoreRequestRecord, InMemoryStore } from "../src/store.js";
 
@@ -292,6 +293,61 @@ function runGatewayStoreContract(
       }
     });
 
+    it("upserts waiting agent runs into one queue item consistently", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        const first = await harness.store.upsertAgentRun(makeAgentRun({
+          id: "run_gateway_agent",
+          task_id: "task_gateway",
+          status: "waiting_approval",
+          blocked_reason: "Needs approval.",
+        }), now);
+        const second = await harness.store.upsertAgentRun(makeAgentRun({
+          id: "run_gateway_agent",
+          task_id: "task_gateway",
+          status: "waiting_approval",
+          blocked_reason: "Needs updated approval.",
+        }), new Date("2026-05-06T12:01:00.000Z"));
+        const fetched = await harness.store.getAgentRun("run_gateway_agent");
+        const queue = await harness.store.listQueue("ready", now);
+        const running = await harness.store.upsertAgentRun(makeAgentRun({
+          id: "run_gateway_agent",
+          task_id: "task_gateway",
+          status: "running",
+          blocked_reason: "Agent resumed.",
+        }), new Date("2026-05-06T12:02:00.000Z"));
+        const readyAfterRunning = await harness.store.listQueue("ready", now);
+        const doneAfterRunning = await harness.store.listQueue("done", now);
+        const reblocked = await harness.store.upsertAgentRun(makeAgentRun({
+          id: "run_gateway_agent",
+          task_id: "task_gateway",
+          status: "blocked",
+          blocked_reason: "Needs another answer.",
+        }), new Date("2026-05-06T12:03:00.000Z"));
+        const readyAfterReblocked = await harness.store.listQueue("ready", now);
+
+        assert.equal(first.agent_run.id, "run_gateway_agent");
+        assert.equal(first.queue_item?.id, "qit_run_gateway_agent_agent_waiting");
+        assert.equal(first.review_packet?.summary, "Needs approval.");
+        assert.equal(second.queue_item?.id, first.queue_item?.id);
+        assert.equal(second.review_packet?.summary, "Needs updated approval.");
+        assert.equal(second.review_packet?.created_at, first.review_packet?.created_at);
+        assert.equal(fetched?.blocked_reason, "Needs updated approval.");
+        assert.deepEqual(queue.map((item) => item.id), ["qit_run_gateway_agent_agent_waiting"]);
+        assert.equal(running.queue_item, undefined);
+        assert.deepEqual(readyAfterRunning.map((item) => item.id), []);
+        assert.deepEqual(doneAfterRunning.map((item) => item.id), ["qit_run_gateway_agent_agent_waiting"]);
+        assert.equal(reblocked.queue_item?.id, "qit_run_gateway_agent_agent_waiting");
+        assert.equal(reblocked.queue_item?.state, "ready");
+        assert.equal(reblocked.queue_item?.priority_score, 850);
+        assert.deepEqual(readyAfterReblocked.map((item) => item.id), ["qit_run_gateway_agent_agent_waiting"]);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     it("dedupes and finalizes task message history consistently", async (t) => {
       const harness = await createHarness(t);
       if (!harness) return;
@@ -436,6 +492,47 @@ function makeBrowserResource(id: string, title: string, url: string): Record<str
   };
 }
 
+function makeAgentRun(overrides: Partial<AgentRun> = {}): AgentRun {
+  return {
+    id: "run_gateway_fixture",
+    provider: "fake",
+    task_id: "task_gateway_fixture",
+    thread_id: "thread_gateway_fixture",
+    status: "running",
+    started_at: "2026-05-06T12:00:00.000Z",
+    updated_at: "2026-05-06T12:00:00.000Z",
+    risk_tags: ["task_message"],
+    evidence: [
+      {
+        id: "ev_run_gateway_fixture",
+        kind: "raw",
+        title: "Gateway agent run fixture",
+        url: "artifact://raw/gateway-agent-run.jsonl",
+      },
+    ],
+    output_refs: [
+      {
+        id: "raw_run_gateway_fixture",
+        uri: "artifact://raw/gateway-agent-run.jsonl",
+        media_type: "application/jsonl",
+      },
+    ],
+    resume_actions: [
+      {
+        id: "act_run_gateway_fixture_resume",
+        type: "resume_agent",
+        label: "Resume agent run",
+        requires_confirmation: true,
+        side_effect: "local",
+        payload: {
+          agent_run_id: "run_gateway_fixture",
+        },
+      },
+    ],
+    ...overrides,
+  };
+}
+
 function makeContextRestoreRequest(
   id: string,
   idempotencyKey: string,
@@ -469,6 +566,7 @@ async function clearPostgresTestData(store: PostgresQueueStore): Promise<void> {
       route_decisions,
       queue_items,
       review_packets,
+      agent_runs,
       events,
       context_restore_requests
     RESTART IDENTITY CASCADE
