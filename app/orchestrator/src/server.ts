@@ -1132,7 +1132,7 @@ async function injectEventIntoTaskSessionIfPossible(
   const target = await taskInjectionTargetForEvent(event, sessions, store);
   if (!target) return undefined;
 
-  const { session, targetTaskId, evidence, confidence } = target;
+  const { session, targetTaskId, evidence, confidence, matchedContext } = target;
   if (!session) return undefined;
 
   const taskSessionId = String((session as Record<string, unknown>).id);
@@ -1149,7 +1149,7 @@ async function injectEventIntoTaskSessionIfPossible(
 
   const taskMessage = await taskSessions.sendFollowupMessage({
     task_session_id: taskSessionId,
-    text: taskFollowupTextForEvent(event),
+    text: taskFollowupTextForEvent(event, matchedContext),
     event_ids: [event.id],
     idempotency_key: `inject_${event.idempotency_key}`,
   });
@@ -1166,6 +1166,7 @@ async function taskInjectionTargetForEvent(
   targetTaskId: string;
   evidence: EvidenceRef[];
   confidence: RouteDecision["confidence"];
+  matchedContext?: ContextEntry;
 } | undefined> {
   const hintedTaskId = taskIdForHint(event.task_hint);
   if (hintedTaskId) {
@@ -1189,6 +1190,7 @@ async function taskInjectionTargetForEvent(
     session,
     targetTaskId: match.taskId,
     confidence: match.score >= 90 ? "high" : "medium",
+    matchedContext: match.entry,
     evidence: [
       ...sourceEventEvidence(event),
       {
@@ -1290,12 +1292,17 @@ function taskIdsForSessions(sessions: unknown[]): Set<string> {
   return taskIds;
 }
 
-function taskFollowupTextForEvent(event: McpEvent): string {
+function taskFollowupTextForEvent(event: McpEvent, matchedContext?: ContextEntry): string {
   const lines = [
     `New ${event.source} event for this task.`,
     `Title: ${event.title}`,
   ];
   if (event.summary) lines.push(`Summary: ${event.summary}`);
+  if (matchedContext) {
+    lines.push(`Matched context: ${matchedContext.event_title}`);
+    const url = contextEntryUrl(matchedContext);
+    if (url) lines.push(`Matched context URL: ${url}`);
+  }
   if (event.links.length > 0) {
     lines.push(`Links: ${event.links.map((link) => link.url).join(", ")}`);
   }

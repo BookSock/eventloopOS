@@ -1558,6 +1558,8 @@ describe("orchestrator gateway API", () => {
       assert.equal(body.task_message.task_session_id, "task_session_blog");
       assert.deepEqual(body.task_message.event_ids, ["evt_slack_unhinted_blog_context_match"]);
       assert.match(body.task_message.text, /Launch date feedback/);
+      assert.match(body.task_message.text, /Matched context: Browser context: Blog launch draft/);
+      assert.match(body.task_message.text, /Matched context URL: https:\/\/example\.test\/blog-launch-draft/);
       assert.equal(body.task_message.idempotency_key, "inject_slack:T123:C123:unhinted-context");
       assert.equal(messages.size, 1);
     } finally {
@@ -2272,6 +2274,7 @@ describe("orchestrator gateway API", () => {
       assert.equal(body.task_message.task_session_id, "task_session_blog");
       assert.deepEqual(body.task_message.event_ids, [body.event.id]);
       assert.match(body.task_message.text, /Blog draft is priority/);
+      assert.match(body.task_message.text, /Matched context: Browser context: Blog launch draft/);
       assert.equal(body.queue_item, undefined);
 
       const storedResponse = await fetch(`${voiceBaseUrl}/events/${body.event.id}`);

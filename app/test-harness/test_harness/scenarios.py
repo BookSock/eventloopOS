@@ -1447,6 +1447,13 @@ class AmbientContextRouteScenario(BrowserContextStoreOnlyScenario):
                 "event_ids": [ambient_event["id"]],
                 "idempotency_key": "inject_slack:T123:C123:ambient-context",
                 "status": "sent",
+                "text": (
+                    "New slack event for this task.\n"
+                    "Title: Slack message from Malis\n"
+                    "Summary: Launch date feedback belongs in the blog draft before next pass.\n"
+                    "Matched context: Browser context: Blog launch draft\n"
+                    "Matched context URL: https://example.test/blog-launch-draft"
+                ),
             },
             "review_packet": None,
             "queue_item": None,
@@ -1478,6 +1485,9 @@ class AmbientContextRouteScenario(BrowserContextStoreOnlyScenario):
             raise ScenarioFailure(f"task message session mismatch: {task_message!r}")
         if task_message.get("event_ids") != [self._ambient_event()["id"]]:
             raise ScenarioFailure(f"task message event ids mismatch: {task_message!r}")
+        text = task_message.get("text")
+        if isinstance(text, str) and "Matched context: Browser context: Blog launch draft" not in text:
+            raise ScenarioFailure(f"task message missing matched context summary: {task_message!r}")
         if observed.get("review_packet") is not None or observed.get("queue_item") is not None:
             raise ScenarioFailure("ambient context route should not queue human review")
 
