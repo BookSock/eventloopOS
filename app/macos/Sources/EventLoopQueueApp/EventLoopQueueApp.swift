@@ -34,6 +34,15 @@ struct EventLoopQueueApp: App {
         }
         .commands {
             CommandMenu("Queue") {
+                Button(viewModel.selectedPacket?.recommendedAction ?? "Run Recommended Action") {
+                    Task {
+                        await viewModel.executeRecommendedActionAndNext()
+                    }
+                }
+                .keyboardShortcut(.return, modifiers: [.command, .shift])
+                .disabled(!viewModel.canExecuteSelectedRecommendedAction)
+                .accessibilityIdentifier("queue-command-execute-recommended-action")
+
                 Button("Done / Next") {
                     Task {
                         await viewModel.doneAndNext()
@@ -98,6 +107,15 @@ private struct QueueMenuView: View {
             }
         }
         .accessibilityIdentifier("queue-menu-refresh")
+
+        Button(viewModel.selectedPacket?.recommendedAction ?? "Run Recommended Action") {
+            Task {
+                await viewModel.executeRecommendedActionAndNext()
+            }
+        }
+        .keyboardShortcut(.return, modifiers: [.command, .shift])
+        .disabled(!viewModel.canExecuteSelectedRecommendedAction)
+        .accessibilityIdentifier("queue-menu-execute-recommended-action")
 
         Button("Done / Next") {
             Task {

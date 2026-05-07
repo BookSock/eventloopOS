@@ -75,6 +75,36 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
     }
 
+    func testRecommendedActionAvailabilityFollowsSelectedPacket() async {
+        let actionablePacket = ReviewPacket(
+            id: "packet-route",
+            title: "Route feedback",
+            summary: "Human approved agent handoff.",
+            source: "manual://review",
+            priority: 90,
+            recommendedAction: "Route to task agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let nonActionablePacket = ReviewPacket(
+            id: "packet-done",
+            title: "Ignore feedback",
+            summary: "No agent handoff.",
+            source: "manual://review",
+            priority: 10,
+            recommendedAction: "Ignore for now",
+            recommendedActionType: "mark_done",
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+        let viewModel = QueueViewModel(client: FakeQueueClient(packets: [actionablePacket, nonActionablePacket]))
+
+        await viewModel.loadQueue()
+
+        XCTAssertTrue(viewModel.canExecuteSelectedRecommendedAction)
+        viewModel.select(packetId: "packet-done")
+        XCTAssertFalse(viewModel.canExecuteSelectedRecommendedAction)
+    }
+
     func testRenewSelectedLeaseKeepsSelectionLoaded() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
         await viewModel.loadQueue()

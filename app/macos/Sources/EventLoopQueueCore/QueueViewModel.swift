@@ -42,6 +42,10 @@ public final class QueueViewModel: ObservableObject {
         packets.first { $0.id == selectedPacketID }
     }
 
+    public var canExecuteSelectedRecommendedAction: Bool {
+        selectedPacket?.recommendedActionType == "resume_agent"
+    }
+
     public var selectedWorkspaceSnapshot: WorkspaceSnapshot? {
         selectedPacket?.workspaceSnapshot
     }
