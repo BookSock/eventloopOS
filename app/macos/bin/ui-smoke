@@ -144,6 +144,16 @@ assertContains(manualItems, "Restore Manual Workspace")
 
 tell application "System Events"
   tell process "EventLoopQueueApp"
+    click menu item "Restore Manual Workspace" of menu 1 of menu bar item 1 of menu bar 2
+  end tell
+end tell
+delay 0.5
+set restoredItems to menuItemNames()
+assertContains(restoredItems, "Workspace restored: 0 commands")
+assertContains(restoredItems, "Return to Event Loop")
+
+tell application "System Events"
+  tell process "EventLoopQueueApp"
     click menu item "Return to Event Loop" of menu 1 of menu bar item 1 of menu bar 2
   end tell
 end tell
@@ -157,7 +167,7 @@ return queueWindowName
   const result = await spawnChecked("osascript", ["-e", script]);
   return {
     window_name: result.stdout.trim(),
-    mode_toggle_proof: "menu item changed Enter Manual Mode -> Return to Event Loop -> Enter Manual Mode; Restore Manual Workspace available after capture",
+    mode_toggle_proof: "menu item changed Enter Manual Mode -> Return to Event Loop -> Enter Manual Mode; Restore Manual Workspace executed with receipt",
   };
 }
 

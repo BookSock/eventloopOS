@@ -83,6 +83,7 @@ private struct QueueMenuView: View {
             queueState: viewModel.state,
             mode: viewModel.mode,
             contextRestoreState: viewModel.contextRestoreState,
+            workspaceRestoreState: viewModel.workspaceRestoreState,
             manualWorkspaceCaptureState: viewModel.manualWorkspaceCaptureState
         )
     }
@@ -101,6 +102,11 @@ private struct QueueMenuView: View {
                 Text(restoreLabel)
                     .lineLimit(2)
                     .accessibilityIdentifier("queue-menu-restore")
+            }
+            if let workspaceRestoreLabel = summary.workspaceRestoreLabel {
+                Text(workspaceRestoreLabel)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("queue-menu-workspace-restore")
             }
             if let manualWorkspaceLabel = summary.manualWorkspaceLabel {
                 Text(manualWorkspaceLabel)

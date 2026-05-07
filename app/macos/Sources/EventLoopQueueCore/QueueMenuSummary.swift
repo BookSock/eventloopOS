@@ -5,6 +5,7 @@ public struct QueueMenuSummary: Equatable, Sendable {
     public let subtitle: String
     public let modeLabel: String
     public let restoreLabel: String?
+    public let workspaceRestoreLabel: String?
     public let manualWorkspaceLabel: String?
 
     public init(
@@ -13,6 +14,7 @@ public struct QueueMenuSummary: Equatable, Sendable {
         queueState: QueueState,
         mode: EventLoopMode,
         contextRestoreState: ContextRestoreState,
+        workspaceRestoreState: WorkspaceRestoreState = .idle,
         manualWorkspaceCaptureState: ManualWorkspaceCaptureState = .idle
     ) {
         self.modeLabel = mode == .manual ? "Manual Mode" : "Event Loop"
@@ -24,6 +26,7 @@ public struct QueueMenuSummary: Equatable, Sendable {
             title = "Queue error"
             subtitle = message
             restoreLabel = Self.restoreLabel(contextRestoreState)
+            workspaceRestoreLabel = Self.workspaceRestoreLabel(workspaceRestoreState)
             manualWorkspaceLabel = Self.manualWorkspaceLabel(manualWorkspaceCaptureState)
             return
         case .idle, .loaded:
@@ -38,6 +41,7 @@ public struct QueueMenuSummary: Equatable, Sendable {
 
         subtitle = selectedPacket?.title ?? "No selection"
         restoreLabel = Self.restoreLabel(contextRestoreState)
+        workspaceRestoreLabel = Self.workspaceRestoreLabel(workspaceRestoreState)
         manualWorkspaceLabel = Self.manualWorkspaceLabel(manualWorkspaceCaptureState)
     }
 
@@ -53,6 +57,21 @@ public struct QueueMenuSummary: Equatable, Sendable {
             return request.status == "done" ? "Restore done: \(resource.title)" : "Restore \(request.status): \(resource.title)"
         case let .failed(resource, _):
             return "Restore failed: \(resource.title)"
+        }
+    }
+
+    private static func workspaceRestoreLabel(_ state: WorkspaceRestoreState) -> String? {
+        switch state {
+        case .idle:
+            return nil
+        case .skippedManualMode:
+            return "Workspace restore paused"
+        case let .planned(plan):
+            return "Workspace plan: \(plan.commands.count) commands"
+        case let .executed(receipt):
+            return "Workspace restored: \(receipt.commands.count) commands"
+        case .failed:
+            return "Workspace restore failed"
         }
     }
 

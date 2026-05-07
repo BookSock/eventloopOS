@@ -86,4 +86,24 @@ final class QueueMenuSummaryTests: XCTestCase {
 
         XCTAssertEqual(summary.manualWorkspaceLabel, "Manual workspace saved: 2 windows")
     }
+
+    func testSummaryShowsManualWorkspaceRestoreStatus() {
+        let receipt = WorkspaceRestoreReceipt(
+            commands: [
+                WorkspaceExecutedCommand(command: "aerospace", args: ["workspace", "eventloop-blog"]),
+                WorkspaceExecutedCommand(command: "open", args: ["-a", "Ghostty"])
+            ],
+            skipped: []
+        )
+        let summary = QueueMenuSummary(
+            packets: SeededQueue.packets,
+            selectedPacket: SeededQueue.packets[0],
+            queueState: .loaded,
+            mode: .manual,
+            contextRestoreState: .idle,
+            workspaceRestoreState: .executed(receipt)
+        )
+
+        XCTAssertEqual(summary.workspaceRestoreLabel, "Workspace restored: 2 commands")
+    }
 }
