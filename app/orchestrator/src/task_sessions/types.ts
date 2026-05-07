@@ -1,8 +1,11 @@
+import type { TaskFollowupPolicyMeta } from "./task_followup_policy.js";
+
 export type TaskFollowupInput = {
   task_session_id: string;
   text: string;
   event_ids: string[];
   idempotency_key: string;
+  policy?: TaskFollowupPolicyMeta;
 };
 
 export type TaskSessionController = {

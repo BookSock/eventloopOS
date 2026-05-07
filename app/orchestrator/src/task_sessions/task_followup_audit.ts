@@ -1,4 +1,6 @@
+import { evaluateHook } from "../hooks/evaluator.js";
 import type { Observability } from "../observability.js";
+import type { TaskFollowupPolicyMeta } from "./task_followup_policy.js";
 import type { TaskFollowupInput, TaskSessionController } from "./types.js";
 
 export type TaskFollowupAuditOptions = {
@@ -13,6 +15,7 @@ export type TaskFollowupAuditMeta = {
   queueItemId?: string;
   eventId?: string;
   sourceId?: string;
+  policy?: TaskFollowupPolicyMeta;
 };
 
 export async function sendTaskFollowupWithActivity(
@@ -24,6 +27,8 @@ export async function sendTaskFollowupWithActivity(
     throw new Error("task session controller is not configured");
   }
 
+  const { policy: inputPolicy, ...runtimeInput } = input;
+  const policy = meta.policy ?? inputPolicy;
   const observability = options.observability;
   const details = {
     origin: meta.origin,
@@ -47,8 +52,46 @@ export async function sendTaskFollowupWithActivity(
     details,
   });
 
+  if (policy) {
+    const decision = evaluateHook({
+      ...policy,
+      now: new Date(meta.occurredAt),
+    });
+    if (decision.decision !== "allow") {
+      const message = {
+        id: `task_msg_blocked_${stableId(input.idempotency_key)}`,
+        task_session_id: input.task_session_id,
+        mode: "followup",
+        text: input.text,
+        event_ids: input.event_ids,
+        idempotency_key: input.idempotency_key,
+        status: "blocked",
+        blocked_reason: decision.reason ?? "task message blocked by policy",
+        policy_decision: decision,
+      };
+      await observability?.incrementCounter("task_followups_blocked_total");
+      await observability?.recordActivity({
+        type: "task_followup_blocked",
+        occurred_at: meta.occurredAt,
+        actor: "system",
+        task_id: meta.taskId,
+        queue_item_id: meta.queueItemId,
+        event_id: meta.eventId ?? input.event_ids[0],
+        task_session_id: input.task_session_id,
+        source_id: meta.sourceId,
+        status: "blocked",
+        summary: `Task followup blocked: ${input.task_session_id}`,
+        details: {
+          ...details,
+          message,
+        },
+      });
+      return message;
+    }
+  }
+
   try {
-    const message = await options.taskSessions.sendFollowupMessage(input);
+    const message = await options.taskSessions.sendFollowupMessage(runtimeInput);
     const blocked = isRecord(message) && message.status === "blocked";
     await observability?.incrementCounter(blocked ? "task_followups_blocked_total" : "task_followups_sent_total");
     await observability?.recordActivity({
@@ -93,4 +136,8 @@ export async function sendTaskFollowupWithActivity(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stableId(input: string): string {
+  return input.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "unknown";
 }

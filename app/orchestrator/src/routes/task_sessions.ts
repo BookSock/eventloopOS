@@ -101,6 +101,14 @@ export async function handleTaskFollowupRoute(input: {
   }, {
     origin: "task_session_api",
     occurredAt: input.occurredAt,
+    policy: {
+      hook: "before_task_message",
+      surface: "task_message",
+      untrusted_source_text: validation.untrustedSourceText ?? validation.text,
+      evidence: [],
+      scope_kind: "agent_session",
+      scope_id: input.taskSessionId,
+    },
   });
 
   return {
@@ -174,7 +182,13 @@ export function taskSessionMatchesTask(candidate: unknown, taskId: string): cand
 function validateTaskFollowupRequest(
   input: unknown,
   headerIdempotencyKey: string | undefined,
-): { ok: true; text: string; eventIds: string[]; idempotencyKey: string } | { ok: false; message: string } {
+): {
+  ok: true;
+  text: string;
+  eventIds: string[];
+  idempotencyKey: string;
+  untrustedSourceText?: string;
+} | { ok: false; message: string } {
   if (!isRecord(input)) {
     return { ok: false, message: "task followup request must be an object" };
   }
@@ -202,6 +216,9 @@ function validateTaskFollowupRequest(
     text,
     eventIds,
     idempotencyKey,
+    untrustedSourceText: typeof input.untrusted_source_text === "string" && input.untrusted_source_text
+      ? input.untrusted_source_text
+      : undefined,
   };
 }
 

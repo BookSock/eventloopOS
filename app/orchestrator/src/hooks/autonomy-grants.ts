@@ -34,7 +34,7 @@ const DEFAULT_SURFACE_LEVELS: Record<AutonomySurface, AutonomyLevel> = {
   source_read: "allow",
   context_read: "allow",
   workspace_restore: "ask",
-  task_message: "ask",
+  task_message: "allow",
   local_write: "ask",
   external_draft: "ask",
   external_send: "ask",
@@ -62,4 +62,3 @@ export function evaluateAutonomyGrant(input: EvaluateAutonomyInput): AutonomyLev
 
   return matchingGrant?.level ?? DEFAULT_SURFACE_LEVELS[input.surface];
 }
-
