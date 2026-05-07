@@ -103,7 +103,7 @@ Strong tests now:
 - Fixture E2E for agent loops.
 - Live harness scenario for browser store-only + restore request peek/claim/done status.
 - Real Chromium Playwright extension E2E.
-- Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06.
+- Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06 with `EVENTLOOPOS_ENABLE_NATIVE_BROWSER_SMOKE=1 pnpm --filter @eventloopos/browser-extension run test:e2e:native-browser`.
 - `voice:listen` accepts line-delimited local STT transcript streams, optional wake phrase filtering, and forwards into `/voice/commands`.
 - `voice:listen-command` lets whisper.cpp stream, MLX Whisper wrappers, or other local STT tools feed the same router while staying unit-testable through an injected process.
 - `dev:doctor` reports whether `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` is configured and can launch with `--help`; unconfigured voice command is treated as optional/pass.
