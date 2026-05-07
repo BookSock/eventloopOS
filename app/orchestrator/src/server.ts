@@ -1014,6 +1014,16 @@ async function routeEventThroughGateway(
   queue_item?: unknown;
   task_message?: unknown;
 }> {
+  const existing = await options.store.getEventByIdempotencyKey(event.source, event.idempotency_key);
+  if (existing) {
+    return {
+      event: existing.event,
+      route_decision: existing.route_decision,
+      review_packet: existing.review_packet,
+      queue_item: existing.queue_item,
+    };
+  }
+
   const injected = await injectEventIntoTaskSessionIfPossible(event, options.taskSessions, now);
   if (injected) {
     const result = await options.store.recordEventRoute(event, injected.routeDecision, now);

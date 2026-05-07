@@ -4,6 +4,7 @@ import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import {
   getReviewPacket,
   getStoredEvent,
+  getStoredEventByIdempotencyKey,
   getContextRestoreRequest,
   ingestEventAsReviewPacket,
   claimNextContextRestoreRequest,
@@ -35,6 +36,7 @@ export type GatewayStore = {
   markQueueItemDone(queueItemId: string, actorId: string, now: Date): Promise<QueueItemWithPacket | undefined>;
   getReviewPacket(id: string): Promise<ReviewPacket | undefined>;
   getEvent(eventId: string): Promise<StoredEventResult | undefined>;
+  getEventByIdempotencyKey(source: string, idempotencyKey: string): Promise<StoredEventResult | undefined>;
   listContextEntries(query?: ContextQuery): Promise<ContextEntry[]>;
   createContextRestoreRequest(
     request: Omit<ContextRestoreRequestRecord, "status" | "created_at" | "updated_at">,
@@ -75,6 +77,9 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     },
     async getEvent(eventId) {
       return getStoredEvent(store, eventId);
+    },
+    async getEventByIdempotencyKey(source, idempotencyKey) {
+      return getStoredEventByIdempotencyKey(store, source, idempotencyKey);
     },
     async listContextEntries(query) {
       return listContextEntries(store, query);
@@ -127,6 +132,9 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async getEvent(eventId) {
       return store.getEventResult(eventId);
+    },
+    async getEventByIdempotencyKey(source, idempotencyKey) {
+      return store.getEventResultByIdempotencyKey(source, idempotencyKey);
     },
     async listContextEntries(query) {
       return store.listContextEntries(query);

@@ -263,6 +263,14 @@ export function getStoredEvent(store: InMemoryStore, eventId: string): StoredEve
   return store.eventsById.get(eventId);
 }
 
+export function getStoredEventByIdempotencyKey(
+  store: InMemoryStore,
+  _source: string,
+  idempotencyKey: string,
+): StoredEventResult | undefined {
+  return store.eventsByIdempotencyKey.get(idempotencyKey);
+}
+
 export function listContextEntries(store: InMemoryStore, query: ContextQuery = {}): ContextEntry[] {
   const limit = query.limit ?? 100;
   return rankContextEntries(

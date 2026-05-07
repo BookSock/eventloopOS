@@ -267,6 +267,18 @@ export class PostgresQueueStore {
     }
   }
 
+  async getEventResultByIdempotencyKey(
+    source: string,
+    idempotencyKey: string,
+  ): Promise<StoredEventResult | undefined> {
+    const result = await this.pool.query(
+      "SELECT id FROM events WHERE source = $1 AND idempotency_key = $2",
+      [source, idempotencyKey],
+    );
+    const eventId = result.rows[0]?.id;
+    return eventId ? this.getEventResult(eventId) : undefined;
+  }
+
   async listContextEntries(query: ContextQuery = {}): Promise<ContextEntry[]> {
     const limit = query.limit ?? 100;
     const values: unknown[] = [];

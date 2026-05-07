@@ -1382,12 +1382,14 @@ describe("orchestrator gateway API", () => {
         body: JSON.stringify({ event }),
       });
       const duplicateBody = await duplicateResponse.json() as {
-        task_message: {
-          idempotency_key: string;
+        route_decision: {
+          action: string;
         };
+        task_message?: unknown;
       };
       assert.equal(duplicateResponse.status, 202);
-      assert.equal(duplicateBody.task_message.idempotency_key, body.task_message.idempotency_key);
+      assert.equal(duplicateBody.route_decision.action, "inject_into_agent_thread");
+      assert.equal(duplicateBody.task_message, undefined);
       assert.equal(messages.size, 1);
 
       const storedResponse = await fetch(`${taskBaseUrl}/events/evt_slack_task_inject`);
@@ -1400,6 +1402,128 @@ describe("orchestrator gateway API", () => {
       assert.equal(storedResponse.status, 200);
       assert.equal(storedBody.route_decision.action, "inject_into_agent_thread");
       assert.equal(storedBody.queue_item, undefined);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("does not inject a duplicate event into a task session after it already queued human review", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    let sessions: Array<Record<string, unknown>> = [];
+    const messages: Record<string, unknown>[] = [];
+    const taskServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      taskSessions: {
+        listSessions() {
+          return sessions;
+        },
+        sendFollowupMessage(input) {
+          const message = {
+            id: `task_msg_${messages.length + 1}`,
+            task_session_id: input.task_session_id,
+            text: input.text,
+            event_ids: input.event_ids,
+            idempotency_key: input.idempotency_key,
+            status: "sent",
+          };
+          messages.push(message);
+          return message;
+        },
+      },
+    });
+    await new Promise<void>((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+    const address = taskServer.address() as AddressInfo;
+    const taskBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const event = {
+        id: "evt_slack_late_duplicate",
+        source: "slack",
+        source_id: "slack:T123:C123:late-duplicate",
+        idempotency_key: "slack:T123:C123:late-duplicate",
+        occurred_at: "2026-05-06T16:59:00.000Z",
+        received_at: "2026-05-06T17:00:00.000Z",
+        task_hint: "blog feedback",
+        type: "slack.message",
+        title: "Slack message from Malis",
+        summary: "Blog needs launch date note before next draft.",
+        raw_ref: {
+          id: "raw_slack_T123_C123_late_duplicate",
+          uri: "artifact://raw/slack/T123/C123/late-duplicate.json",
+          media_type: "application/json",
+        },
+        links: [],
+        resources: [],
+      };
+
+      const firstResponse = await fetch(`${taskBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ event }),
+      });
+      const firstBody = await firstResponse.json() as {
+        route_decision: {
+          action: string;
+        };
+        queue_item?: unknown;
+        task_message?: unknown;
+      };
+
+      assert.equal(firstResponse.status, 202);
+      assert.equal(firstBody.route_decision.action, "ask_human_now");
+      assert.notEqual(firstBody.queue_item, undefined);
+      assert.equal(firstBody.task_message, undefined);
+
+      const firstQueueResponse = await fetch(`${taskBaseUrl}/queue`);
+      const firstQueueBody = await firstQueueResponse.json() as { items: unknown[] };
+
+      sessions = [
+        {
+          id: "task_session_blog",
+          task_id: "task_blog_feedback",
+          status: "idle",
+        },
+      ];
+
+      const duplicateResponse = await fetch(`${taskBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          event: {
+            ...event,
+            id: "evt_slack_late_duplicate_retry",
+            title: "Retry after task session appears",
+          },
+        }),
+      });
+      const duplicateBody = await duplicateResponse.json() as {
+        event: {
+          id: string;
+        };
+        route_decision: {
+          action: string;
+        };
+        queue_item?: unknown;
+        task_message?: unknown;
+      };
+
+      assert.equal(duplicateResponse.status, 202);
+      assert.equal(duplicateBody.event.id, "evt_slack_late_duplicate");
+      assert.equal(duplicateBody.route_decision.action, "ask_human_now");
+      assert.notEqual(duplicateBody.queue_item, undefined);
+      assert.equal(duplicateBody.task_message, undefined);
+      assert.equal(messages.length, 0);
+
+      const queueResponse = await fetch(`${taskBaseUrl}/queue`);
+      const queueBody = await queueResponse.json() as { items: unknown[] };
+      assert.equal(queueBody.items.length, firstQueueBody.items.length);
     } finally {
       await new Promise<void>((resolve, reject) => {
         taskServer.close((error) => (error ? reject(error) : resolve()));
