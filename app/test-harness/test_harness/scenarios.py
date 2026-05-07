@@ -1453,7 +1453,7 @@ class AmbientContextRouteScenario(BrowserContextStoreOnlyScenario):
                 "status": "sent",
                 "text": (
                     "New slack event for this task.\n"
-                    "Title: Slack message from Malis\n"
+                    "Title: Slack message from Alex\n"
                     "Summary: Launch date feedback belongs in the blog draft before next pass.\n"
                     "Matched context: Browser context: Blog launch draft\n"
                     "Matched context URL: https://example.test/blog-launch-draft"
@@ -1538,7 +1538,7 @@ class AmbientContextRouteScenario(BrowserContextStoreOnlyScenario):
             "occurred_at": "2026-05-06T16:59:00.000Z",
             "received_at": "2026-05-06T17:00:00.000Z",
             "type": "slack.message",
-            "title": "Slack message from Malis",
+            "title": "Slack message from Alex",
             "summary": "Launch date feedback belongs in the blog draft before next pass.",
             "raw_ref": {
                 "id": "raw_slack_T123_C123_ambient_context",
@@ -2652,7 +2652,7 @@ class VoiceTaskCommandScenario:
         return {
             "transcript": "Blog post is priority and should include launch date in two weeks.",
             "task_hint": "blog feedback",
-            "project_hint": "pagerfree",
+            "project_hint": "acme",
         }
 
     def _expected_response(self) -> dict[str, Any]:

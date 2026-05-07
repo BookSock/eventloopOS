@@ -17,6 +17,50 @@ import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import { findPromptInjectionPattern } from "./hooks/evaluator.js";
 import type { DurableTaskMessageRecord } from "./task_sessions/task_message_history.js";
 import type { WorkspaceRestoreReceiptRecord } from "./workspace/restore_receipts.js";
+import {
+  contextEntriesForResult,
+  contextEntryMatchesQuery,
+  listContextEntries,
+  rankContextEntries,
+  resourceSearchParts,
+  type ContextEntry,
+  type ContextQuery,
+} from "./store/context_entries.js";
+import {
+  claimNextContextRestoreRequest,
+  createContextRestoreRequest,
+  getContextRestoreRequest,
+  markContextRestoreRequestDone,
+  markContextRestoreRequestFailed,
+  peekNextContextRestoreRequest,
+  reapExpiredContextRestoreRequestLeases,
+  retryContextRestoreRequest,
+  type ContextRestoreRequestRecord,
+  type ContextRestoreRequestStatus,
+} from "./store/context_restore_store.js";
+import { eventIdempotencyKey, stableId, taskIdForHint } from "./store/ids.js";
+
+export {
+  contextEntriesForResult,
+  contextEntryMatchesQuery,
+  listContextEntries,
+  rankContextEntries,
+  type ContextEntry,
+  type ContextQuery,
+} from "./store/context_entries.js";
+export {
+  claimNextContextRestoreRequest,
+  createContextRestoreRequest,
+  getContextRestoreRequest,
+  markContextRestoreRequestDone,
+  markContextRestoreRequestFailed,
+  peekNextContextRestoreRequest,
+  reapExpiredContextRestoreRequestLeases,
+  retryContextRestoreRequest,
+  type ContextRestoreRequestRecord,
+  type ContextRestoreRequestStatus,
+} from "./store/context_restore_store.js";
+export { taskIdForHint } from "./store/ids.js";
 
 const FIXTURE_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -63,40 +107,6 @@ export type StoredEventResult = {
   route_decision: RouteDecision;
   review_packet?: ReviewPacket;
   queue_item?: QueueItemWithPacket;
-};
-
-export type ContextEntry = {
-  event_id: string;
-  event_title: string;
-  event_source: string;
-  task_id?: string;
-  route_decision: RouteDecision;
-  resource: Record<string, unknown>;
-  captured_at: string;
-  relevance_score: number;
-  match_reasons: string[];
-};
-
-export type ContextQuery = {
-  source?: string;
-  task_id?: string;
-  q?: string;
-  limit?: number;
-};
-
-export type ContextRestoreRequestStatus = "pending" | "leased" | "done" | "failed";
-
-export type ContextRestoreRequestRecord = {
-  id: string;
-  status: ContextRestoreRequestStatus;
-  created_at: string;
-  updated_at: string;
-  idempotency_key?: string;
-  resource: Record<string, unknown>;
-  restore_plan: Record<string, unknown>;
-  result?: unknown;
-  lease_owner?: string;
-  lease_expires_at?: string;
 };
 
 export type ReviewArtifacts = {
@@ -389,146 +399,6 @@ export function getStoredEventByIdempotencyKey(
   idempotencyKey: string,
 ): StoredEventResult | undefined {
   return store.eventsByIdempotencyKey.get(eventIdempotencyKey(source, idempotencyKey));
-}
-
-export function listContextEntries(store: InMemoryStore, query: ContextQuery = {}): ContextEntry[] {
-  const limit = query.limit ?? 100;
-  return rankContextEntries(
-    [...store.eventsById.values()]
-    .filter((result) => eventMatchesContextQuery(result.event, query))
-    .flatMap(contextEntriesForResult)
-      .filter((entry) => contextEntryMatchesQuery(entry, query)),
-    query,
-  )
-    .slice(0, limit);
-}
-
-export function createContextRestoreRequest(
-  store: InMemoryStore,
-  request: Omit<ContextRestoreRequestRecord, "status" | "created_at" | "updated_at">,
-  now: Date,
-): { record: ContextRestoreRequestRecord; inserted: boolean } {
-  if (request.idempotency_key) {
-    const existingId = store.contextRestoreRequestIdsByIdempotencyKey.get(request.idempotency_key);
-    const existing = existingId ? store.contextRestoreRequests.get(existingId) : undefined;
-    if (existing) {
-      return { record: existing, inserted: false };
-    }
-  }
-
-  const timestamp = now.toISOString();
-  const record: ContextRestoreRequestRecord = {
-    ...request,
-    status: "pending",
-    created_at: timestamp,
-    updated_at: timestamp,
-  };
-  store.contextRestoreRequests.set(record.id, record);
-  if (record.idempotency_key) {
-    store.contextRestoreRequestIdsByIdempotencyKey.set(record.idempotency_key, record.id);
-  }
-
-  return { record, inserted: true };
-}
-
-export function claimNextContextRestoreRequest(
-  store: InMemoryStore,
-  leaseOwner: string,
-  now: Date,
-  leaseMs: number,
-): ContextRestoreRequestRecord | undefined {
-  reapExpiredContextRestoreRequestLeases(store, now);
-  const record = peekNextContextRestoreRequest(store, now);
-
-  if (!record) return undefined;
-
-  record.status = "leased";
-  record.lease_owner = leaseOwner;
-  record.lease_expires_at = new Date(now.getTime() + leaseMs).toISOString();
-  record.updated_at = now.toISOString();
-  return record;
-}
-
-export function peekNextContextRestoreRequest(
-  store: InMemoryStore,
-  now: Date,
-): ContextRestoreRequestRecord | undefined {
-  reapExpiredContextRestoreRequestLeases(store, now);
-  return Array.from(store.contextRestoreRequests.values())
-    .filter((candidate) => candidate.status === "pending")
-    .sort((left, right) => left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id))[0];
-}
-
-export function getContextRestoreRequest(
-  store: InMemoryStore,
-  restoreRequestId: string,
-): ContextRestoreRequestRecord | undefined {
-  return store.contextRestoreRequests.get(restoreRequestId);
-}
-
-export function markContextRestoreRequestDone(
-  store: InMemoryStore,
-  restoreRequestId: string,
-  result: unknown,
-  now: Date,
-): ContextRestoreRequestRecord | undefined {
-  const record = store.contextRestoreRequests.get(restoreRequestId);
-  if (!record) return undefined;
-
-  record.status = "done";
-  record.updated_at = now.toISOString();
-  record.result = result;
-  record.lease_owner = undefined;
-  record.lease_expires_at = undefined;
-  return record;
-}
-
-export function markContextRestoreRequestFailed(
-  store: InMemoryStore,
-  restoreRequestId: string,
-  result: unknown,
-  now: Date,
-): ContextRestoreRequestRecord | undefined {
-  const record = store.contextRestoreRequests.get(restoreRequestId);
-  if (!record) return undefined;
-
-  record.status = "failed";
-  record.updated_at = now.toISOString();
-  record.result = result;
-  record.lease_owner = undefined;
-  record.lease_expires_at = undefined;
-  return record;
-}
-
-export function retryContextRestoreRequest(
-  store: InMemoryStore,
-  restoreRequestId: string,
-  now: Date,
-): ContextRestoreRequestRecord | undefined {
-  const record = store.contextRestoreRequests.get(restoreRequestId);
-  if (!record) return undefined;
-
-  record.status = "pending";
-  record.updated_at = now.toISOString();
-  record.result = undefined;
-  record.lease_owner = undefined;
-  record.lease_expires_at = undefined;
-  return record;
-}
-
-export function reapExpiredContextRestoreRequestLeases(store: InMemoryStore, now: Date): number {
-  let reaped = 0;
-  for (const record of store.contextRestoreRequests.values()) {
-    if (record.status !== "leased" || !record.lease_expires_at) continue;
-    if (new Date(record.lease_expires_at).getTime() > now.getTime()) continue;
-
-    record.status = "pending";
-    record.lease_owner = undefined;
-    record.lease_expires_at = undefined;
-    record.updated_at = now.toISOString();
-    reaped += 1;
-  }
-  return reaped;
 }
 
 export function buildReviewArtifactsFromEvent(
@@ -845,132 +715,6 @@ function untrustedRouteTextForEvent(event: McpEvent): string {
     .join("\n");
 }
 
-export function taskIdForHint(taskHint: string | undefined): string | undefined {
-  return taskHint ? `task_${stableId(taskHint)}` : undefined;
-}
-
-function eventMatchesContextQuery(event: McpEvent, query: ContextQuery): boolean {
-  if (query.source && event.source !== query.source) return false;
-  if (query.task_id && taskIdForHint(event.task_hint) !== query.task_id) return false;
-  return true;
-}
-
-export function contextEntryMatchesQuery(entry: ContextEntry, query: ContextQuery): boolean {
-  if (!query.q) return true;
-  const needle = query.q.toLowerCase();
-  const searchText = contextEntrySearchText(entry).toLowerCase();
-  if (searchText.includes(needle)) return true;
-  const terms = contextQueryTerms(needle);
-  return terms.length > 0 && terms.every((term) => searchText.includes(term));
-}
-
-export function rankContextEntries(entries: ContextEntry[], query: ContextQuery = {}): ContextEntry[] {
-  return entries
-    .map((entry) => scoreContextEntry(entry, query))
-    .sort((left, right) => {
-      if (right.relevance_score !== left.relevance_score) {
-        return right.relevance_score - left.relevance_score;
-      }
-      return right.captured_at.localeCompare(left.captured_at);
-    });
-}
-
-function scoreContextEntry(entry: ContextEntry, query: ContextQuery): ContextEntry {
-  const reasons: string[] = [];
-  let score = 0;
-
-  if (query.task_id && entry.task_id === query.task_id) {
-    score += 100;
-    reasons.push("task_match");
-  }
-
-  const normalizedQuery = query.q?.toLowerCase();
-  if (normalizedQuery) {
-    const resource = entry.resource;
-    const title = `${entry.event_title}\n${typeof resource.title === "string" ? resource.title : ""}`.toLowerCase();
-    const url = typeof resource.url === "string" ? resource.url.toLowerCase() : "";
-    const textQuote = typeof resource.text_quote === "string" ? resource.text_quote.toLowerCase() : "";
-    const searchText = contextEntrySearchText(entry).toLowerCase();
-    const terms = contextQueryTerms(normalizedQuery);
-
-    if (title.includes(normalizedQuery)) {
-      score += 60;
-      reasons.push("title_phrase");
-    }
-    if (textQuote.includes(normalizedQuery)) {
-      score += 40;
-      reasons.push("quote_phrase");
-    }
-    if (url.includes(normalizedQuery)) {
-      score += 30;
-      reasons.push("url_phrase");
-    }
-
-    const matchingTerms = terms.filter((term) => searchText.includes(term));
-    if (matchingTerms.length > 0) {
-      score += matchingTerms.length * 10;
-      reasons.push("term_match");
-    }
-  } else {
-    reasons.push("recent");
-  }
-
-  return {
-    ...entry,
-    relevance_score: score,
-    match_reasons: [...new Set(reasons)],
-  };
-}
-
-function contextEntrySearchText(entry: ContextEntry): string {
-  return [
-    entry.event_id,
-    entry.event_title,
-    entry.event_source,
-    entry.task_id,
-    ...resourceSearchParts(entry.resource),
-  ]
-    .filter((part): part is string => typeof part === "string" && part.length > 0)
-    .join("\n");
-}
-
-function resourceSearchParts(resource: Record<string, unknown>): string[] {
-  const parts: string[] = [];
-  for (const key of ["id", "kind", "title", "url", "source", "text_quote", "selector_hint"]) {
-    const value = resource[key];
-    if (typeof value === "string") parts.push(value);
-  }
-  const details = resource.details;
-  if (details && typeof details === "object") {
-    parts.push(JSON.stringify(details));
-  }
-  return parts;
-}
-
-function contextQueryTerms(normalizedQuery: string): string[] {
-  return normalizedQuery.split(/\s+/).filter(Boolean);
-}
-
-export function contextEntriesForResult(result: StoredEventResult): ContextEntry[] {
-  return result.event.resources.map((resource): ContextEntry => {
-    const capturedAt = typeof resource.captured_at === "string" && resource.captured_at
-      ? resource.captured_at
-      : result.event.received_at;
-
-    return {
-      event_id: result.event.id,
-      event_title: result.event.title,
-      event_source: result.event.source,
-      task_id: taskIdForHint(result.event.task_hint),
-      route_decision: result.route_decision,
-      resource,
-      captured_at: capturedAt,
-      relevance_score: 0,
-      match_reasons: [],
-    };
-  });
-}
-
 function decisionNeededForRoute(routeDecision: RouteDecision): string {
   if (routeDecision.action === "create_review_packet") {
     return "Review prepared work and decide next action.";
@@ -1016,15 +760,6 @@ function priorityReasonsForEvent(event: McpEvent): string[] {
     event.source === "slack" ? "slack_message" : `${event.source}_event`,
     event.task_hint ? "task_hint_present" : "needs_routing",
   ];
-}
-
-function stableId(input: string): string {
-  const normalized = input.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
-  return normalized || "unknown";
-}
-
-function eventIdempotencyKey(source: string, idempotencyKey: string): string {
-  return `${source}:${idempotencyKey}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

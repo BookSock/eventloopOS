@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "test": "pnpm -r --if-present test",
     "test:unit": "pnpm -r --if-present test:unit",
@@ -39,6 +42,7 @@
     "dev:postgres:down": "pnpm --filter @eventloopos/orchestrator run dev:postgres down",
     "dev:postgres:url": "pnpm --filter @eventloopos/orchestrator run dev:postgres url",
     "dev:dogfood": "bin/dev-dogfood",
+    "dev:dogfood:memory": "EVENTLOOPOS_DOGFOOD_POSTGRES=0 bin/dev-dogfood",
     "dev:dogfood:smoke": "EVENTLOOPOS_DOGFOOD_POSTGRES=0 EVENTLOOPOS_DOGFOOD_SMOKE_MS=3000 bin/dev-dogfood",
     "queue:add": "pnpm --filter @eventloopos/orchestrator run queue:add",
     "queue:lineage": "pnpm --filter @eventloopos/orchestrator run queue:lineage",
@@ -47,6 +51,8 @@
     "task:sessions": "pnpm --filter @eventloopos/orchestrator run task:sessions",
     "task:bind": "pnpm --filter @eventloopos/orchestrator run task:bind",
     "task:messages": "pnpm --filter @eventloopos/orchestrator run task:messages",
+    "master:send": "pnpm --filter @eventloopos/orchestrator run master:send",
+    "onboarding:scan": "pnpm --filter @eventloopos/orchestrator run onboarding:scan",
     "mcp:sources": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run mcp:sources",
     "mcp:preview": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run mcp:preview",
     "mcp:route-once": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run mcp:route-once",

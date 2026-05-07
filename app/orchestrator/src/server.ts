@@ -9,6 +9,7 @@ import { handleContextRestoreRoute } from "./routes/context_restore.js";
 import { handleEventsRoute, routeEventThroughGateway } from "./routes/events.js";
 import { handleMcpSourcesRoute, type McpSourceRegistry } from "./routes/mcp_sources.js";
 import { handleActivityRoute, handleMetricsRoute } from "./routes/observability.js";
+import { handleOnboardingRoute } from "./routes/onboarding.js";
 import { handleQueueRoute } from "./routes/queue.js";
 import { handleTaskSessionsRoute } from "./routes/task_sessions.js";
 import { handleWorkspaceRoute } from "./routes/workspace.js";
@@ -126,6 +127,25 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           observability,
           routeNameForPath(request.method, context.url.pathname) ?? "workspace",
           workspaceRoute,
+          startedAt,
+        );
+      }
+
+      const onboardingRoute = await handleOnboardingRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        workspace: options.workspace,
+        taskSessions: options.taskSessions,
+        now: now(),
+        requestId: context.requestId,
+      });
+      if (onboardingRoute) {
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "onboarding",
+          onboardingRoute,
           startedAt,
         );
       }

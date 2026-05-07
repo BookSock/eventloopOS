@@ -1,0 +1,38 @@
+{
+  "sources": [
+    {
+      "id": "todo_md_source",
+      "server": {
+        "name": "eventloopos-script-events",
+        "command": "node",
+        "args": ["dist/src/mcp_sources/script_events_server.js"],
+        "envAllowlist": [
+          "EVENTLOOPOS_SCRIPT_EVENTS_COMMAND",
+          "EVENTLOOPOS_SCRIPT_EVENTS_ARGS",
+          "EVENTLOOPOS_TODO_MD_PATHS",
+          "EVENTLOOPOS_TODO_MD_PROJECT_HINT",
+          "EVENTLOOPOS_TODO_MD_TASK_HINT",
+          "PATH",
+          "HOME"
+        ],
+        "stderrLogPath": "var/log/mcp/todo_md_source.stderr.log"
+      },
+      "poll": {
+        "tool": "poll_script",
+        "args": {},
+        "timeoutMs": 10000
+      },
+      "cursor": {
+        "strategy": "hash",
+        "dedupeWindow": 2000
+      },
+      "eventMapper": "generic_item_to_event",
+      "riskPolicy": {
+        "readOnly": true,
+        "allowWriteTools": false,
+        "maxRiskLevel": "low",
+        "untrustedTextFields": ["title", "summary", "text"]
+      }
+    }
+  ]
+}

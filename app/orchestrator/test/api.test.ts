@@ -406,13 +406,13 @@ describe("orchestrator gateway API", () => {
       actor: {
         id: "actor_slack_U123",
         type: "human",
-        name: "Malis",
+        name: "Alex",
       },
-      project_hint: "pagerfree",
+      project_hint: "acme",
       task_hint: "blog feedback",
       type: "slack.message",
-      title: "Slack message from Malis",
-      summary: "Customer says pgrust copy needs clearer Postgres version support.",
+      title: "Slack message from Alex",
+      summary: "Customer says dbtool copy needs clearer Postgres version support.",
       raw_ref: {
         id: "raw_slack_T123_C123_456",
         uri: "artifact://raw/slack/T123/C123/456.json",
@@ -472,7 +472,7 @@ describe("orchestrator gateway API", () => {
     assert.equal(firstBody.route_decision.target_task_id, "task_blog_feedback");
     assert.equal(firstBody.review_packet.id, "pkt_evt_slack_t123_c123_456");
     assert.equal(firstBody.review_packet.task_id, "task_blog_feedback");
-    assert.match(firstBody.review_packet.summary, /pgrust copy/);
+    assert.match(firstBody.review_packet.summary, /dbtool copy/);
     assert.equal(firstBody.queue_item.id, "qit_evt_slack_t123_c123_456");
     assert.equal(firstBody.queue_item.review_packet_id, firstBody.review_packet.id);
     assert.deepEqual(firstBody.queue_item.priority_reasons, [
@@ -2217,7 +2217,7 @@ describe("orchestrator gateway API", () => {
         received_at: "2026-05-06T17:00:00.000Z",
         task_hint: "blog feedback",
         type: "slack.message",
-        title: "Slack message from Malis",
+        title: "Slack message from Alex",
         summary: "Blog needs launch date note before next draft.",
         raw_ref: {
           id: "raw_slack_T123_C123_999",
@@ -2460,7 +2460,7 @@ describe("orchestrator gateway API", () => {
         received_at: "2026-05-06T17:00:00.000Z",
         task_hint: "blog feedback",
         type: "slack.message",
-        title: "Slack message from Malis",
+        title: "Slack message from Alex",
         summary: "Blog needs launch date note before next draft.",
         raw_ref: {
           id: "raw_slack_T123_C123_failed",
@@ -2584,7 +2584,7 @@ describe("orchestrator gateway API", () => {
         received_at: "2026-05-06T17:00:00.000Z",
         task_hint: "blog feedback",
         type: "slack.message",
-        title: "Slack message from Malis",
+        title: "Slack message from Alex",
         summary: "Blog needs launch date note before next draft.",
         raw_ref: {
           id: "raw_slack_T123_C123_blocked",
@@ -2738,7 +2738,7 @@ describe("orchestrator gateway API", () => {
         occurred_at: "2026-05-06T16:59:00.000Z",
         received_at: "2026-05-06T17:00:00.000Z",
         type: "slack.message",
-        title: "Slack message from Malis",
+        title: "Slack message from Alex",
         summary: "Launch date feedback belongs in the blog draft before next pass.",
         raw_ref: {
           id: "raw_slack_T123_C123_unhinted_context",
@@ -2848,7 +2848,7 @@ describe("orchestrator gateway API", () => {
         occurred_at: "2026-05-06T16:59:00.000Z",
         received_at: "2026-05-06T17:00:00.000Z",
         type: "slack.message",
-        title: "Slack message from Malis",
+        title: "Slack message from Alex",
         summary: "Can you check the office lease invoice this afternoon?",
         raw_ref: {
           id: "raw_slack_T123_C999_unmatched",
@@ -3011,7 +3011,7 @@ describe("orchestrator gateway API", () => {
         occurred_at: "2026-05-06T16:59:00.000Z",
         received_at: "2026-05-06T17:00:00.000Z",
         type: "slack.message",
-        title: "Slack message from Malis",
+        title: "Slack message from Alex",
         summary: "Launch date draft needs review.",
         raw_ref: {
           id: "raw_slack_T123_C999_ambiguous",
@@ -3097,7 +3097,7 @@ describe("orchestrator gateway API", () => {
         received_at: "2026-05-06T17:00:00.000Z",
         task_hint: "blog feedback",
         type: "slack.message",
-        title: "Slack message from Malis",
+        title: "Slack message from Alex",
         summary: "Blog needs launch date note before next draft.",
         raw_ref: {
           id: "raw_slack_T123_C123_late_duplicate",
@@ -3429,7 +3429,7 @@ describe("orchestrator gateway API", () => {
         body: JSON.stringify({
           transcript: "Blog post is priority and should include launch date in two weeks.",
           task_hint: "blog feedback",
-          project_hint: "pagerfree",
+          project_hint: "acme",
         }),
       });
       const body = await response.json() as {
@@ -3689,11 +3689,11 @@ describe("orchestrator gateway API", () => {
               ts: "456.000",
               thread_ts: "456.000",
               user_id: "U123",
-              user_name: "Malis",
-              text: "Customer says pgrust copy needs clearer Postgres version support.",
+              user_name: "Alex",
+              text: "Customer says dbtool copy needs clearer Postgres version support.",
               occurred_at: "2026-05-06T16:58:00Z",
               permalink: "https://slack.example.com/archives/C123/p456000",
-              project_hint: "pagerfree",
+              project_hint: "acme",
               task_hint: "blog feedback",
             },
           ],
@@ -3751,11 +3751,11 @@ describe("orchestrator gateway API", () => {
           ts: "456.010",
           thread_ts: "456.010",
           user_id: "U123",
-          user_name: "Malis",
+          user_name: "Alex",
           text: "Preview should not burn this Slack item.",
           occurred_at: "2026-05-06T17:00:00Z",
           permalink: "https://slack.example.com/archives/C123/p456010",
-          project_hint: "pagerfree",
+          project_hint: "acme",
           task_hint: "blog feedback",
         },
       ],
@@ -3840,11 +3840,11 @@ describe("orchestrator gateway API", () => {
               ts: "456.001",
               thread_ts: "456.001",
               user_id: "U123",
-              user_name: "Malis",
+              user_name: "Alex",
               text: "Launch blog needs pricing note.",
               occurred_at: "2026-05-06T16:58:00Z",
               permalink: "https://slack.example.com/archives/C123/p456001",
-              project_hint: "pagerfree",
+              project_hint: "acme",
               task_hint: "blog feedback",
             },
           ],
@@ -4209,7 +4209,7 @@ describe("orchestrator gateway API", () => {
                     type: "human",
                     name: "Jason",
                   },
-                  project_hint: "pagerfree",
+                  project_hint: "acme",
                   task_hint: "blog feedback",
                   links: [
                     {

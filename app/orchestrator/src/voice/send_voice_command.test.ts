@@ -7,7 +7,7 @@ describe("voice command client", () => {
     const options = voiceCommandOptionsFromEnv({
       EVENTLOOPOS_ORCHESTRATOR_URL: "http://127.0.0.1:9999",
       EVENTLOOPOS_VOICE_TRANSCRIPT: "Blog post priority changed",
-      EVENTLOOPOS_VOICE_PROJECT_HINT: "pagerfree",
+      EVENTLOOPOS_VOICE_PROJECT_HINT: "acme",
       EVENTLOOPOS_VOICE_TASK_HINT: "blog feedback",
       EVENTLOOPOS_VOICE_IDEMPOTENCY_KEY: "voice-1",
       EVENTLOOPOS_VOICE_SOURCE_ID: "mic-1",
@@ -16,7 +16,7 @@ describe("voice command client", () => {
 
     assert.equal(options.baseUrl, "http://127.0.0.1:9999");
     assert.equal(options.transcript, "Blog post priority changed");
-    assert.equal(options.projectHint, "pagerfree");
+    assert.equal(options.projectHint, "acme");
     assert.equal(options.taskHint, "blog feedback");
     assert.equal(options.idempotencyKey, "voice-1");
     assert.equal(options.sourceId, "mic-1");
@@ -32,7 +32,7 @@ describe("voice command client", () => {
     const exitCode = await sendVoiceCommand({
       baseUrl: "http://127.0.0.1:4377",
       transcript: "Blog post is priority and should mention launch.",
-      projectHint: "pagerfree",
+      projectHint: "acme",
       taskHint: "blog feedback",
       idempotencyKey: "idem_voice_test",
       stdout: {
@@ -54,7 +54,7 @@ describe("voice command client", () => {
     assert.equal(requestedIdempotencyKey, "idem_voice_test");
     assert.deepEqual(JSON.parse(requestedBody), {
       transcript: "Blog post is priority and should mention launch.",
-      project_hint: "pagerfree",
+      project_hint: "acme",
       task_hint: "blog feedback",
       idempotency_key: "idem_voice_test",
     });

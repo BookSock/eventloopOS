@@ -82,7 +82,7 @@ export async function searchAgentSlackMessages(
   });
   const parsed = parseAgentSlackJsonOutput(stdout);
   const rawMessages = Array.isArray(parsed.messages) ? parsed.messages : [];
-  const items = rawMessages.filter(isRecord).map((message) => agentSlackMessageToPollItem(message));
+  const items = rawMessages.filter(isRecord).map((message) => agentSlackMessageToPollItem(message, options));
 
   return {
     items,
@@ -169,14 +169,34 @@ export function parseAgentSlackJsonOutput(output: string): Record<string, unknow
   throw new Error("agent-slack output did not contain a JSON object");
 }
 
-export function agentSlackMessageToPollItem(message: Record<string, unknown>): Record<string, unknown> {
+export function agentSlackMessageToPollItem(
+  message: Record<string, unknown>,
+  options?: Partial<AgentSlackSearchOptions>,
+): Record<string, unknown> {
   const text = firstString(message, ["text", "body", "content", "message", "snippet", "title"]) ?? "";
   const url = firstString(message, ["permalink", "url", "link"]);
-  const channelId = firstString(message, ["channel_id", "channel", "channel_name", "conversation_id"]) ?? channelIdFromUrl(url) ?? "unknown_channel";
-  const teamId = firstString(message, ["team_id", "team", "workspace_id", "workspace"]) ?? workspaceFromUrl(url) ?? "agent_slack_workspace";
+  const channelId =
+    firstString(message, ["channel_id", "channel", "channel_name", "conversation_id"])
+    ?? channelIdFromUrl(url)
+    ?? firstChannel(options?.channels)
+    ?? "unknown_channel";
+  const teamId =
+    firstString(message, ["team_id", "team", "workspace_id", "workspace"])
+    ?? workspaceFromUrl(url)
+    ?? workspaceFromUrl(options?.workspace)
+    ?? options?.workspace
+    ?? "agent_slack_workspace";
   const ts = firstString(message, ["ts", "timestamp", "id"]) ?? tsFromUrl(url) ?? stableHash([teamId, channelId, text]);
-  const userId = firstString(message, ["user_id", "user", "author_id", "author"]) ?? "unknown";
-  const userName = firstString(message, ["user_name", "user", "author_name", "author"]) ?? userId;
+  const author = isRecord(message.author) ? message.author : undefined;
+  const userId =
+    firstString(message, ["user_id", "user", "author_id", "author"])
+    ?? (author ? firstString(author, ["user_id", "id", "name"]) : undefined)
+    ?? options?.user
+    ?? "unknown";
+  const userName =
+    firstString(message, ["user_name", "user", "author_name", "author"])
+    ?? (author ? firstString(author, ["user_name", "name", "real_name", "user_id"]) : undefined)
+    ?? userId;
   const occurredAt = occurredAtForMessage(message, ts);
 
   return {
@@ -193,6 +213,10 @@ export function agentSlackMessageToPollItem(message: Record<string, unknown>): R
     occurred_at: occurredAt,
     raw: message,
   };
+}
+
+function firstChannel(channels: string[] | undefined): string | undefined {
+  return channels?.find((channel) => channel.trim())?.trim();
 }
 
 function occurredAtForMessage(message: Record<string, unknown>, ts: string): string {
@@ -232,7 +256,7 @@ function firstString(input: Record<string, unknown>, keys: string[]): string | u
 
 function workspaceFromUrl(url: string | undefined): string | undefined {
   if (!url) return undefined;
-  const match = /^https?:\/\/([^./]+)\.slack\.com\//.exec(url);
+  const match = /^https?:\/\/([^./]+)\.slack\.com(?:\/|$)/.exec(url);
   return match?.[1];
 }
 

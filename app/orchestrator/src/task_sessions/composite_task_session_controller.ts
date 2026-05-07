@@ -2,6 +2,7 @@ import type {
   TaskFollowupInput,
   TaskRuntimeBinding,
   TaskRuntimeMessage,
+  TaskRuntimeStart,
   TaskRuntimeSession,
   TaskSessionController,
 } from "./types.js";
@@ -23,6 +24,24 @@ export class CompositeTaskSessionController implements TaskSessionController {
 
   async getSession(taskSessionId: string): Promise<TaskRuntimeSession | undefined> {
     return (await this.ownerForSession(taskSessionId))?.session;
+  }
+
+  async startTaskSession(input: {
+    task_id: string;
+    prompt: string;
+    cwd?: string;
+    model?: string;
+    idempotency_key: string;
+  }): Promise<TaskRuntimeStart> {
+    const runtime = this.runtimes.find((candidate) => candidate.controller.startTaskSession);
+    if (!runtime?.controller.startTaskSession) {
+      return {
+        ok: false,
+        task_id: input.task_id,
+        error: "no task runtime supports session start",
+      };
+    }
+    return await runtime.controller.startTaskSession(input);
   }
 
   async sendFollowupMessage(input: TaskFollowupInput): Promise<TaskRuntimeMessage> {

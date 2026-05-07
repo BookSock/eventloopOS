@@ -83,7 +83,7 @@ describe("agent-slack MCP server", () => {
     assert.deepEqual(agentSlackMessageToPollItem({
       url: "https://acme.slack.com/archives/C123/p1770000000000001",
       text: "Blog post needs launch date.",
-      user_name: "Malis",
+      user_name: "Alex",
       thread_ts: "1770000000.000001",
     }), {
       team_id: "acme",
@@ -92,16 +92,49 @@ describe("agent-slack MCP server", () => {
       text: "Blog post needs launch date.",
       permalink: "https://acme.slack.com/archives/C123/p1770000000000001",
       user_id: "unknown",
-      user_name: "Malis",
+      user_name: "Alex",
       thread_ts: "1770000000.000001",
-      title: "Slack message from Malis",
+      title: "Slack message from Alex",
       resource_title: "Slack thread",
       occurred_at: "2026-02-02T02:40:00.000Z",
       raw: {
         url: "https://acme.slack.com/archives/C123/p1770000000000001",
         text: "Blog post needs launch date.",
-        user_name: "Malis",
+        user_name: "Alex",
         thread_ts: "1770000000.000001",
+      },
+    });
+  });
+
+  it("uses configured Slack search filters as fallback metadata", () => {
+    assert.deepEqual(agentSlackMessageToPollItem({
+      ts: "1770000000.000001",
+      author: {
+        user_id: "U123",
+      },
+      content: "Blog post needs launch date.",
+    }, {
+      workspace: "https://acme.slack.com",
+      channels: ["D123"],
+      user: "U123",
+    }), {
+      team_id: "acme",
+      channel_id: "D123",
+      ts: "1770000000.000001",
+      text: "Blog post needs launch date.",
+      permalink: "slack://channel/D123/1770000000.000001",
+      user_id: "U123",
+      user_name: "U123",
+      thread_ts: "1770000000.000001",
+      title: "Slack message from U123",
+      resource_title: "Slack thread",
+      occurred_at: "2026-02-02T02:40:00.000Z",
+      raw: {
+        ts: "1770000000.000001",
+        author: {
+          user_id: "U123",
+        },
+        content: "Blog post needs launch date.",
       },
     });
   });

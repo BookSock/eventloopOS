@@ -137,13 +137,13 @@ describe("orchestrator config schema", () => {
 
   it("accepts MCP source config path", () => {
     const result = loadConfig({
-      ORCHESTRATOR_MCP_SOURCES_PATH: "config/mcp-sources.json",
+      ORCHESTRATOR_MCP_SOURCES_PATH: "config/mcp-sources.test-local.json",
     });
 
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.equal(result.value.mcpSources, "config");
-      assert.equal(result.value.mcpSourcesPath, "config/mcp-sources.json");
+      assert.equal(result.value.mcpSourcesPath, "config/mcp-sources.test-local.json");
     }
   });
 

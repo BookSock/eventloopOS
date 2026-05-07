@@ -51,6 +51,25 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(workspaceClient.restorePlanSnapshots, [SeededQueue.blogFeedbackWorkspace])
     }
 
+    func testFirstPullFromEventLoopCapturesManualWorkspaceBaselineOnce() async {
+        let baselineSnapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 77, app: "Ghostty", title: "normal shell", workspace: "normal")],
+            activeWorkspace: "normal"
+        )
+        let workspaceClient = FakeWorkspaceClient(captureSnapshot: baselineSnapshot)
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+
+        await viewModel.pullNextPaper()
+        await viewModel.pullNextPaper()
+
+        XCTAssertEqual(viewModel.manualWorkspaceSnapshot, baselineSnapshot)
+        XCTAssertEqual(viewModel.manualWorkspaceCaptureState, .captured(baselineSnapshot))
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
+    }
+
     func testPullNextPaperReturnsFromManualModeAndCapturesManualWorkspace() async {
         let manualSnapshot = WorkspaceSnapshot(
             windows: [WorkspaceWindow(id: 77, app: "Ghostty", title: "manual shell", workspace: "manual")],
@@ -592,6 +611,45 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.manualWorkspaceSnapshot, snapshot)
         XCTAssertEqual(viewModel.manualWorkspaceCaptureState, .captured(snapshot))
         XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
+    }
+
+    func testToggleIntoManualModeRestoresSavedManualWorkspace() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 9, app: "Ghostty", title: "normal shell", workspace: "normal"),
+                WorkspaceWindow(id: 10, app: "Google Chrome", title: "Inbox", workspace: "normal")
+            ],
+            activeWorkspace: "normal"
+        )
+        let receipt = WorkspaceRestoreReceipt(
+            commands: [
+                WorkspaceExecutedCommand(command: "aerospace", args: ["workspace", "normal"], stdout: "ok")
+            ],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: snapshot,
+            restoreEnvelope: WorkspaceRestoreExecutionEnvelope(
+                ok: true,
+                plan: WorkspaceRestorePlan(commands: [], skipped: []),
+                receipt: receipt,
+                executeSupported: true,
+                idempotencyKey: "idem_fake"
+            )
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+
+        await viewModel.pullNextPaper()
+        await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+
+        XCTAssertEqual(viewModel.mode, .manual)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [snapshot])
     }
 
     func testRestoreManualWorkspaceUsesSavedSnapshotAndKeepsManualMode() async {

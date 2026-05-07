@@ -6,7 +6,7 @@
     "source_id": "slack:T123:C123:456.000",
     "idempotency_key": "slack:T123:C123:456.000",
     "type": "slack.message",
-    "title": "Slack message from Malis"
+    "title": "Slack message from Alex"
   },
   "expected_route_decision": {
     "id": "rte_evt_slack_t123_c123_456_000",
@@ -18,7 +18,7 @@
   "expected_review_packet": {
     "id": "pkt_evt_slack_t123_c123_456_000",
     "task_id": "task_blog_feedback",
-    "title": "Review Slack message from Malis",
+    "title": "Review Slack message from Alex",
     "risk_level": "medium",
     "confidence": "medium"
   },

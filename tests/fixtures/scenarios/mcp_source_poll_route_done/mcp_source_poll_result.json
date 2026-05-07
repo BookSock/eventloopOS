@@ -6,11 +6,11 @@
       "ts": "456.000",
       "thread_ts": "456.000",
       "user_id": "U123",
-      "user_name": "Malis",
-      "text": "Customer says pgrust copy needs clearer Postgres version support.",
+      "user_name": "Alex",
+      "text": "Customer says dbtool copy needs clearer Postgres version support.",
       "occurred_at": "2026-05-06T16:58:00Z",
       "permalink": "https://slack.example.com/archives/C123/p456000",
-      "project_hint": "pagerfree",
+      "project_hint": "acme",
       "task_hint": "blog feedback"
     },
     {
@@ -19,11 +19,11 @@
       "ts": "456.000",
       "thread_ts": "456.000",
       "user_id": "U123",
-      "user_name": "Malis",
-      "text": "Customer says pgrust copy needs clearer Postgres version support.",
+      "user_name": "Alex",
+      "text": "Customer says dbtool copy needs clearer Postgres version support.",
       "occurred_at": "2026-05-06T16:58:00Z",
       "permalink": "https://slack.example.com/archives/C123/p456000",
-      "project_hint": "pagerfree",
+      "project_hint": "acme",
       "task_hint": "blog feedback"
     }
   ],

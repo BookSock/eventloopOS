@@ -52,6 +52,15 @@ export type TaskRuntimeBinding = Record<string, unknown> & {
   error?: string;
 };
 
+export type TaskRuntimeStart = Record<string, unknown> & {
+  ok: boolean;
+  task_session_id?: string;
+  task_id: string;
+  session?: TaskRuntimeSession;
+  message?: TaskRuntimeMessage;
+  error?: string;
+};
+
 export type TaskRuntimeError = {
   code: string;
   message: string;
@@ -71,6 +80,13 @@ export type TaskFollowupInput = {
 export type TaskSessionController = {
   listSessions?: () => Promise<TaskRuntimeSession[]> | TaskRuntimeSession[];
   getSession?: (taskSessionId: string) => Promise<TaskRuntimeSession | undefined> | TaskRuntimeSession | undefined;
+  startTaskSession?: (input: {
+    task_id: string;
+    prompt: string;
+    cwd?: string;
+    model?: string;
+    idempotency_key: string;
+  }) => Promise<TaskRuntimeStart> | TaskRuntimeStart;
   sendFollowupMessage(input: TaskFollowupInput): Promise<TaskRuntimeMessage> | TaskRuntimeMessage;
   bindTaskSession?: (input: {
     task_session_id: string;

@@ -133,6 +133,43 @@ describe("CodexNativeThreadController", () => {
     assert.match(message.evidence[0]?.title ?? "", /app-server unavailable/);
   });
 
+  it("starts a task session then sends the initial prompt", async () => {
+    const starts: unknown[] = [];
+    const controller = new CodexNativeThreadController(
+      fakeClient({
+        threads: [{ id: "thread_new", task_id: "task_new_outreach" }],
+        startThread: () => ({
+          id: "thread_new",
+          task_id: "task_new_outreach",
+          status: "idle",
+        }),
+        startTurn(input) {
+          starts.push(input);
+          return { id: "turn_new", status: "queued" };
+        },
+      }),
+      { clock: () => new Date("2026-05-06T22:30:00.000Z") },
+    );
+
+    const result = await controller.startTaskSession({
+      task_id: "task_new_outreach",
+      prompt: "Research prospect and draft DM.",
+      idempotency_key: "idem_new_outreach",
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.task_session_id, taskSessionIdForNativeThread("thread_new"));
+    assert.equal(result.message?.status, "sent");
+    assert.deepEqual(starts, [
+      {
+        thread_id: "thread_new",
+        text: "Research prospect and draft DM.",
+        event_ids: [],
+        idempotency_key: "idem_new_outreach",
+      },
+    ]);
+  });
+
   it("binds a task session to a task through native thread mapping", async () => {
     const bindings: unknown[] = [];
     const controller = new CodexNativeThreadController(
@@ -180,6 +217,7 @@ describe("CodexNativeThreadController", () => {
 
 function fakeClient(input: {
   threads: CodexNativeThread[];
+  startThread?: CodexNativeThreadClient["startThread"];
   startTurn?: CodexNativeThreadClient["startTurn"];
 }): CodexNativeThreadClient {
   return {
@@ -189,6 +227,7 @@ function fakeClient(input: {
     getThread(threadId) {
       return input.threads.find((thread) => thread.id === threadId);
     },
+    startThread: input.startThread,
     startTurn: input.startTurn ?? (() => ({ id: "turn_default", status: "queued" })),
   };
 }

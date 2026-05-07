@@ -4,7 +4,7 @@
     "id": "task_blog_feedback",
     "title": "Review blog feedback",
     "status": "active",
-    "project": "pagerfree",
+    "project": "acme",
     "owner": {
       "id": "actor_jason",
       "type": "human",

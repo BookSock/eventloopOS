@@ -21,6 +21,11 @@ export type CodexNativeTurn = {
 export type CodexNativeThreadClient = {
   listThreads(): Promise<CodexNativeThread[]> | CodexNativeThread[];
   getThread(threadId: string): Promise<CodexNativeThread | undefined> | CodexNativeThread | undefined;
+  startThread?(input: {
+    task_id: string;
+    cwd?: string;
+    model?: string;
+  }): Promise<CodexNativeThread> | CodexNativeThread;
   startTurn(input: {
     thread_id: string;
     text: string;
@@ -141,6 +146,73 @@ export class CodexNativeThreadController implements TaskSessionController {
         status: "failed",
         evidenceTitle: `Codex native thread turn failed: ${error instanceof Error ? error.message : String(error)}`,
       });
+    }
+  }
+
+  async startTaskSession(input: {
+    task_id: string;
+    prompt: string;
+    cwd?: string;
+    model?: string;
+    idempotency_key: string;
+  }): Promise<{
+    ok: boolean;
+    task_session_id?: string;
+    task_id: string;
+    session?: CodexTaskSession;
+    message?: CodexTaskMessage;
+    error?: string;
+  }> {
+    if (!this.client.startThread) {
+      return {
+        ok: false,
+        task_id: input.task_id,
+        error: "Codex native thread client does not support thread start",
+      };
+    }
+
+    try {
+      const thread = await this.client.startThread({
+        task_id: input.task_id,
+        cwd: input.cwd,
+        model: input.model,
+      });
+      const session = this.threadToSession({
+        ...thread,
+        task_id: input.task_id,
+      });
+      const now = this.clock().toISOString();
+      const turn = await this.client.startTurn({
+        thread_id: session.native_thread_id,
+        text: input.prompt,
+        event_ids: [],
+        idempotency_key: input.idempotency_key,
+      });
+      const message = this.recordMessage({
+        task_session_id: session.id,
+        text: input.prompt,
+        event_ids: [],
+        idempotency_key: input.idempotency_key,
+        now,
+        nativeThreadId: session.native_thread_id,
+        nativeTurnId: turn.id,
+        status: turn.status === "blocked" || turn.status === "failed" ? turn.status : "sent",
+        evidenceTitle: "Codex native thread started",
+      });
+      return {
+        ok: message.status === "sent",
+        task_session_id: session.id,
+        task_id: input.task_id,
+        session,
+        message,
+        error: message.status === "sent" ? undefined : message.evidence[0]?.title,
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        task_id: input.task_id,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 

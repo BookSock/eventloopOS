@@ -1,7 +1,7 @@
 import type { CodexNativeThread, CodexNativeThreadClient, CodexNativeTurn } from "./codex_native_thread_controller.js";
 
 export type CodexAppServerRequest = (request: {
-  method: "initialize" | "thread/list" | "thread/read" | "turn/start";
+  method: "initialize" | "thread/start" | "thread/list" | "thread/read" | "turn/start";
   params: unknown;
 }) => Promise<unknown> | unknown;
 
@@ -63,6 +63,38 @@ export class CodexAppServerThreadClient implements CodexNativeThreadClient {
     }
 
     return await this.threadFromAppServer(envelope.thread);
+  }
+
+  async startThread(input: {
+    task_id: string;
+    cwd?: string;
+    model?: string;
+  }): Promise<CodexNativeThread> {
+    const response = await this.request({
+      method: "thread/start",
+      params: {
+        cwd: input.cwd ?? null,
+        model: input.model ?? null,
+        baseInstructions: null,
+        developerInstructions: `This Codex thread is owned by eventloopOS task ${input.task_id}. Keep work scoped to this task. Ask for human help by creating a waiting_approval/blocked report when needed.`,
+        approvalPolicy: null,
+        approvalsReviewer: null,
+        config: null,
+        ephemeral: null,
+        modelProvider: null,
+        personality: null,
+        sandbox: null,
+        serviceName: "eventloopos",
+        serviceTier: null,
+        sessionStartSource: null,
+      },
+    });
+    const envelope = requireRecord(response, "thread/start response");
+    const thread = await this.threadFromAppServer(envelope.thread);
+    return {
+      ...thread,
+      task_id: input.task_id,
+    };
   }
 
   async startTurn(input: {

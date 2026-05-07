@@ -11,12 +11,12 @@
     "id": "rte_evt_fake_slack_mcp_slack_t123_c456_1715011200_000",
     "event_id": "evt_fake_slack_mcp_slack_t123_c456_1715011200_000",
     "action": "ask_human_now",
-    "target_task_id": "task_pgrust_postgres_support_copy",
+    "target_task_id": "task_dbtool_postgres_support_copy",
     "confidence": "medium"
   },
   "expected_review_packet": {
     "id": "pkt_evt_fake_slack_mcp_slack_t123_c456_1715011200_000",
-    "task_id": "task_pgrust_postgres_support_copy",
+    "task_id": "task_dbtool_postgres_support_copy",
     "title": "Review Slack MCP review request",
     "risk_level": "medium",
     "confidence": "medium"
@@ -24,7 +24,7 @@
   "expected_queue_item": {
     "id": "qit_evt_fake_slack_mcp_slack_t123_c456_1715011200_000",
     "review_packet_id": "pkt_evt_fake_slack_mcp_slack_t123_c456_1715011200_000",
-    "task_id": "task_pgrust_postgres_support_copy",
+    "task_id": "task_dbtool_postgres_support_copy",
     "state": "ready",
     "priority_score": 800,
     "priority_reasons": [

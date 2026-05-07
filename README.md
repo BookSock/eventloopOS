@@ -10,6 +10,8 @@ This repo is structured as a planning-first MVP workspace:
 
 Current MVP direction: build a Mac-native intake stack for agent-heavy work. The first version should not try to replace the OS or become a notification product. It should create a ranked review queue, capture/restore enough workspace context, route non-human-blocked events into background agents, and let the user advance through one human-blocked packet at a time with one hotkey and one done/next action.
 
+If you are trying this from a fresh clone on another Mac, start with [docs/try-on-mac.md](docs/try-on-mac.md).
+
 ## Current Proof
 
 ```sh
@@ -57,6 +59,12 @@ pnpm run dev:dogfood
 ```
 
 This starts dev Postgres, builds and runs the orchestrator with Codex app-server task sessions, uses AeroSpace in disabled-execute mode, auto-loads `config/mcp-sources.json` when present, and launches the Mac queue app against the local orchestrator. Press `Ctrl-C` in the terminal to stop the app, orchestrator, optional poll loop, and dev Postgres. Set `EVENTLOOPOS_DOGFOOD_POSTGRES=0` for empty in-memory mode. Set `EVENTLOOPOS_DOGFOOD_MCP_POLL=1` to run the MCP poll loop while dogfooding.
+
+Fresh-clone first run without Docker:
+
+```sh
+pnpm run dev:dogfood:memory
+```
 
 Quick dogfood launch smoke:
 

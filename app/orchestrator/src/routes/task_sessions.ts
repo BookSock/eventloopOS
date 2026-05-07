@@ -49,6 +49,18 @@ export async function handleTaskSessionsRoute(input: {
     });
   }
 
+  if (input.method === "POST" && input.pathname === "/task-sessions") {
+    const parsed = await input.readJsonBody();
+    if (!parsed.ok) return schemaError(parsed.message);
+
+    return handleStartTaskSessionRoute({
+      taskSessions: input.taskSessions,
+      body: parsed.value,
+      idempotencyKey: input.idempotencyKey,
+      requestId: input.requestId,
+    });
+  }
+
   const getTaskSessionMatch = input.pathname.match(/^\/task-sessions\/([^/]+)$/);
   if (input.method === "GET" && getTaskSessionMatch) {
     return handleGetTaskSessionRoute({
@@ -238,6 +250,60 @@ export async function handleGetTaskSessionRoute(input: {
     status: 200,
     body: {
       session,
+      request_id: input.requestId,
+    },
+  };
+}
+
+export async function handleStartTaskSessionRoute(input: {
+  taskSessions?: TaskSessionController;
+  body: unknown;
+  idempotencyKey?: string;
+  requestId: string;
+}): Promise<RouteResult> {
+  if (!input.taskSessions?.startTaskSession) {
+    return {
+      ok: false,
+      status: 501,
+      code: "task_start_unavailable",
+      message: "task session start is not configured",
+    };
+  }
+
+  const validation = validateTaskStartRequest(input.body, input.idempotencyKey);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      status: 400,
+      code: "schema_error",
+      message: validation.message,
+    };
+  }
+
+  const started = await input.taskSessions.startTaskSession({
+    task_id: validation.taskId,
+    prompt: validation.prompt,
+    cwd: validation.cwd,
+    model: validation.model,
+    idempotency_key: validation.idempotencyKey,
+  });
+
+  if (isRecord(started) && started.ok === false) {
+    return {
+      ok: false,
+      status: 409,
+      code: "task_start_failed",
+      message: typeof started.error === "string" ? started.error : "task start failed",
+      details: started,
+    };
+  }
+
+  return {
+    ok: true,
+    status: 202,
+    body: {
+      ok: true,
+      started,
       request_id: input.requestId,
     },
   };
@@ -473,6 +539,49 @@ function validateTaskFollowupRequest(
     untrustedSourceText: typeof input.untrusted_source_text === "string" && input.untrusted_source_text
       ? input.untrusted_source_text
       : undefined,
+  };
+}
+
+function validateTaskStartRequest(
+  input: unknown,
+  headerIdempotencyKey: string | undefined,
+): {
+  ok: true;
+  taskId: string;
+  prompt: string;
+  cwd?: string;
+  model?: string;
+  idempotencyKey: string;
+} | { ok: false; message: string } {
+  if (!isRecord(input)) {
+    return { ok: false, message: "task start request must be an object" };
+  }
+
+  const taskId = typeof input.task_id === "string" ? input.task_id.trim() : "";
+  if (!taskId) return { ok: false, message: "task_id must be a non-empty string" };
+  if (!/^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(taskId)) {
+    return { ok: false, message: "task_id must start with task_ and contain only letters, numbers, underscores, or hyphens" };
+  }
+
+  const prompt = typeof input.prompt === "string" ? input.prompt.trim() : "";
+  if (!prompt) return { ok: false, message: "prompt must be a non-empty string" };
+
+  const bodyIdempotencyKey = typeof input.idempotency_key === "string" && input.idempotency_key
+    ? input.idempotency_key
+    : undefined;
+  const idempotencyKey = headerIdempotencyKey ?? bodyIdempotencyKey;
+  if (!idempotencyKey) return { ok: false, message: "idempotency_key or Idempotency-Key header is required" };
+
+  const cwd = typeof input.cwd === "string" && input.cwd.trim() ? input.cwd.trim() : undefined;
+  const model = typeof input.model === "string" && input.model.trim() ? input.model.trim() : undefined;
+
+  return {
+    ok: true,
+    taskId,
+    prompt,
+    cwd,
+    model,
+    idempotencyKey,
   };
 }
 

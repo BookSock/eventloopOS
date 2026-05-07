@@ -7,7 +7,7 @@ describe("voice listen loop", () => {
     const options = voiceListenOptionsFromEnv({
       EVENTLOOPOS_ORCHESTRATOR_URL: "http://127.0.0.1:9999",
       EVENTLOOPOS_VOICE_WAKE_PHRASE: "computer",
-      EVENTLOOPOS_VOICE_PROJECT_HINT: "pagerfree",
+      EVENTLOOPOS_VOICE_PROJECT_HINT: "acme",
       EVENTLOOPOS_VOICE_TASK_HINT: "blog feedback",
       EVENTLOOPOS_VOICE_SOURCE_ID: "local-stt",
       EVENTLOOPOS_VOICE_IDEMPOTENCY_PREFIX: "voice_local",
@@ -15,7 +15,7 @@ describe("voice listen loop", () => {
 
     assert.equal(options.baseUrl, "http://127.0.0.1:9999");
     assert.equal(options.wakePhrase, "computer");
-    assert.equal(options.projectHint, "pagerfree");
+    assert.equal(options.projectHint, "acme");
     assert.equal(options.taskHint, "blog feedback");
     assert.equal(options.sourceId, "local-stt");
     assert.equal(options.idempotencyPrefix, "voice_local");
@@ -34,7 +34,7 @@ describe("voice listen loop", () => {
     const exitCode = await listenVoiceCommands({
       baseUrl: "http://127.0.0.1:4377",
       wakePhrase: "computer",
-      projectHint: "pagerfree",
+      projectHint: "acme",
       taskHint: "blog feedback",
       sourceId: "local-stt",
       idempotencyPrefix: "voice_loop",
@@ -57,14 +57,14 @@ describe("voice listen loop", () => {
     assert.deepEqual(requestedBodies, [
       {
         transcript: "blog post is priority",
-        project_hint: "pagerfree",
+        project_hint: "acme",
         task_hint: "blog feedback",
         idempotency_key: "voice_loop_1",
         source_id: "local-stt",
       },
       {
         transcript: "launch date in two weeks",
-        project_hint: "pagerfree",
+        project_hint: "acme",
         task_hint: "blog feedback",
         idempotency_key: "voice_loop_2",
         source_id: "local-stt",

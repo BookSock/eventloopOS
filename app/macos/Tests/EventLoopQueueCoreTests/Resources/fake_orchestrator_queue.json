@@ -18,7 +18,7 @@
           {
             "id": "ev_slack_feedback",
             "kind": "slack_message",
-            "title": "Malis feedback in launch thread",
+            "title": "Alex feedback in launch thread",
             "url": "https://slack.example.com/archives/C123/p999"
           }
         ],
@@ -105,7 +105,7 @@
             "id": "ctx_github_pr",
             "kind": "github",
             "title": "Routing PR",
-            "url": "github://pagerfree/eventloopOS/pull/12",
+            "url": "github://acme/eventloopOS/pull/12",
             "source": "github",
             "restore_confidence": "high"
           }

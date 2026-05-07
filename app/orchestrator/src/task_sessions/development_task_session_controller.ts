@@ -81,6 +81,37 @@ export class DevelopmentTaskSessionController {
     return this.sessions.get(taskSessionId);
   }
 
+  startTaskSession(input: {
+    task_id: string;
+    prompt: string;
+    idempotency_key: string;
+  }): {
+    ok: boolean;
+    task_session_id: string;
+    task_id: string;
+    session: DevelopmentTaskSession;
+    message: DevelopmentTaskMessage;
+  } {
+    const session = this.seedSession({
+      id: `task_session_${stableId(input.task_id)}`,
+      task_id: input.task_id,
+      status: "idle",
+    });
+    const message = this.sendFollowupMessage({
+      task_session_id: session.id,
+      text: input.prompt,
+      event_ids: [],
+      idempotency_key: input.idempotency_key,
+    });
+    return {
+      ok: true,
+      task_session_id: session.id,
+      task_id: input.task_id,
+      session,
+      message,
+    };
+  }
+
   sendFollowupMessage(input: {
     task_session_id: string;
     text: string;

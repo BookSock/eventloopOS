@@ -10,7 +10,7 @@
     "type": "human",
     "name": "Jason"
   },
-  "project_hint": "pagerfree",
+  "project_hint": "acme",
   "task_hint": "blog feedback",
   "type": "manual.review_requested",
   "title": "Blog launch review needs approval",

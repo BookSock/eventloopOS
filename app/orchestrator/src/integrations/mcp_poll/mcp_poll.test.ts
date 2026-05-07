@@ -37,13 +37,13 @@ describe("MCP poll ingestion", () => {
       actor: {
         id: "actor_slack_U123",
         type: "human",
-        name: "Malis",
+        name: "Alex",
       },
-      project_hint: "pagerfree",
+      project_hint: "acme",
       task_hint: "blog feedback",
       type: "slack.message",
-      title: "Slack message from Malis",
-      summary: "Customer says pgrust copy needs clearer Postgres version support.",
+      title: "Slack message from Alex",
+      summary: "Customer says dbtool copy needs clearer Postgres version support.",
       raw_ref: {
         id: "raw_slack_T123_C123_456.000",
         uri: "artifact://raw/slack:T123:C123:456.000.json",
@@ -96,8 +96,8 @@ describe("MCP poll ingestion", () => {
     assert.equal(result.events.length, 1);
     assert.equal(result.events[0].source, "github");
     assert.equal(result.events[0].type, "github.issue_comment");
-    assert.equal(result.events[0].idempotency_key, "github:pagerfreeglobal/pgrust:issue-comment-99");
-    assert.equal(result.events[0].resources[0].repo, "pagerfreeglobal/pgrust");
+    assert.equal(result.events[0].idempotency_key, "github:acme-corp/dbtool:issue-comment-99");
+    assert.equal(result.events[0].resources[0].repo, "acme-corp/dbtool");
   });
 
   it("maps generic MCP item output to Event object", async () => {

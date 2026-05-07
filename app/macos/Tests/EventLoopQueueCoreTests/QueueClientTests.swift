@@ -27,7 +27,7 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(browserResource.textQuote, "Launch pricing note needs review later")
         XCTAssertEqual(browserResource.selectorHint, "[data-context-quote]")
         XCTAssertEqual(browserResource.details?.confidenceReason, "browser_quote_fallback")
-        XCTAssertEqual(loaded.first?.evidence.first?.title, "Malis feedback in launch thread")
+        XCTAssertEqual(loaded.first?.evidence.first?.title, "Alex feedback in launch thread")
         XCTAssertEqual(loaded.first?.workspaceSnapshot?.backend, "aerospace")
         XCTAssertEqual(loaded.first?.workspaceSnapshot?.activeWorkspace, "eventloop-blog")
         XCTAssertEqual(loaded.first?.workspaceSnapshot?.windows.first?.title, "codex")

@@ -6,6 +6,11 @@ coverage/
 .DS_Store
 .env
 .env.local
+config/mcp-sources.json
+config/codex-task-map.json
+var/
+bin/dev-jason-dogfood
+bin/*.local
 external-resources/repos/*
 external-resources/models/*
 artifacts/logs/*

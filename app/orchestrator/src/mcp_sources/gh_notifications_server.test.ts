@@ -19,7 +19,7 @@ describe("gh notifications MCP server", () => {
   it("builds read-only gh api notification args from env options", () => {
     const options = notificationsOptionsFromEnv({
       EVENTLOOPOS_GH_COMMAND: "gh",
-      EVENTLOOPOS_GH_REPO: "pagerfreeglobal/pgrust",
+      EVENTLOOPOS_GH_REPO: "acme-corp/dbtool",
       EVENTLOOPOS_GH_PARTICIPATING: "false",
       EVENTLOOPOS_GH_ALL: "true",
       EVENTLOOPOS_GH_SINCE: "2026-05-01T00:00:00Z",
@@ -31,7 +31,7 @@ describe("gh notifications MCP server", () => {
       "api",
       "-X",
       "GET",
-      "repos/pagerfreeglobal/pgrust/notifications",
+      "repos/acme-corp/dbtool/notifications",
       "-f",
       "per_page=50",
       "-f",

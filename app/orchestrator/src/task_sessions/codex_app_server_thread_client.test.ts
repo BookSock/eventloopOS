@@ -208,6 +208,53 @@ describe("CodexAppServerThreadClient", () => {
     ]);
   });
 
+  it("starts a thread with eventloop task instructions", async () => {
+    const calls: unknown[] = [];
+    const client = new CodexAppServerThreadClient(async (request) => {
+      calls.push(request);
+      return {
+        thread: {
+          id: "thread_new",
+          name: "new task",
+          status: { type: "idle" },
+          cwd: "/repo",
+          createdAt: 1_767_027_600,
+          updatedAt: 1_767_027_600,
+        },
+      };
+    });
+
+    const thread = await client.startThread({
+      task_id: "task_new_outreach",
+      cwd: "/repo",
+      model: "gpt-5.3-codex",
+    });
+
+    assert.equal(thread.id, "thread_new");
+    assert.equal(thread.task_id, "task_new_outreach");
+    assert.deepEqual(calls, [
+      {
+        method: "thread/start",
+        params: {
+          cwd: "/repo",
+          model: "gpt-5.3-codex",
+          baseInstructions: null,
+          developerInstructions: "This Codex thread is owned by eventloopOS task task_new_outreach. Keep work scoped to this task. Ask for human help by creating a waiting_approval/blocked report when needed.",
+          approvalPolicy: null,
+          approvalsReviewer: null,
+          config: null,
+          ephemeral: null,
+          modelProvider: null,
+          personality: null,
+          sandbox: null,
+          serviceName: "eventloopos",
+          serviceTier: null,
+          sessionStartSource: null,
+        },
+      },
+    ]);
+  });
+
   it("rejects malformed thread list responses", async () => {
     const client = new CodexAppServerThreadClient(async () => ({ data: "not-array" }));
 

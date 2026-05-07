@@ -27,7 +27,7 @@ public enum SeededQueue {
             id: "packet-ci-failed",
             title: "CI failed on routing PR",
             summary: "GitHub check failed after agent patch. Needs owner decision before retrying.",
-            source: "github://pagerfree/eventloopOS/pull/12",
+            source: "github://acme/eventloopOS/pull/12",
             priority: 75,
             recommendedAction: "Open failure, choose retry or send back to agent.",
             createdAt: Date(timeIntervalSince1970: 1_767_031_200)

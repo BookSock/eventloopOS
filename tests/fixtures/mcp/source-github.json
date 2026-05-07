@@ -10,7 +10,7 @@
   "poll": {
     "tool": "search_issues",
     "args": {
-      "query": "repo:pagerfreeglobal/pgrust is:pr updated:>=cursor"
+      "query": "repo:acme-corp/dbtool is:pr updated:>=cursor"
     },
     "timeoutMs": 20
   },

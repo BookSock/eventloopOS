@@ -34,6 +34,32 @@ pnpm run dev:dogfood
 
 The `local_events_source` config launches `app/orchestrator/dist/src/mcp_sources/local_events_server.js` over stdio and reads `EVENTLOOPOS_LOCAL_EVENTS_PATH`. It is read-only: edit the JSON file yourself, then run `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` or enable the dogfood poll loop.
 
+For hackable polling, use the script source. This lets Codex write one-off Gmail, X/Twitter, todo, CRM, or website poll scripts without changing orchestrator code:
+
+```sh
+pnpm --filter @eventloopos/orchestrator build
+EVENTLOOPOS_SCRIPT_EVENTS_COMMAND=node \
+EVENTLOOPOS_SCRIPT_EVENTS_ARGS='["scripts/poll-gmail.js","--query","is:unread newer_than:1d"]' \
+EVENTLOOPOS_SCRIPT_EVENTS_CURSOR_ARG=--cursor \
+ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.script-events.example.json \
+pnpm --filter @eventloopos/orchestrator start
+```
+
+Script stdout must be JSON shaped like `{"items":[...],"nextCursor":"optional"}` or a bare item array. Items should use `generic_item_to_event` fields: `id`, `source`, `type`, `title`, `summary`, optional `url`, `task_hint`, `project_hint`, `links`, and `resources`. Cursor is passed as configured arg and/or env var.
+
+Todo files can use the bundled script source:
+
+```sh
+pnpm --filter @eventloopos/orchestrator build
+EVENTLOOPOS_SCRIPT_EVENTS_COMMAND=node \
+EVENTLOOPOS_SCRIPT_EVENTS_ARGS='["../../scripts/poll-todo-md.mjs"]' \
+EVENTLOOPOS_TODO_MD_PATHS='/path/to/first/todo.md,/path/to/second/todo.md' \
+ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.todo-md.example.json \
+pnpm --filter @eventloopos/orchestrator start
+```
+
+The todo script emits unchecked markdown tasks (`- [ ] ...`) and `- TODO: ...` lines as generic events. Add `[task:blog feedback]` inside a todo line when it should route to an existing task session.
+
 Inspect configured sources before routing:
 
 ```sh
@@ -117,7 +143,7 @@ Use `generic_item_to_event` when a local MCP server can return items shaped like
       "title": "Blog launch detail now matters",
       "summary": "Blog post should mention launch in two weeks.",
       "occurred_at": "2026-05-06T17:03:00Z",
-      "project_hint": "pagerfree",
+      "project_hint": "acme",
       "links": [{ "label": "Source", "url": "eventloop://voice/1" }],
       "resources": []
     }
