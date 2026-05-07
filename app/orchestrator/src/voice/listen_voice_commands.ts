@@ -8,13 +8,13 @@ export type VoiceListenOptions = {
   taskHint?: string;
   sourceId?: string;
   idempotencyPrefix?: string;
-  stdin?: StdinLike;
+  stdin?: VoiceTranscriptStream;
   stdout?: Pick<NodeJS.WriteStream, "write">;
   stderr?: Pick<NodeJS.WriteStream, "write">;
   fetchFn?: typeof fetch;
 };
 
-type StdinLike = {
+export type VoiceTranscriptStream = {
   setEncoding(encoding: BufferEncoding): unknown;
   [Symbol.asyncIterator](): AsyncIterator<unknown, unknown, unknown>;
 };

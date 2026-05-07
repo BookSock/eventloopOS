@@ -86,6 +86,7 @@ Done:
 - Expired restore request leases get reaped and reclaimed.
 - Doctor checks orchestrator health, AeroSpace, Docker, browser Playwright readiness, Codex app-server.
 - `pnpm --filter @eventloopos/orchestrator run live:aerospace` builds and emits a machine-readable skip by default. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1`, it checks live AeroSpace status/capture/restore-plan without executing workspace moves.
+- `voice:listen-command` runs a configured local STT command and pipes line-delimited transcripts into the same wake-phrase voice router. Command args are JSON argv, not shell-parsed strings.
 
 Gap:
 
@@ -103,6 +104,7 @@ Strong tests now:
 - Real Chromium Playwright extension E2E.
 - Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06.
 - `voice:listen` accepts line-delimited local STT transcript streams, optional wake phrase filtering, and forwards into `/voice/commands`.
+- `voice:listen-command` lets whisper.cpp stream, MLX Whisper wrappers, or other local STT tools feed the same router while staying unit-testable through an injected process.
 - Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
 
 Weak tests:
@@ -111,7 +113,7 @@ Weak tests:
 - AeroSpace live restore needs installed/running AeroSpace.
 - AeroSpace live smoke exists, but `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm --filter @eventloopos/orchestrator run live:aerospace` currently reports `server_unavailable` because AeroSpace.app is not running.
 - No full installed extension + native host + Mac app manual UI flow; current live coverage proves Mac client/orchestrator API round-trip but not rendered app interaction.
-- No local voice wake-word/STT test.
+- No real microphone wake-word/STT test yet; current coverage proves the local transcript command pipe and router contract with fake process output.
 
 ## Next Best Work
 
