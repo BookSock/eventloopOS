@@ -2163,6 +2163,33 @@ describe("orchestrator gateway API", () => {
       assert.equal(storedResponse.status, 200);
       assert.equal(storedBody.route_decision.action, "inject_into_agent_thread");
       assert.equal(storedBody.queue_item, undefined);
+
+      const activityResponse = await fetch(`${taskBaseUrl}/activity?limit=3`);
+      const activityBody = await activityResponse.json() as {
+        events: Array<{
+          type: string;
+          task_id?: string;
+          details: Record<string, unknown>;
+        }>;
+      };
+      assert.deepEqual(activityBody.events.map((entry) => entry.type), [
+        "event_routed",
+        "task_followup_sent",
+        "task_followup_attempted",
+      ]);
+      assert.equal(activityBody.events[0].task_id, "task_blog_feedback");
+      const eventRoutedDetails = activityBody.events[0].details;
+      assert.equal((eventRoutedDetails.task_message as Record<string, unknown> | undefined)?.text, undefined);
+      assert.equal(JSON.stringify(eventRoutedDetails).includes('"text":'), false);
+
+      const taskMessagesResponse = await fetch(`${taskBaseUrl}/task-messages?task_id=task_blog_feedback`);
+      const taskMessagesBody = await taskMessagesResponse.json() as {
+        messages: Array<{ id: string; task_id?: string; text?: string }>;
+      };
+      assert.equal(taskMessagesResponse.status, 200);
+      assert.equal(taskMessagesBody.messages.length, 1);
+      assert.equal(taskMessagesBody.messages[0].task_id, "task_blog_feedback");
+      assert.equal(taskMessagesBody.messages[0].text, undefined);
     } finally {
       await new Promise<void>((resolve, reject) => {
         taskServer.close((error) => (error ? reject(error) : resolve()));
@@ -3149,6 +3176,7 @@ describe("orchestrator gateway API", () => {
           activity: Array<{
             type: string;
             queue_item_id?: string;
+            details: Record<string, unknown>;
           }>;
           task_messages: Array<{
             status: string;
@@ -3178,6 +3206,13 @@ describe("orchestrator gateway API", () => {
         "event_routed",
       ]);
       assert.ok(lineageBody.lineage.activity.every((event) => event.queue_item_id === eventBody.queue_item.id));
+      assert.equal(JSON.stringify(lineageBody.lineage.activity).includes('"text":'), false);
+      const queueDoneActivity = lineageBody.lineage.activity[0];
+      const actionResult = queueDoneActivity.details.action_result as Record<string, unknown> | undefined;
+      const actionTaskMessage = actionResult?.task_message as Record<string, unknown> | undefined;
+      assert.notEqual(actionTaskMessage, undefined);
+      assert.equal(actionTaskMessage?.text, undefined);
+      assert.equal(JSON.stringify(actionResult).includes('"text":'), false);
       assert.equal(lineageBody.lineage.task_messages.length, 1);
       assert.equal(lineageBody.lineage.task_messages[0].status, "sent");
       assert.deepEqual(lineageBody.lineage.task_messages[0].event_ids, ["evt_manual_blog_action"]);

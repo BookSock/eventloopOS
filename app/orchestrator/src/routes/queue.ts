@@ -7,6 +7,7 @@ import {
 import type { GatewayStore } from "../gateway_store.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import type { Observability } from "../observability.js";
+import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
 import { taskSessionMatchesTask } from "./task_sessions.js";
@@ -276,10 +277,10 @@ async function recordQueueDone(
     task_session_id: extra?.taskSessionId,
     status: "ok",
     summary: `Queue item done: ${item.review_packet.title}`,
-    details: {
+    details: sanitizeActivityDetails({
       review_packet_id: item.review_packet_id,
       action_result: extra?.actionResult,
-    },
+    }),
   });
 }
 

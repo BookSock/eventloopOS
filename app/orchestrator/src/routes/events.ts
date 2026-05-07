@@ -1,6 +1,7 @@
 import type { GatewayStore } from "../gateway_store.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import type { Observability } from "../observability.js";
+import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
 import { injectEventIntoTaskSessionIfPossible } from "../routing/task_session_injection.js";
 import type { RouteDecision } from "../store.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
@@ -160,6 +161,7 @@ export async function routeEventThroughGateway(
       }, followupInput, {
         origin: "event_route",
         occurredAt: now.toISOString(),
+        taskId: taskIdFromFollowupPolicy(followupInput.policy),
         eventId: event.id,
         sourceId: event.source_id,
       }),
@@ -225,7 +227,7 @@ async function recordRoutedEventActivity(
     source_id: event.source_id,
     status: "ok",
     summary: `Event routed: ${event.title}`,
-    details: {
+    details: sanitizeActivityDetails({
       source: event.source,
       type: event.type,
       route_action: routeDecision.action,
@@ -233,8 +235,12 @@ async function recordRoutedEventActivity(
       human_queue_reason: routeDecision.human_queue_reason,
       task_message: input.taskMessage,
       task_message_error: input.taskMessageError,
-    },
+    }),
   });
+}
+
+function taskIdFromFollowupPolicy(policy: { scope_kind?: string; scope_id?: string } | undefined): string | undefined {
+  return policy?.scope_kind === "task" && typeof policy.scope_id === "string" ? policy.scope_id : undefined;
 }
 
 function validateVoiceCommandRequest(
