@@ -110,4 +110,5 @@ Planning docs live in `docs/planning/`. Start with:
 - `08-command-contract.md`
 - `09-v0-scenarios.md`
 - `14-current-mvp-state.md`
+- `15-agent-test-matrix.md`
 - `10-final-planning-index.md`

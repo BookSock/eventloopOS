@@ -192,24 +192,32 @@ Use golden packets to stop silent behavior drift.
 
 ## Commands
 
-Future `Makefile` should expose:
+Current `Makefile` exposes:
 
 ```bash
 make test
-make test:unit
-make test:integration
-make test:e2e
-make test:e2e:browser
-make test:e2e:macos
-make test:contracts
-make test:architecture
-make test:mcp-stability
-make fixtures:seed
-make packets:golden
+make test-unit
+make test-integration
+make test-e2e
+make test-e2e-browser
+make test-e2e-native-browser
+make test-e2e-native-browser-real-orchestrator
+make test-e2e-macos
+make test-e2e-live
+make test-e2e-live-boot
+make test-e2e-live-full
+make test-db-native
+make test-contracts
+make test-architecture
+make test-mcp-stability
+make fixtures-seed
+make packets-golden
 make lint
 make typecheck
 make ci
 ```
+
+Use `15-agent-test-matrix.md` to pick the smallest proof for each subsystem.
 
 `make ci` required gate:
 
@@ -272,7 +280,8 @@ Orchestrator:
 - Duplicate event safe.
 - Queue priority deterministic.
 - Stale lease cleanup tested.
-- `make test:integration ORCHESTRATOR=1` passes.
+- `make test-integration` passes for local integration scope.
+- `make test-db-native` passes for real Postgres persistence scope.
 
 Integrations:
 

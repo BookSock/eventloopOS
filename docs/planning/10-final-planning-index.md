@@ -27,6 +27,7 @@ Do not build broad OS replacement first. Build review queue + context restore + 
 9. `11-ambient-router-workspace-backends.md` - ambient router, MCP/polling, voice, AeroSpace.
 10. `12-lessons-hermes-openclaw.md` - gateway/session/hook lessons from cloned repos.
 11. `13-broader-agent-ecosystem-lessons.md` - lessons from ZeroClaw, SwarmClaw, Letta, CrewAI, LangGraph, security papers.
+12. `15-agent-test-matrix.md` - current command matrix mapping subsystem changes to concrete proof.
 
 Supporting:
 

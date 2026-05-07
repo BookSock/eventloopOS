@@ -7,78 +7,93 @@ Goal: agents need stable commands. Commands are public API for development.
 Use `make` as command facade. Underneath can call pnpm, xcodebuild, docker, playwright.
 
 ```bash
-make setup
-make dev
+make install
 make test
-make test:unit
-make test:contracts
-make test:integration
-make test:e2e
-make test:e2e:browser
-make test:e2e:macos
-make fixtures:seed
-make packets:golden
+make test-unit
+make test-contracts
+make test-integration
+make test-e2e
+make test-e2e-browser
+make test-e2e-native-browser
+make test-e2e-native-browser-real-orchestrator
+make test-e2e-macos
+make test-e2e-live
+make test-e2e-live-boot
+make test-e2e-live-full
+make test-db-native
+make fixtures-seed
+make packets-golden
 make lint
 make typecheck
 make ci
-make clean
 ```
 
 ## Meaning
 
-### `make setup`
+### `make install`
 
 Installs deps. Pulls browsers. Checks Xcode tools. Does not require secrets.
-
-### `make dev`
-
-Starts local dev world:
-
-- Postgres.
-- Orchestrator.
-- Fake services if `TEST_MODE=1`.
-- Browser extension build watcher if present.
 
 ### `make test`
 
 Runs unit + contract tests. Fast. Default command agents run often.
 
-### `make test:unit`
+### `make test-unit`
 
 Pure unit tests only. No Docker, no browser, no macOS UI.
 
-### `make test:contracts`
+### `make test-contracts`
 
 Validates schemas, fixtures, golden contract shapes.
 
-### `make test:integration`
+### `make test-integration`
 
 Runs DB + adapter integration tests with fake services. No live external network.
 
-### `make test:e2e`
+### `make test-e2e`
 
 Runs full deterministic scenario smoke.
 
-### `make test:e2e:browser`
+### `make test-e2e-browser`
 
 Runs Playwright extension tests with bundled Chromium.
 
-### `make test:e2e:macos`
+### `make test-e2e-native-browser`
 
-Runs XCUITest macOS app tests. Can be local-only at first.
+Runs installed Chromium native messaging smoke against a fixture server.
 
-### `make fixtures:seed`
+### `make test-e2e-native-browser-real-orchestrator`
+
+Runs installed Chromium extension/native host capture against a real local orchestrator.
+
+### `make test-e2e-macos`
+
+Runs SwiftUI rendered queue window smoke.
+
+### `make test-e2e-live-boot`
+
+Builds and boots orchestrator, runs live harness, native-host smoke, browser E2E, and Mac client smoke.
+
+### `make test-e2e-live-full`
+
+Adds installed Chromium extension/native-host capture against the same booted orchestrator.
+
+### `make test-db-native`
+
+Runs real Postgres tests against a throwaway native local Postgres cluster.
+
+### `make fixtures-seed`
 
 Seeds local DB from deterministic fixtures.
 
-### `make packets:golden`
+### `make packets-golden`
 
 Regenerates review packet outputs in compare mode by default.
 
 Update mode must be explicit:
 
 ```bash
-UPDATE_GOLDEN=1 make packets:golden
+UPDATE_GOLDEN=1 make packets-golden
 ```
 
 ### `make ci`
@@ -88,11 +103,11 @@ Merge gate:
 ```text
 lint
 typecheck
-test:unit
-test:contracts
-test:integration
-packets:golden
-test:e2e smoke
+test-unit
+test-contracts
+test-integration
+packets-golden
+test-e2e smoke
 ```
 
 ## Environment
