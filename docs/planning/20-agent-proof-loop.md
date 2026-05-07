@@ -14,6 +14,7 @@ Each meaningful implementation agent should leave:
 - live backend notes when a test is skipped because capability is unavailable
 - dogfood metric snapshot when changing routing, queue, restore, or task sessions
 - task-message lineage snapshot from `pnpm task:messages` when changing task followup/session routing
+- queue-item lineage snapshot from `pnpm queue:lineage -- --queue-item-id <id>` when changing queue actions, routing, or review packet creation
 
 ## Proof Commands
 
@@ -24,6 +25,7 @@ Current implementation:
 - `pnpm proof:agent`
 - `pnpm proof:live`
 - `pnpm task:messages`
+- `pnpm queue:lineage`
 - `make proof-agent`
 - `make proof-live`
 - default commands: lint, typecheck, test, test:e2e

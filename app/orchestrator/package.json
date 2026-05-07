@@ -16,6 +16,7 @@
     "poll:mcp:loop": "node dist/src/mcp_sources/poll_loop.js",
     "poll:mcp:once": "node dist/src/mcp_sources/poll_once.js",
     "queue:add": "pnpm run build && node dist/src/manual/send_manual_review.js",
+    "queue:lineage": "pnpm run build && node dist/src/queue/queue_lineage_cli.js",
     "voice:listen": "node dist/src/voice/listen_voice_commands.js",
     "voice:listen-command": "node dist/src/voice/listen_transcript_command.js",
     "voice:send": "node dist/src/voice/send_voice_command.js",

@@ -33,6 +33,7 @@ export function routeNameForPath(method: string | undefined, pathname: string): 
     [/^\/queue\/[^/]+\/done$/, "queue_done"],
     [/^\/queue\/[^/]+\/defer$/, "queue_defer"],
     [/^\/queue\/[^/]+\/ignore$/, "queue_ignore"],
+    [/^\/queue\/[^/]+\/lineage$/, "queue_lineage"],
     [/^\/queue\/[^/]+\/actions\/recommended$/, "queue_recommended_action"],
     [/^\/contexts$/, "contexts"],
     [/^\/contexts\/restore-plan$/, "context_restore_plan"],

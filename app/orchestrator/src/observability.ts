@@ -22,6 +22,8 @@ export type ActivityEvent = {
 export type ActivityQuery = {
   limit?: number;
   task_id?: string;
+  queue_item_id?: string;
+  event_id?: string;
   task_session_id?: string;
   status?: ActivityStatus;
   since?: string;
@@ -154,6 +156,8 @@ export class PostgresObservability implements Observability {
     };
 
     if (normalized.task_id) addClause("task_id = ?", normalized.task_id);
+    if (normalized.queue_item_id) addClause("queue_item_id = ?", normalized.queue_item_id);
+    if (normalized.event_id) addClause("event_id = ?", normalized.event_id);
     if (normalized.task_session_id) addClause("task_session_id = ?", normalized.task_session_id);
     if (normalized.status) addClause("status = ?", normalized.status);
     if (normalized.since) addClause("occurred_at >= ?::timestamptz", normalized.since);
@@ -197,6 +201,8 @@ function normalizeActivityQuery(query: number | ActivityQuery): Required<Pick<Ac
 
 function activityMatchesQuery(event: ActivityEvent, query: ActivityQuery & { limit: number }): boolean {
   if (query.task_id && event.task_id !== query.task_id) return false;
+  if (query.queue_item_id && event.queue_item_id !== query.queue_item_id) return false;
+  if (query.event_id && event.event_id !== query.event_id) return false;
   if (query.task_session_id && event.task_session_id !== query.task_session_id) return false;
   if (query.status && event.status !== query.status) return false;
   if (query.since && new Date(event.occurred_at).getTime() < new Date(query.since).getTime()) return false;

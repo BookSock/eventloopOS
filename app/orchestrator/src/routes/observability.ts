@@ -53,6 +53,10 @@ export function validateActivityQuery(url: URL): { ok: true; query: ActivityQuer
 
   const taskId = optionalNonEmptyParam(url, "task_id");
   if (!taskId.ok) return taskId;
+  const queueItemId = optionalNonEmptyParam(url, "queue_item_id");
+  if (!queueItemId.ok) return queueItemId;
+  const eventId = optionalNonEmptyParam(url, "event_id");
+  if (!eventId.ok) return eventId;
   const taskSessionId = optionalNonEmptyParam(url, "task_session_id");
   if (!taskSessionId.ok) return taskSessionId;
   const status = url.searchParams.get("status") ?? undefined;
@@ -69,6 +73,8 @@ export function validateActivityQuery(url: URL): { ok: true; query: ActivityQuer
     query: {
       limit,
       task_id: taskId.value,
+      queue_item_id: queueItemId.value,
+      event_id: eventId.value,
       task_session_id: taskSessionId.value,
       status: status as ActivityStatus | undefined,
       since,

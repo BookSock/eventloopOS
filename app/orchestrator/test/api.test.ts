@@ -3032,6 +3032,88 @@ describe("orchestrator gateway API", () => {
       const queueResponse = await fetch(`${actionBaseUrl}/queue/next`);
       const queueBody = await queueResponse.json() as { item: unknown };
       assert.equal(queueBody.item, null);
+
+      const lineageResponse = await fetch(`${actionBaseUrl}/queue/${eventBody.queue_item.id}/lineage?limit=10`);
+      const lineageBody = await lineageResponse.json() as {
+        lineage: {
+          queue_item: {
+            id: string;
+            state: string;
+            review_packet: {
+              id: string;
+              title: string;
+            };
+          };
+          related_event_ids: string[];
+          events: Array<{
+            event: {
+              id: string;
+              title: string;
+            };
+            route_decision: {
+              action: string;
+            };
+          }>;
+          activity: Array<{
+            type: string;
+            queue_item_id?: string;
+          }>;
+          task_messages: Array<{
+            status: string;
+            event_ids: string[];
+            queue_item_id?: string;
+            text?: string;
+          }>;
+          counts: {
+            events: number;
+            activity: number;
+            task_messages: number;
+          };
+        };
+      };
+      assert.equal(lineageResponse.status, 200);
+      assert.equal(lineageResponse.headers.get("x-route-name"), "GET_queue_lineage");
+      assert.equal(lineageBody.lineage.queue_item.id, eventBody.queue_item.id);
+      assert.equal(lineageBody.lineage.queue_item.state, "done");
+      assert.equal(lineageBody.lineage.queue_item.review_packet.title, "Review Launch blog final paragraph");
+      assert.deepEqual(lineageBody.lineage.related_event_ids, ["evt_manual_blog_action"]);
+      assert.equal(lineageBody.lineage.events[0].event.id, "evt_manual_blog_action");
+      assert.equal(lineageBody.lineage.events[0].route_decision.action, "ask_human_now");
+      assert.deepEqual(lineageBody.lineage.activity.map((event) => event.type), [
+        "queue_item_done",
+        "task_followup_sent",
+        "task_followup_attempted",
+        "event_routed",
+      ]);
+      assert.ok(lineageBody.lineage.activity.every((event) => event.queue_item_id === eventBody.queue_item.id));
+      assert.equal(lineageBody.lineage.task_messages.length, 1);
+      assert.equal(lineageBody.lineage.task_messages[0].status, "sent");
+      assert.deepEqual(lineageBody.lineage.task_messages[0].event_ids, ["evt_manual_blog_action"]);
+      assert.equal(lineageBody.lineage.task_messages[0].queue_item_id, eventBody.queue_item.id);
+      assert.equal(lineageBody.lineage.task_messages[0].text, undefined);
+      assert.deepEqual(lineageBody.lineage.counts, {
+        events: 1,
+        activity: 4,
+        task_messages: 1,
+      });
+
+      const filteredActivityResponse = await fetch(`${actionBaseUrl}/activity?queue_item_id=${eventBody.queue_item.id}&event_id=evt_manual_blog_action&limit=10`);
+      const filteredActivityBody = await filteredActivityResponse.json() as {
+        count: number;
+        events: Array<{ type: string; event_id?: string; queue_item_id?: string }>;
+      };
+      assert.equal(filteredActivityResponse.status, 200);
+      assert.equal(filteredActivityBody.count, 3);
+      assert.deepEqual(filteredActivityBody.events.map((event) => event.type), [
+        "task_followup_sent",
+        "task_followup_attempted",
+        "event_routed",
+      ]);
+      assert.ok(filteredActivityBody.events.every((event) => event.event_id === "evt_manual_blog_action"));
+      assert.ok(filteredActivityBody.events.every((event) => event.queue_item_id === eventBody.queue_item.id));
+
+      const badLineageResponse = await fetch(`${actionBaseUrl}/queue/${eventBody.queue_item.id}/lineage?limit=0`);
+      assert.equal(badLineageResponse.status, 400);
     } finally {
       await new Promise<void>((resolve, reject) => {
         actionServer.close((error) => (error ? reject(error) : resolve()));

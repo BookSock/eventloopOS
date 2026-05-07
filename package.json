@@ -40,6 +40,7 @@
     "dev:dogfood": "bin/dev-dogfood",
     "dev:dogfood:smoke": "EVENTLOOPOS_DOGFOOD_POSTGRES=0 EVENTLOOPOS_DOGFOOD_SMOKE_MS=3000 bin/dev-dogfood",
     "queue:add": "pnpm --filter @eventloopos/orchestrator run queue:add",
+    "queue:lineage": "pnpm --filter @eventloopos/orchestrator run queue:lineage",
     "task:sessions": "pnpm --filter @eventloopos/orchestrator run task:sessions",
     "task:bind": "pnpm --filter @eventloopos/orchestrator run task:bind",
     "task:messages": "pnpm --filter @eventloopos/orchestrator run task:messages",

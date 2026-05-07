@@ -57,6 +57,41 @@ export async function handleQueueRoute(input: {
     });
   }
 
+  const lineageMatch = input.pathname.match(/^\/queue\/([^/]+)\/lineage$/);
+  if (input.method === "GET" && lineageMatch) {
+    const validation = validateQueueLineageQuery(input.url);
+    if (!validation.ok) return schemaError(validation.message);
+
+    const queueItemId = decodeURIComponent(lineageMatch[1] ?? "");
+    const item = await findQueueItem(input.store, queueItemId);
+    if (!item) return error(404, "not_found", `queue item ${queueItemId} was not found`);
+
+    const [activity, taskMessages] = await Promise.all([
+      input.observability.listActivity({ queue_item_id: queueItemId, limit: validation.limit }),
+      input.store.listTaskMessages({ queue_item_id: queueItemId, limit: validation.limit }),
+    ]);
+    const relatedEventIds = relatedEventIdsForLineage(item, activity, taskMessages);
+    const events = await Promise.all(
+      relatedEventIds.map(async (eventId) => input.store.getEvent(eventId)),
+    );
+
+    return ok(200, {
+      lineage: {
+        queue_item: item,
+        related_event_ids: relatedEventIds,
+        events: events.filter((event) => event !== undefined),
+        activity,
+        task_messages: taskMessages,
+        counts: {
+          events: events.filter((event) => event !== undefined).length,
+          activity: activity.length,
+          task_messages: taskMessages.length,
+        },
+      },
+      request_id: input.requestId,
+    });
+  }
+
   const renewLeaseMatch = input.pathname.match(/^\/queue\/([^/]+)\/lease\/renew$/);
   if (input.method === "POST" && renewLeaseMatch) {
     const parsed = await input.readJsonBody();
@@ -257,6 +292,16 @@ function validateQueueQuery(url: URL): { ok: true; state?: QueueState } | { ok: 
   return { ok: true, state: state as QueueState };
 }
 
+function validateQueueLineageQuery(url: URL): { ok: true; limit: number } | { ok: false; message: string } {
+  const limitRaw = url.searchParams.get("limit");
+  if (!limitRaw) return { ok: true, limit: 100 };
+  const limit = Number(limitRaw);
+  if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
+    return { ok: false, message: "limit must be an integer between 1 and 500" };
+  }
+  return { ok: true, limit };
+}
+
 function validateQueueDeferRequest(input: unknown, now: Date): { ok: true; actorId: string; dueAt: Date } | { ok: false; message: string } {
   if (!isRecord(input) || input.action !== "defer") {
     return { ok: false, message: "defer request requires action=defer" };
@@ -313,7 +358,32 @@ function validateQueueActionRequest(input: unknown): { ok: true; actorId: string
 }
 
 async function findQueueItem(store: GatewayStore, queueItemId: string): Promise<QueueItemWithPacket | undefined> {
-  return (await store.listQueue()).find((item) => item.id === queueItemId);
+  const visible = (await store.listQueue()).find((item) => item.id === queueItemId);
+  if (visible) return visible;
+  for (const state of queueStates) {
+    const item = (await store.listQueue(state)).find((candidate) => candidate.id === queueItemId);
+    if (item) return item;
+  }
+  return undefined;
+}
+
+function relatedEventIdsForLineage(
+  item: QueueItemWithPacket,
+  activity: Array<{ event_id?: string }>,
+  taskMessages: Array<{ event_ids: string[] }>,
+): string[] {
+  const ids = new Set<string>();
+  const actionEventId = item.review_packet.recommended_action.payload.event_id;
+  if (typeof actionEventId === "string" && actionEventId) ids.add(actionEventId);
+  for (const event of activity) {
+    if (event.event_id) ids.add(event.event_id);
+  }
+  for (const message of taskMessages) {
+    for (const eventId of message.event_ids) {
+      if (eventId) ids.add(eventId);
+    }
+  }
+  return [...ids].sort();
 }
 
 async function executeQueueAction(
