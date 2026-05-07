@@ -133,6 +133,60 @@ test("restore request poller marks unsupported pending request as failed", async
   ]);
 });
 
+test("restore request poller marks disallowed restore result as failed", async () => {
+  const failedBodies = [];
+  const resource = { id: "ctx_browser_private", kind: "browser_tab", url: "https://mail.google.com/mail/u/0" };
+  const poller = createRestoreRequestPoller({
+    controller: {
+      restore: async (input) => {
+        assert.deepEqual(input, resource);
+        return {
+          ok: false,
+          url: resource.url,
+          error: {
+            code: "origin_not_allowed",
+            message: "origin not allowed for restore: mail.google.com"
+          }
+        };
+      }
+    },
+    fetchImpl: async (url, init = {}) => {
+      if (url.endsWith("/contexts/restore-requests/claim-next")) {
+        return jsonResponse({
+          restore_request: {
+            id: "ctx_restore_disallowed",
+            status: "leased",
+            restore_plan: {
+              kind: "browser_extension_message",
+              message: { type: "eventloop.restore", resource }
+            }
+          }
+        });
+      }
+      assert.equal(url, "http://127.0.0.1:4377/contexts/restore-requests/ctx_restore_disallowed/failed");
+      failedBodies.push(JSON.parse(init.body));
+      return jsonResponse({ restore_request: { id: "ctx_restore_disallowed", status: "failed" } });
+    }
+  });
+
+  const result = await poller.pollOnce();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.result.error.code, "origin_not_allowed");
+  assert.deepEqual(failedBodies, [
+    {
+      result: {
+        ok: false,
+        url: resource.url,
+        error: {
+          code: "origin_not_allowed",
+          message: "origin not allowed for restore: mail.google.com"
+        }
+      }
+    }
+  ]);
+});
+
 test("restore request poller reads orchestrator URL at poll time", async () => {
   const requestedUrls = [];
   const poller = createRestoreRequestPoller({

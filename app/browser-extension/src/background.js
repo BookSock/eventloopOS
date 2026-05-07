@@ -7,7 +7,8 @@ import { createRestoreRequestPoller, ensureRestorePollAlarm, RESTORE_REQUEST_ALA
 const configStore = createExtensionConfig({ storageArea: chrome.storage?.local });
 const controller = createExtensionController({
   chromeApi: chrome,
-  nativeBridge: createChromeNativeBridge(chrome)
+  nativeBridge: createChromeNativeBridge(chrome),
+  configStore
 });
 
 chrome.action?.onClicked?.addListener(async () => {

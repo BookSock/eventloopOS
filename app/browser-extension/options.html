@@ -15,6 +15,14 @@
           <input id="orchestrator-url" name="orchestratorUrl" type="url" required />
           <button type="submit">Save</button>
         </div>
+        <label for="allowed-origins">Allowed origins</label>
+        <textarea
+          id="allowed-origins"
+          name="allowedOrigins"
+          rows="5"
+          spellcheck="false"
+          placeholder="https://github.com&#10;https://*.slack.com"
+        ></textarea>
         <p id="status" role="status" aria-live="polite"></p>
       </form>
     </main>

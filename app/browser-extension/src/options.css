@@ -29,12 +29,20 @@ label {
   align-items: center;
 }
 
-input {
+input,
+textarea {
   min-width: 0;
   border: 1px solid #c9d1d9;
   border-radius: 6px;
   padding: 8px 10px;
   font: inherit;
+}
+
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  margin-bottom: 2px;
+  resize: vertical;
 }
 
 button {

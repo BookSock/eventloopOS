@@ -15,6 +15,7 @@ test("manifest is Chrome MV3 and points at browser-ready scripts", async () => {
     manifest.permissions.sort(),
     ["activeTab", "alarms", "nativeMessaging", "scripting", "storage", "tabs"].sort()
   );
-  assert.equal(manifest.content_scripts[0].js[0], "src/content-script.js");
+  assert.equal(manifest.content_scripts, undefined);
+  assert.deepEqual(manifest.host_permissions, ["<all_urls>"]);
   assert.equal(/\bimport\s+/.test(contentScript), false);
 });

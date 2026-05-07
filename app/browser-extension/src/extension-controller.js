@@ -1,7 +1,8 @@
 import { buildContextResource, buildRestoreResult, contextResourceToPageContext, normalizeContextResource } from "./protocol.js";
 import { callChrome } from "./chrome-promises.js";
+import { DEFAULT_ALLOWED_ORIGINS, isUrlAllowedByOrigins } from "./extension-config.js";
 
-export function createExtensionController({ chromeApi, nativeBridge, now = () => new Date() }) {
+export function createExtensionController({ chromeApi, nativeBridge, configStore, now = () => new Date() }) {
   async function captureActiveTab(routeHints = {}) {
     const [tab] = await callChrome(chromeApi.tabs.query.bind(chromeApi.tabs), {
       active: true,
@@ -12,7 +13,15 @@ export function createExtensionController({ chromeApi, nativeBridge, now = () =>
       throw new Error("active_tab_not_found");
     }
 
-    const page = await callChrome(chromeApi.tabs.sendMessage.bind(chromeApi.tabs), tab.id, {
+    if (!(await isAllowedUrl(tab.url))) {
+      return {
+        ok: false,
+        skipped: true,
+        error: disallowedOriginError(tab.url, "capture")
+      };
+    }
+
+    const page = await sendContentScriptMessage(tab.id, {
       type: "eventloop.capturePage"
     });
 
@@ -42,6 +51,13 @@ export function createExtensionController({ chromeApi, nativeBridge, now = () =>
           error: { code: "missing_url", message: "restore resource missing url" }
         });
       }
+      if (!(await isAllowedUrl(url))) {
+        return buildRestoreResult({
+          ok: false,
+          url,
+          error: disallowedOriginError(url, "restore")
+        });
+      }
 
       const tabs = await callChrome(chromeApi.tabs.query.bind(chromeApi.tabs), {});
       let tab = tabs.find((candidate) => urlsMatch(candidate.url, url));
@@ -55,7 +71,7 @@ export function createExtensionController({ chromeApi, nativeBridge, now = () =>
         tab = await callChrome(chromeApi.tabs.create.bind(chromeApi.tabs), { url, active: true });
       }
 
-      const restoreResponse = await callChrome(chromeApi.tabs.sendMessage.bind(chromeApi.tabs), tab.id, {
+      const restoreResponse = await sendContentScriptMessage(tab.id, {
         type: "eventloop.restorePage",
         page: contextResourceToPageContext(resource)
       });
@@ -78,7 +94,54 @@ export function createExtensionController({ chromeApi, nativeBridge, now = () =>
     }
   }
 
+  async function isAllowedUrl(url) {
+    const allowedOrigins = configStore?.getAllowedOrigins
+      ? await configStore.getAllowedOrigins()
+      : DEFAULT_ALLOWED_ORIGINS;
+    return isUrlAllowedByOrigins(url, allowedOrigins);
+  }
+
+  async function sendContentScriptMessage(tabId, message) {
+    await ensureContentScript(tabId);
+    return await callChrome(chromeApi.tabs.sendMessage.bind(chromeApi.tabs), tabId, message);
+  }
+
+  async function ensureContentScript(tabId) {
+    try {
+      const response = await callChrome(chromeApi.tabs.sendMessage.bind(chromeApi.tabs), tabId, {
+        type: "eventloop.ping"
+      });
+      if (response?.ok === true) {
+        return;
+      }
+    } catch {
+      // No listener yet. Programmatic injection keeps the content script out of every page by default.
+    }
+
+    if (!chromeApi.scripting?.executeScript) {
+      throw new Error("content_script_injection_unavailable");
+    }
+    await callChrome(chromeApi.scripting.executeScript.bind(chromeApi.scripting), {
+      target: { tabId },
+      files: ["src/content-script.js"]
+    });
+  }
+
   return { captureActiveTab, restore };
+}
+
+function disallowedOriginError(url, action) {
+  let host = "unknown";
+  try {
+    const parsed = new URL(url);
+    host = parsed.protocol === "file:" ? "file" : parsed.host;
+  } catch {
+    host = String(url ?? "unknown");
+  }
+  return {
+    code: "origin_not_allowed",
+    message: `origin not allowed for ${action}: ${host}`
+  };
 }
 
 function normalizeRouteHints(routeHints) {

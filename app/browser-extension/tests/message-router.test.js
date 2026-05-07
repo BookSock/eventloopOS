@@ -60,14 +60,14 @@ test("runtime message router reads extension config", async () => {
     },
     {
       configStore: {
-        get: async () => ({ orchestratorUrl: "http://127.0.0.1:4377" })
+        get: async () => ({ orchestratorUrl: "http://127.0.0.1:4377", allowedOrigins: ["https://github.com"] })
       }
     }
   );
   await flushMicrotasks();
 
   assert.equal(handled, true);
-  assert.deepEqual(responses, [{ orchestratorUrl: "http://127.0.0.1:4377" }]);
+  assert.deepEqual(responses, [{ orchestratorUrl: "http://127.0.0.1:4377", allowedOrigins: ["https://github.com"] }]);
 });
 
 test("runtime message router writes extension config", async () => {
@@ -80,14 +80,17 @@ test("runtime message router writes extension config", async () => {
     },
     {
       configStore: {
-        set: async (config) => ({ orchestratorUrl: config.orchestratorUrl.replace(/\/+$/, "") })
+        set: async (config) => ({
+          orchestratorUrl: config.orchestratorUrl.replace(/\/+$/, ""),
+          allowedOrigins: config.allowedOrigins ?? ["http://127.0.0.1:*"]
+        })
       }
     }
   );
   await flushMicrotasks();
 
   assert.equal(handled, true);
-  assert.deepEqual(responses, [{ orchestratorUrl: "http://127.0.0.1:9999" }]);
+  assert.deepEqual(responses, [{ orchestratorUrl: "http://127.0.0.1:9999", allowedOrigins: ["http://127.0.0.1:*"] }]);
 });
 
 function flushMicrotasks() {

@@ -8,6 +8,7 @@ import test from "node:test";
 import { chromium } from "playwright";
 
 const extensionDir = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const defaultAllowedOrigins = ["file://*", "http://localhost:*", "http://127.0.0.1:*"];
 
 test("MV3 extension captures and restores browser page context in Chromium", async () => {
   const server = await startFixtureServer();
@@ -34,16 +35,8 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
     await page.waitForSelector("[data-context-quote]");
     await page.evaluate(() => window.scrollTo(0, 360));
 
-    const captured = await assertEventually(
-      async () =>
-        await serviceWorker.evaluate(async (targetUrl) => {
-          const tabs = await chrome.tabs.query({});
-          const tab = tabs.find((candidate) => candidate.url === targetUrl);
-          if (!tab) {
-            throw new Error(`target tab not found: ${targetUrl}`);
-          }
-          return await chrome.tabs.sendMessage(tab.id, { type: "eventloop.capturePage" });
-        }, url)
+    const captured = await assertEventually(async () =>
+      await sendContentMessageFromServiceWorker(serviceWorker, url, { type: "eventloop.capturePage" })
     );
 
     assert.equal(captured.url, url);
@@ -55,23 +48,30 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
       type: "eventloop.setConfig",
       config: { orchestratorUrl: "http://127.0.0.1:9999/" }
     });
-    assert.deepEqual(setConfig, { orchestratorUrl: "http://127.0.0.1:9999" });
+    assert.deepEqual(setConfig, { orchestratorUrl: "http://127.0.0.1:9999", allowedOrigins: defaultAllowedOrigins });
 
-    const storedConfig = await serviceWorker.evaluate(async () => await chrome.storage.local.get("orchestratorUrl"));
-    assert.deepEqual(storedConfig, { orchestratorUrl: "http://127.0.0.1:9999" });
+    const storedConfig = await serviceWorker.evaluate(
+      async () => await chrome.storage.local.get(["orchestratorUrl", "allowedOrigins"])
+    );
+    assert.deepEqual(storedConfig, { orchestratorUrl: "http://127.0.0.1:9999", allowedOrigins: defaultAllowedOrigins });
 
     const getConfig = await sendRuntimeMessageFromTab(serviceWorker, url, { type: "eventloop.getConfig" });
-    assert.deepEqual(getConfig, { orchestratorUrl: "http://127.0.0.1:9999" });
+    assert.deepEqual(getConfig, { orchestratorUrl: "http://127.0.0.1:9999", allowedOrigins: defaultAllowedOrigins });
 
     const optionsPage = await context.newPage();
     await optionsPage.goto(`chrome-extension://${extensionId}/options.html`);
     await optionsPage.fill("#orchestrator-url", "http://127.0.0.1:8888/");
+    await optionsPage.fill("#allowed-origins", `${server.origin}\nhttps://github.com`);
     await optionsPage.click("button[type='submit']");
     await optionsPage.waitForSelector('#status[data-state="saved"]');
     assert.equal(await optionsPage.inputValue("#orchestrator-url"), "http://127.0.0.1:8888");
-    assert.deepEqual(await serviceWorker.evaluate(async () => await chrome.storage.local.get("orchestratorUrl")), {
-      orchestratorUrl: "http://127.0.0.1:8888"
-    });
+    assert.deepEqual(
+      await serviceWorker.evaluate(async () => await chrome.storage.local.get(["orchestratorUrl", "allowedOrigins"])),
+      {
+        orchestratorUrl: "http://127.0.0.1:8888",
+        allowedOrigins: [server.origin, "https://github.com"]
+      }
+    );
     await optionsPage.close();
 
     await page.evaluate(() => window.scrollTo(0, 0));
@@ -106,9 +106,9 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
     await page.evaluate(() => window.scrollTo(0, 0));
     const pollConfig = await sendRuntimeMessageFromTab(serviceWorker, url, {
       type: "eventloop.setConfig",
-      config: { orchestratorUrl: server.origin }
+      config: { orchestratorUrl: server.origin, allowedOrigins: [server.origin] }
     });
-    assert.deepEqual(pollConfig, { orchestratorUrl: server.origin });
+    assert.deepEqual(pollConfig, { orchestratorUrl: server.origin, allowedOrigins: [server.origin] });
 
     await serviceWorker.evaluate(async () => {
       await chrome.alarms.create("eventloop.restoreRequests.poll", { when: Date.now() + 100 });
@@ -139,7 +139,7 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
     await secondPage.waitForSelector("[data-context-quote]");
     await sendRuntimeMessageFromTab(secondServiceWorker, url, {
       type: "eventloop.setConfig",
-      config: { orchestratorUrl: server.origin }
+      config: { orchestratorUrl: server.origin, allowedOrigins: [server.origin] }
     });
     await secondServiceWorker.evaluate(async () => {
       await chrome.alarms.create("eventloop.restoreRequests.poll", { when: Date.now() + 100 });
@@ -260,6 +260,25 @@ async function readRequestBody(request) {
     chunks.push(chunk);
   }
   return Buffer.concat(chunks).toString("utf8");
+}
+
+async function sendContentMessageFromServiceWorker(serviceWorker, targetUrl, message) {
+  return await serviceWorker.evaluate(
+    async ({ targetUrl, message }) => {
+      const tabs = await chrome.tabs.query({});
+      const tab = tabs.find((candidate) => candidate.url === targetUrl);
+      if (!tab) {
+        throw new Error(`target tab not found: ${targetUrl}`);
+      }
+
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ["src/content-script.js"]
+      });
+      return await chrome.tabs.sendMessage(tab.id, message);
+    },
+    { targetUrl, message }
+  );
 }
 
 async function sendRuntimeMessageFromTab(serviceWorker, targetUrl, message) {

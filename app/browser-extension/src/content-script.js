@@ -1,4 +1,9 @@
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message?.type === "eventloop.ping") {
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (message?.type === "eventloop.capturePage") {
     sendResponse(capturePageContext(window, document));
     return false;

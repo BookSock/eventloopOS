@@ -106,21 +106,63 @@ test("restore returns structured error when resource has no URL", async () => {
   assert.equal(result.error.code, "missing_url");
 });
 
+test("restore skips disallowed URL without tab or page side effects", async () => {
+  const chromeApi = fakeChrome({ tabs: [] });
+  const controller = createExtensionController({
+    chromeApi,
+    nativeBridge: createMockNativeBridge()
+  });
+
+  const result = await controller.restore({
+    ...fixtureResource,
+    url: "https://mail.google.com/mail/u/0"
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "origin_not_allowed");
+  assert.equal(chromeApi.calls.tabsQuery, 0);
+  assert.equal(chromeApi.calls.tabsCreate.length, 0);
+  assert.equal(chromeApi.calls.restoreMessages.length, 0);
+});
+
+test("restore injects content script when page listener is missing", async () => {
+  const chromeApi = fakeChrome({
+    tabs: [{ id: 7, url: fixtureResource.url, title: fixtureResource.title, windowId: 11 }],
+    contentScriptReady: false
+  });
+  const controller = createExtensionController({
+    chromeApi,
+    nativeBridge: createMockNativeBridge()
+  });
+
+  const result = await controller.restore(fixtureResource);
+
+  assert.equal(result.ok, true);
+  assert.equal(chromeApi.calls.executeScript.length, 1);
+  assert.deepEqual(chromeApi.calls.executeScript[0], {
+    target: { tabId: 7 },
+    files: ["src/content-script.js"]
+  });
+});
+
 test("urlsMatch ignores hash and preserves query", () => {
   assert.equal(urlsMatch("https://example.test/a?b=1#top", "https://example.test/a?b=1"), true);
   assert.equal(urlsMatch("https://example.test/a?b=2", "https://example.test/a?b=1"), false);
 });
 
-function fakeChrome({ tabs }) {
+function fakeChrome({ tabs, contentScriptReady = true }) {
   const state = {
     tabs: [...tabs],
-    nextTabId: 100
+    nextTabId: 100,
+    contentScriptReady
   };
   const calls = {
+    tabsQuery: 0,
     tabsCreate: [],
     tabsUpdate: [],
     windowsUpdate: [],
-    restoreMessages: []
+    restoreMessages: [],
+    executeScript: []
   };
 
   return {
@@ -128,6 +170,7 @@ function fakeChrome({ tabs }) {
     runtime: {},
     tabs: {
       query(_query, callback) {
+        calls.tabsQuery += 1;
         callback([...state.tabs]);
       },
       update(id, update, callback) {
@@ -145,8 +188,25 @@ function fakeChrome({ tabs }) {
         callback(tab);
       },
       sendMessage(tabId, message, callback) {
+        if (message.type === "eventloop.ping") {
+          if (!state.contentScriptReady) {
+            globalThis.chrome = { runtime: { lastError: { message: "Could not establish connection." } } };
+            callback(undefined);
+            globalThis.chrome = undefined;
+            return;
+          }
+          callback({ ok: true });
+          return;
+        }
         calls.restoreMessages.push({ tabId, ...message });
         callback({ ok: true, restoredScroll: true, restoredHighlight: true, highlightStrategy: "selector" });
+      }
+    },
+    scripting: {
+      executeScript(options, callback) {
+        calls.executeScript.push(options);
+        state.contentScriptReady = true;
+        callback([{ result: true }]);
       }
     },
     windows: {

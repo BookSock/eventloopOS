@@ -96,6 +96,23 @@ test("capture route hints ignore non-string values", async () => {
   assert.equal(nativeBridge.sent[0].payload.project_hint, undefined);
 });
 
+test("capture skips disallowed active tab without reading page or native forwarding", async () => {
+  const chromeApi = fakeChrome({
+    tabs: [{ id: 11, url: "https://mail.google.com/mail/u/0", title: "Mail", active: true, windowId: 5 }],
+    pageByTabId: new Map([[11, { url: "https://mail.google.com/mail/u/0", title: "Mail" }]])
+  });
+  const nativeBridge = createMockNativeBridge();
+  const controller = createExtensionController({ chromeApi, nativeBridge });
+
+  const result = await controller.captureActiveTab();
+
+  assert.equal(result.ok, false);
+  assert.equal(result.skipped, true);
+  assert.equal(result.error.code, "origin_not_allowed");
+  assert.equal(chromeApi.calls.sendMessages.length, 0);
+  assert.equal(nativeBridge.sent.length, 0);
+});
+
 test("captures fixture marker quote and scroll from page-like objects", () => {
   const doc = {
     title: "eventloopOS Browser Context Fixture",
@@ -203,7 +220,12 @@ test("restorePageContext scrolls page-like window", () => {
 });
 
 function fakeChrome({ tabs, pageByTabId }) {
+  const calls = {
+    sendMessages: [],
+    executeScript: []
+  };
   return {
+    calls,
     runtime: {},
     tabs: {
       query(query, callback) {
@@ -214,8 +236,19 @@ function fakeChrome({ tabs, pageByTabId }) {
         callback(tabs);
       },
       sendMessage(tabId, message, callback) {
+        calls.sendMessages.push({ tabId, message });
+        if (message.type === "eventloop.ping") {
+          callback({ ok: true });
+          return;
+        }
         assert.equal(message.type, "eventloop.capturePage");
         callback(pageByTabId.get(tabId));
+      }
+    },
+    scripting: {
+      executeScript(options, callback) {
+        calls.executeScript.push(options);
+        callback([{ result: true }]);
       }
     }
   };

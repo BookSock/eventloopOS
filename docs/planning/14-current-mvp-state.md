@@ -38,6 +38,10 @@ Done:
 - Extension options page stores orchestrator URL in `chrome.storage.local`.
 - Runtime messages can get/set config.
 - Restore poller reads URL at poll time, not hardcoded forever.
+- Extension config stores an allowed-origin list. Default allowlist is local/dev only (`file://*`, `localhost`, `127.0.0.1`), and options UI lets the user add origins such as GitHub or Slack.
+- Capture and restore check the allowed-origin list before reading page content, creating/focusing tabs, or sending native context. Disallowed restore requests are marked failed with `origin_not_allowed`.
+- The extension no longer injects a content script on every page through `manifest.content_scripts`; it injects `src/content-script.js` programmatically only after an allowed capture/restore path needs page access.
+- Remaining browser permission caveat: `host_permissions` is still `<all_urls>` so programmatic restore can work across user-configured origins. Later installer UX should move this toward optional host permissions if Chrome permission friction matters.
 - Restore poller uses a per-profile stable lease owner from `chrome.storage.local`, avoiding fixed-owner collisions across Chromium profiles.
 - Chrome alarm wakes poller.
 - Poller claims work through `/contexts/restore-requests/claim-next`.
@@ -128,6 +132,7 @@ Strong tests now:
 - Real Chromium Playwright extension E2E.
 - Real Chromium Playwright extension E2E proves restored quote highlight, not only scroll.
 - Browser E2E launches two Chromium profiles and proves different restore-request lease owners.
+- Browser extension tests prove allowed-origin config normalization, disallowed capture skip without native forwarding, disallowed restore skip without tab/page side effects, and restore poller failed ACK for `origin_not_allowed`.
 - Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06 with `pnpm run test:e2e:native-browser`.
 - Real orchestrator + installed Chromium extension/native host smoke exists as `pnpm run test:e2e:native-browser-real-orchestrator`; it starts the actual orchestrator, captures a real browser tab through native messaging, verifies `store_only`, checks no human queue item was created, and checks browser context search can find the captured tab.
 - Mac client + browser restore smoke exists as `pnpm run test:e2e:mac-browser-restore`; it starts a real orchestrator, has Swift `HTTPQueueClient` create a restore request, and proves the Chromium extension claims/completes it.
@@ -174,11 +179,10 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add browser extension domain allowlist gating before broad private-browser dogfood.
-2. Persist MCP poll cursor/seen state so Slack/GitHub polling survives orchestrator restart without noisy refetch.
-3. Add a real GitHub installed-tool MCP source dogfood config/wrapper for Jason's installed tools, using the local-events and agent-slack recipes as templates.
-4. Add durable `task_messages` history for Codex/Claude followups and idempotency.
-5. Real Claude+Codex composite dogfood with harmless sessions configured together.
-6. Fix manual-mode exit snapshot semantics.
-7. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-8. Later: real microphone/wake-word proof and always-listening voice UX.
+1. Persist MCP poll cursor/seen state so Slack/GitHub polling survives orchestrator restart without noisy refetch.
+2. Add a real GitHub installed-tool MCP source dogfood config/wrapper for Jason's installed tools, using the local-events and agent-slack recipes as templates.
+3. Add durable `task_messages` history for Codex/Claude followups and idempotency.
+4. Real Claude+Codex composite dogfood with harmless sessions configured together.
+5. Fix manual-mode exit snapshot semantics.
+6. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+7. Later: real microphone/wake-word proof and always-listening voice UX.
