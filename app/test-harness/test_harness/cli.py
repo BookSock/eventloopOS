@@ -10,6 +10,7 @@ from .fixtures import FixtureLoader
 from .scenarios import (
     BROWSER_CONTEXT_ATTACH_TASK,
     AMBIENT_CONTEXT_ROUTE,
+    MCP_AMBIENT_CONTEXT_ROUTE,
     BROWSER_CONTEXT_RANKED_SEARCH,
     BROWSER_CONTEXT_STORE_ONLY,
     GENERIC_MCP_SOURCE_POLL_ROUTE_DONE,
@@ -28,6 +29,7 @@ from .scenarios import (
     WORKSPACE_STATUS_SMOKE,
     BrowserContextAttachTaskScenario,
     AmbientContextRouteScenario,
+    McpAmbientContextRouteScenario,
     BrowserContextRankedSearchScenario,
     BrowserContextStoreOnlyScenario,
     GenericMcpSourcePollRouteDoneScenario,
@@ -71,6 +73,7 @@ def main(argv: list[str] | None = None) -> int:
         BROWSER_CONTEXT_RANKED_SEARCH: BrowserContextRankedSearchScenario,
         BROWSER_CONTEXT_ATTACH_TASK: BrowserContextAttachTaskScenario,
         AMBIENT_CONTEXT_ROUTE: AmbientContextRouteScenario,
+        MCP_AMBIENT_CONTEXT_ROUTE: McpAmbientContextRouteScenario,
         TASK_SESSION_FOLLOWUP: TaskSessionFollowupScenario,
         QUEUE_RECOMMENDED_ACTION: QueueRecommendedActionScenario,
         TASK_SESSION_BINDING: TaskSessionBindingScenario,

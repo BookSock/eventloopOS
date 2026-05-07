@@ -19,6 +19,7 @@ BROWSER_CONTEXT_STORE_ONLY = "browser_context_store_only"
 BROWSER_CONTEXT_RANKED_SEARCH = "browser_context_ranked_search"
 BROWSER_CONTEXT_ATTACH_TASK = "browser_context_attach_task"
 AMBIENT_CONTEXT_ROUTE = "ambient_context_route"
+MCP_AMBIENT_CONTEXT_ROUTE = "mcp_ambient_context_route"
 TASK_SESSION_FOLLOWUP = "task_session_followup"
 QUEUE_RECOMMENDED_ACTION = "queue_recommended_action"
 TASK_SESSION_BINDING = "task_session_binding"
@@ -37,6 +38,7 @@ SCENARIOS = (
     BROWSER_CONTEXT_RANKED_SEARCH,
     BROWSER_CONTEXT_ATTACH_TASK,
     AMBIENT_CONTEXT_ROUTE,
+    MCP_AMBIENT_CONTEXT_ROUTE,
     TASK_SESSION_FOLLOWUP,
     QUEUE_RECOMMENDED_ACTION,
     TASK_SESSION_BINDING,
@@ -1548,6 +1550,171 @@ class AmbientContextRouteScenario(BrowserContextStoreOnlyScenario):
                 },
             ],
             "resources": [],
+        }
+
+
+class McpAmbientContextRouteScenario(AmbientContextRouteScenario):
+    scenario_name = MCP_AMBIENT_CONTEXT_ROUTE
+
+    def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
+        context_event = self._context_event()
+        ambient_event = self._ambient_event()
+        observed = self._expected_observed(context_event, ambient_event)
+        observed["mcp_poll"] = {
+            "source_id": "generic_mcp_source",
+            "events_seen": 1,
+            "routed_count": 1,
+        }
+        log["steps"].append({"name": "attach_context", "event_id": context_event["id"]})
+        log["steps"].append({"name": "mcp_poll_and_route", "event_id": ambient_event["id"]})
+        self._assert_observed(observed)
+        self.writer.write_json("observed.json", observed)
+        return ScenarioResult(
+            scenario=self.scenario_name,
+            mode="fixture",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": ambient_event["id"],
+                "task_session_id": observed["task_message"]["task_session_id"],
+                "route_action": observed["route_decision"]["action"],
+            },
+        )
+
+    def _run_orchestrator(self, log: dict[str, Any]) -> ScenarioResult:
+        if self.orchestrator_url is None:
+            raise ScenarioFailure("orchestrator_url required")
+        client = OrchestratorClient(self.orchestrator_url)
+        self._drain_existing_queue(client, log)
+        context_event = self._context_event()
+
+        context_response = client.route_event(context_event)
+        context_route_decision = context_response.get("route_decision") if isinstance(context_response, dict) else None
+        if not isinstance(context_route_decision, dict) or context_route_decision.get("action") != "attach_to_task":
+            raise ScenarioFailure(f"context route mismatch: {context_response!r}")
+        log["steps"].append({"name": "attach_context", "event_id": context_event["id"]})
+
+        poll_response = client.poll_and_route_mcp_source("generic_mcp_source", self._mcp_poll_input())
+        routed = poll_response.get("routed") if isinstance(poll_response, dict) else None
+        if not isinstance(routed, list) or not routed or not isinstance(routed[0], dict):
+            raise ScenarioFailure(f"MCP ambient poll response missing routed[0]: {poll_response!r}")
+        routed_item = routed[0]
+        ambient_event = routed_item.get("event")
+        route_decision = routed_item.get("route_decision")
+        task_message = routed_item.get("task_message")
+        if not isinstance(ambient_event, dict):
+            raise ScenarioFailure(f"MCP ambient route missing event: {routed_item!r}")
+        observed = {
+            "context_event": context_event,
+            "ambient_event": ambient_event,
+            "mcp_poll": poll_response,
+            "context_route_decision": context_route_decision,
+            "route_decision": route_decision,
+            "task_message": task_message,
+            "review_packet": routed_item.get("review_packet"),
+            "queue_item": routed_item.get("queue_item"),
+            "final_queue": {"item": client.next_queue_item()},
+        }
+        log["steps"].append({"name": "mcp_poll_and_route", "event_id": ambient_event.get("id")})
+        self._assert_observed(observed)
+        if observed["final_queue"]["item"] is not None:
+            raise ScenarioFailure(f"expected empty queue after MCP ambient route, got {observed['final_queue']!r}")
+        self.writer.write_json("observed.json", observed)
+        return ScenarioResult(
+            scenario=self.scenario_name,
+            mode="orchestrator",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": ambient_event["id"],
+                "task_session_id": task_message["task_session_id"],
+                "route_action": route_decision["action"],
+            },
+        )
+
+    def _expected_observed(self, context_event: dict[str, Any], ambient_event: dict[str, Any]) -> dict[str, Any]:
+        observed = super()._expected_observed(context_event, ambient_event)
+        observed["task_message"] = {
+            "id": "task_msg_inject_generic_mcp_source_office-priority-ambient-context",
+            "task_session_id": "task_session_blog",
+            "event_ids": [ambient_event["id"]],
+            "idempotency_key": "inject_generic_mcp_source:office-priority-ambient-context",
+            "status": "sent",
+            "text": (
+                "New mcp_poll event for this task.\n"
+                "Title: Launch date feedback\n"
+                "Summary: Launch date feedback belongs in the blog draft before next pass.\n"
+                "Matched context: Browser context: Blog launch draft\n"
+                "Matched context URL: https://example.test/blog-launch-draft"
+            ),
+        }
+        return observed
+
+    def _assert_observed(self, observed: dict[str, Any]) -> None:
+        super()._assert_observed(observed)
+        mcp_poll = observed.get("mcp_poll")
+        if not isinstance(mcp_poll, dict):
+            raise ScenarioFailure("MCP ambient route missing poll response")
+        if mcp_poll.get("source_id") != "generic_mcp_source":
+            raise ScenarioFailure(f"MCP ambient source mismatch: {mcp_poll!r}")
+        ambient_event = observed.get("ambient_event")
+        if not isinstance(ambient_event, dict) or ambient_event.get("task_hint") is not None:
+            raise ScenarioFailure(f"MCP ambient event should not have task_hint: {ambient_event!r}")
+        if ambient_event.get("source") != "mcp_poll":
+            raise ScenarioFailure(f"MCP ambient event source mismatch: {ambient_event!r}")
+
+    @staticmethod
+    def _ambient_event() -> dict[str, Any]:
+        return {
+            "id": "evt_mcp_poll_generic_mcp_source_office_priority_ambient_context",
+            "source": "mcp_poll",
+            "source_id": "generic_mcp_source:office-priority-ambient-context",
+            "idempotency_key": "generic_mcp_source:office-priority-ambient-context",
+            "occurred_at": "2026-05-06T16:59:00.000Z",
+            "received_at": "2026-01-15T09:30:00Z",
+            "type": "office.priority_hint",
+            "title": "Launch date feedback",
+            "summary": "Launch date feedback belongs in the blog draft before next pass.",
+            "raw_ref": {
+                "id": "raw_generic_mcp_source_office-priority-ambient-context",
+                "uri": "artifact://raw/generic_mcp_source:office-priority-ambient-context.json",
+                "media_type": "application/json",
+            },
+            "links": [
+                {
+                    "label": "Blog draft",
+                    "url": "https://example.test/blog-launch-draft",
+                },
+            ],
+            "resources": [],
+        }
+
+    @staticmethod
+    def _mcp_poll_input() -> dict[str, Any]:
+        return {
+            "items": [
+                {
+                    "id": "office-priority-ambient-context",
+                    "source": "mcp_poll",
+                    "type": "office.priority_hint",
+                    "title": "Launch date feedback",
+                    "summary": "Launch date feedback belongs in the blog draft before next pass.",
+                    "occurred_at": "2026-05-06T16:59:00.000Z",
+                    "actor": {
+                        "id": "actor_mcp_office",
+                        "type": "human",
+                        "name": "Office",
+                    },
+                    "links": [
+                        {
+                            "label": "Blog draft",
+                            "url": "https://example.test/blog-launch-draft",
+                        },
+                    ],
+                    "resources": [],
+                },
+            ],
+            "nextCursor": "office-priority-ambient-context",
         }
 
 

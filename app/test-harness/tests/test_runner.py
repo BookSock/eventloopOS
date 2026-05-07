@@ -11,6 +11,7 @@ from test_harness.fixtures import FixtureLoader
 from test_harness.scenarios import (
     BROWSER_CONTEXT_ATTACH_TASK,
     AMBIENT_CONTEXT_ROUTE,
+    MCP_AMBIENT_CONTEXT_ROUTE,
     BROWSER_CONTEXT_RANKED_SEARCH,
     BROWSER_CONTEXT_STORE_ONLY,
     GENERIC_MCP_SOURCE_POLL_ROUTE_DONE,
@@ -27,6 +28,7 @@ from test_harness.scenarios import (
     WORKSPACE_STATUS_SMOKE,
     BrowserContextAttachTaskScenario,
     AmbientContextRouteScenario,
+    McpAmbientContextRouteScenario,
     BrowserContextRankedSearchScenario,
     BrowserContextStoreOnlyScenario,
     GenericMcpSourcePollRouteDoneScenario,
@@ -350,6 +352,45 @@ class AmbientContextRouteRunnerTests(unittest.TestCase):
 
     def _run(self, artifact_dir: Path):
         runner = AmbientContextRouteScenario(
+            loader=FixtureLoader(REPO_ROOT),
+            writer=ArtifactWriter(artifact_dir),
+            clock=FakeClock(),
+        )
+        return runner.run()
+
+
+class McpAmbientContextRouteRunnerTests(unittest.TestCase):
+    def test_fixture_replay_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(Path(tmp))
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.scenario, MCP_AMBIENT_CONTEXT_ROUTE)
+        self.assertEqual(result.mode, "fixture")
+        self.assertEqual(result.details["event_id"], "evt_mcp_poll_generic_mcp_source_office_priority_ambient_context")
+        self.assertEqual(result.details["task_session_id"], "task_session_blog")
+        self.assertEqual(result.details["route_action"], "inject_into_agent_thread")
+
+    def test_artifact_generation_captures_mcp_context_inferred_route(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            self._run(artifact_dir)
+
+            log = json.loads((artifact_dir / "scenario-log.json").read_text(encoding="utf-8"))
+            observed = json.loads((artifact_dir / "observed.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(log["passed"])
+        self.assertEqual([step["name"] for step in log["steps"]], ["attach_context", "mcp_poll_and_route"])
+        self.assertEqual(observed["ambient_event"].get("task_hint"), None)
+        self.assertEqual(observed["ambient_event"]["source"], "mcp_poll")
+        self.assertEqual(observed["mcp_poll"]["source_id"], "generic_mcp_source")
+        self.assertEqual(observed["route_decision"]["action"], "inject_into_agent_thread")
+        self.assertEqual(observed["route_decision"]["target_task_id"], "task_blog_feedback")
+        self.assertEqual(observed["task_message"]["task_session_id"], "task_session_blog")
+        self.assertEqual(observed["queue_item"], None)
+
+    def _run(self, artifact_dir: Path):
+        runner = McpAmbientContextRouteScenario(
             loader=FixtureLoader(REPO_ROOT),
             writer=ArtifactWriter(artifact_dir),
             clock=FakeClock(),
