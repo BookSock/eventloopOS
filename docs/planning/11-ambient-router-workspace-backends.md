@@ -263,7 +263,7 @@ There are multiple loops.
 
 ### Master Loop
 
-Owns global attention system.
+Owns intake routing and source polling. It ranks human-blocked papers, but it does not own all-day interruption timing in MVP.
 
 Responsibilities:
 

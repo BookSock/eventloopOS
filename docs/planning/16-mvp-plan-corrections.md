@@ -238,6 +238,37 @@ Latest user steering:
 
 Release guardrails:
 
+## Third Plan Audit - 2026-05-07
+
+Latest clarification:
+
+- Product metaphor is a quiet intake stack, like papers on a desk.
+- User pulls the next paper during intentional focused work.
+- System should not solve all-day interruption timing in MVP.
+- Calendar/Focus/notification work is deferred unless it becomes needed for manual-mode control.
+- Browser/workspace restore is a context helper, not the core product promise.
+- Core promise is: route incoming info to agents first, queue only work that is human-blocked, ambiguous, or risky.
+
+Subagent audit outcome:
+
+- Plan is aligned on intake stack and one-paper queue.
+- Remaining stale "interrupt" wording is acceptable only where explicitly marked post-MVP or policy-gated.
+- `server.ts` god-file critique is stale: current file is 256 lines and mostly route dispatch.
+- Metrics/observability critique is stale for MVP: local `/metrics`, `/activity`, `dogfood:review`, `dogfood:check`, route counters, lineage, and proof manifests exist.
+- Real remaining architecture risk is `GatewayStore` width. Keep conformance tests strong; split store ports only after dogfood-critical product loops stabilize.
+- Real remaining product risk is task/session identity UX: user must understand which Codex/Claude session owns a paper and what message was sent to it.
+- Real remaining proof risk is live dogfood coverage with Jason's actual MCP sources, Codex/Claude sessions, and Mac app in one repeatable run.
+
+Next work should bias toward:
+
+1. Making current paper/history clearer in the Mac UI.
+2. Making MCP source onboarding/preview easier for Jason's installed servers.
+3. Making task-session binding/identity obvious enough to trust.
+4. Running and tightening real dogfood proofs.
+5. Recording router feedback signals from done/defer/ignore/send-back actions.
+
+Do not restart research lanes for calendar, notification fatigue, voice-out, budget dashboards, broad runtime ecosystem, or multi-device sync unless Jason explicitly pulls them forward.
+
 - MCP/browser/source events should prove one of three outcomes: `store_only`, routed into a task session, or queued because human judgment is needed.
 - Human queue noise should stay visible: high ignore/dismiss rate means router is over-queueing.
 - Task followup history must be reconstructable after the fact: queue item -> event -> task -> runtime/session -> message status.

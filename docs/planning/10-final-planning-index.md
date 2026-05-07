@@ -4,7 +4,7 @@ Use this doc as handoff map.
 
 ## Current Decision
 
-Build MVP as local-first Mac attention scheduler for agent-heavy work.
+Build MVP as local-first Mac intake stack for agent-heavy work.
 
 Sharp wedge:
 
@@ -12,7 +12,7 @@ Sharp wedge:
 Superhuman for agent review, with Mac workspace restore.
 ```
 
-Do not build broad OS replacement first. Build review queue + context restore + agent resume loop.
+Do not build broad OS replacement or interruption manager first. Build one-paper queue + context restore + agent resume loop.
 
 Clarified product stance:
 
@@ -216,34 +216,24 @@ Known gaps:
 - Voice command HTTP ingress, env/stdin client, and local transcript-command runner exist for local STT clients to submit transcripts into the same router; microphone/wake-word UX is deferred.
 - Postgres live tests need Docker/container runtime to execute locally.
 
-## Open Decisions
+## Current Build Choices
 
-Decide before implementation:
+Implementation is past scaffold. Current defaults:
 
-- TypeScript package manager: likely `pnpm`.
-- Orchestrator framework: likely Fastify or Hono.
-- DB migration tool: likely Drizzle, Kysely, or node-pg-migrate.
-- macOS app stack: SwiftUI with AppKit interop vs AppKit-first.
-- Queue UI first surface: native macOS only vs tiny web UI for fast E2E.
-- Local DB for single-user dev: Postgres only vs SQLite for app-local mode.
+- Package manager: `pnpm`.
+- Orchestrator: TypeScript HTTP service with route modules.
+- Persistence: Postgres migrations plus in-memory parity store.
+- macOS app: SwiftUI/AppKit interop.
+- Product surface: native one-paper Mac queue, with CLI/test harness proof paths.
+- Browser restore: Chromium MV3 extension + native host.
+- Task runtimes: Codex and Claude Code behind the same task-session controller.
 
-Recommended defaults:
+## Next Planning Use
 
-- `pnpm`.
-- Fastify.
-- Postgres first for test parity.
-- node-pg-migrate or Drizzle migrations.
-- SwiftUI + AppKit interop for menu bar/hotkey.
-- Tiny web queue shell optional for fast Playwright E2E, but real product native.
+Use this index to keep agents aligned, not to restart early scaffold planning.
 
-## Planning Complete When
+Before new work:
 
-Planning is enough to start implementation now.
-
-Next action:
-
-```text
-Scaffold Ticket 1 + Ticket 2 + Ticket 3.
-```
-
-That means shared contracts, command facade, and test harness skeleton. After that, multiple agents can work without stepping on each other.
+1. Read `16-mvp-plan-corrections.md`.
+2. Pick narrow proof from `15-agent-test-matrix.md`.
+3. Leave machine-checkable proof from `20-agent-proof-loop.md`.

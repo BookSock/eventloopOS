@@ -23,7 +23,7 @@ Pass:
 
 ## Scenario 2: Slack Blog Feedback
 
-Purpose: prove Slack event can become review item.
+Purpose: prove Slack event routes to an existing task session first, and creates a review item only if human-blocked, ambiguous, or risky.
 
 Fixture:
 
@@ -34,20 +34,20 @@ Steps:
 1. Replay Slack message fixture.
 2. Normalize to `Event`.
 3. Link to blog task by URL/thread/project hint.
-4. Create review packet.
-5. Queue packet.
-6. Open Slack thread deep link.
+4. Send followup to existing blog task session when confidence/policy allow.
+5. If agent blocks or route is ambiguous/risky, create review packet with `human_queue_reason`.
+6. If queued, open Slack thread deep link.
 
 Pass:
 
 - Event idempotent.
-- Packet says decision needed.
+- Task session receives safe followup, or packet says why human decision is needed.
 - Source Slack link present.
-- Queue priority reason includes feedback/unblocks writing.
+- Human queue stays unchanged unless `human_queue_reason` is present.
 
 ## Scenario 3: GitHub CI Failed
 
-Purpose: prove coding workflow signal.
+Purpose: prove coding workflow signal routes to task agent first.
 
 Fixture:
 
@@ -58,13 +58,15 @@ Steps:
 1. Replay webhook.
 2. Normalize to `Event`.
 3. Link PR to task.
-4. Create packet with failed check evidence.
-5. Open PR/check URL.
+4. Send CI failure context to owning Codex/Claude task session.
+5. Queue review packet only if agent needs human approval, route is ambiguous, or action is risky.
+6. If queued, open PR/check URL.
 
 Pass:
 
 - Bad signature rejected.
 - Failed check appears as evidence.
+- Human queue reason is explicit when packet exists.
 - Risk not hidden by model confidence.
 
 ## Scenario 4: Codex Waiting For Review
@@ -201,7 +203,9 @@ Pass:
 
 ## Scenario 10: Voice Priority Update
 
-Purpose: prove spoken context routes to right work.
+Status: optional v1 experiment.
+
+Purpose: prove spoken context routes to right work if voice ingress is enabled.
 
 Steps:
 
@@ -219,6 +223,8 @@ Pass:
 - Human queue item created only if route ambiguous.
 
 ## Scenario 11: AeroSpace Workspace Restore
+
+Status: optional power-user backend.
 
 Purpose: prove optional workspace backend.
 
@@ -273,6 +279,8 @@ Pass:
 - If session uncertain, human queue item created.
 
 ## Scenario 14: Browser Page Poll Read-Only
+
+Status: later unless Jason dogfood needs a no-API website.
 
 Purpose: prove future no-API web apps can become read-only event sources.
 
@@ -331,6 +339,8 @@ Pass:
 - Human queue item created if ownership unclear.
 
 ## Scenario 17: Task Session Steering
+
+Status: later batching mode after simple followup works.
 
 Purpose: prove master can send new info without starting duplicate run.
 
@@ -405,6 +415,8 @@ Pass:
 - Packet proof chip appears.
 
 ## Scenario 21: Procedure Pause Resume
+
+Status: post-MVP unless repeated dogfood workflows prove need.
 
 Purpose: prove repeatable human-review workflow is resumable.
 

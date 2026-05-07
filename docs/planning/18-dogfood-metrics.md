@@ -22,6 +22,24 @@ Every inbound source should be able to show why it did not annoy the human:
 
 High `human_queue` plus high ignore/defer rate means the router is over-queueing. That is product failure for the intake-stack MVP.
 
+## Router Calibration
+
+Do not build a heavy learning system for MVP. Capture feedback signals so the master prompt/config can be tuned from history:
+
+- `done`: paper was useful enough to finish.
+- `send_back_to_agent`: queue timing was probably right, and agent had enough context to continue.
+- `defer`: paper may be useful but was not right now.
+- `ignore`: router likely over-queued this source/task/action.
+- `manual_rebind`: router matched wrong task or session.
+- `edited_before_send`: agent draft needed human correction; track edit length/decision, not raw final text.
+
+Near-term loop:
+
+1. Store these actions in activity with source/task/session IDs and payload hashes/lengths.
+2. `dogfood:review` groups them by source, task, and human queue reason.
+3. Jason or the master agent periodically updates router prompts/config: higher queue threshold, source-specific route hints, or stronger task matching terms.
+4. Keep automatic prompt rewriting disabled until dogfood history shows repeated stable patterns.
+
 ## Metrics V0
 
 Track locally:

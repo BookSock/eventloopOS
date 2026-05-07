@@ -13,6 +13,8 @@ The queue UI should answer only four questions first:
 
 The stack can be visible, but it is secondary. The user should not feel like they are triaging a table of tickets.
 
+Non-goal for MVP: pulling the user out of other work. No sound, banner, haptic, Focus-mode gate, or meeting-aware interruption is needed for this product shape. User enters event-loop mode intentionally and pulls from the stack.
+
 ## Required Actions
 
 Current paper:
@@ -41,6 +43,8 @@ MVP UI is acceptable when:
 - Disabled agent actions explain missing binding, policy block, or runtime failure.
 - Manual Mode state is obvious and reversible.
 - Empty state does not look like marketing; it should show local daemon/source status and next setup step.
+- Lineage/history shows enough to answer "what happened before this paper reached me?" without exposing raw task-message text.
+- Task-session identity is visible enough that user knows which Codex/Claude thread will receive a send-back action.
 
 ## Test Proof
 
@@ -50,6 +54,7 @@ Tests should prove:
 - Current paper remains visible with long title/body/evidence.
 - Done, defer, ignore, restore, and manual-mode actions call expected APIs.
 - Full local smoke can move from queued paper to done/next.
+- Send-back-to-agent proof shows visible Codex/Claude target identity before message send.
 - Screenshot artifact exists for UI failures.
 
 ## Defer
@@ -61,4 +66,3 @@ Do not build now:
 - Calendar-aware surfacing.
 - Focus-mode integration.
 - Complex Kanban/list management.
-

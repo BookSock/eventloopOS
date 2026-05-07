@@ -2,7 +2,7 @@
 
 ## System Shape
 
-First product = local-first Mac app + small local service. App owns attention queue. Adapters handle ingestion/control.
+First product = local-first Mac app + small local service. App owns quiet intake stack and one-paper queue. Adapters handle ingestion/control.
 
 ```text
 Slack/GitHub/MCP/Notion/Codex/Chrome

@@ -10,7 +10,7 @@ This is the current reality map for agents. Pick the narrowest command that prov
 | Command/script wiring | `pnpm run typecheck` | `make ci` | Node syntax checks, Swift build, package tests |
 | Current MVP live spine | `pnpm run test:e2e:live:boot` | `pnpm run test:e2e:live:full` | Orchestrator boot, live scenarios, native/browser/Mac smoke |
 | Dogfood stack launch | `pnpm run dev:dogfood:smoke` | `pnpm run dev:dogfood` | Orchestrator + Mac queue app startup path |
-| Planning/scope docs | `rg "intake stack|aggressive interruption|dogfood metrics|deeplink" docs/planning` | docs review | Confirms agents read current scope before adding calendar/notification/voice-out work |
+| Planning/scope docs | `rg "intake stack|one paper|aggressive interruption|human_queue_reason|dogfood metrics|deeplink" docs/planning` | docs review | Confirms agents read current scope before adding calendar/notification/voice-out work |
 
 ## Subsystem Proofs
 
