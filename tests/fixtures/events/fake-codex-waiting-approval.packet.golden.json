@@ -30,7 +30,7 @@
   "context": [],
   "recommended_action": {
     "id": "act_run_fake_ticket_10_resume",
-    "type": "agent.resume",
+    "type": "resume_agent",
     "label": "Resume fake Codex run",
     "payload": {
       "agent_run_id": "run_fake_ticket_10",
@@ -41,7 +41,7 @@
   "alternate_actions": [
     {
       "id": "act_run_fake_ticket_10_followup",
-      "type": "task_session.followup",
+      "type": "resume_agent",
       "label": "Send followup instead",
       "payload": {
         "agent_run_id": "run_fake_ticket_10"

@@ -16,6 +16,13 @@ describe("MCP source CLI", () => {
     assert.equal(options.includeText, true);
   });
 
+  it("ignores pnpm separator args before source ids", () => {
+    const options = mcpSourceCliOptionsFromEnvAndArgs({}, ["preview", "--", "slack_dm_source"]);
+
+    assert.equal(options.command, "preview");
+    assert.deepEqual(options.sourceIds, ["slack_dm_source"]);
+  });
+
   it("lists configured sources", async () => {
     const writes: string[] = [];
     const exitCode = await runMcpSourceCli({

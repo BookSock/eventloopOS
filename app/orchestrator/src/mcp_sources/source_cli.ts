@@ -18,7 +18,8 @@ export function mcpSourceCliOptionsFromEnvAndArgs(
   env: NodeJS.ProcessEnv,
   args: string[],
 ): McpSourceCliOptions {
-  const [commandRaw, ...sourceIdsRaw] = args;
+  const cleanArgs = args.filter((arg) => arg !== "--");
+  const [commandRaw, ...sourceIdsRaw] = cleanArgs;
   const command = parseCommand(commandRaw);
   return {
     command,

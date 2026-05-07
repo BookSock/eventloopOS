@@ -105,12 +105,12 @@ Inspect sources before routing:
 
 ```sh
 pnpm run mcp:sources
-pnpm run mcp:preview -- local_events_source
+pnpm run mcp:preview local_events_source
 ```
 
 `mcp:preview` calls `/mcp-sources/:id/preview`, does not route events, and does not commit MCP cursor state. It redacts event title/body/summary fields by default so source-shape checks do not dump private Slack/GitHub content into logs. Set `EVENTLOOPOS_MCP_PREVIEW_INCLUDE_TEXT=1` only when you intentionally want raw preview text.
 
-After preview looks sane, `pnpm run mcp:route-once -- local_events_source` routes selected sources once through `/mcp-sources/poll-all-and-route`. `pnpm --filter @eventloopos/orchestrator run poll:mcp:loop` repeats the sweep. Set `EVENTLOOPOS_MCP_SOURCE_IDS=slack_dm_source,generic_mcp_source` to limit a sweep, `EVENTLOOPOS_MCP_POLL_INTERVAL_MS=30000` to tune loop cadence, and `EVENTLOOPOS_MCP_POLL_MAX_CYCLES=1` for bounded test runs.
+After preview looks sane, `pnpm run mcp:route-once local_events_source` routes selected sources once through `/mcp-sources/poll-all-and-route`. `pnpm --filter @eventloopos/orchestrator run poll:mcp:loop` repeats the sweep. Set `EVENTLOOPOS_MCP_SOURCE_IDS=slack_dm_source,generic_mcp_source` to limit a sweep, `EVENTLOOPOS_MCP_POLL_INTERVAL_MS=30000` to tune loop cadence, and `EVENTLOOPOS_MCP_POLL_MAX_CYCLES=1` for bounded test runs.
 
 For local dogfood without Slack/GitHub setup, copy `config/local-events.example.json` to a private file and run the file-backed MCP server through the local-events source config:
 
@@ -153,7 +153,7 @@ The Mac queue app shows task-session binding controls on review packets with `ta
 Chrome native host install:
 
 ```sh
-pnpm --filter @eventloopos/native-host exec eventloop-install-chrome-host <chrome-extension-id> --browser chrome
+pnpm --filter @eventloopos/native-host exec ./bin/install-chrome-host <chrome-extension-id> --browser chrome
 ```
 
 Use `--browser chromium` for local Chromium/Playwright smoke, or `--browser chrome-for-testing` for Google Chrome for Testing. The opt-in real browser native messaging smoke installs a temporary Chromium host manifest, launches the unpacked extension, captures a tab through `chrome.runtime.sendNativeMessage`, forwards it through the native host to the orchestrator fixture, then restores the previous manifest:

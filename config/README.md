@@ -39,7 +39,7 @@ Inspect configured sources before routing:
 ```sh
 pnpm run mcp:sources
 pnpm run mcp:preview
-pnpm run mcp:preview -- local_events_source
+pnpm run mcp:preview local_events_source
 ```
 
 `mcp:preview` calls the source read-only and does not route events or commit MCP cursors. By default preview output avoids event title/body/summary text so agents can verify source shape without dumping private content into logs. Set `EVENTLOOPOS_MCP_PREVIEW_INCLUDE_TEXT=1` only when you intentionally want raw preview text in terminal output.
@@ -47,7 +47,7 @@ pnpm run mcp:preview -- local_events_source
 Route once when preview looks sane:
 
 ```sh
-pnpm run mcp:route-once -- local_events_source
+pnpm run mcp:route-once local_events_source
 ```
 
 For dogfood with Jason's local Slack setup, use the read-only `agent-slack` wrapper:

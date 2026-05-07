@@ -41,7 +41,7 @@ pnpm --filter @eventloopos/native-host exec eventloop-print-chrome-host-manifest
 Install it:
 
 ```sh
-pnpm --filter @eventloopos/native-host exec eventloop-install-chrome-host <chrome-extension-id>
+pnpm --filter @eventloopos/native-host exec ./bin/install-chrome-host <chrome-extension-id>
 ```
 
 Install target:
@@ -53,7 +53,7 @@ Install target:
 Dry run:
 
 ```sh
-pnpm --filter @eventloopos/native-host exec eventloop-install-chrome-host <chrome-extension-id> --dry-run
+pnpm --filter @eventloopos/native-host exec ./bin/install-chrome-host <chrome-extension-id> --dry-run
 ```
 
 ## Test

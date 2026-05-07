@@ -102,7 +102,7 @@ export function buildReviewPacketFromFakeCodexStream(events, run, options = {}) 
     context: blockedEvent.context ?? [],
     recommended_action: makeAction({
       id: `act_${runId}_resume`,
-      type: "agent.resume",
+      type: "resume_agent",
       label: "Resume fake Codex run",
       payload: {
         agent_run_id: runId,
@@ -113,7 +113,7 @@ export function buildReviewPacketFromFakeCodexStream(events, run, options = {}) 
     alternate_actions: [
       makeAction({
         id: `act_${runId}_followup`,
-        type: "task_session.followup",
+        type: "resume_agent",
         label: "Send followup instead",
         payload: {
           agent_run_id: runId,
@@ -234,7 +234,7 @@ function buildResumeActions(runId, state) {
   return [
     makeAction({
       id: `act_${runId}_resume`,
-      type: "agent.resume",
+      type: "resume_agent",
       label: "Resume fake Codex run",
       payload: { agent_run_id: runId },
       requires_approval: true,
