@@ -18,6 +18,7 @@ MCP_POLL_ALL_ROUTE_DONE = "mcp_poll_all_route_done"
 BROWSER_CONTEXT_STORE_ONLY = "browser_context_store_only"
 BROWSER_CONTEXT_RANKED_SEARCH = "browser_context_ranked_search"
 BROWSER_CONTEXT_ATTACH_TASK = "browser_context_attach_task"
+AMBIENT_CONTEXT_ROUTE = "ambient_context_route"
 TASK_SESSION_FOLLOWUP = "task_session_followup"
 QUEUE_RECOMMENDED_ACTION = "queue_recommended_action"
 TASK_SESSION_BINDING = "task_session_binding"
@@ -35,6 +36,7 @@ SCENARIOS = (
     BROWSER_CONTEXT_STORE_ONLY,
     BROWSER_CONTEXT_RANKED_SEARCH,
     BROWSER_CONTEXT_ATTACH_TASK,
+    AMBIENT_CONTEXT_ROUTE,
     TASK_SESSION_FOLLOWUP,
     QUEUE_RECOMMENDED_ACTION,
     TASK_SESSION_BINDING,
@@ -1331,6 +1333,212 @@ class BrowserContextAttachTaskScenario(BrowserContextStoreOnlyScenario):
     route_action = "attach_to_task"
     route_confidence = "medium"
     context_query = {"source": "browser", "task_id": "task_blog_feedback", "q": "launch"}
+
+
+class AmbientContextRouteScenario(BrowserContextStoreOnlyScenario):
+    scenario_name = AMBIENT_CONTEXT_ROUTE
+
+    def run(self) -> ScenarioResult:
+        mode = "orchestrator" if self.orchestrator_url else "fixture"
+        log: dict[str, Any] = {
+            "scenario": self.scenario_name,
+            "mode": mode,
+            "started_at": self.clock.now_iso(),
+            "steps": [],
+        }
+        try:
+            result = self._run_orchestrator(log) if self.orchestrator_url else self._run_fixture(log)
+            log["passed"] = True
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            self.writer.write_json("summary.json", result.details)
+            return result
+        except Exception as exc:
+            log["passed"] = False
+            log["error"] = str(exc)
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            raise
+
+    def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
+        context_event = self._context_event()
+        ambient_event = self._ambient_event()
+        observed = self._expected_observed(context_event, ambient_event)
+        log["steps"].append({"name": "attach_context", "event_id": context_event["id"]})
+        log["steps"].append({"name": "inject_task_session", "event_id": ambient_event["id"]})
+        self._assert_observed(observed)
+        self.writer.write_json("observed.json", observed)
+        return ScenarioResult(
+            scenario=self.scenario_name,
+            mode="fixture",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": ambient_event["id"],
+                "task_session_id": observed["task_message"]["task_session_id"],
+                "route_action": observed["route_decision"]["action"],
+            },
+        )
+
+    def _run_orchestrator(self, log: dict[str, Any]) -> ScenarioResult:
+        if self.orchestrator_url is None:
+            raise ScenarioFailure("orchestrator_url required")
+        client = OrchestratorClient(self.orchestrator_url)
+        self._drain_existing_queue(client, log)
+        context_event = self._context_event()
+        ambient_event = self._ambient_event()
+
+        context_response = client.route_event(context_event)
+        context_route_decision = context_response.get("route_decision") if isinstance(context_response, dict) else None
+        if not isinstance(context_route_decision, dict) or context_route_decision.get("action") != "attach_to_task":
+            raise ScenarioFailure(f"context route mismatch: {context_response!r}")
+        log["steps"].append({"name": "attach_context", "event_id": context_event["id"]})
+
+        ambient_response = client.route_event(ambient_event)
+        route_decision = ambient_response.get("route_decision") if isinstance(ambient_response, dict) else None
+        task_message = ambient_response.get("task_message") if isinstance(ambient_response, dict) else None
+        observed = {
+            "context_event": context_event,
+            "ambient_event": ambient_event,
+            "context_route_decision": context_route_decision,
+            "route_decision": route_decision,
+            "task_message": task_message,
+            "review_packet": ambient_response.get("review_packet"),
+            "queue_item": ambient_response.get("queue_item"),
+            "final_queue": {"item": client.next_queue_item()},
+        }
+        log["steps"].append({"name": "inject_task_session", "event_id": ambient_event["id"]})
+        self._assert_observed(observed)
+        if observed["final_queue"]["item"] is not None:
+            raise ScenarioFailure(f"expected empty queue after ambient route, got {observed['final_queue']!r}")
+        self.writer.write_json("observed.json", observed)
+        return ScenarioResult(
+            scenario=self.scenario_name,
+            mode="orchestrator",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": ambient_event["id"],
+                "task_session_id": task_message["task_session_id"],
+                "route_action": route_decision["action"],
+            },
+        )
+
+    def _expected_observed(self, context_event: dict[str, Any], ambient_event: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "context_event": context_event,
+            "ambient_event": ambient_event,
+            "context_route_decision": {
+                "action": "attach_to_task",
+                "target_task_id": "task_blog_feedback",
+            },
+            "route_decision": {
+                "action": "inject_into_agent_thread",
+                "target_task_id": "task_blog_feedback",
+                "target_task_session_id": "task_session_blog",
+                "evidence": [
+                    {"kind": "raw"},
+                    {"kind": "context_match"},
+                ],
+            },
+            "task_message": {
+                "id": "task_msg_inject_slack_t123_c123_ambient_context",
+                "task_session_id": "task_session_blog",
+                "event_ids": [ambient_event["id"]],
+                "idempotency_key": "inject_slack:T123:C123:ambient-context",
+                "status": "sent",
+            },
+            "review_packet": None,
+            "queue_item": None,
+            "final_queue": {"item": None},
+        }
+
+    def _assert_observed(self, observed: dict[str, Any]) -> None:
+        context_route_decision = observed.get("context_route_decision")
+        if not isinstance(context_route_decision, dict) or context_route_decision.get("action") != "attach_to_task":
+            raise ScenarioFailure(f"context route mismatch: {context_route_decision!r}")
+        if context_route_decision.get("target_task_id") != "task_blog_feedback":
+            raise ScenarioFailure(f"context target task mismatch: {context_route_decision!r}")
+        route_decision = observed.get("route_decision")
+        if not isinstance(route_decision, dict):
+            raise ScenarioFailure("ambient response missing route_decision")
+        if route_decision.get("action") != "inject_into_agent_thread":
+            raise ScenarioFailure(f"ambient route action mismatch: {route_decision!r}")
+        if route_decision.get("target_task_id") != "task_blog_feedback":
+            raise ScenarioFailure(f"ambient target task mismatch: {route_decision!r}")
+        if route_decision.get("target_task_session_id") != "task_session_blog":
+            raise ScenarioFailure(f"ambient target session mismatch: {route_decision!r}")
+        evidence = route_decision.get("evidence")
+        if not isinstance(evidence, list) or not any(isinstance(item, dict) and item.get("kind") == "context_match" for item in evidence):
+            raise ScenarioFailure(f"ambient route missing context_match evidence: {route_decision!r}")
+        task_message = observed.get("task_message")
+        if not isinstance(task_message, dict):
+            raise ScenarioFailure("ambient response missing task_message")
+        if task_message.get("task_session_id") != "task_session_blog":
+            raise ScenarioFailure(f"task message session mismatch: {task_message!r}")
+        if task_message.get("event_ids") != [self._ambient_event()["id"]]:
+            raise ScenarioFailure(f"task message event ids mismatch: {task_message!r}")
+        if observed.get("review_packet") is not None or observed.get("queue_item") is not None:
+            raise ScenarioFailure("ambient context route should not queue human review")
+
+    @staticmethod
+    def _context_event() -> dict[str, Any]:
+        return {
+            "id": "evt_browser_ctx_ambient_blog",
+            "source": "browser",
+            "source_id": "browser:ctx_ambient_blog",
+            "idempotency_key": "browser:ctx_ambient_blog",
+            "occurred_at": "2026-05-06T16:50:00.000Z",
+            "received_at": "2026-05-06T16:50:00.000Z",
+            "task_hint": "blog feedback",
+            "type": "browser.context_captured",
+            "title": "Browser context: Blog launch draft",
+            "summary": "Blog launch draft includes launch date paragraph.",
+            "raw_ref": {
+                "id": "raw_browser_ctx_ambient_blog",
+                "uri": "artifact://raw/browser/ctx-ambient-blog.json",
+                "media_type": "application/json",
+            },
+            "links": [],
+            "resources": [
+                {
+                    "id": "ctx_browser_ambient_blog",
+                    "kind": "browser_tab",
+                    "title": "Blog launch draft",
+                    "url": "https://example.test/blog-launch-draft",
+                    "source": "chrome-extension",
+                    "text_quote": "Launch date paragraph in blog draft.",
+                    "captured_at": "2026-05-06T16:50:00.000Z",
+                    "restore_confidence": "high",
+                },
+            ],
+        }
+
+    @staticmethod
+    def _ambient_event() -> dict[str, Any]:
+        return {
+            "id": "evt_slack_ambient_context",
+            "source": "slack",
+            "source_id": "slack:T123:C123:ambient-context",
+            "idempotency_key": "slack:T123:C123:ambient-context",
+            "occurred_at": "2026-05-06T16:59:00.000Z",
+            "received_at": "2026-05-06T17:00:00.000Z",
+            "type": "slack.message",
+            "title": "Slack message from Malis",
+            "summary": "Launch date feedback belongs in the blog draft before next pass.",
+            "raw_ref": {
+                "id": "raw_slack_T123_C123_ambient_context",
+                "uri": "artifact://raw/slack/T123/C123/ambient-context.json",
+                "media_type": "application/json",
+            },
+            "links": [
+                {
+                    "label": "Blog draft",
+                    "url": "https://example.test/blog-launch-draft",
+                },
+            ],
+            "resources": [],
+        }
 
 
 class BrowserContextRankedSearchScenario(BrowserContextStoreOnlyScenario):

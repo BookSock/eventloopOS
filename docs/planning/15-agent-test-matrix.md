@@ -15,6 +15,7 @@ This is the current reality map for agents. Pick the narrowest command that prov
 | Subsystem | Command | What it proves | Notes |
 | --- | --- | --- | --- |
 | Orchestrator API + router | `pnpm --filter @eventloopos/orchestrator test` | Event routing, queue lease/done, task sessions, MCP polling, workspace API, voice command path | Docker-backed DB tests skip without container runtime. |
+| Ambient context routing | `app/test-harness/bin/run-scenario ambient_context_route --orchestrator-url http://127.0.0.1:4377` | Stored task-bound browser context lets an unhinted Slack-style event inject into the matching task session without queueing human review | Included in `pnpm run test:e2e:live:boot`. |
 | Postgres queue store | `pnpm run test:db:docker` or `pnpm run test:db:native` | Migrations, idempotent events, queue leases, stale lease reap, context restore request persistence against real Postgres | Docker path uses temp container; native path uses temp local cluster and deletes it. Both passed locally. |
 | Browser extension | `pnpm run test:e2e:browser` | MV3 extension capture/restore in Chromium via Playwright persistent context, including distinct restore-request lease owners across two Chromium profiles | No real native host unless opt-in smoke is used. |
 | Installed native browser bridge | `pnpm run test:e2e:native-browser` | Installed Chromium native messaging manifest, real extension `chrome.runtime.sendNativeMessage`, native host forwarding to fixture server | Mutates and restores temporary native messaging manifests. |

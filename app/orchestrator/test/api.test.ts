@@ -1409,6 +1409,403 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("routes unhinted Slack events into task sessions using stored task context", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const messages = new Map<string, Record<string, unknown>>();
+    const taskServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      taskSessions: {
+        listSessions() {
+          return [
+            {
+              id: "task_session_blog",
+              task_id: "task_blog_feedback",
+              status: "idle",
+            },
+          ];
+        },
+        sendFollowupMessage(input) {
+          const existing = messages.get(input.idempotency_key);
+          if (existing) return existing;
+          const message = {
+            id: `task_msg_${messages.size + 1}`,
+            task_session_id: input.task_session_id,
+            mode: "followup",
+            text: input.text,
+            event_ids: input.event_ids,
+            idempotency_key: input.idempotency_key,
+            status: "sent",
+          };
+          messages.set(input.idempotency_key, message);
+          return message;
+        },
+      },
+    });
+    await new Promise<void>((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+    const address = taskServer.address() as AddressInfo;
+    const taskBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const contextEvent = {
+        id: "evt_browser_ctx_unhinted_slack_blog",
+        source: "browser",
+        source_id: "browser:ctx_unhinted_slack_blog",
+        idempotency_key: "browser:ctx_unhinted_slack_blog",
+        occurred_at: "2026-05-06T16:50:00.000Z",
+        received_at: "2026-05-06T16:50:00.000Z",
+        task_hint: "blog feedback",
+        type: "browser.context_captured",
+        title: "Browser context: Blog launch draft",
+        summary: "Blog launch draft includes launch date paragraph.",
+        raw_ref: {
+          id: "raw_browser_ctx_unhinted_slack_blog",
+          uri: "artifact://raw/browser/ctx-unhinted-slack-blog.json",
+          media_type: "application/json",
+        },
+        links: [],
+        resources: [
+          {
+            id: "ctx_browser_unhinted_slack_blog",
+            kind: "browser_tab",
+            title: "Blog launch draft",
+            url: "https://example.test/blog-launch-draft",
+            source: "chrome-extension",
+            text_quote: "Launch date paragraph in blog draft.",
+            captured_at: "2026-05-06T16:50:00.000Z",
+            restore_confidence: "high",
+          },
+        ],
+      };
+      const contextResponse = await fetch(`${taskBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ event: contextEvent }),
+      });
+      const contextBody = await contextResponse.json() as {
+        route_decision: {
+          action: string;
+          target_task_id: string;
+        };
+      };
+      assert.equal(contextResponse.status, 202);
+      assert.equal(contextBody.route_decision.action, "attach_to_task");
+      assert.equal(contextBody.route_decision.target_task_id, "task_blog_feedback");
+
+      const event = {
+        id: "evt_slack_unhinted_blog_context_match",
+        source: "slack",
+        source_id: "slack:T123:C123:unhinted-context",
+        idempotency_key: "slack:T123:C123:unhinted-context",
+        occurred_at: "2026-05-06T16:59:00.000Z",
+        received_at: "2026-05-06T17:00:00.000Z",
+        type: "slack.message",
+        title: "Slack message from Malis",
+        summary: "Launch date feedback belongs in the blog draft before next pass.",
+        raw_ref: {
+          id: "raw_slack_T123_C123_unhinted_context",
+          uri: "artifact://raw/slack/T123/C123/unhinted-context.json",
+          media_type: "application/json",
+        },
+        links: [
+          {
+            label: "Blog draft",
+            url: "https://example.test/blog-launch-draft",
+          },
+        ],
+        resources: [],
+      };
+
+      const response = await fetch(`${taskBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ event }),
+      });
+      const body = await response.json() as {
+        ok: boolean;
+        route_decision: {
+          action: string;
+          target_task_id: string;
+          target_task_session_id: string;
+          confidence: string;
+          evidence: Array<{
+            kind: string;
+          }>;
+        };
+        review_packet?: unknown;
+        queue_item?: unknown;
+        task_message: {
+          task_session_id: string;
+          event_ids: string[];
+          text: string;
+          idempotency_key: string;
+        };
+      };
+
+      assert.equal(response.status, 202);
+      assert.equal(body.ok, true);
+      assert.equal(body.route_decision.action, "inject_into_agent_thread");
+      assert.equal(body.route_decision.target_task_id, "task_blog_feedback");
+      assert.equal(body.route_decision.target_task_session_id, "task_session_blog");
+      assert.equal(body.route_decision.confidence, "high");
+      assert.equal(body.route_decision.evidence.some((evidence) => evidence.kind === "context_match"), true);
+      assert.equal(body.review_packet, undefined);
+      assert.equal(body.queue_item, undefined);
+      assert.equal(body.task_message.task_session_id, "task_session_blog");
+      assert.deepEqual(body.task_message.event_ids, ["evt_slack_unhinted_blog_context_match"]);
+      assert.match(body.task_message.text, /Launch date feedback/);
+      assert.equal(body.task_message.idempotency_key, "inject_slack:T123:C123:unhinted-context");
+      assert.equal(messages.size, 1);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("keeps unmatched unhinted ambient events in the human queue", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const messages: Record<string, unknown>[] = [];
+    const taskServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      taskSessions: {
+        listSessions() {
+          return [
+            {
+              id: "task_session_blog",
+              task_id: "task_blog_feedback",
+              status: "idle",
+            },
+          ];
+        },
+        sendFollowupMessage(input) {
+          const message = {
+            id: `task_msg_${messages.length + 1}`,
+            task_session_id: input.task_session_id,
+            text: input.text,
+            event_ids: input.event_ids,
+            idempotency_key: input.idempotency_key,
+            status: "sent",
+          };
+          messages.push(message);
+          return message;
+        },
+      },
+    });
+    await new Promise<void>((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+    const address = taskServer.address() as AddressInfo;
+    const taskBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const event = {
+        id: "evt_slack_unmatched_ambient",
+        source: "slack",
+        source_id: "slack:T123:C999:unmatched",
+        idempotency_key: "slack:T123:C999:unmatched",
+        occurred_at: "2026-05-06T16:59:00.000Z",
+        received_at: "2026-05-06T17:00:00.000Z",
+        type: "slack.message",
+        title: "Slack message from Malis",
+        summary: "Can you check the office lease invoice this afternoon?",
+        raw_ref: {
+          id: "raw_slack_T123_C999_unmatched",
+          uri: "artifact://raw/slack/T123/C999/unmatched.json",
+          media_type: "application/json",
+        },
+        links: [],
+        resources: [],
+      };
+
+      const response = await fetch(`${taskBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ event }),
+      });
+      const body = await response.json() as {
+        route_decision: {
+          action: string;
+          target_task_id?: string;
+        };
+        queue_item?: unknown;
+        task_message?: unknown;
+      };
+
+      assert.equal(response.status, 202);
+      assert.equal(body.route_decision.action, "ask_human_now");
+      assert.equal(body.route_decision.target_task_id, undefined);
+      assert.notEqual(body.queue_item, undefined);
+      assert.equal(body.task_message, undefined);
+      assert.equal(messages.length, 0);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("keeps ambiguous unhinted ambient events in the human queue", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const messages: Record<string, unknown>[] = [];
+    const taskServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      taskSessions: {
+        listSessions() {
+          return [
+            {
+              id: "task_session_blog",
+              task_id: "task_blog_feedback",
+              status: "idle",
+            },
+            {
+              id: "task_session_launch_email",
+              task_id: "task_launch_email",
+              status: "idle",
+            },
+          ];
+        },
+        sendFollowupMessage(input) {
+          const message = {
+            id: `task_msg_${messages.length + 1}`,
+            task_session_id: input.task_session_id,
+            text: input.text,
+            event_ids: input.event_ids,
+            idempotency_key: input.idempotency_key,
+            status: "sent",
+          };
+          messages.push(message);
+          return message;
+        },
+      },
+    });
+    await new Promise<void>((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+    const address = taskServer.address() as AddressInfo;
+    const taskBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      for (const contextEvent of [
+        {
+          id: "evt_browser_ctx_ambiguous_blog",
+          source: "browser",
+          source_id: "browser:ctx_ambiguous_blog",
+          idempotency_key: "browser:ctx_ambiguous_blog",
+          occurred_at: "2026-05-06T16:50:00.000Z",
+          received_at: "2026-05-06T16:50:00.000Z",
+          task_hint: "blog feedback",
+          type: "browser.context_captured",
+          title: "Browser context: Blog launch draft",
+          summary: "Launch date draft needs review.",
+          raw_ref: {
+            id: "raw_browser_ctx_ambiguous_blog",
+            uri: "artifact://raw/browser/ctx-ambiguous-blog.json",
+            media_type: "application/json",
+          },
+          links: [],
+          resources: [
+            {
+              id: "ctx_browser_ambiguous_blog",
+              kind: "browser_tab",
+              title: "Launch date draft",
+              text_quote: "Launch date draft needs review.",
+              captured_at: "2026-05-06T16:50:00.000Z",
+              restore_confidence: "high",
+            },
+          ],
+        },
+        {
+          id: "evt_browser_ctx_ambiguous_email",
+          source: "browser",
+          source_id: "browser:ctx_ambiguous_email",
+          idempotency_key: "browser:ctx_ambiguous_email",
+          occurred_at: "2026-05-06T16:51:00.000Z",
+          received_at: "2026-05-06T16:51:00.000Z",
+          task_hint: "launch email",
+          type: "browser.context_captured",
+          title: "Browser context: Launch email draft",
+          summary: "Launch date draft needs review.",
+          raw_ref: {
+            id: "raw_browser_ctx_ambiguous_email",
+            uri: "artifact://raw/browser/ctx-ambiguous-email.json",
+            media_type: "application/json",
+          },
+          links: [],
+          resources: [
+            {
+              id: "ctx_browser_ambiguous_email",
+              kind: "browser_tab",
+              title: "Launch date draft",
+              text_quote: "Launch date draft needs review.",
+              captured_at: "2026-05-06T16:51:00.000Z",
+              restore_confidence: "high",
+            },
+          ],
+        },
+      ]) {
+        const contextResponse = await fetch(`${taskBaseUrl}/events`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ event: contextEvent }),
+        });
+        assert.equal(contextResponse.status, 202);
+      }
+
+      const event = {
+        id: "evt_slack_ambiguous_ambient",
+        source: "slack",
+        source_id: "slack:T123:C999:ambiguous",
+        idempotency_key: "slack:T123:C999:ambiguous",
+        occurred_at: "2026-05-06T16:59:00.000Z",
+        received_at: "2026-05-06T17:00:00.000Z",
+        type: "slack.message",
+        title: "Slack message from Malis",
+        summary: "Launch date draft needs review.",
+        raw_ref: {
+          id: "raw_slack_T123_C999_ambiguous",
+          uri: "artifact://raw/slack/T123/C999/ambiguous.json",
+          media_type: "application/json",
+        },
+        links: [],
+        resources: [],
+      };
+
+      const response = await fetch(`${taskBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ event }),
+      });
+      const body = await response.json() as {
+        route_decision: {
+          action: string;
+          target_task_id?: string;
+        };
+        queue_item?: unknown;
+        task_message?: unknown;
+      };
+
+      assert.equal(response.status, 202);
+      assert.equal(body.route_decision.action, "ask_human_now");
+      assert.equal(body.route_decision.target_task_id, undefined);
+      assert.notEqual(body.queue_item, undefined);
+      assert.equal(body.task_message, undefined);
+      assert.equal(messages.length, 0);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("does not inject a duplicate event into a task session after it already queued human review", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     let sessions: Array<Record<string, unknown>> = [];
@@ -1748,6 +2145,142 @@ describe("orchestrator gateway API", () => {
       };
       assert.equal(storedResponse.status, 200);
       assert.equal(storedBody.event.source, "voice");
+      assert.equal(storedBody.route_decision.action, "inject_into_agent_thread");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        voiceServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("normalizes unhinted voice commands into inferred task-session followups", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const messages = new Map<string, Record<string, unknown>>();
+    const voiceServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      taskSessions: {
+        listSessions() {
+          return [
+            {
+              id: "task_session_blog",
+              task_id: "task_blog_feedback",
+              status: "idle",
+            },
+          ];
+        },
+        sendFollowupMessage(input) {
+          const existing = messages.get(input.idempotency_key);
+          if (existing) return existing;
+          const message = {
+            id: `task_msg_${messages.size + 1}`,
+            task_session_id: input.task_session_id,
+            mode: "followup",
+            text: input.text,
+            event_ids: input.event_ids,
+            idempotency_key: input.idempotency_key,
+            status: "sent",
+          };
+          messages.set(input.idempotency_key, message);
+          return message;
+        },
+      },
+    });
+    await new Promise<void>((resolve) => voiceServer.listen(0, "127.0.0.1", resolve));
+    const address = voiceServer.address() as AddressInfo;
+    const voiceBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const contextEvent = {
+        id: "evt_browser_ctx_unhinted_voice_blog",
+        source: "browser",
+        source_id: "browser:ctx_unhinted_voice_blog",
+        idempotency_key: "browser:ctx_unhinted_voice_blog",
+        occurred_at: "2026-05-06T16:50:00.000Z",
+        received_at: "2026-05-06T16:50:00.000Z",
+        task_hint: "blog feedback",
+        type: "browser.context_captured",
+        title: "Browser context: Blog launch draft",
+        summary: "Blog launch draft includes launch date paragraph.",
+        raw_ref: {
+          id: "raw_browser_ctx_unhinted_voice_blog",
+          uri: "artifact://raw/browser/ctx-unhinted-voice-blog.json",
+          media_type: "application/json",
+        },
+        links: [],
+        resources: [
+          {
+            id: "ctx_browser_unhinted_voice_blog",
+            kind: "browser_tab",
+            title: "Blog launch draft",
+            url: "https://example.test/blog-launch-draft",
+            source: "chrome-extension",
+            text_quote: "Launch date paragraph in blog draft.",
+            captured_at: "2026-05-06T16:50:00.000Z",
+            restore_confidence: "high",
+          },
+        ],
+      };
+      const contextResponse = await fetch(`${voiceBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ event: contextEvent }),
+      });
+      assert.equal(contextResponse.status, 202);
+
+      const response = await fetch(`${voiceBaseUrl}/voice/commands`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_voice_unhinted_blog_priority",
+        },
+        body: JSON.stringify({
+          transcript: "Blog draft is priority and should include launch date in two weeks.",
+        }),
+      });
+      const body = await response.json() as {
+        ok: boolean;
+        event: {
+          id: string;
+          task_hint?: string;
+        };
+        route_decision: {
+          action: string;
+          target_task_id: string;
+          target_task_session_id: string;
+          evidence: Array<{
+            kind: string;
+          }>;
+        };
+        task_message: {
+          task_session_id: string;
+          event_ids: string[];
+          text: string;
+        };
+        queue_item?: unknown;
+      };
+
+      assert.equal(response.status, 202);
+      assert.equal(body.ok, true);
+      assert.equal(body.event.task_hint, undefined);
+      assert.equal(body.route_decision.action, "inject_into_agent_thread");
+      assert.equal(body.route_decision.target_task_id, "task_blog_feedback");
+      assert.equal(body.route_decision.target_task_session_id, "task_session_blog");
+      assert.equal(body.route_decision.evidence.some((evidence) => evidence.kind === "context_match"), true);
+      assert.equal(body.task_message.task_session_id, "task_session_blog");
+      assert.deepEqual(body.task_message.event_ids, [body.event.id]);
+      assert.match(body.task_message.text, /Blog draft is priority/);
+      assert.equal(body.queue_item, undefined);
+
+      const storedResponse = await fetch(`${voiceBaseUrl}/events/${body.event.id}`);
+      const storedBody = await storedResponse.json() as {
+        route_decision: {
+          action: string;
+        };
+      };
+      assert.equal(storedResponse.status, 200);
       assert.equal(storedBody.route_decision.action, "inject_into_agent_thread");
     } finally {
       await new Promise<void>((resolve, reject) => {
