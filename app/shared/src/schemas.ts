@@ -430,6 +430,7 @@ export const RouteDecisionSchema = z
     target_task_id: id.optional(),
     target_task_session_id: id.optional(),
     confidence: z.enum(["low", "medium", "high"]),
+    human_queue_reason: z.enum(["human_blocked", "ambiguous", "risky"]).optional(),
     evidence: z.array(EvidenceRefSchema),
     created_at: isoDateTime
   })

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import type { Action, ContextResource, EvidenceRef, QueueItem, QueueItemWithPacket, QueueState, ReviewPacket } from "./contracts.js";
 import type { McpPollStateSnapshot } from "./integrations/mcp_poll/persistent_cursor_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
+import { findPromptInjectionPattern } from "./hooks/evaluator.js";
 import type { DurableTaskMessageRecord } from "./task_sessions/task_message_history.js";
 import type { WorkspaceRestoreReceiptRecord } from "./workspace/restore_receipts.js";
 
@@ -41,6 +42,7 @@ export type RouteDecision = {
   target_task_id?: string;
   target_task_session_id?: string;
   confidence: "low" | "medium" | "high";
+  human_queue_reason?: "human_blocked" | "ambiguous" | "risky";
   evidence: EvidenceRef[];
   created_at: string;
 };
@@ -499,13 +501,15 @@ export function decideRouteForEvent(event: McpEvent, now: Date): RouteDecision {
   const evidence = evidenceForEvent(event);
   const targetTaskId = taskIdForHint(event.task_hint);
   const action = routeActionForEvent(event);
+  const confidence = routeConfidenceForEvent(event, action);
 
   return {
     id: `rte_${stableId(event.id)}`,
     event_id: event.id,
     action,
     target_task_id: targetTaskId,
-    confidence: routeConfidenceForEvent(event, action),
+    confidence,
+    human_queue_reason: humanQueueReasonForEvent(event, action, targetTaskId),
     evidence,
     created_at: now.toISOString(),
   };
@@ -644,6 +648,28 @@ function routeConfidenceForEvent(event: McpEvent, action: RouteDecision["action"
   if (action === "store_only" && event.type === "browser.context_captured") return "high";
   if (event.task_hint || event.project_hint) return "medium";
   return "low";
+}
+
+function humanQueueReasonForEvent(
+  event: McpEvent,
+  action: RouteDecision["action"],
+  targetTaskId: string | undefined,
+): RouteDecision["human_queue_reason"] {
+  if (action !== "ask_human_now" && action !== "create_review_packet") return undefined;
+  if (findPromptInjectionPattern(untrustedRouteTextForEvent(event))) return "risky";
+  if (targetTaskId) return "human_blocked";
+  return "ambiguous";
+}
+
+function untrustedRouteTextForEvent(event: McpEvent): string {
+  return [
+    event.title,
+    event.summary,
+    ...event.links.flatMap((link) => [link.label, link.url]),
+    ...event.resources.flatMap(resourceSearchParts),
+  ]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join("\n");
 }
 
 export function taskIdForHint(taskHint: string | undefined): string | undefined {

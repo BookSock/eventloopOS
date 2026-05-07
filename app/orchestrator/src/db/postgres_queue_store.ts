@@ -312,6 +312,7 @@ export class PostgresQueueStore {
       action: "ask_human_now",
       target_task_id: event.task_hint ? `task_${stableId(event.task_hint)}` : undefined,
       confidence: event.task_hint || event.project_hint ? "medium" : "low",
+      human_queue_reason: event.task_hint ? "human_blocked" : "ambiguous",
       evidence: packet.evidence,
       created_at: packet.created_at,
     };
@@ -1056,10 +1057,11 @@ export class PostgresQueueStore {
           target_task_id,
           target_task_session_id,
           confidence,
+          human_queue_reason,
           evidence,
           created_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::timestamptz)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::timestamptz)
         ON CONFLICT (id) DO NOTHING
       `,
       [
@@ -1069,6 +1071,7 @@ export class PostgresQueueStore {
         decision.target_task_id ?? null,
         decision.target_task_session_id ?? null,
         decision.confidence,
+        decision.human_queue_reason ?? null,
         JSON.stringify(decision.evidence),
         decision.created_at,
       ],
@@ -1275,6 +1278,7 @@ function rowToRouteDecision(row: QueryResultRow): RouteDecision {
     target_task_id: row.target_task_id ?? undefined,
     target_task_session_id: row.target_task_session_id ?? undefined,
     confidence: row.confidence,
+    human_queue_reason: row.human_queue_reason ?? undefined,
     evidence: row.evidence,
     created_at: requiredDateToIso(row.created_at),
   };

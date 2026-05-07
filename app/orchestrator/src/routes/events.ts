@@ -230,6 +230,7 @@ async function recordRoutedEventActivity(
       type: event.type,
       route_action: routeDecision.action,
       confidence: routeDecision.confidence,
+      human_queue_reason: routeDecision.human_queue_reason,
       task_message: input.taskMessage,
       task_message_error: input.taskMessageError,
     },

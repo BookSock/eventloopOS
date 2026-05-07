@@ -80,9 +80,15 @@ CREATE TABLE IF NOT EXISTS route_decisions (
   target_task_id text,
   target_task_session_id text,
   confidence text NOT NULL CHECK (confidence IN ('low', 'medium', 'high')),
+  human_queue_reason text CHECK (human_queue_reason IN ('human_blocked', 'ambiguous', 'risky')),
   evidence jsonb NOT NULL DEFAULT '[]'::jsonb,
   created_at timestamptz NOT NULL
 );
+
+ALTER TABLE route_decisions
+  ADD COLUMN IF NOT EXISTS human_queue_reason text CHECK (
+    human_queue_reason IN ('human_blocked', 'ambiguous', 'risky')
+  );
 
 CREATE TABLE IF NOT EXISTS receipts (
   id text PRIMARY KEY,

@@ -2116,7 +2116,7 @@ describe("orchestrator gateway API", () => {
       });
       const body = await response.json() as {
         ok: boolean;
-        route_decision: { action: string };
+        route_decision: { action: string; human_queue_reason?: string };
         queue_item?: { id: string };
         review_packet?: { decision_needed: string };
         task_message?: unknown;
@@ -2125,6 +2125,7 @@ describe("orchestrator gateway API", () => {
       assert.equal(response.status, 202);
       assert.equal(body.ok, true);
       assert.equal(body.route_decision.action, "ask_human_now");
+      assert.equal(body.route_decision.human_queue_reason, "risky");
       assert.ok(body.queue_item?.id);
       assert.match(body.review_packet?.decision_needed ?? "", /Human approval needed before this update is sent back to the task agent/);
       assert.equal(body.task_message, undefined);
@@ -2584,6 +2585,7 @@ describe("orchestrator gateway API", () => {
         route_decision: {
           action: string;
           target_task_id?: string;
+          human_queue_reason?: string;
         };
         queue_item?: unknown;
         review_packet?: { decision_needed: string };
@@ -2593,6 +2595,7 @@ describe("orchestrator gateway API", () => {
       assert.equal(response.status, 202);
       assert.equal(body.route_decision.action, "ask_human_now");
       assert.equal(body.route_decision.target_task_id, undefined);
+      assert.equal(body.route_decision.human_queue_reason, "ambiguous");
       assert.notEqual(body.queue_item, undefined);
       assert.equal(
         body.review_packet?.decision_needed,
@@ -2745,6 +2748,7 @@ describe("orchestrator gateway API", () => {
         route_decision: {
           action: string;
           target_task_id?: string;
+          human_queue_reason?: string;
         };
         queue_item?: unknown;
         review_packet?: { decision_needed: string };
@@ -2754,6 +2758,7 @@ describe("orchestrator gateway API", () => {
       assert.equal(response.status, 202);
       assert.equal(body.route_decision.action, "ask_human_now");
       assert.equal(body.route_decision.target_task_id, undefined);
+      assert.equal(body.route_decision.human_queue_reason, "ambiguous");
       assert.notEqual(body.queue_item, undefined);
       assert.equal(
         body.review_packet?.decision_needed,

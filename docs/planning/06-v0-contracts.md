@@ -273,12 +273,19 @@ type RouteDecision = {
   target_task_id?: string;
   target_task_session_id?: string;
   confidence: "low" | "medium" | "high";
+  human_queue_reason?: "human_blocked" | "ambiguous" | "risky";
   evidence: EvidenceRef[];
   created_at: string;
 };
 ```
 
 Naming note: `ask_human_now` means “create or update a human review packet in the intake stack.” It must not steal focus or trigger passive interruption in MVP.
+
+`human_queue_reason` is required whenever a route creates intake work. MVP reasons are deliberately small:
+
+- `human_blocked`: task/session exists, but approval or judgment is needed before sending work onward.
+- `ambiguous`: no confident task/session match exists, so user decides where this paper belongs.
+- `risky`: untrusted content or action risk requires human review before agent injection.
 
 Rules:
 

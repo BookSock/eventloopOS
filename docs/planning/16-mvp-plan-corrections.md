@@ -199,6 +199,7 @@ Real gaps:
 - Live Mac queue mutation proof now exists: `pnpm test:e2e:macos-live-ui` launches the packaged app against a temp live orchestrator, clicks `Pull Next Paper` and `Done / Next`, then asserts queue done state, activity, and metrics. It is included in `pnpm proof:live`.
 - Live Mac task handoff proof now exists: `pnpm test:e2e:macos-live-handoff` launches the packaged app against a temp live orchestrator, clicks `Pull Next Paper` and `Route to task agent`, then asserts queue done state, task followup attempted/sent activity, metrics, and `task_session_blog.status=running`. It is included in `pnpm proof:live`.
 - Human queue packet copy now distinguishes task-matched approvals from unmatched/ambiguous events, so the current paper says why human judgment is needed instead of asking vaguely whether to route an event.
+- Human queue routing now has an explicit `human_queue_reason`: `human_blocked`, `ambiguous`, or `risky`. Queue creation should stay inside those reasons so the product remains an intake stack of blocked papers, not an ambient notification stream.
 - GatewayStore remains broad. Conformance tests reduce risk; split into smaller store ports later, after dogfood-critical safety/history patches.
 
 Latest user steering:
@@ -224,6 +225,5 @@ Release guardrails:
 
 1. Wire dogfood threshold checks into a real local Postgres + MCP source dogfood session.
 2. Add safe real Claude followup smoke against an explicitly supplied disposable Claude session.
-3. Tighten router route states further so queue creation is limited to `human_blocked`, `ambiguous`, or `risky` categories.
-4. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
-5. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+3. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
+4. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.

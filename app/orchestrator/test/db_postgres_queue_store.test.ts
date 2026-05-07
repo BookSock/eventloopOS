@@ -212,7 +212,7 @@ describe("PostgresQueueStore", () => {
       });
       assert.equal(response.status, 202);
       return await response.json() as {
-        route_decision: { id: string; action: string };
+        route_decision: { id: string; action: string; human_queue_reason?: string };
         queue_item: { id: string };
       };
     });
@@ -231,13 +231,14 @@ describe("PostgresQueueStore", () => {
       });
       assert.equal(response.status, 202);
       return await response.json() as {
-        route_decision: { id: string; action: string };
+        route_decision: { id: string; action: string; human_queue_reason?: string };
         queue_item: { id: string };
       };
     });
 
     assert.equal(afterRestart.route_decision.id, first.route_decision.id);
     assert.equal(afterRestart.route_decision.action, "ask_human_now");
+    assert.equal(afterRestart.route_decision.human_queue_reason, "ambiguous");
     assert.equal(afterRestart.queue_item.id, first.queue_item.id);
     assert.equal((await store.pool.query("SELECT count(*)::int AS count FROM events")).rows[0]?.count, 1);
     assert.equal((await store.pool.query("SELECT count(*)::int AS count FROM queue_items")).rows[0]?.count, 1);
