@@ -74,7 +74,8 @@ private struct QueueMenuView: View {
             selectedPacket: viewModel.selectedPacket,
             queueState: viewModel.state,
             mode: viewModel.mode,
-            contextRestoreState: viewModel.contextRestoreState
+            contextRestoreState: viewModel.contextRestoreState,
+            manualWorkspaceCaptureState: viewModel.manualWorkspaceCaptureState
         )
     }
 
@@ -92,6 +93,11 @@ private struct QueueMenuView: View {
                 Text(restoreLabel)
                     .lineLimit(2)
                     .accessibilityIdentifier("queue-menu-restore")
+            }
+            if let manualWorkspaceLabel = summary.manualWorkspaceLabel {
+                Text(manualWorkspaceLabel)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("queue-menu-manual-workspace")
             }
 
             Divider()

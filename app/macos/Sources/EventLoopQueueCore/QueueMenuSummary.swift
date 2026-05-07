@@ -5,13 +5,15 @@ public struct QueueMenuSummary: Equatable, Sendable {
     public let subtitle: String
     public let modeLabel: String
     public let restoreLabel: String?
+    public let manualWorkspaceLabel: String?
 
     public init(
         packets: [ReviewPacket],
         selectedPacket: ReviewPacket?,
         queueState: QueueState,
         mode: EventLoopMode,
-        contextRestoreState: ContextRestoreState
+        contextRestoreState: ContextRestoreState,
+        manualWorkspaceCaptureState: ManualWorkspaceCaptureState = .idle
     ) {
         self.modeLabel = mode == .manual ? "Manual Mode" : "Event Loop"
 
@@ -22,6 +24,7 @@ public struct QueueMenuSummary: Equatable, Sendable {
             title = "Queue error"
             subtitle = message
             restoreLabel = Self.restoreLabel(contextRestoreState)
+            manualWorkspaceLabel = Self.manualWorkspaceLabel(manualWorkspaceCaptureState)
             return
         case .idle, .loaded:
             if packets.isEmpty {
@@ -35,6 +38,7 @@ public struct QueueMenuSummary: Equatable, Sendable {
 
         subtitle = selectedPacket?.title ?? "No selection"
         restoreLabel = Self.restoreLabel(contextRestoreState)
+        manualWorkspaceLabel = Self.manualWorkspaceLabel(manualWorkspaceCaptureState)
     }
 
     private static func restoreLabel(_ state: ContextRestoreState) -> String? {
@@ -49,6 +53,19 @@ public struct QueueMenuSummary: Equatable, Sendable {
             return request.status == "done" ? "Restore done: \(resource.title)" : "Restore \(request.status): \(resource.title)"
         case let .failed(resource, _):
             return "Restore failed: \(resource.title)"
+        }
+    }
+
+    private static func manualWorkspaceLabel(_ state: ManualWorkspaceCaptureState) -> String? {
+        switch state {
+        case .idle:
+            return nil
+        case .capturing:
+            return "Capturing manual workspace"
+        case let .captured(snapshot):
+            return "Manual workspace saved: \(snapshot.windows.count) windows"
+        case .failed:
+            return "Manual workspace capture failed"
         }
     }
 }

@@ -67,4 +67,23 @@ final class QueueMenuSummaryTests: XCTestCase {
 
         XCTAssertEqual(summary.restoreLabel, "Restore leased: Launch doc")
     }
+
+    func testSummaryShowsManualWorkspaceCaptureStatus() {
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog"),
+                WorkspaceWindow(id: 10, app: "Google Chrome", title: "Launch doc", workspace: "eventloop-blog")
+            ]
+        )
+        let summary = QueueMenuSummary(
+            packets: SeededQueue.packets,
+            selectedPacket: SeededQueue.packets[0],
+            queueState: .loaded,
+            mode: .manual,
+            contextRestoreState: .idle,
+            manualWorkspaceCaptureState: .captured(snapshot)
+        )
+
+        XCTAssertEqual(summary.manualWorkspaceLabel, "Manual workspace saved: 2 windows")
+    }
 }

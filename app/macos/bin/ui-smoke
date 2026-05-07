@@ -139,6 +139,7 @@ end tell
 delay 0.5
 set manualItems to menuItemNames()
 assertContains(manualItems, "Return to Event Loop")
+assertContains(manualItems, "Manual workspace saved: 0 windows")
 
 tell application "System Events"
   tell process "EventLoopQueueApp"
