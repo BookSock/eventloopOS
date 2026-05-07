@@ -157,6 +157,28 @@ describe("MCP poll ingestion", () => {
     assert.equal(configs[1].server.command, "docker");
     assert.equal(configs[2].eventMapper, "generic_item_to_event");
   });
+
+  it("rejects write-enabled MCP source configs for MVP polling", async () => {
+    const rawConfig = JSON.parse(await readFile(join(process.cwd(), "../../tests/fixtures/mcp/source-generic.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    rawConfig.riskPolicy = {
+      readOnly: false,
+      allowWriteTools: true,
+      maxRiskLevel: "critical",
+      untrustedTextFields: ["summary"],
+    };
+
+    const result = validateMcpPollSourceConfig(rawConfig);
+
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.ok ? [] : result.issues, [
+      "riskPolicy.readOnly must be true for MVP polling sources",
+      "riskPolicy.allowWriteTools must be false for MVP polling sources",
+      "riskPolicy.maxRiskLevel must be low for MVP polling sources",
+    ]);
+  });
 });
 
 async function readConfig(path: string): Promise<McpPollSourceConfig> {

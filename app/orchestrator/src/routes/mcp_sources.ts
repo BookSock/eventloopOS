@@ -22,6 +22,22 @@ export async function handleMcpSourcesRoute(input: {
   requestId: string;
   routeEvent: McpEventRouter;
 }): Promise<RouteResult | undefined> {
+  if (input.method === "POST" && input.pathname === "/mcp/poll") {
+    const parsed = await input.readJsonBody();
+    if (!parsed.ok) return schemaError(parsed.message);
+
+    const pollValidation = validateMcpPollRequest(parsed.value, input.now.toISOString());
+    if (!pollValidation.ok) return schemaError(pollValidation.message);
+
+    return ok(200, {
+      source_id: pollValidation.sourceId,
+      events: pollValidation.events,
+      duplicates_ignored: 0,
+      cursor: pollValidation.cursor,
+      request_id: input.requestId,
+    });
+  }
+
   if (input.method === "GET" && input.pathname === "/mcp-sources") {
     if (!input.mcpSources) {
       return error(501, "mcp_sources_unavailable", "MCP source registry is not configured");

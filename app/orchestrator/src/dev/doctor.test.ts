@@ -231,6 +231,66 @@ describe("developer doctor", () => {
     );
   });
 
+  it("reports unsafe MCP polling source risk policy", async () => {
+    const report = await runDoctor({
+      baseUrl: "http://127.0.0.1:4377",
+      platform: "darwin",
+      mcpSourcesPath: "config/mcp-sources.json",
+      readFileFn: async () => JSON.stringify({
+        sources: [
+          {
+            id: "unsafe_source",
+            server: {
+              name: "unsafe-mcp",
+              command: "unsafe-mcp",
+              args: ["--stdio"],
+              envAllowlist: [],
+              stderrLogPath: "var/log/mcp/unsafe.stderr.log",
+            },
+            poll: {
+              tool: "send_message",
+              args: {},
+              timeoutMs: 5000,
+            },
+            cursor: {
+              strategy: "hash",
+              dedupeWindow: 100,
+            },
+            eventMapper: "generic_item_to_event",
+            riskPolicy: {
+              readOnly: false,
+              allowWriteTools: true,
+              maxRiskLevel: "high",
+              untrustedTextFields: ["summary"],
+            },
+          },
+        ],
+      }),
+      fetchFn: async () => response({ ok: true }, 200),
+      execFn: async (command, args) => {
+        if (command === "swift") {
+          assert.deepEqual(args, ["--version"]);
+          return { stdout: "swift-driver version: 1.127.8 Apple Swift version 6.2.1\n", stderr: "" };
+        }
+        return { stdout: command === "docker" ? "29.3.1\n" : "[]", stderr: "" };
+      },
+      codexCheckFn: async () => ({
+        name: "codex_app_server",
+        ok: true,
+        detail: "Codex app-server responded; sampled 1 thread(s)",
+      }),
+    });
+
+    const mcpConfigCheck = report.checks.find((check) => check.name === "mcp_sources_config");
+
+    assert.equal(report.ok, false);
+    assert.equal(mcpConfigCheck?.ok, false);
+    assert.equal(
+      mcpConfigCheck?.detail,
+      "MCP source config 0: riskPolicy.readOnly must be true for MVP polling sources, riskPolicy.allowWriteTools must be false for MVP polling sources, riskPolicy.maxRiskLevel must be low for MVP polling sources",
+    );
+  });
+
   it("resolves MCP source config paths from repo-root commands", () => {
     const options = doctorOptionsFromEnv({
       ORCHESTRATOR_MCP_SOURCES_PATH: "config/mcp-sources.example.json",

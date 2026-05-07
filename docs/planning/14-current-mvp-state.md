@@ -144,7 +144,7 @@ Strong tests now:
 - `voice:listen-command` lets whisper.cpp stream, MLX Whisper wrappers, or other local STT tools feed the same router while staying unit-testable through an injected process. The whisper.cpp stream preset is unit-covered and doctor-checked.
 - Opt-in fixture-audio STT smoke passed locally with `EVENTLOOPOS_ENABLE_VOICE_STT_SMOKE=1 EVENTLOOPOS_WHISPER_MODEL=external-resources/models/whisper/ggml-tiny.en.bin pnpm run voice:stt-smoke`; transcript was `computer blog post priority changed.`
 - `dev:doctor` reports whether `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` is configured and can launch with `--help`; unconfigured voice command is treated as optional/pass.
-- `dev:doctor` reports whether `ORCHESTRATOR_MCP_SOURCES_PATH` or `config/mcp-sources.json` contains valid MCP polling sources; missing default config is treated as optional/pass.
+- `dev:doctor` reports whether `ORCHESTRATOR_MCP_SOURCES_PATH` or `config/mcp-sources.json` contains valid MCP polling sources; missing default config is treated as optional/pass. MVP MCP source config validation now rejects write-enabled/high-risk polling sources (`readOnly` must be true, `allowWriteTools` false, `maxRiskLevel` low).
 - Config paths for MCP sources, Codex task maps, and seed fixtures resolve existing repo-root relative files even when package scripts run from `app/orchestrator`.
 - File-backed local events MCP server exists for dogfood. `config/mcp-sources.local-events.example.json` launches it over stdio, reads `EVENTLOOPOS_LOCAL_EVENTS_PATH`, and returns generic event-ish `items[]` for MCP poll routing.
 - Read-only `agent-slack` MCP wrapper exists for Jason dogfood. `config/mcp-sources.agent-slack.example.json` launches it over stdio, reads `EVENTLOOPOS_AGENT_SLACK_*` filters, shells out to `agent-slack search messages`, maps compact Slack search output into `slack_message_to_event` items, and accepts the orchestrator MCP cursor as an `--after YYYY-MM-DD` fallback when no explicit `EVENTLOOPOS_AGENT_SLACK_AFTER` is set. It does not expose Slack write tools. Same-day refetch is expected; idempotency/cursor dedupe owns exact duplicate suppression.
@@ -169,11 +169,11 @@ Weak tests:
 - No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, temp `.app` bundle launch, and opt-in AppleScript menu/window/manual-mode interaction.
 - No real microphone wake-word proof yet; current coverage proves fixture-audio STT with `whisper-cli`, local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
 - Activity history is durable in Postgres mode and process-local in in-memory mode. The report groups by task/session/queue but does not yet compare trends across days.
-- `server.ts` is still large, but task-session injection policy, task followup audit, observability routes, task-session routes, context-restore routes, queue routes, workspace routes, and MCP source routes have been extracted into smaller modules. It is down to roughly 650 lines after the MCP route split. Continue splitting events/voice/manual-review routes before much more orchestrator feature width.
+- `server.ts` is much smaller: task-session injection policy, task followup audit, observability routes, task-session routes, context-restore routes, queue routes, workspace routes, MCP source routes, and events/voice/review-packet routes have been extracted into smaller modules. It is down to roughly 340 lines after the events route split. Continue splitting contexts/manual-review routes before much more orchestrator feature width.
 
 ## Next Best Work
 
-1. Continue extracting `server.ts` route/policy modules without behavior change, especially events, voice, and manual review.
+1. Continue extracting `server.ts` route/policy modules without behavior change, especially contexts and manual review.
 2. Add restart/failure smoke around Postgres state, restore retry, and task followup chaos.
 3. Add trend comparisons to `dogfood:review`.
 4. Add real Slack/GitHub MCP source dogfood config for Jason's installed servers, using the local-events MCP recipe as the template.

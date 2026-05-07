@@ -117,7 +117,7 @@ Do now:
 - Keep `server.ts` shrinking before adding much more width.
 - Keep metrics/history concrete and local.
 - Keep deep-link restore confidence visible by provider.
-- Keep MCP sources read-only/draft-first by default.
+- Keep MCP sources read-only/draft-first by default. MVP config validation now rejects sources that set `readOnly=false`, `allowWriteTools=true`, or `maxRiskLevel` above `low`.
 - Keep keystroke/terminal path behind explicit grants.
 - Keep tests tied to real feedback loops: fixture E2E, live boot, real Chromium extension, opt-in AeroSpace, opt-in Mac UI smoke.
 
@@ -157,7 +157,8 @@ Current extraction:
 - `app/orchestrator/src/routes/queue.ts` owns queue list/next/lease/done/defer/ignore/recommended-action route bodies and validation.
 - `app/orchestrator/src/routes/workspace.ts` owns workspace status/capture/restore-plan/restore route bodies and idempotent restore receipt replay.
 - `app/orchestrator/src/routes/mcp_sources.ts` owns legacy `/mcp/poll`, MCP source list/get/poll/poll-and-route/poll-all-and-route route bodies, validation, and poll-cycle observability.
-- `server.ts` still owns events, voice, manual review, and a few read-only lookup routes.
+- `app/orchestrator/src/routes/events.ts` owns event ingest/get, voice-command ingest, event routing/idempotency/fallback, and review-packet lookup route bodies.
+- `server.ts` still owns contexts and manual review routes.
 
 Keep doing behavior-preserving extraction first. Add tests before changing policy.
 
@@ -169,9 +170,9 @@ Other architecture notes:
 
 ## Next Best Work
 
-1. Continue behavior-preserving `server.ts` route extraction, especially events, voice, and manual review.
+1. Continue behavior-preserving `server.ts` route extraction, especially contexts and manual review.
 2. Add GatewayStore conformance tests for event idempotency, queue leasing/defer/ignore, context restore retry, workspace restore receipt replay, and context search.
-3. Enforce MCP read-only source contracts beyond metadata, especially for user-installed servers.
+3. Enforce MCP read-only source contracts beyond config validation, especially runtime tool metadata checks for user-installed servers.
 4. Add real MCP/Slack source dogfood config around Jason's installed tools.
 5. Add trend comparisons to `dogfood:review`.
 6. Real Claude+Codex composite dogfood against harmless configured sessions.

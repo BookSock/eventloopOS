@@ -65,6 +65,18 @@ export function validateMcpPollSourceConfig(input: unknown): McpSourceConfigVali
     ? readStringArray(riskPolicy, "untrustedTextFields", issues, "riskPolicy.untrustedTextFields")
     : [];
 
+  if (riskPolicy) {
+    if (readOnly !== true) {
+      issues.push("riskPolicy.readOnly must be true for MVP polling sources");
+    }
+    if (allowWriteTools !== false) {
+      issues.push("riskPolicy.allowWriteTools must be false for MVP polling sources");
+    }
+    if (maxRiskLevel !== "low") {
+      issues.push("riskPolicy.maxRiskLevel must be low for MVP polling sources");
+    }
+  }
+
   if (issues.length > 0) {
     return { ok: false, issues };
   }
