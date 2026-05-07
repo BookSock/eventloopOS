@@ -138,7 +138,10 @@ Low-risk split:
 Current extraction:
 
 - `app/orchestrator/src/routing/task_session_injection.ts` owns ambient/task-hinted injection policy.
-- `server.ts` still owns HTTP routes, validators, queue action execution, MCP poll routes, and workspace routes.
+- `app/orchestrator/src/task_sessions/task_followup_audit.ts` owns attempted/sent/blocked/failed task-message activity.
+- `app/orchestrator/src/routes/observability.ts` owns metrics/activity route bodies.
+- `app/orchestrator/src/routes/task_sessions.ts` owns task-session list/get/followup/binding route bodies and validation.
+- `server.ts` still owns many HTTP routes, context restore route bodies, queue action execution, MCP poll routes, events, voice, manual review, and workspace routes.
 
 Keep doing behavior-preserving extraction first. Add tests before changing policy.
 
