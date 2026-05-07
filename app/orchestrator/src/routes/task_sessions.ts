@@ -1,5 +1,10 @@
 import type { Observability } from "../observability.js";
 import type { GatewayStore } from "../gateway_store.js";
+import {
+  taskMessageRecordToApiMessage,
+  type DurableTaskMessageStatus,
+  type TaskMessageHistoryQuery,
+} from "../task_sessions/task_message_history.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
 import type { JsonBodyReader } from "./context_restore.js";
@@ -8,6 +13,7 @@ import type { RouteResult } from "./types.js";
 export async function handleTaskSessionsRoute(input: {
   method: string | undefined;
   pathname: string;
+  url: URL;
   readJsonBody: JsonBodyReader;
   store: GatewayStore;
   taskSessions?: TaskSessionController;
@@ -16,6 +22,14 @@ export async function handleTaskSessionsRoute(input: {
   requestId: string;
   idempotencyKey?: string;
 }): Promise<RouteResult | undefined> {
+  if (input.method === "GET" && input.pathname === "/task-messages") {
+    return handleListTaskMessagesRoute({
+      store: input.store,
+      url: input.url,
+      requestId: input.requestId,
+    });
+  }
+
   if (input.method === "GET" && input.pathname === "/task-sessions") {
     return handleListTaskSessionsRoute({
       taskSessions: input.taskSessions,
@@ -63,6 +77,34 @@ export async function handleTaskSessionsRoute(input: {
   }
 
   return undefined;
+}
+
+export async function handleListTaskMessagesRoute(input: {
+  store: GatewayStore;
+  url: URL;
+  requestId: string;
+}): Promise<RouteResult> {
+  const validation = validateTaskMessageHistoryQuery(input.url.searchParams);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      status: 400,
+      code: "schema_error",
+      message: validation.message,
+    };
+  }
+
+  const records = await input.store.listTaskMessages(validation.query);
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      ok: true,
+      messages: records.map(taskMessageRecordToApiMessage),
+      count: records.length,
+      request_id: input.requestId,
+    },
+  };
 }
 
 export async function handleListTaskSessionsRoute(input: {
@@ -250,6 +292,49 @@ function schemaError(message: string): RouteResult {
     code: "schema_error",
     message,
   };
+}
+
+function validateTaskMessageHistoryQuery(searchParams: URLSearchParams): {
+  ok: true;
+  query: TaskMessageHistoryQuery;
+} | { ok: false; message: string } {
+  const status = nonEmptyParam(searchParams, "status");
+  let statusValue: DurableTaskMessageStatus | undefined;
+  if (status) {
+    if (!isTaskMessageStatus(status)) {
+      return { ok: false, message: "status must be attempted, sent, blocked, or failed" };
+    }
+    statusValue = status;
+  }
+
+  const limitText = nonEmptyParam(searchParams, "limit");
+  const parsedLimit = limitText ? Number(limitText) : undefined;
+  if (parsedLimit !== undefined && (!Number.isFinite(parsedLimit) || parsedLimit <= 0)) {
+    return { ok: false, message: "limit must be a positive number" };
+  }
+  const limit = parsedLimit === undefined ? undefined : Math.floor(parsedLimit);
+
+  return {
+    ok: true,
+    query: {
+      task_session_id: nonEmptyParam(searchParams, "task_session_id") ?? nonEmptyParam(searchParams, "session"),
+      task_id: nonEmptyParam(searchParams, "task_id"),
+      queue_item_id: nonEmptyParam(searchParams, "queue_item_id"),
+      event_id: nonEmptyParam(searchParams, "event_id"),
+      idempotency_key: nonEmptyParam(searchParams, "idempotency_key"),
+      status: statusValue,
+      limit,
+    },
+  };
+}
+
+function isTaskMessageStatus(input: string): input is DurableTaskMessageStatus {
+  return input === "attempted" || input === "sent" || input === "blocked" || input === "failed";
+}
+
+function nonEmptyParam(searchParams: URLSearchParams, name: string): string | undefined {
+  const value = searchParams.get(name)?.trim();
+  return value || undefined;
 }
 
 function validateTaskFollowupRequest(

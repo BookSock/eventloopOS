@@ -47,8 +47,19 @@ export type DurableTaskMessageFinalInput = {
   error?: string;
 };
 
+export type TaskMessageHistoryQuery = {
+  task_session_id?: string;
+  task_id?: string;
+  queue_item_id?: string;
+  event_id?: string;
+  idempotency_key?: string;
+  status?: DurableTaskMessageStatus;
+  limit?: number;
+};
+
 export type TaskMessageHistoryStore = {
   getTaskMessageByIdempotencyKey(idempotencyKey: string): Promise<DurableTaskMessageRecord | undefined>;
+  listTaskMessages(query?: TaskMessageHistoryQuery): Promise<DurableTaskMessageRecord[]>;
   recordTaskMessageAttempt(input: DurableTaskMessageAttemptInput): Promise<DurableTaskMessageRecord>;
   finalizeTaskMessage(input: DurableTaskMessageFinalInput): Promise<DurableTaskMessageRecord | undefined>;
 };
@@ -98,6 +109,10 @@ export function taskMessageRecordToApiMessage(record: DurableTaskMessageRecord):
     id: optionalString(record.message.id) ?? record.id,
     durable_id: record.id,
     task_session_id: record.task_session_id,
+    task_id: record.task_id,
+    queue_item_id: record.queue_item_id,
+    origin: record.origin,
+    source_id: record.source_id,
     mode: record.mode,
     event_ids: record.event_ids,
     idempotency_key: record.idempotency_key,
@@ -111,6 +126,8 @@ export function taskMessageRecordToApiMessage(record: DurableTaskMessageRecord):
     native_session_id: record.native_session_id,
     native_result_session_id: record.native_result_session_id,
     error: record.error,
+    created_at: record.created_at,
+    updated_at: record.updated_at,
     durable: true,
   };
 }

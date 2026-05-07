@@ -10,6 +10,7 @@ import {
   type DurableTaskMessageAttemptInput,
   type DurableTaskMessageFinalInput,
   type DurableTaskMessageRecord,
+  type TaskMessageHistoryQuery,
 } from "./task_sessions/task_message_history.js";
 import {
   getReviewPacket,
@@ -82,6 +83,7 @@ export type GatewayStore = {
   getMcpPollState(sourceId: string): Promise<McpPollStateSnapshot | undefined>;
   saveMcpPollState(sourceId: string, state: McpCursorState, now: Date): Promise<McpPollStateSnapshot>;
   getTaskMessageByIdempotencyKey(idempotencyKey: string): Promise<DurableTaskMessageRecord | undefined>;
+  listTaskMessages(query?: TaskMessageHistoryQuery): Promise<DurableTaskMessageRecord[]>;
   recordTaskMessageAttempt(input: DurableTaskMessageAttemptInput): Promise<DurableTaskMessageRecord>;
   finalizeTaskMessage(input: DurableTaskMessageFinalInput): Promise<DurableTaskMessageRecord | undefined>;
 };
@@ -189,6 +191,13 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     },
     async getTaskMessageByIdempotencyKey(idempotencyKey) {
       return taskMessagesByIdempotencyKey.get(idempotencyKey);
+    },
+    async listTaskMessages(query = {}) {
+      const limit = normalizeTaskMessageLimit(query.limit);
+      return Array.from(taskMessagesByIdempotencyKey.values())
+        .filter((record) => taskMessageMatchesQuery(record, query))
+        .sort(compareTaskMessagesNewestFirst)
+        .slice(0, limit);
     },
     async recordTaskMessageAttempt(input) {
       const existing = taskMessagesByIdempotencyKey.get(input.idempotency_key);
@@ -307,6 +316,9 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     async getTaskMessageByIdempotencyKey(idempotencyKey) {
       return store.getTaskMessageByIdempotencyKey(idempotencyKey);
     },
+    async listTaskMessages(query) {
+      return store.listTaskMessages(query);
+    },
     async recordTaskMessageAttempt(input) {
       return store.recordTaskMessageAttempt(input);
     },
@@ -318,4 +330,25 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
 
 function stableId(input: string): string {
   return input.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "unknown";
+}
+
+function normalizeTaskMessageLimit(limit: number | undefined): number {
+  if (!Number.isFinite(limit) || !limit) return 50;
+  return Math.max(1, Math.min(200, Math.floor(limit)));
+}
+
+function taskMessageMatchesQuery(record: DurableTaskMessageRecord, query: TaskMessageHistoryQuery): boolean {
+  if (query.task_session_id && record.task_session_id !== query.task_session_id) return false;
+  if (query.task_id && record.task_id !== query.task_id) return false;
+  if (query.queue_item_id && record.queue_item_id !== query.queue_item_id) return false;
+  if (query.event_id && !record.event_ids.includes(query.event_id)) return false;
+  if (query.idempotency_key && record.idempotency_key !== query.idempotency_key) return false;
+  if (query.status && record.status !== query.status) return false;
+  return true;
+}
+
+function compareTaskMessagesNewestFirst(left: DurableTaskMessageRecord, right: DurableTaskMessageRecord): number {
+  const updated = Date.parse(right.updated_at) - Date.parse(left.updated_at);
+  if (updated !== 0) return updated;
+  return left.id.localeCompare(right.id);
 }

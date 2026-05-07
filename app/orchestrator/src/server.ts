@@ -153,6 +153,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
       const taskSessionsRoute = await handleTaskSessionsRoute({
         method: request.method,
         pathname: context.url.pathname,
+        url: context.url,
         readJsonBody: () => readJsonBody(request),
         store: options.store,
         taskSessions: options.taskSessions,

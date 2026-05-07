@@ -348,6 +348,17 @@ function runGatewayStoreContract(
           },
         });
         const fetched = await harness.store.getTaskMessageByIdempotencyKey("idem_gateway_task_message");
+        const blogMessages = await harness.store.listTaskMessages({
+          task_session_id: "task_session_blog",
+          event_id: "evt_gateway_task_message",
+        });
+        const sentMessages = await harness.store.listTaskMessages({
+          status: "sent",
+          limit: 1,
+        });
+        const missingMessages = await harness.store.listTaskMessages({
+          queue_item_id: "qit_missing",
+        });
 
         assert.equal(first.status, "attempted");
         assert.equal(first.text_length, "Continue blog work.".length);
@@ -364,6 +375,10 @@ function runGatewayStoreContract(
         assert.notEqual(sentWithSameRuntimeId?.id, sent?.id);
         assert.equal(sentWithSameRuntimeId?.message.id, sent?.message.id);
         assert.deepEqual(fetched, sent);
+        assert.deepEqual(blogMessages, [sent]);
+        assert.equal(sentMessages.length, 1);
+        assert.equal(sentMessages[0]?.id, sentWithSameRuntimeId?.id);
+        assert.deepEqual(missingMessages, []);
       } finally {
         await harness.cleanup();
       }

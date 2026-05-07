@@ -1579,6 +1579,38 @@ describe("orchestrator gateway API", () => {
       assert.equal(duplicateBody.message.id, "task_msg_1");
       assert.equal(messages.size, 1);
 
+      const taskMessagesResponse = await fetch(`${taskBaseUrl}/task-messages?task_session_id=task_session_blog&event_id=evt_browser_ctx_123&status=sent`);
+      const taskMessagesBody = await taskMessagesResponse.json() as {
+        count: number;
+        messages: Array<{
+          id: string;
+          task_session_id: string;
+          status: string;
+          event_ids: string[];
+          idempotency_key: string;
+          text_hash: string;
+          text_length: number;
+          text?: string;
+          created_at: string;
+          updated_at: string;
+        }>;
+      };
+      assert.equal(taskMessagesResponse.status, 200);
+      assert.equal(taskMessagesBody.count, 1);
+      assert.equal(taskMessagesBody.messages[0].id, "task_msg_1");
+      assert.equal(taskMessagesBody.messages[0].task_session_id, "task_session_blog");
+      assert.equal(taskMessagesBody.messages[0].status, "sent");
+      assert.deepEqual(taskMessagesBody.messages[0].event_ids, ["evt_browser_ctx_123"]);
+      assert.equal(taskMessagesBody.messages[0].idempotency_key, "idem_task_followup_1");
+      assert.equal(taskMessagesBody.messages[0].text_length, requestBody.text.length);
+      assert.match(taskMessagesBody.messages[0].text_hash, /^[a-f0-9]{64}$/);
+      assert.equal(taskMessagesBody.messages[0].text, undefined);
+      assert.equal(taskMessagesBody.messages[0].created_at, "2026-05-06T12:00:00.000Z");
+      assert.equal(taskMessagesBody.messages[0].updated_at, "2026-05-06T12:00:00.000Z");
+
+      const badTaskMessagesResponse = await fetch(`${taskBaseUrl}/task-messages?status=nope`);
+      assert.equal(badTaskMessagesResponse.status, 400);
+
       const metricsResponse = await fetch(`${taskBaseUrl}/metrics`);
       const metricsBody = await metricsResponse.json() as {
         metrics: {

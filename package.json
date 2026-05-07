@@ -42,6 +42,7 @@
     "queue:add": "pnpm --filter @eventloopos/orchestrator run queue:add",
     "task:sessions": "pnpm --filter @eventloopos/orchestrator run task:sessions",
     "task:bind": "pnpm --filter @eventloopos/orchestrator run task:bind",
+    "task:messages": "pnpm --filter @eventloopos/orchestrator run task:messages",
     "task:runtime-smoke": "bin/task-runtime-smoke",
     "live:aerospace": "pnpm --filter @eventloopos/orchestrator run live:aerospace",
     "voice:listen-command": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run voice:listen-command",

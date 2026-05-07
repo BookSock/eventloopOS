@@ -20,6 +20,7 @@ import {
   type DurableTaskMessageAttemptInput,
   type DurableTaskMessageFinalInput,
   type DurableTaskMessageRecord,
+  type TaskMessageHistoryQuery,
 } from "../task_sessions/task_message_history.js";
 import type { RestoreExecutionReceipt, RestorePlan } from "../workspace/aerospace.js";
 import type { WorkspaceRestoreReceiptRecord } from "../workspace/restore_receipts.js";
@@ -174,6 +175,36 @@ export class PostgresQueueStore {
     );
     const row = result.rows[0];
     return row ? rowToTaskMessageRecord(row) : undefined;
+  }
+
+  async listTaskMessages(query: TaskMessageHistoryQuery = {}): Promise<DurableTaskMessageRecord[]> {
+    const clauses: string[] = [];
+    const values: unknown[] = [];
+    const addClause = (sql: string, value: unknown): void => {
+      values.push(value);
+      clauses.push(sql.replace("$?", `$${values.length}`));
+    };
+
+    if (query.task_session_id) addClause("task_session_id = $?", query.task_session_id);
+    if (query.task_id) addClause("task_id = $?", query.task_id);
+    if (query.queue_item_id) addClause("queue_item_id = $?", query.queue_item_id);
+    if (query.idempotency_key) addClause("idempotency_key = $?", query.idempotency_key);
+    if (query.status) addClause("status = $?", query.status);
+    if (query.event_id) addClause("event_ids ? $?", query.event_id);
+
+    values.push(normalizeTaskMessageLimit(query.limit));
+    const limitPlaceholder = `$${values.length}`;
+    const result = await this.pool.query(
+      `
+        SELECT *
+        FROM task_messages
+        ${clauses.length ? `WHERE ${clauses.join(" AND ")}` : ""}
+        ORDER BY updated_at DESC, id ASC
+        LIMIT ${limitPlaceholder}
+      `,
+      values,
+    );
+    return result.rows.map(rowToTaskMessageRecord);
   }
 
   async recordTaskMessageAttempt(input: DurableTaskMessageAttemptInput): Promise<DurableTaskMessageRecord> {
@@ -1373,4 +1404,9 @@ function dateToIso(value: unknown): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeTaskMessageLimit(limit: number | undefined): number {
+  if (!Number.isFinite(limit) || !limit) return 50;
+  return Math.max(1, Math.min(200, Math.floor(limit)));
 }

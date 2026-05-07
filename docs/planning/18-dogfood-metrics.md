@@ -119,6 +119,7 @@ Current implementation:
 - Queue defer/ignore actions record `queue_item_deferred` / `queue_item_ignored` activity and increment `queue_items_deferred_total` / `queue_items_ignored_total`.
 - Task followup calls now emit attempted plus sent/blocked/failed activity with task session ID, idempotency key, event IDs, payload length, and origin (`event_route`, `queue_action`, or `task_session_api`).
 - Durable `task_messages` now persist followup status by idempotency key across Postgres restarts. The durable record stores payload hash/length and sanitized runtime metadata, not raw followup text. Duplicate retries return the stored task-message result before runtime side effects.
+- `GET /task-messages` and `pnpm task:messages` expose that durable task-message history with filters for task session, task, queue item, event, status, and idempotency key.
 - `pnpm dogfood:check` reads the same local metrics/activity and exits non-zero when dogfood thresholds fail. Current checks cover ignored queue item rate, restore success rate, task followup failures, stale queue leases, and oldest pending restore age. Use `EVENTLOOPOS_DOGFOOD_CHECK_FORMAT=json` for agent-readable output.
 
 Near-term gaps:

@@ -164,6 +164,7 @@ Strong tests now:
 - Task followups record attempted plus sent/blocked/failed activity with origin, task session ID, idempotency key, event IDs, and text length, giving a lightweight outbox-style audit trail without a separate durable outbox table.
 - Postgres and in-memory gateway stores now persist durable `task_messages` by idempotency key. Records keep internal stable IDs, runtime message IDs in sanitized message metadata, task/session/event linkage, status, payload hash/length, native thread/turn IDs when available, timestamps, and error summary.
 - Duplicate task followups now return the durable stored result before runtime side effects, without incrementing counters or writing duplicate activity. Activity details sanitize runtime messages so raw followup text is not stored in metrics/history.
+- `GET /task-messages` and `pnpm task:messages` expose filtered task-message lineage by task session, task, queue item, event, status, and idempotency key. Responses include text hash/length and sanitized runtime metadata, not raw followup text.
 - Task followup chaos tests prove an event-route runtime failure or blocked followup creates a human queue fallback, records attempted/failed or attempted/blocked activity, and dedupes retry without sending another task message.
 - Task-message policy tests prove direct followups with prompt-injection-looking text are blocked before runtime send, and task-hinted events with suspicious source text become human queue items instead of agent injections.
 - Terminal task-session adapter tests prove visible-draft safety: omitted `submit` sends text only, does not press Enter, and does not append a Ghostty newline. Tmux argv and Ghostty AppleScript escaping are covered for shell-ish text, multiline text, and escaped targets.
@@ -203,9 +204,9 @@ Weak tests:
 
 ## Next Best Work
 
-1. Expose after-the-fact lineage first: `GET /task-messages`, `pnpm task:messages`, and filters by task/session/event/status/idempotency, with no raw followup text in responses.
-2. Tighten the Codex + Claude task-runtime seam with shared typed session/message/capability/error shapes instead of `unknown` return contracts.
-3. Add dogfood gauges/checks for queue depth by state, stale `attempted` task messages, pending/failed restore requests, and followup status counts.
+1. Tighten the Codex + Claude task-runtime seam with shared typed session/message/capability/error shapes instead of `unknown` return contracts.
+2. Add dogfood gauges/checks for queue depth by state, stale `attempted` task messages, pending/failed restore requests, and followup status counts.
+3. Add a small Mac/UI affordance or CLI wrapper that links a selected queue item to its event/task-message lineage without dumping global history.
 4. Decide whether to promote `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
 5. Add app bundle/XCUITest smoke only if the current SwiftUI render, launch, AppleScript, and live Mac handoff smokes stop catching enough UI regressions.
 6. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.

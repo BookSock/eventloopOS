@@ -1,6 +1,6 @@
 import { pathToFileURL } from "node:url";
 
-export type TaskSessionCliCommand = "list" | "bind";
+export type TaskSessionCliCommand = "list" | "bind" | "messages";
 
 export type TaskSessionCliOptions = {
   command: TaskSessionCliCommand;
@@ -8,6 +8,11 @@ export type TaskSessionCliOptions = {
   taskSessionId?: string;
   taskId?: string;
   taskHint?: string;
+  queueItemId?: string;
+  eventId?: string;
+  idempotencyKey?: string;
+  status?: string;
+  limit?: number;
   fetchFn?: typeof fetch;
   stdout?: Pick<NodeJS.WriteStream, "write">;
   stderr?: Pick<NodeJS.WriteStream, "write">;
@@ -24,12 +29,20 @@ export function taskSessionCliOptionsFromEnvAndArgv(
     taskSessionId: args.taskSessionId ?? env.EVENTLOOPOS_TASK_SESSION_ID,
     taskId: args.taskId ?? env.EVENTLOOPOS_TASK_ID,
     taskHint: args.taskHint ?? env.EVENTLOOPOS_TASK_HINT,
+    queueItemId: args.queueItemId ?? env.EVENTLOOPOS_QUEUE_ITEM_ID,
+    eventId: args.eventId ?? env.EVENTLOOPOS_EVENT_ID,
+    idempotencyKey: args.idempotencyKey ?? env.EVENTLOOPOS_IDEMPOTENCY_KEY,
+    status: args.status ?? env.EVENTLOOPOS_TASK_MESSAGE_STATUS,
+    limit: args.limit ?? numberFromEnv(env.EVENTLOOPOS_TASK_MESSAGE_LIMIT),
   };
 }
 
 export async function runTaskSessionCli(options: TaskSessionCliOptions): Promise<number> {
   if (options.command === "list") {
     return await listTaskSessions(options);
+  }
+  if (options.command === "messages") {
+    return await listTaskMessages(options);
   }
   return await bindTaskSession(options);
 }
@@ -41,6 +54,36 @@ async function listTaskSessions(options: TaskSessionCliOptions): Promise<number>
 
   try {
     const response = await fetchFn(new URL("/task-sessions", options.baseUrl), {
+      method: "GET",
+      headers: { "content-type": "application/json" },
+    });
+    const body = await response.json() as unknown;
+    stdout.write(`${JSON.stringify(body)}\n`);
+    return response.ok ? 0 : 1;
+  } catch (error) {
+    stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+}
+
+async function listTaskMessages(options: TaskSessionCliOptions): Promise<number> {
+  const fetchFn = options.fetchFn ?? fetch;
+  const stdout = options.stdout ?? process.stdout;
+  const stderr = options.stderr ?? process.stderr;
+
+  try {
+    const url = new URL("/task-messages", options.baseUrl);
+    appendQuery(url, "task_session_id", options.taskSessionId);
+    appendQuery(url, "task_id", options.taskId);
+    appendQuery(url, "queue_item_id", options.queueItemId);
+    appendQuery(url, "event_id", options.eventId);
+    appendQuery(url, "idempotency_key", options.idempotencyKey);
+    appendQuery(url, "status", options.status);
+    if (options.limit !== undefined) {
+      url.searchParams.set("limit", String(options.limit));
+    }
+
+    const response = await fetchFn(url, {
       method: "GET",
       headers: { "content-type": "application/json" },
     });
@@ -98,7 +141,7 @@ function parseArgs(argv: string[]): Partial<TaskSessionCliOptions> {
     if (arg === "--") {
       continue;
     }
-    if (arg === "list" || arg === "bind") {
+    if (arg === "list" || arg === "bind" || arg === "messages") {
       options.command = arg;
       continue;
     }
@@ -113,6 +156,23 @@ function parseArgs(argv: string[]): Partial<TaskSessionCliOptions> {
         break;
       case "--task-id":
         options.taskId = readArgValue(argv, ++index, arg);
+        break;
+      case "--queue-item":
+      case "--queue-item-id":
+        options.queueItemId = readArgValue(argv, ++index, arg);
+        break;
+      case "--event":
+      case "--event-id":
+        options.eventId = readArgValue(argv, ++index, arg);
+        break;
+      case "--idempotency-key":
+        options.idempotencyKey = readArgValue(argv, ++index, arg);
+        break;
+      case "--status":
+        options.status = readArgValue(argv, ++index, arg);
+        break;
+      case "--limit":
+        options.limit = parseLimit(readArgValue(argv, ++index, arg));
         break;
       case "--task":
       case "--task-hint":
@@ -134,8 +194,28 @@ function readArgValue(argv: string[], index: number, flag: string): string {
 }
 
 function commandFromEnv(input: string | undefined): TaskSessionCliCommand | undefined {
-  if (input === "list" || input === "bind") return input;
+  if (input === "list" || input === "bind" || input === "messages") return input;
   return undefined;
+}
+
+function parseLimit(input: string): number {
+  const value = Number(input);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error("--limit requires a positive number");
+  }
+  return Math.floor(value);
+}
+
+function numberFromEnv(input: string | undefined): number | undefined {
+  if (!input) return undefined;
+  return parseLimit(input);
+}
+
+function appendQuery(url: URL, name: string, value: string | undefined): void {
+  const trimmed = value?.trim();
+  if (trimmed) {
+    url.searchParams.set(name, trimmed);
+  }
 }
 
 function stableId(input: string): string {
