@@ -188,6 +188,24 @@ final class QueueWindowRenderTests: XCTestCase {
                     summary: "Task followup sent",
                     eventId: "evt_review_1",
                     taskSessionId: "task_session_blog"
+                ),
+                QueueLineageActivity(
+                    id: "actv_2",
+                    type: "queue_item_done",
+                    occurredAt: Date(timeIntervalSince1970: 1_767_096_360),
+                    status: "ok",
+                    summary: "Human marked queue item done after reviewing agent output.",
+                    eventId: "evt_review_1",
+                    taskSessionId: "task_session_blog"
+                ),
+                QueueLineageActivity(
+                    id: "actv_3",
+                    type: "task_followup_failed",
+                    occurredAt: Date(timeIntervalSince1970: 1_767_096_420),
+                    status: "failed",
+                    summary: "Older failed followup stayed visible for debugging.",
+                    eventId: "evt_review_1",
+                    taskSessionId: "task_session_blog"
                 )
             ],
             taskMessages: [
@@ -200,9 +218,31 @@ final class QueueWindowRenderTests: XCTestCase {
                     eventIds: ["evt_review_1"],
                     textHash: "abc",
                     textLength: 42
+                ),
+                QueueLineageTaskMessage(
+                    id: "task_msg_2",
+                    durableId: "task_msg_durable_2",
+                    taskSessionId: "task_session_blog",
+                    origin: "event_route",
+                    status: "failed",
+                    eventIds: ["evt_review_1"],
+                    textHash: "def",
+                    textLength: 84,
+                    error: "runtime failed"
+                ),
+                QueueLineageTaskMessage(
+                    id: "task_msg_3",
+                    durableId: "task_msg_durable_3",
+                    taskSessionId: "task_session_blog",
+                    origin: "voice_command",
+                    status: "blocked",
+                    eventIds: ["evt_review_1"],
+                    textHash: "ghi",
+                    textLength: 21,
+                    error: "policy blocked"
                 )
             ],
-            counts: QueueLineageCounts(events: 1, activity: 1, taskMessages: 1)
+            counts: QueueLineageCounts(events: 1, activity: 3, taskMessages: 3)
         )
     }
 }

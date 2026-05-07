@@ -491,6 +491,22 @@ private struct QueueLineageSection: View {
                             .lineLimit(2)
                             .accessibilityIdentifier("queue-lineage-latest-activity")
                     }
+                    if !lineage.activity.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(lineage.activity.prefix(3))) { activity in
+                                QueueLineageActivityRow(activity: activity)
+                            }
+                        }
+                        .accessibilityIdentifier("packet-lineage-activity-list")
+                    }
+                    if !lineage.taskMessages.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(lineage.taskMessages.prefix(3))) { message in
+                                QueueLineageTaskMessageRow(message: message)
+                            }
+                        }
+                        .accessibilityIdentifier("packet-lineage-task-messages-list")
+                    }
                     Button {
                         loadLineage()
                     } label: {
@@ -501,6 +517,79 @@ private struct QueueLineageSection: View {
                 .accessibilityIdentifier("queue-lineage-loaded")
             }
         }
+        .accessibilityIdentifier("packet-lineage-section")
+    }
+}
+
+private struct QueueLineageActivityRow: View {
+    let activity: QueueLineageActivity
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(activity.status ?? "activity")
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(activity.type)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            Text(activity.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            if let taskSessionId = activity.taskSessionId {
+                Text(taskSessionId)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.vertical, 3)
+        .accessibilityIdentifier("packet-lineage-activity-row-\(activity.id)")
+    }
+}
+
+private struct QueueLineageTaskMessageRow: View {
+    let message: QueueLineageTaskMessage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(message.status)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if let origin = message.origin {
+                    Text(origin)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+            Text(message.taskSessionId)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            HStack(spacing: 8) {
+                if let textLength = message.textLength {
+                    Text("\(textLength) chars")
+                }
+                Text("\(message.eventIds.count) events")
+                if let error = message.error {
+                    Text(error)
+                        .lineLimit(1)
+                }
+            }
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 3)
+        .accessibilityIdentifier("packet-lineage-task-message-row-\(message.id)")
     }
 }
 
