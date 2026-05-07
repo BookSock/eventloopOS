@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import { CodexAppServerThreadClient } from "../task_sessions/codex_app_server_thread_client.js";
 import { createCodexAppServerStdioConnection } from "../task_sessions/codex_app_server_stdio.js";
 import { resolveTranscriptCommandConfigFromEnv } from "../voice/stt_presets.js";
+import { captureWorkspacePlan } from "../workspace/aerospace.js";
 
 type ExecResult = {
   stdout: string;
@@ -164,7 +165,8 @@ async function checkOrchestratorHealth(baseUrl: string, fetchFn: typeof fetch): 
 }
 
 async function checkAerospaceDaemon(execFn: ExecFunction): Promise<DoctorCheck> {
-  const command = ["aerospace", "list-windows", "--all", "--json"];
+  const plan = captureWorkspacePlan();
+  const command = [plan.command, ...plan.args];
   try {
     const result = await execFn(command[0] ?? "aerospace", command.slice(1));
     JSON.parse(result.stdout);

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { runLiveAerospaceSmoke } from "./live_aerospace_smoke.js";
-import type { ExecFunction } from "./aerospace.js";
+import { captureWorkspacePlan, type ExecFunction } from "./aerospace.js";
 
 describe("live AeroSpace smoke", () => {
   it("skips unless explicitly enabled", async () => {
@@ -44,11 +44,7 @@ describe("live AeroSpace smoke", () => {
 
     const result = await runLiveAerospaceSmoke({ enabled: true, exec });
 
-    assert.deepEqual(calls, [
-      { command: "aerospace", args: ["list-windows", "--all", "--json"] },
-      { command: "aerospace", args: ["list-windows", "--all", "--json"] },
-      { command: "aerospace", args: ["list-windows", "--all", "--json"] },
-    ]);
+    assert.deepEqual(calls, [captureWorkspacePlan(), captureWorkspacePlan(), captureWorkspacePlan()]);
     assert.deepEqual(result, {
       ok: true,
       skipped: false,

@@ -91,7 +91,7 @@ Done:
 - Expired restore request leases get reaped and reclaimed.
 - Native Postgres test runner creates a throwaway local cluster, runs live DB tests, stops server, and deletes temp data when Docker daemon is unavailable.
 - Doctor checks orchestrator health, AeroSpace, Docker, browser Playwright readiness, Mac/browser restore smoke Swift readiness, optional voice transcript command readiness, and Codex app-server.
-- `pnpm --filter @eventloopos/orchestrator run live:aerospace` builds and emits a machine-readable skip by default. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1`, it checks live AeroSpace status/capture/restore-plan without executing workspace moves.
+- `pnpm --filter @eventloopos/orchestrator run live:aerospace` builds and emits a machine-readable skip by default. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1`, it checks live AeroSpace status/capture/restore-plan without executing workspace moves. This passed locally after launching AeroSpace.app.
 - `voice:listen-command` runs a configured local STT command and pipes line-delimited transcripts into the same wake-phrase voice router. Command args are JSON argv, not shell-parsed strings.
 - `voice:listen-command` also supports `EVENTLOOPOS_VOICE_STT_PRESET=whisper_cpp_stream` so local whisper.cpp microphone capture can be configured with env vars (`EVENTLOOPOS_WHISPER_MODEL`, optional step/length/keep/thread/capture/language settings) instead of manual JSON argv.
 
@@ -120,8 +120,7 @@ Strong tests now:
 Weak tests:
 
 - Docker-backed Postgres live tests skip when Docker absent, but native Postgres live tests pass on this machine.
-- AeroSpace live restore needs installed/running AeroSpace.
-- AeroSpace live smoke exists, but `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm --filter @eventloopos/orchestrator run live:aerospace` currently reports `server_unavailable` because AeroSpace.app is not running.
+- AeroSpace live restore needs installed/running AeroSpace. Local live smoke passed with AeroSpace.app running; full restore execution remains gated behind explicit confirmation and is not part of the smoke.
 - No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, and temp `.app` bundle launch, but not one combined installed Mac UI interaction flow.
 - No real microphone wake-word/STT audio proof yet; current coverage proves the local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
 

@@ -10,6 +10,9 @@ export type AerospaceCommand = {
   args: string[];
 };
 
+export const AEROSPACE_WINDOW_CAPTURE_FORMAT =
+  "%{window-id}%{app-name}%{window-title}%{workspace}%{monitor-id}%{app-pid}";
+
 export type WorkspaceCapabilityStatus =
   | {
       available: true;
@@ -102,7 +105,7 @@ export class AerospaceWorkspaceAdapter {
 export function captureWorkspacePlan(): AerospaceCommand {
   return {
     command: "aerospace",
-    args: ["list-windows", "--all", "--json"],
+    args: ["list-windows", "--all", "--json", "--format", AEROSPACE_WINDOW_CAPTURE_FORMAT],
   };
 }
 

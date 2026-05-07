@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { doctorOptionsFromEnv, runDoctor, runDoctorCli } from "./doctor.js";
+import { captureWorkspacePlan } from "../workspace/aerospace.js";
 
 describe("developer doctor", () => {
   it("reports all live backend checks as machine-readable JSON", async () => {
@@ -14,7 +15,7 @@ describe("developer doctor", () => {
       },
       execFn: async (command, args) => {
         if (command === "aerospace") {
-          assert.deepEqual(args, ["list-windows", "--all", "--json"]);
+          assert.deepEqual(args, captureWorkspacePlan().args);
           return { stdout: "[]", stderr: "" };
         }
         if (command === "docker") {
@@ -55,7 +56,7 @@ describe("developer doctor", () => {
           name: "aerospace_daemon",
           ok: true,
           detail: "AeroSpace CLI returned window JSON",
-          command: ["aerospace", "list-windows", "--all", "--json"],
+          command: [captureWorkspacePlan().command, ...captureWorkspacePlan().args],
           source_url: "https://nikitabobko.github.io/AeroSpace/commands.html#list-windows",
         },
         {

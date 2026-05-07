@@ -6,7 +6,7 @@ import {
   parseRestorePlanRequest,
   parseWorkspaceSnapshot,
 } from "./controller.js";
-import type { ExecFunction, WorkspaceSnapshot } from "./aerospace.js";
+import { captureWorkspacePlan, type ExecFunction, type WorkspaceSnapshot } from "./aerospace.js";
 
 describe("workspace controller", () => {
   it("captures AeroSpace workspace snapshots through injected exec", async () => {
@@ -23,7 +23,7 @@ describe("workspace controller", () => {
     const controller = new AerospaceWorkspaceController(exec);
     const snapshot = await controller.capture();
 
-    assert.deepEqual(calls, [{ command: "aerospace", args: ["list-windows", "--all", "--json"] }]);
+    assert.deepEqual(calls, [captureWorkspacePlan()]);
     assert.deepEqual(snapshot, {
       backend: "aerospace",
       windows: [
