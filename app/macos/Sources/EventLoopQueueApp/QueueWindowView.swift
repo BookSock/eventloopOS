@@ -92,7 +92,8 @@ struct QueueWindowView: View {
                 taskSessions: viewModel.taskSessions,
                 selectedTaskSessions: viewModel.selectedTaskSessions,
                 taskBindingState: viewModel.taskBindingState,
-                canExecuteRecommendedAction: viewModel.canExecuteSelectedRecommendedAction
+                canExecuteRecommendedAction: viewModel.canExecuteSelectedRecommendedAction,
+                recommendedActionBlockReason: viewModel.selectedRecommendedActionBlockReason
             ) {
                 Task {
                     await viewModel.doneAndNext()
@@ -216,6 +217,7 @@ private struct PacketDetail: View {
     let selectedTaskSessions: [TaskSession]
     let taskBindingState: TaskBindingState
     let canExecuteRecommendedAction: Bool
+    let recommendedActionBlockReason: String?
     let doneAndNext: () -> Void
     let executeRecommendedAction: () -> Void
     let moveToNext: () -> Void
@@ -319,6 +321,13 @@ private struct PacketDetail: View {
                 }
 
                 Spacer()
+
+                if let recommendedActionBlockReason {
+                    Text(recommendedActionBlockReason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("queue-recommended-action-block-reason")
+                }
 
                 HStack {
                     Spacer()

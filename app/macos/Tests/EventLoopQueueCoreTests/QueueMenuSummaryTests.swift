@@ -106,4 +106,20 @@ final class QueueMenuSummaryTests: XCTestCase {
 
         XCTAssertEqual(summary.workspaceRestoreLabel, "Workspace restored: 2 commands")
     }
+
+    func testSummaryShowsRecommendedActionBlockReason() {
+        let summary = QueueMenuSummary(
+            packets: SeededQueue.packets,
+            selectedPacket: SeededQueue.packets[0],
+            queueState: .loaded,
+            mode: .eventLoop,
+            contextRestoreState: .idle,
+            recommendedActionBlockReason: "Bind a task session to task_blog_feedback before resuming agent"
+        )
+
+        XCTAssertEqual(
+            summary.recommendedActionBlockReason,
+            "Bind a task session to task_blog_feedback before resuming agent"
+        )
+    }
 }

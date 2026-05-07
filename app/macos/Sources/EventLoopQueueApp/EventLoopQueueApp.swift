@@ -93,7 +93,8 @@ private struct QueueMenuView: View {
             mode: viewModel.mode,
             contextRestoreState: viewModel.contextRestoreState,
             workspaceRestoreState: viewModel.workspaceRestoreState,
-            manualWorkspaceCaptureState: viewModel.manualWorkspaceCaptureState
+            manualWorkspaceCaptureState: viewModel.manualWorkspaceCaptureState,
+            recommendedActionBlockReason: viewModel.selectedRecommendedActionBlockReason
         )
     }
 
@@ -121,6 +122,11 @@ private struct QueueMenuView: View {
                 Text(manualWorkspaceLabel)
                     .lineLimit(2)
                     .accessibilityIdentifier("queue-menu-manual-workspace")
+            }
+            if let blockReason = summary.recommendedActionBlockReason {
+                Text(blockReason)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("queue-menu-recommended-action-block-reason")
             }
 
             Divider()

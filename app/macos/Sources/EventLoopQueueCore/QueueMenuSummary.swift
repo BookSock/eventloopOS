@@ -7,6 +7,7 @@ public struct QueueMenuSummary: Equatable, Sendable {
     public let restoreLabel: String?
     public let workspaceRestoreLabel: String?
     public let manualWorkspaceLabel: String?
+    public let recommendedActionBlockReason: String?
 
     public init(
         packets: [ReviewPacket],
@@ -15,9 +16,11 @@ public struct QueueMenuSummary: Equatable, Sendable {
         mode: EventLoopMode,
         contextRestoreState: ContextRestoreState,
         workspaceRestoreState: WorkspaceRestoreState = .idle,
-        manualWorkspaceCaptureState: ManualWorkspaceCaptureState = .idle
+        manualWorkspaceCaptureState: ManualWorkspaceCaptureState = .idle,
+        recommendedActionBlockReason: String? = nil
     ) {
         self.modeLabel = mode == .manual ? "Manual Mode" : "Event Loop"
+        self.recommendedActionBlockReason = recommendedActionBlockReason
 
         switch queueState {
         case .loading:
