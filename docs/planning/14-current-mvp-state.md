@@ -184,7 +184,7 @@ Strong tests now:
 - `pnpm run ci` now runs `pnpm test:proof-agent` first to prove the override/manifest path with a cheap `node --version` command, then runs the full `pnpm proof:agent` bundle as the required correctness gate.
 - `pnpm dogfood:check` exits non-zero when local dogfood thresholds fail. Checks currently cover ignored queue rate, restore success, task followup failures, stale queue leases, and pending restore age.
 - `pnpm dogfood:check` also reads attempted task-message history through `/task-messages?status=attempted` and fails when a task message stays in `attempted` longer than `EVENTLOOPOS_DOGFOOD_MAX_ATTEMPTED_TASK_MESSAGE_AGE_MS`.
-- `pnpm proof:live` writes `artifacts/proof-live-manifest.json`, runs `test:e2e:live:boot` with dogfood threshold checks against the temp live orchestrator before shutdown, runs live Mac queue mutation + task handoff smokes, then runs `task:runtime-smoke`.
+- `pnpm proof:live` writes `artifacts/proof-live-manifest.json`, runs `test:e2e:live:boot` with dogfood threshold checks against the temp live orchestrator before shutdown, runs provider deeplink proof, runs live Mac queue mutation + task handoff smokes, then runs `task:runtime-smoke`.
 - `pnpm test:e2e:macos-live-ui` starts a temp live orchestrator, launches the packaged Mac queue app against it, uses AppleScript/System Events to click `Pull Next Paper` and `Done / Next`, then asserts `/queue?state=done`, `/activity`, and `/metrics` changed. `pnpm proof:live` now includes this smoke.
 - `pnpm test:e2e:macos-live-handoff` starts a temp live orchestrator with a task-bound packet, launches the packaged Mac queue app, clicks `Pull Next Paper` and `Route to task agent`, then asserts `/queue?state=done`, `/activity`, `/metrics`, and `/task-sessions` prove the followup was sent and `task_session_blog` moved to `running`. `pnpm proof:live` includes this smoke.
 - macOS render E2E now writes inspectable screenshots to `artifacts/screenshots/queue-window-selected-packet.png` and `artifacts/screenshots/queue-window-long-packet.png`; the long-content fixture catches basic one-paper wrapping/nonblank regressions.
@@ -195,7 +195,7 @@ Strong tests now:
 - Real local Postgres + local-events MCP dogfood proof passed: started Docker Postgres, ran orchestrator with `DATABASE_URL`, `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json`, and `EVENTLOOPOS_LOCAL_EVENTS_PATH=config/local-events.example.json`, ran `poll:mcp:once`, saw one ambiguous human-queue packet, then `dogfood:check` passed. After orchestrator restart, `/queue`, `/activity`, and `/metrics` still showed the routed item and counters from Postgres.
 - `pnpm run test:e2e:postgres-mcp-dogfood` now automates that proof: Docker Postgres up/down, local-events MCP poll, dogfood threshold check, orchestrator restart, persisted queue/activity/metrics assertions.
 - `pnpm run test:e2e:claude-real-followup` is a gated real Claude smoke. Without `EVENTLOOPOS_ENABLE_REAL_CLAUDE_SMOKE=1` it prints a machine-readable skip. With the flag it creates a disposable Claude session using Haiku, disables tools, caps per-call budget, starts orchestrator with that session, sends a followup through `/task-sessions/:id/followup`, and asserts the task message is `sent` with the same native session ID.
-- `pnpm run test:e2e:provider-deeplink` starts a temp orchestrator with local-events MCP fixtures and proves Slack permalink, GitHub code-line permalink, and generic browser URL resources survive MCP mapping into stored event context with provider details, restore confidence, and confidence reasons.
+- `pnpm run test:e2e:provider-deeplink` starts a temp orchestrator with local-events MCP fixtures and proves Slack permalink, GitHub code-line permalink, and generic browser URL resources survive MCP mapping into stored event context with provider details, restore confidence, and confidence reasons. `pnpm proof:live` includes this deterministic smoke.
 - Opt-in AppleScript UI smoke now proves the Pull Next Paper menu item exists and that Manual Mode captures workspace only on return to Event Loop, then Restore Manual Workspace returns the user to manual mode.
 
 Weak tests:
@@ -210,7 +210,7 @@ Weak tests:
 ## Next Best Work
 
 1. Add stricter runtime normalization later only if provider-specific metadata starts leaking into queue UI or history.
-2. Decide whether to promote `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
+2. Decide whether to promote `test:e2e:postgres-mcp-dogfood` and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
 3. Add app bundle/XCUITest smoke only if the current SwiftUI render, launch, AppleScript, and live Mac handoff smokes stop catching enough UI regressions.
 4. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.
 5. Later: real microphone/wake-word proof and always-listening voice UX.

@@ -193,7 +193,7 @@ Real gaps:
 - Dogfood thresholds now have `pnpm dogfood:check`: ignored queue rate, restore success rate, task followup failures, stale leases, and pending restore age.
 - Mac queue UI now makes current paper more dominant by narrowing the stack column and enlarging the selected packet header.
 - Composite runtime dogfood now has `pnpm task:runtime-smoke`, which starts a temp daemon and proves live Codex app-server sessions plus a configured Claude session appear through the same task-session API.
-- Live proof now has `pnpm proof:live`: it writes a separate proof manifest, runs a temp live orchestrator smoke with dogfood threshold checks before shutdown, and runs the composite task-runtime smoke.
+- Live proof now has `pnpm proof:live`: it writes a separate proof manifest, runs a temp live orchestrator smoke with dogfood threshold checks before shutdown, runs provider deeplink proof, and runs the composite task-runtime smoke.
 - Mac app now has a true Pull Next Paper action and global hotkey (`Cmd+Opt+Shift+J`): it leases/presents the current top packet, returns from Manual Mode if needed, captures the manual workspace on return, loads bound task sessions, and plans queue workspace restore.
 - Mac queue load/refresh is read-only: opening the app shows the stack without selecting/leasing active work. `Pull Next Paper` is now the canonical transition into a current paper.
 - Live Mac queue mutation proof now exists: `pnpm test:e2e:macos-live-ui` launches the packaged app against a temp live orchestrator, clicks `Pull Next Paper` and `Done / Next`, then asserts queue done state, activity, and metrics. It is included in `pnpm proof:live`.
@@ -203,7 +203,7 @@ Real gaps:
 - Real local Postgres + local-events MCP dogfood proof has been run: MCP poll created one ambiguous intake item, `dogfood:check` passed, and queue/activity/metrics survived orchestrator restart against the same Postgres database.
 - The same proof is scripted as `pnpm run test:e2e:postgres-mcp-dogfood`, so future agents can rerun it instead of relying on notes.
 - Real Claude followup proof now exists behind `EVENTLOOPOS_ENABLE_REAL_CLAUDE_SMOKE=1`: disposable Haiku session, tools disabled, budget capped, orchestrator session exposure, and real `/task-sessions/:id/followup` send.
-- Provider deeplink proof now exists as `pnpm run test:e2e:provider-deeplink`: Slack permalink, GitHub code-line permalink, and generic browser fallback travel through MCP mapping into stored event context with confidence metadata.
+- Provider deeplink proof now exists as `pnpm run test:e2e:provider-deeplink`: Slack permalink, GitHub code-line permalink, and generic browser fallback travel through MCP mapping into stored event context with confidence metadata. It is included in `pnpm proof:live`.
 - GatewayStore remains broad. Conformance tests reduce risk; split into smaller store ports later, after dogfood-critical safety/history patches.
 
 ## Second Plan Audit - 2026-05-07
@@ -223,7 +223,7 @@ Review outcome:
 Near-term implementation order:
 
 1. Add stricter runtime normalization only if dogfood shows provider-specific shape drift.
-2. Promote extra live smokes into `proof:live` when local prerequisites make sense.
+2. Promote Postgres MCP dogfood and real Claude followup into `proof:live` only when local prerequisites make sense.
 3. Keep XCUITest as later hardening unless AppleScript/live smokes miss real bugs.
 
 Latest user steering:
@@ -248,6 +248,6 @@ Release guardrails:
 ## Next Best Work
 
 1. Add stricter runtime normalization only if dogfood shows provider-specific shape drift.
-2. Decide whether `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
+2. Decide whether `test:e2e:postgres-mcp-dogfood` and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
 3. Add app bundle/XCUITest smoke later if current AppleScript/live smokes miss UI regressions.
 4. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.
