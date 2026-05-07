@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-integration test-e2e test-e2e-browser test-e2e-native-browser test-e2e-native-browser-real-orchestrator test-e2e-macos test-e2e-live test-e2e-live-boot test-e2e-live-full test-db-docker test-db-native dev-doctor dev-postgres live-aerospace voice-listen-command test-contracts test-architecture test-mcp-stability fixtures-seed packets-golden lint typecheck ci install
+.PHONY: test test-unit test-integration test-e2e test-e2e-browser test-e2e-native-browser test-e2e-native-browser-real-orchestrator test-e2e-mac-browser-restore test-e2e-macos test-e2e-live test-e2e-live-boot test-e2e-live-full test-db-docker test-db-native dev-doctor dev-postgres live-aerospace voice-listen-command test-contracts test-architecture test-mcp-stability fixtures-seed packets-golden lint typecheck ci install
 
 PNPM ?= pnpm
 
@@ -25,6 +25,9 @@ test-e2e-native-browser:
 
 test-e2e-native-browser-real-orchestrator:
 	$(PNPM) test:e2e:native-browser-real-orchestrator
+
+test-e2e-mac-browser-restore:
+	$(PNPM) test:e2e:mac-browser-restore
 
 test-e2e-macos:
 	$(PNPM) test:e2e:macos

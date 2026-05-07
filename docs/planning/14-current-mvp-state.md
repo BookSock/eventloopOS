@@ -65,10 +65,11 @@ Done:
 - Restore request status refresh.
 - Automatic restore request status polling while Mac UI is open.
 - UI shows queued/done/failed restore state.
+- Live Mac client + Chromium extension restore smoke exists: Mac `HTTPQueueClient` creates a real orchestrator restore request, Chromium extension claims it, restores the tab/scroll, and Mac-readable restore request status becomes `done`.
 
 Gap:
 
-- No real installed Chrome extension + Mac app combined live UI test yet.
+- No app bundle/XCUITest proof of the full installed Mac UI flow yet.
 
 ## Orchestrator Loop
 
@@ -107,6 +108,7 @@ Strong tests now:
 - Browser E2E launches two Chromium profiles and proves different restore-request lease owners.
 - Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06 with `pnpm run test:e2e:native-browser`.
 - Real orchestrator + installed Chromium extension/native host smoke exists as `pnpm run test:e2e:native-browser-real-orchestrator`; it starts the actual orchestrator, captures a real browser tab through native messaging, verifies `store_only`, checks no human queue item was created, and checks browser context search can find the captured tab.
+- Mac client + browser restore smoke exists as `pnpm run test:e2e:mac-browser-restore`; it starts a real orchestrator, has Swift `HTTPQueueClient` create a restore request, and proves the Chromium extension claims/completes it.
 - Full live boot smoke can reuse one running orchestrator for harness scenarios, Mac client live smoke, browser extension E2E, and installed Chromium extension/native host capture with `pnpm run test:e2e:live:full`.
 - `voice:listen` accepts line-delimited local STT transcript streams, optional wake phrase filtering, and forwards into `/voice/commands`.
 - `voice:listen-command` lets whisper.cpp stream, MLX Whisper wrappers, or other local STT tools feed the same router while staying unit-testable through an injected process.
@@ -118,11 +120,11 @@ Weak tests:
 - Docker-backed Postgres live tests skip when Docker absent, but native Postgres live tests pass on this machine.
 - AeroSpace live restore needs installed/running AeroSpace.
 - AeroSpace live smoke exists, but `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm --filter @eventloopos/orchestrator run live:aerospace` currently reports `server_unavailable` because AeroSpace.app is not running.
-- No full installed extension + native host + Mac app manual UI flow; current coverage proves Mac client/orchestrator API round-trip, real installed extension/native host/orchestrator browser capture, and rendered Mac queue view, but not one combined installed flow.
+- No full app bundle/XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, and rendered Mac queue view, but not one combined installed Mac UI flow.
 - No real microphone wake-word/STT test yet; current coverage proves the local transcript command pipe and router contract with fake process output.
 
 ## Next Best Work
 
 1. Run Docker/Postgres DB tests on machine with Docker daemon and record pass/fail.
-2. Add installed extension + native host + Mac app rendered UI smoke.
+2. Add app bundle/XCUITest smoke for installed Mac UI flow.
 3. Add real microphone/STT adapter feeding `voice:listen` (whisper.cpp, MLX Whisper, or macOS Speech).

@@ -34,6 +34,11 @@ try {
       EVENTLOOPOS_ENABLE_REAL_ORCHESTRATOR_NATIVE_BROWSER_SMOKE: "1",
       EVENTLOOPOS_REAL_ORCHESTRATOR_URL: orchestratorUrl
     });
+    await spawnChecked("node", ["--test", "app/browser-extension/e2e/mac-browser-restore.test.js"], {
+      ...process.env,
+      EVENTLOOPOS_ENABLE_MAC_BROWSER_RESTORE_SMOKE: "1",
+      EVENTLOOPOS_REAL_ORCHESTRATOR_URL: orchestratorUrl
+    });
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

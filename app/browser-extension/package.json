@@ -9,7 +9,8 @@
     "test:e2e": "node --test e2e/*.test.js",
     "test:e2e:browser": "node --test e2e/*.test.js",
     "test:e2e:native-browser": "EVENTLOOPOS_ENABLE_NATIVE_BROWSER_SMOKE=1 node --test e2e/native-messaging-host.test.js",
-    "test:e2e:native-browser-real-orchestrator": "pnpm --filter @eventloopos/orchestrator run build && EVENTLOOPOS_ENABLE_REAL_ORCHESTRATOR_NATIVE_BROWSER_SMOKE=1 node --test e2e/native-messaging-host.test.js"
+    "test:e2e:native-browser-real-orchestrator": "pnpm --filter @eventloopos/orchestrator run build && EVENTLOOPOS_ENABLE_REAL_ORCHESTRATOR_NATIVE_BROWSER_SMOKE=1 node --test e2e/native-messaging-host.test.js",
+    "test:e2e:mac-browser-restore": "pnpm --filter @eventloopos/orchestrator run build && EVENTLOOPOS_ENABLE_MAC_BROWSER_RESTORE_SMOKE=1 node --test e2e/mac-browser-restore.test.js"
   },
   "devDependencies": {
     "playwright": "1.59.1"
