@@ -1,7 +1,11 @@
 export const DEFAULT_ORCHESTRATOR_URL = "http://127.0.0.1:4377";
 export const ORCHESTRATOR_URL_KEY = "orchestratorUrl";
+export const INSTALLATION_ID_KEY = "installationId";
+export const RESTORE_REQUEST_LEASE_OWNER_PREFIX = "eventloop-browser-extension";
 
-export function createExtensionConfig({ storageArea } = {}) {
+export function createExtensionConfig({ storageArea, randomId = defaultRandomId } = {}) {
+  let cachedInstallationId;
+
   async function get() {
     const stored = await getStoredConfig(storageArea);
     return {
@@ -24,7 +28,31 @@ export function createExtensionConfig({ storageArea } = {}) {
     return config.orchestratorUrl;
   }
 
-  return { get, set, getOrchestratorUrl };
+  async function getRestoreRequestLeaseOwner() {
+    const installationId = await getInstallationId();
+    return `${RESTORE_REQUEST_LEASE_OWNER_PREFIX}-${installationId}`;
+  }
+
+  async function getInstallationId() {
+    if (cachedInstallationId) {
+      return cachedInstallationId;
+    }
+
+    const stored = storageArea?.get ? await storageArea.get({ [INSTALLATION_ID_KEY]: undefined }) : {};
+    const existing = normalizeInstallationId(stored[INSTALLATION_ID_KEY]);
+    if (existing) {
+      cachedInstallationId = existing;
+      return cachedInstallationId;
+    }
+
+    cachedInstallationId = normalizeInstallationId(randomId()) ?? "ephemeral";
+    if (storageArea?.set) {
+      await storageArea.set({ [INSTALLATION_ID_KEY]: cachedInstallationId });
+    }
+    return cachedInstallationId;
+  }
+
+  return { get, set, getOrchestratorUrl, getRestoreRequestLeaseOwner };
 }
 
 export function normalizeOrchestratorUrl(value) {
@@ -54,4 +82,19 @@ async function getStoredConfig(storageArea) {
   }
 
   return await storageArea.get({ [ORCHESTRATOR_URL_KEY]: DEFAULT_ORCHESTRATOR_URL });
+}
+
+function normalizeInstallationId(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  return normalized || undefined;
+}
+
+function defaultRandomId() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }

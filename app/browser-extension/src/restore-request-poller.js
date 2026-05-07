@@ -7,7 +7,8 @@ export function createRestoreRequestPoller({
   controller,
   fetchImpl = globalThis.fetch?.bind(globalThis),
   orchestratorUrl = DEFAULT_ORCHESTRATOR_URL,
-  getOrchestratorUrl
+  getOrchestratorUrl,
+  getLeaseOwner
 }) {
   if (!controller?.restore) {
     throw new Error("controller.restore is required");
@@ -18,6 +19,7 @@ export function createRestoreRequestPoller({
 
   async function pollOnce() {
     const nextOrchestratorUrl = getOrchestratorUrl ? await getOrchestratorUrl() : orchestratorUrl;
+    const leaseOwner = getLeaseOwner ? await getLeaseOwner() : RESTORE_REQUEST_LEASE_OWNER;
     const baseUrl = nextOrchestratorUrl.replace(/\/+$/, "");
     const next = await fetchJson(fetchImpl, `${baseUrl}/contexts/restore-requests/claim-next`, {
       method: "POST",
@@ -25,7 +27,7 @@ export function createRestoreRequestPoller({
         "content-type": "application/json"
       },
       body: JSON.stringify({
-        lease_owner: RESTORE_REQUEST_LEASE_OWNER,
+        lease_owner: leaseOwner,
         lease_ms: 60_000
       })
     });

@@ -16,7 +16,7 @@ This is the current reality map for agents. Pick the narrowest command that prov
 | --- | --- | --- | --- |
 | Orchestrator API + router | `pnpm --filter @eventloopos/orchestrator test` | Event routing, queue lease/done, task sessions, MCP polling, workspace API, voice command path | Docker-backed DB tests skip without container runtime. |
 | Postgres queue store | `pnpm run test:db:native` | Migrations, idempotent events, queue leases, stale lease reap, context restore request persistence against real local Postgres | Uses temp native Postgres cluster and deletes it. |
-| Browser extension | `pnpm run test:e2e:browser` | MV3 extension capture/restore in Chromium via Playwright persistent context | No real native host unless opt-in smoke is used. |
+| Browser extension | `pnpm run test:e2e:browser` | MV3 extension capture/restore in Chromium via Playwright persistent context, including distinct restore-request lease owners across two Chromium profiles | No real native host unless opt-in smoke is used. |
 | Installed native browser bridge | `pnpm run test:e2e:native-browser` | Installed Chromium native messaging manifest, real extension `chrome.runtime.sendNativeMessage`, native host forwarding to fixture server | Mutates and restores temporary native messaging manifests. |
 | Installed native browser + real orchestrator | `pnpm run test:e2e:native-browser-real-orchestrator` | Real orchestrator receives browser capture through installed extension/native host, routes `store_only`, creates no queue item, stores searchable context | Starts its own orchestrator on random port. |
 | macOS queue UI render | `pnpm run test:e2e:macos` | Real SwiftUI `QueueWindowView` renders seeded queue data to nonblank image | No app bundle/XCUITest yet. |
@@ -47,4 +47,3 @@ Do not claim a subsystem works from `make ci` alone when the subsystem requires 
 - Real AeroSpace live proof needs AeroSpace.app running.
 - Docker Postgres proof needs Docker daemon. Native Postgres proof is available and passed locally.
 - Real microphone/STT proof is not implemented. Transcript command pipe is test-covered with fake process output.
-- Multi-profile browser extension lease-owner behavior is not live-proven yet.

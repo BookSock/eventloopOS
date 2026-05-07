@@ -36,6 +36,7 @@ Done:
 - Extension options page stores orchestrator URL in `chrome.storage.local`.
 - Runtime messages can get/set config.
 - Restore poller reads URL at poll time, not hardcoded forever.
+- Restore poller uses a per-profile stable lease owner from `chrome.storage.local`, avoiding fixed-owner collisions across Chromium profiles.
 - Chrome alarm wakes poller.
 - Poller claims work through `/contexts/restore-requests/claim-next`.
 - Poller restores browser tab/scroll.
@@ -93,7 +94,6 @@ Done:
 
 Gap:
 
-- Browser extension has one fixed lease owner; installed multi-profile behavior still needs live proof.
 - Docker Postgres dev runner exists (`pnpm --filter @eventloopos/orchestrator run test:db:docker`) but has not passed here because local Docker daemon is absent. Native runner passed locally with `pnpm run test:db:native`.
 
 ## Testing Loop
@@ -104,6 +104,7 @@ Strong tests now:
 - Fixture E2E for agent loops.
 - Live harness scenario for browser store-only + restore request peek/claim/done status.
 - Real Chromium Playwright extension E2E.
+- Browser E2E launches two Chromium profiles and proves different restore-request lease owners.
 - Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06 with `pnpm run test:e2e:native-browser`.
 - Real orchestrator + installed Chromium extension/native host smoke exists as `pnpm run test:e2e:native-browser-real-orchestrator`; it starts the actual orchestrator, captures a real browser tab through native messaging, verifies `store_only`, checks no human queue item was created, and checks browser context search can find the captured tab.
 - Full live boot smoke can reuse one running orchestrator for harness scenarios, Mac client live smoke, browser extension E2E, and installed Chromium extension/native host capture with `pnpm run test:e2e:live:full`.

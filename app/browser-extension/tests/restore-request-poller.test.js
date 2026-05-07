@@ -151,6 +151,30 @@ test("restore request poller reads orchestrator URL at poll time", async () => {
   assert.deepEqual(requestedUrls, ["http://127.0.0.1:9999/contexts/restore-requests/claim-next"]);
 });
 
+test("restore request poller reads lease owner at poll time", async () => {
+  const claimBodies = [];
+  const poller = createRestoreRequestPoller({
+    controller: {
+      restore: async () => {
+        throw new Error("restore should not run");
+      }
+    },
+    fetchImpl: async (_url, init = {}) => {
+      claimBodies.push(JSON.parse(init.body));
+      return jsonResponse({ restore_request: null });
+    },
+    getLeaseOwner: async () => "eventloop-browser-extension-profile-a"
+  });
+
+  assert.deepEqual(await poller.pollOnce(), { ok: true, restored: false });
+  assert.deepEqual(claimBodies, [
+    {
+      lease_owner: "eventloop-browser-extension-profile-a",
+      lease_ms: 60000
+    }
+  ]);
+});
+
 test("ensureRestorePollAlarm creates missing MV3 alarm", async () => {
   const calls = [];
   const alarmsApi = {

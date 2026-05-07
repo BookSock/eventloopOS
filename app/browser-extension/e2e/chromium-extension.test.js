@@ -12,7 +12,9 @@ const extensionDir = path.resolve(fileURLToPath(new URL("..", import.meta.url)))
 test("MV3 extension captures and restores browser page context in Chromium", async () => {
   const server = await startFixtureServer();
   const userDataDir = await mkdtemp(path.join(tmpdir(), "eventloopos-browser-e2e-"));
+  const secondUserDataDir = await mkdtemp(path.join(tmpdir(), "eventloopos-browser-e2e-profile-"));
   let context;
+  let secondContext;
 
   try {
     context = await chromium.launchPersistentContext(userDataDir, {
@@ -108,14 +110,47 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
       assert.ok(body);
       return body;
     }, { timeoutMs: 5_000 });
+    const firstInstallation = await serviceWorker.evaluate(async () => await chrome.storage.local.get("installationId"));
     assert.equal(pollDoneBody.result.ok, true);
     assert.equal(pollDoneBody.result.url, url);
     assert.equal(pollDoneBody.result.restoredScroll, true);
     await assertEventually(async () => {
       assert.equal(await page.evaluate(() => Math.round(window.scrollY)), 840);
     });
+
+    secondContext = await chromium.launchPersistentContext(secondUserDataDir, {
+      channel: "chromium",
+      headless: true,
+      args: [`--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`]
+    });
+    const secondServiceWorker =
+      secondContext.serviceWorkers()[0] ?? (await secondContext.waitForEvent("serviceworker", { timeout: 10_000 }));
+    const secondPage = secondContext.pages()[0] ?? (await secondContext.newPage());
+    await secondPage.goto(url);
+    await secondPage.waitForSelector("[data-context-quote]");
+    await sendRuntimeMessageFromTab(secondServiceWorker, url, {
+      type: "eventloop.setConfig",
+      config: { orchestratorUrl: server.origin }
+    });
+    await secondServiceWorker.evaluate(async () => {
+      await chrome.alarms.create("eventloop.restoreRequests.poll", { when: Date.now() + 100 });
+    });
+    await assertEventually(async () => {
+      assert.equal(server.restoreClaimBodies().length, 2);
+    }, { timeoutMs: 5_000 });
+    const secondInstallation = await secondServiceWorker.evaluate(async () => await chrome.storage.local.get("installationId"));
+
+    assert.match(firstInstallation.installationId, /^[a-z0-9_-]+$/);
+    assert.match(secondInstallation.installationId, /^[a-z0-9_-]+$/);
+    assert.notEqual(firstInstallation.installationId, secondInstallation.installationId);
+    assert.notEqual(
+      server.restoreClaimBodies()[0].lease_owner,
+      server.restoreClaimBodies()[1].lease_owner
+    );
   } finally {
+    await secondContext?.close();
     await context?.close();
+    await rm(secondUserDataDir, { recursive: true, force: true });
     await rm(userDataDir, { recursive: true, force: true });
     await server.close();
   }
@@ -123,6 +158,7 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
 
 async function startFixtureServer() {
   let restoreDoneBody = null;
+  const restoreClaimBodies = [];
   const pendingRestoreRequest = {
     id: "ctx_restore_e2e",
     status: "pending",
@@ -169,7 +205,8 @@ async function startFixtureServer() {
 
     if (request.method === "POST" && request.url === "/contexts/restore-requests/claim-next") {
       const claimBody = JSON.parse(await readRequestBody(request));
-      assert.equal(claimBody.lease_owner, "eventloop-browser-extension");
+      assert.match(claimBody.lease_owner, /^eventloop-browser-extension-[a-z0-9_-]+$/);
+      restoreClaimBodies.push(claimBody);
       pendingRestoreRequest.status = "leased";
       pendingRestoreRequest.lease_owner = claimBody.lease_owner;
       response.writeHead(200, { "content-type": "application/json" });
@@ -203,6 +240,7 @@ async function startFixtureServer() {
   return {
     origin: `http://127.0.0.1:${address.port}`,
     restoreDoneBody: () => restoreDoneBody,
+    restoreClaimBodies: () => restoreClaimBodies,
     close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
   };
 }

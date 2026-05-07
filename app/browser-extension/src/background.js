@@ -20,7 +20,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) =>
 
 const restoreRequestPoller = createRestoreRequestPoller({
   controller,
-  getOrchestratorUrl: configStore.getOrchestratorUrl
+  getOrchestratorUrl: configStore.getOrchestratorUrl,
+  getLeaseOwner: configStore.getRestoreRequestLeaseOwner
 });
 
 chrome.alarms?.onAlarm?.addListener((alarm) => {

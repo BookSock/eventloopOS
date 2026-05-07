@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   DEFAULT_ORCHESTRATOR_URL,
+  INSTALLATION_ID_KEY,
   ORCHESTRATOR_URL_KEY,
   createExtensionConfig,
   normalizeOrchestratorUrl
@@ -12,6 +13,41 @@ test("extension config defaults orchestrator URL when storage is unavailable", a
 
   assert.deepEqual(await config.get(), { orchestratorUrl: DEFAULT_ORCHESTRATOR_URL });
   assert.equal(await config.getOrchestratorUrl(), DEFAULT_ORCHESTRATOR_URL);
+});
+
+test("extension config creates and persists stable restore lease owner", async () => {
+  const writes = [];
+  let stored = {};
+  const config = createExtensionConfig({
+    randomId: () => "Profile One: ABC",
+    storageArea: {
+      get: async (defaults) => ({ ...defaults, ...stored }),
+      set: async (payload) => {
+        writes.push(payload);
+        stored = { ...stored, ...payload };
+      }
+    }
+  });
+
+  assert.equal(await config.getRestoreRequestLeaseOwner(), "eventloop-browser-extension-profile-one-abc");
+  assert.equal(await config.getRestoreRequestLeaseOwner(), "eventloop-browser-extension-profile-one-abc");
+  assert.deepEqual(writes, [{ [INSTALLATION_ID_KEY]: "profile-one-abc" }]);
+});
+
+test("extension config reuses stored restore lease owner", async () => {
+  const config = createExtensionConfig({
+    randomId: () => {
+      throw new Error("random id should not be generated");
+    },
+    storageArea: {
+      get: async (defaults) => ({ ...defaults, [INSTALLATION_ID_KEY]: "stored-profile-123" }),
+      set: async () => {
+        throw new Error("stored installation id should not be rewritten");
+      }
+    }
+  });
+
+  assert.equal(await config.getRestoreRequestLeaseOwner(), "eventloop-browser-extension-stored-profile-123");
 });
 
 test("extension config reads and normalizes stored orchestrator URL", async () => {
