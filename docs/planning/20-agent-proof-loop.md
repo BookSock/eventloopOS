@@ -21,11 +21,16 @@ Keep `make ci` as baseline correctness.
 Current implementation:
 
 - `pnpm proof:agent`
+- `pnpm proof:live`
 - `make proof-agent`
+- `make proof-live`
 - default commands: lint, typecheck, test, test:e2e
 - manifest: `artifacts/proof-manifest.json`
+- live manifest: `artifacts/proof-live-manifest.json`
 - per-command logs: `artifacts/proof-agent/<run-id>/`
 - override for cheap CI/tool smoke: `EVENTLOOPOS_PROOF_COMMANDS='[...]'`
+
+`proof:agent` is the broad fixture/default lane. `proof:live` is the stronger local lane: it starts a temp orchestrator, runs live E2E, runs dogfood threshold checks before shutdown, then verifies the composite Codex + Claude task-runtime surface.
 
 The handoff lane should cover:
 

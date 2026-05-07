@@ -17,4 +17,5 @@ artifacts/voice/*
 artifacts/proof-agent/*
 artifacts/proof-manifest.json
 artifacts/proof-agent-smoke-manifest.json
+artifacts/proof-live-manifest.json
 !artifacts/**/.gitkeep

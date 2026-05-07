@@ -26,6 +26,7 @@
     "dogfood:review": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dogfood:review",
     "dogfood:check": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dogfood:check",
     "proof:agent": "bin/proof-agent",
+    "proof:live": "EVENTLOOPOS_LIVE_SMOKE_DOGFOOD_CHECK=1 EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"live orchestrator boot proof\",\"cmd\":\"pnpm\",\"args\":[\"test:e2e:live:boot\"]},{\"name\":\"task runtime smoke\",\"cmd\":\"pnpm\",\"args\":[\"task:runtime-smoke\"]}]' bin/proof-agent --manifest artifacts/proof-live-manifest.json",
     "test:proof-agent": "EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"proof-agent-smoke\",\"cmd\":\"node\",\"args\":[\"--version\"]}]' bin/proof-agent --manifest artifacts/proof-agent-smoke-manifest.json",
     "dev:postgres": "pnpm --filter @eventloopos/orchestrator run dev:postgres",
     "dev:postgres:up": "pnpm --filter @eventloopos/orchestrator run dev:postgres up",

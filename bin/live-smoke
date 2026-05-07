@@ -28,6 +28,12 @@ try {
     EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL: orchestratorUrl
   });
   await spawnChecked("pnpm", ["--filter", "@eventloopos/browser-extension", "test:e2e"]);
+  if (process.env.EVENTLOOPOS_LIVE_SMOKE_DOGFOOD_CHECK === "1") {
+    await spawnChecked("pnpm", ["dogfood:check"], {
+      ...process.env,
+      EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl
+    });
+  }
   if (process.env.EVENTLOOPOS_ENABLE_NATIVE_BROWSER_LIVE_SMOKE === "1") {
     await spawnChecked("node", ["--test", "app/browser-extension/e2e/native-messaging-host.test.js"], {
       ...process.env,
