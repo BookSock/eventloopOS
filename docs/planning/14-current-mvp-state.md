@@ -11,6 +11,7 @@ Repo now has working MVP spine:
 - Test harness = repeatable agent feedback loop.
 - `pnpm run test:e2e:live:boot` boots orchestrator, runs live harness/native/browser E2E, then stops server.
 - Boot live smoke also runs Mac `HTTPQueueClient` against the live orchestrator and proves context restore request create/read round-trip.
+- `pnpm run test:e2e:live:full` runs the same booted-orchestrator smoke plus installed Chromium extension/native host capture against that same orchestrator.
 
 Main command:
 
@@ -105,6 +106,7 @@ Strong tests now:
 - Real Chromium Playwright extension E2E.
 - Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06 with `pnpm run test:e2e:native-browser`.
 - Real orchestrator + installed Chromium extension/native host smoke exists as `pnpm run test:e2e:native-browser-real-orchestrator`; it starts the actual orchestrator, captures a real browser tab through native messaging, verifies `store_only`, checks no human queue item was created, and checks browser context search can find the captured tab.
+- Full live boot smoke can reuse one running orchestrator for harness scenarios, Mac client live smoke, browser extension E2E, and installed Chromium extension/native host capture with `pnpm run test:e2e:live:full`.
 - `voice:listen` accepts line-delimited local STT transcript streams, optional wake phrase filtering, and forwards into `/voice/commands`.
 - `voice:listen-command` lets whisper.cpp stream, MLX Whisper wrappers, or other local STT tools feed the same router while staying unit-testable through an injected process.
 - `dev:doctor` reports whether `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` is configured and can launch with `--help`; unconfigured voice command is treated as optional/pass.

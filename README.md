@@ -30,6 +30,12 @@ One-command local smoke that boots the orchestrator, waits for `/health`, runs l
 pnpm run test:e2e:live:boot
 ```
 
+Full local smoke adds installed Chromium extension/native host capture against the same booted orchestrator:
+
+```sh
+pnpm run test:e2e:live:full
+```
+
 Live proof covers seeded queue, MCP source discovery, MCP poll-and-route, Slack-specific and generic MCP source poll -> route -> done, poll-all MCP sweep -> route -> done, Slack/MCP task-hinted events injecting into an existing task session without creating a human queue item, voice transcript -> task-session followup routing, passive browser context `store_only`, ranked browser context search, context restore-plan generation, leased browser restore-request claim/done flow, ranked task-attached browser context search, task-session discovery + idempotent followup, task-session binding, native-host forwarding, browser runtime capture/restore messages, workspace status/capture/restore-plan contracts, workspace snapshot context through the queue API, workspace status/restore-disabled smoke in the live harness, and macOS manual-mode queue state with `Cmd-Option-Shift-M` global hotkey wiring. The macOS view model auto-renews queue leases, auto-refreshes context restore-request status, plans selected workspace restores, shows packet decision/risk/context/evidence detail with open links, and skips workspace restore planning while manual mode is active.
 
 Run `pnpm run dev:doctor` to build the orchestrator and get machine-readable readiness for local live checks: orchestrator health, AeroSpace daemon, Docker daemon, browser Playwright extension E2E readiness, optional voice transcript command readiness, and Codex app-server.

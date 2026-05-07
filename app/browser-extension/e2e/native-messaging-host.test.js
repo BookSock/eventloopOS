@@ -69,7 +69,10 @@ test("installed Chromium native host forwards real extension capture to real orc
   }
 
   const pageServer = await startStaticPageFixture();
-  const orchestrator = await startRealOrchestrator();
+  const externalOrchestratorOrigin = process.env.EVENTLOOPOS_REAL_ORCHESTRATOR_URL;
+  const orchestrator = externalOrchestratorOrigin
+    ? { origin: externalOrchestratorOrigin, close: async () => {} }
+    : await startRealOrchestrator();
   try {
     const result = await runInstalledBrowserCaptureSmoke({
       orchestratorOrigin: orchestrator.origin,

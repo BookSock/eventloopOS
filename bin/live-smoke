@@ -28,6 +28,13 @@ try {
     EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL: orchestratorUrl
   });
   await spawnChecked("pnpm", ["--filter", "@eventloopos/browser-extension", "test:e2e"]);
+  if (process.env.EVENTLOOPOS_ENABLE_NATIVE_BROWSER_LIVE_SMOKE === "1") {
+    await spawnChecked("node", ["--test", "app/browser-extension/e2e/native-messaging-host.test.js"], {
+      ...process.env,
+      EVENTLOOPOS_ENABLE_REAL_ORCHESTRATOR_NATIVE_BROWSER_SMOKE: "1",
+      EVENTLOOPOS_REAL_ORCHESTRATOR_URL: orchestratorUrl
+    });
+  }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
