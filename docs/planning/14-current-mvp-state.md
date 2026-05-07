@@ -88,6 +88,7 @@ Done:
 - `poll-and-route` for generic MCP sources uses the same ambient inference path, so user-installed MCP servers can emit event-ish items without `task_hint` and still reach the right task session when stored context is clear.
 - MCP source mappers normalize provider deeplinks for Slack, GitHub, Notion, Google Docs, Figma, and generic browser URLs into `resource.details` with stable provider IDs, confidence reasons, and browser fallback metadata.
 - `ORCHESTRATOR_TASK_SESSIONS=claude_cli` exposes configured Claude Code sessions from `ORCHESTRATOR_CLAUDE_SESSIONS` through the same task-session API; followups run `claude -p --output-format json --resume <session>` in the configured `cwd`.
+- `ORCHESTRATOR_TASK_SESSIONS` now accepts comma-separated modes, so `codex_app_server,claude_cli` exposes Codex App Server threads and configured Claude Code sessions in one daemon. A composite task-session controller lists both providers and routes followups/bindings to the owner runtime by session ID.
 - `GET /contexts` ranked search.
 - `POST /contexts/restore-plan`.
 - `POST /contexts/restore-requests`.
@@ -159,10 +160,10 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add composite Codex+Claude task-session runtime so both providers can run in one orchestrator.
-2. Continue extracting `server.ts` route/policy modules without behavior change.
-3. Add restart/failure smoke around Postgres state, restore retry, and task followup chaos.
-4. Add trend comparisons to `dogfood:review`.
-5. Add real Slack/GitHub MCP source dogfood config for Jason's installed servers, using the local-events MCP recipe as the template.
+1. Continue extracting `server.ts` route/policy modules without behavior change.
+2. Add restart/failure smoke around Postgres state, restore retry, and task followup chaos.
+3. Add trend comparisons to `dogfood:review`.
+4. Add real Slack/GitHub MCP source dogfood config for Jason's installed servers, using the local-events MCP recipe as the template.
+5. Real Claude+Codex composite dogfood with harmless sessions configured together.
 6. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
 7. Later: real microphone/wake-word proof and always-listening voice UX.

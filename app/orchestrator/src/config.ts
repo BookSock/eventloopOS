@@ -1,12 +1,14 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
+export type TaskSessionMode = "fake" | "codex_app_server" | "claude_cli";
+
 export type OrchestratorConfig = {
   host: string;
   port: number;
   seedFixturePath?: string;
   databaseUrl?: string;
-  taskSessions: "fake" | "codex_app_server" | "claude_cli" | "off";
+  taskSessions: "off" | TaskSessionMode[];
   codexTaskMap?: Record<string, string>;
   codexTaskMapPath?: string;
   claudeSessionsRaw?: string;
@@ -49,9 +51,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
   if (codexTaskMapPathRaw !== undefined && !codexTaskMapPathRaw.trim()) {
     issues.push("ORCHESTRATOR_CODEX_TASK_MAP_PATH must be non-empty when set");
   }
-  if (taskSessionsRaw !== "fake" && taskSessionsRaw !== "codex_app_server" && taskSessionsRaw !== "claude_cli" && taskSessionsRaw !== "off") {
-    issues.push("ORCHESTRATOR_TASK_SESSIONS must be fake, codex_app_server, claude_cli, or off");
-  }
+  const taskSessions = parseTaskSessionModes(taskSessionsRaw, issues);
   if (mcpSourcesRaw !== "seeded" && mcpSourcesRaw !== "config" && mcpSourcesRaw !== "off") {
     issues.push("ORCHESTRATOR_MCP_SOURCES must be seeded, config, or off");
   }
@@ -69,13 +69,6 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
     return { ok: false, issues };
   }
 
-  const taskSessions = taskSessionsRaw === "off"
-    ? "off"
-    : taskSessionsRaw === "codex_app_server"
-      ? "codex_app_server"
-      : taskSessionsRaw === "claude_cli"
-        ? "claude_cli"
-        : "fake";
   const mcpSources = mcpSourcesRaw === "config" ? "config" : mcpSourcesRaw === "off" ? "off" : "seeded";
   const workspace = workspaceRaw === "off" ? "off" : "aerospace";
   const workspaceExecute = workspaceExecuteRaw === "enabled" ? "enabled" : "disabled";
@@ -97,6 +90,33 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
       workspaceExecute,
     },
   };
+}
+
+function parseTaskSessionModes(raw: string, issues: string[]): OrchestratorConfig["taskSessions"] {
+  const values = raw.split(",").map((value) => value.trim()).filter(Boolean);
+  const allowed = new Set(["fake", "codex_app_server", "claude_cli", "off"]);
+  const unique = new Set(values);
+  const invalid = values.filter((value) => !allowed.has(value));
+
+  if (values.length === 0 || invalid.length > 0) {
+    issues.push("ORCHESTRATOR_TASK_SESSIONS must be fake, codex_app_server, claude_cli, off, or comma-separated task session modes");
+    return ["fake"];
+  }
+
+  if (unique.size !== values.length) {
+    issues.push("ORCHESTRATOR_TASK_SESSIONS must not contain duplicate modes");
+    return ["fake"];
+  }
+
+  if (unique.has("off")) {
+    if (values.length > 1) {
+      issues.push("ORCHESTRATOR_TASK_SESSIONS=off cannot be combined with other modes");
+      return "off";
+    }
+    return "off";
+  }
+
+  return values as TaskSessionMode[];
 }
 
 function resolveConfiguredPath(rawPath: string | undefined): string | undefined {

@@ -78,8 +78,8 @@ Current product target only needs Codex and Claude Code. Keep TaskSessionControl
 
 Near-term runtime shape:
 
-- Orchestrator should support Codex and Claude Code in the same daemon, not exactly one runtime mode.
-- Add a `CompositeTaskSessionController` that lists sessions from multiple controllers and routes each followup/binding to the controller that owns the session.
+- Orchestrator supports Codex and Claude Code in the same daemon through comma-separated `ORCHESTRATOR_TASK_SESSIONS=codex_app_server,claude_cli`.
+- `CompositeTaskSessionController` lists sessions from multiple controllers and routes each followup/binding to the controller that owns the session.
 - Codex keeps writable task binding through the task-map path.
 - Claude Code can start with configured static sessions plus followup send; writable binding can come after dogfood proves need.
 - Terminal/tmux/Ghostty adapter stays fallback for visible draft input, not main task runtime.
@@ -163,10 +163,9 @@ Other architecture notes:
 
 ## Next Best Work
 
-1. Add composite Codex+Claude task-session runtime so both can be active in one orchestrator.
-2. Continue behavior-preserving `server.ts` route extraction, especially context restore, MCP sources, queue, events.
-3. Add restart/failure smoke around Postgres state, restore retry, and task followup chaos.
-4. Add real MCP/Slack source dogfood config around Jason's installed tools.
-5. Add trend comparisons to `dogfood:review`.
-6. Real Claude followup dogfood against harmless configured session.
-7. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.
+1. Continue behavior-preserving `server.ts` route extraction, especially context restore, MCP sources, queue, events.
+2. Add restart/failure smoke around Postgres state, restore retry, and task followup chaos.
+3. Add real MCP/Slack source dogfood config around Jason's installed tools.
+4. Add trend comparisons to `dogfood:review`.
+5. Real Claude+Codex composite dogfood against harmless configured sessions.
+6. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.

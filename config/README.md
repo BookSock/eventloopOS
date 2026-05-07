@@ -108,3 +108,14 @@ curl -X PUT http://127.0.0.1:4377/task-sessions/<task-session-id>/task-binding \
   -H 'content-type: application/json' \
   -d '{"task_id":"task_blog_feedback"}'
 ```
+
+To expose Codex and Claude Code sessions at the same time:
+
+```sh
+ORCHESTRATOR_TASK_SESSIONS=codex_app_server,claude_cli \
+ORCHESTRATOR_CODEX_TASK_MAP_PATH=config/codex-task-map.json \
+ORCHESTRATOR_CLAUDE_SESSIONS='{"claude-session-id":{"task_id":"task_blog_feedback","name":"Blog Claude","cwd":"/path/to/repo"}}' \
+pnpm --filter @eventloopos/orchestrator start
+```
+
+The composite task-session controller lists both providers through `/task-sessions` and routes followups/bindings to the controller that owns the selected session ID. Use `off` alone to disable task sessions; do not combine `off` with provider modes.

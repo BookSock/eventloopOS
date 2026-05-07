@@ -11,7 +11,7 @@ describe("orchestrator config schema", () => {
       assert.equal(result.value.host, "127.0.0.1");
       assert.equal(result.value.port, 4377);
       assert.equal(result.value.databaseUrl, undefined);
-      assert.equal(result.value.taskSessions, "fake");
+      assert.deepEqual(result.value.taskSessions, ["fake"]);
       assert.equal(result.value.mcpSources, "seeded");
       assert.equal(result.value.workspace, "aerospace");
       assert.equal(result.value.workspaceExecute, "disabled");
@@ -62,7 +62,7 @@ describe("orchestrator config schema", () => {
 
     assert.equal(result.ok, true);
     if (result.ok) {
-      assert.equal(result.value.taskSessions, "codex_app_server");
+      assert.deepEqual(result.value.taskSessions, ["codex_app_server"]);
       assert.deepEqual(result.value.codexTaskMap, { thread_blog: "task_blog_feedback" });
       assert.equal(result.value.codexTaskMapPath, "state/codex-task-map.json");
     }
@@ -82,8 +82,22 @@ describe("orchestrator config schema", () => {
 
     assert.equal(result.ok, true);
     if (result.ok) {
-      assert.equal(result.value.taskSessions, "claude_cli");
+      assert.deepEqual(result.value.taskSessions, ["claude_cli"]);
       assert.equal(result.value.claudeSessionsRaw, "{\"claude-session-blog\":{\"task_id\":\"task_blog_feedback\",\"name\":\"Blog feedback\",\"cwd\":\"/repo\"}}");
+    }
+  });
+
+  it("allows Codex and Claude task sessions in the same daemon", () => {
+    const result = loadConfig({
+      ORCHESTRATOR_TASK_SESSIONS: "codex_app_server,claude_cli",
+      ORCHESTRATOR_CLAUDE_SESSIONS: JSON.stringify({
+        "claude-session-blog": "task_blog_feedback",
+      }),
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.deepEqual(result.value.taskSessions, ["codex_app_server", "claude_cli"]);
     }
   });
 
@@ -175,7 +189,27 @@ describe("orchestrator config schema", () => {
 
     assert.equal(result.ok, false);
     if (!result.ok) {
-      assert.deepEqual(result.issues, ["ORCHESTRATOR_TASK_SESSIONS must be fake, codex_app_server, claude_cli, or off"]);
+      assert.deepEqual(result.issues, [
+        "ORCHESTRATOR_TASK_SESSIONS must be fake, codex_app_server, claude_cli, off, or comma-separated task session modes",
+      ]);
+    }
+  });
+
+  it("rejects duplicate or mixed off task session modes", () => {
+    const duplicate = loadConfig({
+      ORCHESTRATOR_TASK_SESSIONS: "claude_cli,claude_cli",
+    });
+    const mixedOff = loadConfig({
+      ORCHESTRATOR_TASK_SESSIONS: "off,claude_cli",
+    });
+
+    assert.equal(duplicate.ok, false);
+    if (!duplicate.ok) {
+      assert.deepEqual(duplicate.issues, ["ORCHESTRATOR_TASK_SESSIONS must not contain duplicate modes"]);
+    }
+    assert.equal(mixedOff.ok, false);
+    if (!mixedOff.ok) {
+      assert.deepEqual(mixedOff.issues, ["ORCHESTRATOR_TASK_SESSIONS=off cannot be combined with other modes"]);
     }
   });
 

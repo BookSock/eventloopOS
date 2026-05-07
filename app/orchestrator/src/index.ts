@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { loadConfig } from "./config.js";
+import { loadConfig, type OrchestratorConfig } from "./config.js";
 import { PostgresQueueStore } from "./db/postgres_queue_store.js";
 import { createInMemoryGatewayStore, createPostgresGatewayStore } from "./gateway_store.js";
 import {
@@ -15,6 +15,7 @@ import { ClaudeCliTaskSessionController, parseClaudeSessionConfigs } from "./tas
 import { CodexAppServerThreadClient } from "./task_sessions/codex_app_server_thread_client.js";
 import { createCodexAppServerStdioConnection, type CodexAppServerStdioConnection } from "./task_sessions/codex_app_server_stdio.js";
 import { CodexNativeThreadController } from "./task_sessions/codex_native_thread_controller.js";
+import { CompositeTaskSessionController, type CompositeTaskSessionRuntime } from "./task_sessions/composite_task_session_controller.js";
 import { CodexTaskMapResolver } from "./task_sessions/codex_task_map.js";
 import { createSeededDevelopmentTaskSessions } from "./task_sessions/development_task_session_controller.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
@@ -92,11 +93,35 @@ function createTaskSessionRuntime(): { controller: TaskSessionController; close?
     return undefined;
   }
 
-  if (config.value.taskSessions === "codex_app_server") {
+  const runtimes: Array<CompositeTaskSessionRuntime & { close?: () => void }> = config.value.taskSessions.map((mode) => {
+    if (mode === "codex_app_server") return createCodexTaskSessionRuntime(config.value);
+    if (mode === "claude_cli") return createClaudeTaskSessionRuntime(config.value);
+    return {
+      name: "fake",
+      controller: createSeededDevelopmentTaskSessions(),
+    };
+  });
+
+  if (runtimes.length === 1) {
+    return {
+      controller: runtimes[0].controller,
+      close: runtimes[0].close,
+    };
+  }
+
+  return {
+    controller: new CompositeTaskSessionController(runtimes),
+    close: () => {
+      for (const runtime of runtimes) runtime.close?.();
+    },
+  };
+}
+
+function createCodexTaskSessionRuntime(runtimeConfig: OrchestratorConfig): CompositeTaskSessionRuntime & { close: () => void } {
     const connection: CodexAppServerStdioConnection = createCodexAppServerStdioConnection();
     const taskMap = new CodexTaskMapResolver({
-      inlineMap: config.value.codexTaskMap,
-      mapPath: config.value.codexTaskMapPath,
+      inlineMap: runtimeConfig.codexTaskMap,
+      mapPath: runtimeConfig.codexTaskMapPath,
       onError: (error) => {
         console.error(`Codex task map read failed: ${error.message}`);
       },
@@ -105,25 +130,22 @@ function createTaskSessionRuntime(): { controller: TaskSessionController; close?
       console.error(`Codex app-server initialization failed: ${error instanceof Error ? error.message : String(error)}`);
     });
     return {
+      name: "codex_app_server",
       controller: new CodexNativeThreadController(
         new CodexAppServerThreadClient(connection.request, { taskIdForThreadId: (threadId) => taskMap.taskIdForThreadId(threadId) }),
         { bindingWriter: taskMap },
       ),
       close: () => connection.close(),
     };
-  }
+}
 
-  if (config.value.taskSessions === "claude_cli") {
-    return {
-      controller: new ClaudeCliTaskSessionController({
-        sessions: parseClaudeSessionConfigs(config.value.claudeSessionsRaw),
-        execFile: execFilePromise,
-      }),
-    };
-  }
-
+function createClaudeTaskSessionRuntime(runtimeConfig: OrchestratorConfig): CompositeTaskSessionRuntime {
   return {
-    controller: createSeededDevelopmentTaskSessions(),
+    name: "claude_cli",
+    controller: new ClaudeCliTaskSessionController({
+      sessions: parseClaudeSessionConfigs(runtimeConfig.claudeSessionsRaw),
+      execFile: execFilePromise,
+    }),
   };
 }
 
