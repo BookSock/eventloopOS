@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -14,6 +15,8 @@ import {
 } from "../../native-host/src/install.js";
 
 const extensionDir = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const repoRoot = path.resolve(extensionDir, "../..");
+const orchestratorDistEntry = path.join(repoRoot, "app/orchestrator/dist/src/index.js");
 
 test("installed Chromium native host forwards real extension capture to orchestrator", async (t) => {
   if (process.platform !== "darwin") {
@@ -26,6 +29,76 @@ test("installed Chromium native host forwards real extension capture to orchestr
   }
 
   const server = await startOrchestratorFixture();
+  let result;
+
+  try {
+    result = await runInstalledBrowserCaptureSmoke({
+      orchestratorOrigin: server.origin,
+      pageOrigin: server.origin,
+      routeHints: { task_hint: "native smoke" }
+    });
+  } finally {
+    await server.close();
+  }
+
+  assert.equal(result.captureResult.resource.title, "Native messaging smoke");
+  assert.equal(result.captureResult.nativeResponse.ok, true, JSON.stringify(result.captureResult.nativeResponse));
+  assert.equal(result.captureResult.nativeResponse.payload.forwarded, true);
+  assert.equal(result.captureResult.nativeResponse.payload.forward_result.route_decision.action, "inject_task_session");
+  assert.equal(result.captureResult.nativeResponse.payload.forward_result.queue_item, null);
+
+  const forwardedEvent = await assertEventually(async () => {
+    const event = server.forwardedEvent();
+    assert.ok(event);
+    return event;
+  });
+  assert.equal(forwardedEvent.source, "browser");
+  assert.equal(forwardedEvent.task_hint, "native smoke");
+
+  assert.match(result.contextLog, /Native messaging smoke/);
+});
+
+test("installed Chromium native host forwards real extension capture to real orchestrator", async (t) => {
+  if (process.platform !== "darwin") {
+    t.skip("native host install path smoke is macOS-only for now");
+    return;
+  }
+  if (process.env.EVENTLOOPOS_ENABLE_REAL_ORCHESTRATOR_NATIVE_BROWSER_SMOKE !== "1") {
+    t.skip("set EVENTLOOPOS_ENABLE_REAL_ORCHESTRATOR_NATIVE_BROWSER_SMOKE=1 to run real orchestrator native browser smoke");
+    return;
+  }
+
+  const pageServer = await startStaticPageFixture();
+  const orchestrator = await startRealOrchestrator();
+  try {
+    const result = await runInstalledBrowserCaptureSmoke({
+      orchestratorOrigin: orchestrator.origin,
+      pageOrigin: pageServer.origin
+    });
+
+    assert.equal(result.captureResult.resource.title, "Native messaging smoke");
+    assert.equal(result.captureResult.nativeResponse.ok, true, JSON.stringify(result.captureResult.nativeResponse));
+    assert.equal(result.captureResult.nativeResponse.payload.forwarded, true);
+    assert.equal(result.captureResult.nativeResponse.payload.forward_result.route_decision.action, "store_only");
+    assert.equal(result.captureResult.nativeResponse.payload.forward_result.queue_item ?? null, null);
+
+    const queueResponse = await fetch(new URL("/queue", orchestrator.origin));
+    const queueBody = await queueResponse.json();
+    assert.equal(queueResponse.status, 200);
+    assert.equal(queueBody.items.some((item) => item.review_packet?.title === "Native messaging smoke"), false);
+
+    const contextsResponse = await fetch(new URL("/contexts?source=browser&q=Native%20messaging%20smoke&limit=5", orchestrator.origin));
+    const contextsBody = await contextsResponse.json();
+    assert.equal(contextsResponse.status, 200);
+    assert.equal(contextsBody.entries.some((entry) => entry.resource.title === "Native messaging smoke"), true);
+    assert.match(result.contextLog, /Native messaging smoke/);
+  } finally {
+    await orchestrator.close();
+    await pageServer.close();
+  }
+});
+
+async function runInstalledBrowserCaptureSmoke({ orchestratorOrigin, pageOrigin, routeHints }) {
   const smokeDir = await mkdtemp(path.join(tmpdir(), "eventloopos-native-smoke-"));
   const userDataDir = await mkdtemp(path.join(tmpdir(), "eventloopos-native-browser-"));
   const homeDir = process.env.EVENTLOOPOS_NATIVE_BROWSER_SMOKE_HOME ?? process.env.HOME;
@@ -40,7 +113,7 @@ test("installed Chromium native host forwards real extension capture to orchestr
       env: {
         ...process.env,
         HOME: homeDir,
-        EVENTLOOPOS_ORCHESTRATOR_URL: server.origin,
+        EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorOrigin,
         EVENTLOOPOS_CONTEXT_LOG: contextLogPath
       },
       args: [`--disable-extensions-except=${extensionDir}`, `--load-extension=${extensionDir}`]
@@ -82,32 +155,18 @@ test("installed Chromium native host forwards real extension capture to orchestr
       context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker", { timeout: 10_000 }));
 
     const page = context.pages()[0] ?? (await context.newPage());
-    const targetUrl = `${server.origin}/native-smoke`;
+    const targetUrl = `${pageOrigin}/native-smoke`;
     await page.goto(targetUrl);
     await page.waitForSelector("[data-context-quote]");
     await page.evaluate(() => window.scrollTo(0, 240));
 
     const captureResult = await sendRuntimeMessageFromTab(activeServiceWorker, targetUrl, {
       type: "eventloop.captureActiveTab",
-      route_hints: { task_hint: "native smoke" }
+      ...(routeHints ? { route_hints: routeHints } : {})
     });
-
-    assert.equal(captureResult.resource.title, "Native messaging smoke");
-    assert.equal(captureResult.nativeResponse.ok, true, JSON.stringify(captureResult.nativeResponse));
-    assert.equal(captureResult.nativeResponse.payload.forwarded, true);
-    assert.equal(captureResult.nativeResponse.payload.forward_result.route_decision.action, "inject_task_session");
-    assert.equal(captureResult.nativeResponse.payload.forward_result.queue_item, null);
-
-    const forwardedEvent = await assertEventually(async () => {
-      const event = server.forwardedEvent();
-      assert.ok(event);
-      return event;
-    });
-    assert.equal(forwardedEvent.source, "browser");
-    assert.equal(forwardedEvent.task_hint, "native smoke");
 
     const contextLog = await readFile(contextLogPath, "utf8");
-    assert.match(contextLog, /Native messaging smoke/);
+    return { captureResult, contextLog };
   } finally {
     await context?.close();
     if (process.env.EVENTLOOPOS_NATIVE_BROWSER_SMOKE_KEEP_MANIFEST !== "1") {
@@ -121,9 +180,8 @@ test("installed Chromium native host forwards real extension capture to orchestr
     }
     await rm(userDataDir, { recursive: true, force: true });
     await rm(smokeDir, { recursive: true, force: true });
-    await server.close();
   }
-});
+}
 
 async function startOrchestratorFixture() {
   let forwardedEvent = null;
@@ -188,6 +246,120 @@ async function startOrchestratorFixture() {
     forwardedEvent: () => forwardedEvent,
     close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
   };
+}
+
+async function startStaticPageFixture() {
+  const server = createServer((request, response) => {
+    if (request.url === "/native-smoke") {
+      response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      response.end(`<!doctype html>
+        <html>
+          <head>
+            <title>Native messaging smoke</title>
+            <style>
+              body { margin: 0; font-family: sans-serif; }
+              .spacer { height: 600px; }
+            </style>
+          </head>
+          <body>
+            <main>
+              <div class="spacer"></div>
+              <p data-context-quote>Native messaging smoke reached real orchestrator.</p>
+              <div class="spacer"></div>
+            </main>
+          </body>
+        </html>`);
+      return;
+    }
+
+    response.writeHead(404, { "content-type": "text/plain" });
+    response.end("not found");
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+
+  const address = server.address();
+  return {
+    origin: `http://127.0.0.1:${address.port}`,
+    close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
+  };
+}
+
+async function startRealOrchestrator() {
+  const port = await freePort();
+  const origin = `http://127.0.0.1:${port}`;
+  const child = spawn(process.execPath, [orchestratorDistEntry], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      ORCHESTRATOR_PORT: String(port),
+      ORCHESTRATOR_HOST: "127.0.0.1",
+      ORCHESTRATOR_MCP_SOURCES: "off",
+      ORCHESTRATOR_TASK_SESSIONS: "off",
+      ORCHESTRATOR_WORKSPACE: "off"
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let output = "";
+  child.stdout.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+
+  try {
+    await waitForHealth(origin);
+  } catch (error) {
+    child.kill("SIGTERM");
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\n${output}`);
+  }
+
+  return {
+    origin,
+    close: async () => {
+      if (child.exitCode !== null) return;
+      child.kill("SIGTERM");
+      await new Promise((resolve) => child.once("exit", resolve));
+    }
+  };
+}
+
+async function waitForHealth(origin) {
+  const deadline = Date.now() + 10_000;
+  let lastError;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(new URL("/health", origin));
+      if (response.ok) return;
+      lastError = new Error(`orchestrator health returned HTTP ${response.status}`);
+    } catch (error) {
+      lastError = error;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw lastError ?? new Error("timed out waiting for orchestrator health");
+}
+
+async function freePort() {
+  const { createServer: createNetServer } = await import("node:net");
+  return await new Promise((resolve, reject) => {
+    const server = createNetServer();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close(() => {
+        if (!address || typeof address === "string") {
+          reject(new Error("could not allocate local port"));
+          return;
+        }
+        resolve(address.port);
+      });
+    });
+  });
 }
 
 async function readRequestBody(request) {

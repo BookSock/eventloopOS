@@ -87,6 +87,12 @@ Rendered Mac queue UI smoke:
 pnpm run test:e2e:macos
 ```
 
+Real orchestrator + installed Chromium extension/native host smoke:
+
+```sh
+pnpm run test:e2e:native-browser-real-orchestrator
+```
+
 Planning docs live in `docs/planning/`. Start with:
 
 - `00-mvp-brief.md`

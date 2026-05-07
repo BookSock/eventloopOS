@@ -104,6 +104,7 @@ Strong tests now:
 - Live harness scenario for browser store-only + restore request peek/claim/done status.
 - Real Chromium Playwright extension E2E.
 - Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06 with `pnpm run test:e2e:native-browser`.
+- Real orchestrator + installed Chromium extension/native host smoke exists as `pnpm run test:e2e:native-browser-real-orchestrator`; it starts the actual orchestrator, captures a real browser tab through native messaging, verifies `store_only`, checks no human queue item was created, and checks browser context search can find the captured tab.
 - `voice:listen` accepts line-delimited local STT transcript streams, optional wake phrase filtering, and forwards into `/voice/commands`.
 - `voice:listen-command` lets whisper.cpp stream, MLX Whisper wrappers, or other local STT tools feed the same router while staying unit-testable through an injected process.
 - `dev:doctor` reports whether `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` is configured and can launch with `--help`; unconfigured voice command is treated as optional/pass.
@@ -114,7 +115,7 @@ Weak tests:
 - Docker-backed Postgres live tests skip when Docker absent, but native Postgres live tests pass on this machine.
 - AeroSpace live restore needs installed/running AeroSpace.
 - AeroSpace live smoke exists, but `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm --filter @eventloopos/orchestrator run live:aerospace` currently reports `server_unavailable` because AeroSpace.app is not running.
-- No full installed extension + native host + Mac app manual UI flow; current coverage proves Mac client/orchestrator API round-trip and rendered Mac queue view, but not one combined installed flow.
+- No full installed extension + native host + Mac app manual UI flow; current coverage proves Mac client/orchestrator API round-trip, real installed extension/native host/orchestrator browser capture, and rendered Mac queue view, but not one combined installed flow.
 - No real microphone wake-word/STT test yet; current coverage proves the local transcript command pipe and router contract with fake process output.
 
 ## Next Best Work
