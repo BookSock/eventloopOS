@@ -1,24 +1,18 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import {
-  queueStates,
-  type Action,
-  type ApiErrorBody,
-  type QueueItemWithPacket,
-  type QueueState,
-} from "./contracts.js";
+import type { ApiErrorBody } from "./contracts.js";
 import type { GatewayStore } from "./gateway_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import type { McpSourcePollOutput } from "./integrations/mcp_poll/development_registry.js";
 import { createInMemoryObservability, type Observability } from "./observability.js";
 import { handleContextRestoreRoute } from "./routes/context_restore.js";
 import { handleActivityRoute, handleMetricsRoute } from "./routes/observability.js";
+import { handleQueueRoute } from "./routes/queue.js";
 import {
   handleGetTaskSessionRoute,
   handleListTaskSessionsRoute,
   handleTaskBindingRoute,
   handleTaskFollowupRoute,
-  taskSessionMatchesTask,
 } from "./routes/task_sessions.js";
 import type { RouteResult } from "./routes/types.js";
 import { injectEventIntoTaskSessionIfPossible } from "./routing/task_session_injection.js";
@@ -84,26 +78,19 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         }));
       }
 
-      if (request.method === "GET" && context.url.pathname === "/queue") {
-        const validation = validateQueueQuery(context.url);
-        if (!validation.ok) {
-          return sendSchemaError(response, context, validation.message);
-        }
-
-        const items = await options.store.listQueue(validation.state, now());
-
-        return sendJson(response, 200, {
-          items,
-          count: items.length,
-          request_id: context.requestId,
-        });
-      }
-
-      if (request.method === "GET" && context.url.pathname === "/queue/next") {
-        return sendJson(response, 200, {
-          item: await options.store.nextQueueItem(now()) ?? null,
-          request_id: context.requestId,
-        });
+      const queueRoute = await handleQueueRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        url: context.url,
+        readJsonBody: () => readJsonBody(request),
+        store: options.store,
+        taskSessions: options.taskSessions,
+        observability,
+        now: now(),
+        requestId: context.requestId,
+      });
+      if (queueRoute) {
+        return sendRouteResult(response, context, queueRoute);
       }
 
       if (request.method === "GET" && context.url.pathname === "/contexts") {
@@ -457,74 +444,6 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         }));
       }
 
-      if (request.method === "POST" && context.url.pathname === "/queue/lease-next") {
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-        if (!isRecord(parsed.value)) {
-          return sendSchemaError(response, context, "lease request must be an object");
-        }
-
-        const leaseOwner = typeof parsed.value.lease_owner === "string" && parsed.value.lease_owner
-          ? parsed.value.lease_owner
-          : "unknown";
-        const leaseMs = typeof parsed.value.lease_ms === "number" && Number.isInteger(parsed.value.lease_ms)
-          ? parsed.value.lease_ms
-          : 60_000;
-        if (leaseMs <= 0 || leaseMs > 30 * 60_000) {
-          return sendSchemaError(response, context, "lease_ms must be between 1 and 1800000");
-        }
-
-        return sendJson(response, 200, {
-          item: await options.store.leaseNextQueueItem(leaseOwner, now(), leaseMs) ?? null,
-          request_id: context.requestId,
-        });
-      }
-
-      const renewLeaseMatch = context.url.pathname.match(/^\/queue\/([^/]+)\/lease\/renew$/);
-      if (request.method === "POST" && renewLeaseMatch) {
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-        if (!isRecord(parsed.value)) {
-          return sendSchemaError(response, context, "renew lease request must be an object");
-        }
-
-        const leaseOwner = typeof parsed.value.lease_owner === "string" && parsed.value.lease_owner
-          ? parsed.value.lease_owner
-          : "";
-        if (!leaseOwner) {
-          return sendSchemaError(response, context, "lease_owner is required");
-        }
-
-        const leaseMs = typeof parsed.value.lease_ms === "number" && Number.isInteger(parsed.value.lease_ms)
-          ? parsed.value.lease_ms
-          : 60_000;
-        if (leaseMs <= 0 || leaseMs > 30 * 60_000) {
-          return sendSchemaError(response, context, "lease_ms must be between 1 and 1800000");
-        }
-
-        const queueItemId = decodeURIComponent(renewLeaseMatch[1] ?? "");
-        const item = await options.store.renewQueueLease(queueItemId, leaseOwner, now(), leaseMs);
-        if (!item) {
-          return sendError(
-            response,
-            409,
-            context,
-            "lease_not_renewed",
-            `queue item ${queueItemId} lease was not renewed`,
-          );
-        }
-
-        return sendJson(response, 200, {
-          ok: true,
-          item,
-          request_id: context.requestId,
-        });
-      }
-
       if (request.method === "POST" && context.url.pathname === "/mcp/poll") {
         const parsed = await readJsonBody(request);
         if (!parsed.ok) {
@@ -606,201 +525,6 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         });
       }
 
-      const doneMatch = context.url.pathname.match(/^\/queue\/([^/]+)\/done$/);
-      if (request.method === "POST" && doneMatch) {
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-        if (!isRecord(parsed.value) || parsed.value.action !== "done") {
-          return sendSchemaError(response, context, "done request requires action=done");
-        }
-
-        const queueItemId = decodeURIComponent(doneMatch[1] ?? "");
-        const item = await options.store.markQueueItemDone(
-          queueItemId,
-          typeof parsed.value.actor_id === "string" ? parsed.value.actor_id : "unknown",
-          now(),
-        );
-        if (!item) {
-          return sendError(response, 404, context, "not_found", `queue item ${queueItemId} was not found`);
-        }
-        await observability.incrementCounter("queue_items_done_total");
-        await observability.recordActivity({
-          type: "queue_item_done",
-          occurred_at: item.updated_at,
-          actor: "human",
-          task_id: item.task_id,
-          queue_item_id: item.id,
-          status: "ok",
-          summary: `Queue item done: ${item.review_packet.title}`,
-          details: {
-            review_packet_id: item.review_packet_id,
-          },
-        });
-
-        return sendJson(response, 200, {
-          ok: true,
-          item,
-          decision: {
-            id: `dec_${queueItemId}`,
-            queue_item_id: queueItemId,
-            review_packet_id: item.review_packet_id,
-            action: "done",
-            actor_id: typeof parsed.value.actor_id === "string" ? parsed.value.actor_id : "unknown",
-            decided_at: now().toISOString(),
-          },
-          request_id: context.requestId,
-        });
-      }
-
-      const deferMatch = context.url.pathname.match(/^\/queue\/([^/]+)\/defer$/);
-      if (request.method === "POST" && deferMatch) {
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-        const validation = validateQueueDeferRequest(parsed.value, now());
-        if (!validation.ok) {
-          return sendSchemaError(response, context, validation.message);
-        }
-
-        const queueItemId = decodeURIComponent(deferMatch[1] ?? "");
-        const item = await options.store.deferQueueItem(queueItemId, validation.actorId, validation.dueAt, now());
-        if (!item) {
-          return sendError(response, 404, context, "not_found", `queue item ${queueItemId} was not found`);
-        }
-        await observability.incrementCounter("queue_items_deferred_total");
-        await observability.recordActivity({
-          type: "queue_item_deferred",
-          occurred_at: item.updated_at,
-          actor: "human",
-          task_id: item.task_id,
-          queue_item_id: item.id,
-          status: "ok",
-          summary: `Queue item deferred: ${item.review_packet.title}`,
-          details: {
-            review_packet_id: item.review_packet_id,
-            due_at: item.due_at,
-          },
-        });
-
-        return sendJson(response, 200, {
-          ok: true,
-          item,
-          decision: {
-            id: `dec_${queueItemId}_defer`,
-            queue_item_id: queueItemId,
-            review_packet_id: item.review_packet_id,
-            action: "defer",
-            actor_id: validation.actorId,
-            due_at: item.due_at,
-            decided_at: now().toISOString(),
-          },
-          request_id: context.requestId,
-        });
-      }
-
-      const ignoreMatch = context.url.pathname.match(/^\/queue\/([^/]+)\/ignore$/);
-      if (request.method === "POST" && ignoreMatch) {
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-        const validation = validateQueueIgnoreRequest(parsed.value);
-        if (!validation.ok) {
-          return sendSchemaError(response, context, validation.message);
-        }
-
-        const queueItemId = decodeURIComponent(ignoreMatch[1] ?? "");
-        const item = await options.store.ignoreQueueItem(queueItemId, validation.actorId, now());
-        if (!item) {
-          return sendError(response, 404, context, "not_found", `queue item ${queueItemId} was not found`);
-        }
-        await observability.incrementCounter("queue_items_ignored_total");
-        await observability.recordActivity({
-          type: "queue_item_ignored",
-          occurred_at: item.updated_at,
-          actor: "human",
-          task_id: item.task_id,
-          queue_item_id: item.id,
-          status: "ok",
-          summary: `Queue item ignored: ${item.review_packet.title}`,
-          details: {
-            review_packet_id: item.review_packet_id,
-          },
-        });
-
-        return sendJson(response, 200, {
-          ok: true,
-          item,
-          decision: {
-            id: `dec_${queueItemId}_ignore`,
-            queue_item_id: queueItemId,
-            review_packet_id: item.review_packet_id,
-            action: "ignore",
-            actor_id: validation.actorId,
-            decided_at: now().toISOString(),
-          },
-          request_id: context.requestId,
-        });
-      }
-
-      const recommendedActionMatch = context.url.pathname.match(/^\/queue\/([^/]+)\/actions\/recommended$/);
-      if (request.method === "POST" && recommendedActionMatch) {
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-        const validation = validateQueueActionRequest(parsed.value);
-        if (!validation.ok) {
-          return sendSchemaError(response, context, validation.message);
-        }
-
-        const queueItemId = decodeURIComponent(recommendedActionMatch[1] ?? "");
-        const item = await findQueueItem(options.store, queueItemId);
-        if (!item) {
-          return sendError(response, 404, context, "not_found", `queue item ${queueItemId} was not found`);
-        }
-
-        const actionResult = await executeQueueAction(serverOptions, item, item.review_packet.recommended_action, now());
-        if (!actionResult.ok) {
-          return sendError(
-            response,
-            actionResult.status,
-            context,
-            actionResult.code,
-            actionResult.message,
-            actionResult.details,
-          );
-        }
-
-        const completed = await options.store.markQueueItemDone(queueItemId, validation.actorId, now());
-        if (completed) {
-          await observability.incrementCounter("queue_items_done_total");
-          await observability.recordActivity({
-            type: "queue_item_done",
-            occurred_at: completed.updated_at,
-            actor: "human",
-            task_id: completed.task_id,
-            queue_item_id: completed.id,
-            task_session_id: stringFromRecord(actionResult.result, "task_session_id"),
-            status: "ok",
-            summary: `Queue item done: ${completed.review_packet.title}`,
-            details: {
-              review_packet_id: completed.review_packet_id,
-              action_result: actionResult.result,
-            },
-          });
-        }
-        return sendJson(response, 200, {
-          ok: true,
-          action_result: actionResult.result,
-          item: completed,
-          request_id: context.requestId,
-        });
-      }
-
       if (request.method === "GET" && context.url.pathname.startsWith("/review-packets/")) {
         const id = decodeURIComponent(context.url.pathname.slice("/review-packets/".length));
 
@@ -817,15 +541,6 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           packet,
           request_id: context.requestId,
         });
-      }
-
-      if (request.method === "POST" && context.url.pathname === "/queue") {
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-
-        return sendSchemaError(response, context, "POST /queue request schema is not implemented in v0");
       }
 
       return sendError(response, 404, context, "not_found", "route not found");
@@ -853,19 +568,6 @@ function applyResponseHeaders(response: ServerResponse, context: RequestContext)
   if (context.idempotencyKey) {
     response.setHeader("idempotency-key", context.idempotencyKey);
   }
-}
-
-function validateQueueQuery(url: URL): { ok: true; state?: QueueState } | { ok: false; message: string } {
-  const state = url.searchParams.get("state");
-  if (!state) {
-    return { ok: true };
-  }
-
-  if (!queueStates.includes(state as QueueState)) {
-    return { ok: false, message: `state must be one of: ${queueStates.join(", ")}` };
-  }
-
-  return { ok: true, state: state as QueueState };
 }
 
 function validateContextQuery(
@@ -898,38 +600,6 @@ function validateContextQuery(
       q: q?.trim(),
       limit,
     },
-  };
-}
-
-function validateQueueDeferRequest(input: unknown, now: Date): { ok: true; actorId: string; dueAt: Date } | { ok: false; message: string } {
-  if (!isRecord(input) || input.action !== "defer") {
-    return { ok: false, message: "defer request requires action=defer" };
-  }
-  const dueAtRaw = typeof input.due_at === "string" ? input.due_at : "";
-  if (!dueAtRaw) {
-    return { ok: false, message: "due_at is required" };
-  }
-  const dueAt = new Date(dueAtRaw);
-  if (Number.isNaN(dueAt.getTime())) {
-    return { ok: false, message: "due_at must be a valid ISO timestamp" };
-  }
-  if (dueAt.getTime() <= now.getTime()) {
-    return { ok: false, message: "due_at must be in the future" };
-  }
-  return {
-    ok: true,
-    actorId: typeof input.actor_id === "string" ? input.actor_id : "unknown",
-    dueAt,
-  };
-}
-
-function validateQueueIgnoreRequest(input: unknown): { ok: true; actorId: string } | { ok: false; message: string } {
-  if (!isRecord(input) || input.action !== "ignore") {
-    return { ok: false, message: "ignore request requires action=ignore" };
-  }
-  return {
-    ok: true,
-    actorId: typeof input.actor_id === "string" ? input.actor_id : "unknown",
   };
 }
 
@@ -1145,130 +815,6 @@ function validateVoiceCommandRequest(
   };
 }
 
-async function findQueueItem(store: GatewayStore, queueItemId: string): Promise<QueueItemWithPacket | undefined> {
-  return (await store.listQueue()).find((item) => item.id === queueItemId);
-}
-
-async function executeQueueAction(
-  options: GatewayServerOptions,
-  item: QueueItemWithPacket,
-  action: Action,
-  now: Date,
-): Promise<
-  | { ok: true; result: Record<string, unknown> }
-  | { ok: false; status: number; code: string; message: string; details?: unknown }
-> {
-  if (action.type !== "resume_agent") {
-    return {
-      ok: false,
-      status: 422,
-      code: "unsupported_action",
-      message: `recommended action ${action.type} is not executable yet`,
-    };
-  }
-
-  if (!options.taskSessions?.listSessions) {
-    return {
-      ok: false,
-      status: 501,
-      code: "task_sessions_unavailable",
-      message: "task session listing is not configured",
-    };
-  }
-
-  const taskId = item.task_id ?? (typeof action.payload.task_id === "string" ? action.payload.task_id : undefined);
-  if (!taskId) {
-    return {
-      ok: false,
-      status: 409,
-      code: "task_session_unmatched",
-      message: `queue item ${item.id} has no task id`,
-    };
-  }
-
-  const session = (await options.taskSessions.listSessions()).find((candidate) => taskSessionMatchesTask(candidate, taskId));
-  if (!session || !isRecord(session) || typeof session.id !== "string") {
-    return {
-      ok: false,
-      status: 409,
-      code: "task_session_unmatched",
-      message: `no task session is bound to ${taskId}`,
-    };
-  }
-
-  const eventId = typeof action.payload.event_id === "string" ? action.payload.event_id : undefined;
-  const eventResult = eventId ? await options.store.getEvent(eventId) : undefined;
-  const taskMessage = await sendTaskFollowupWithActivity(options, {
-    task_session_id: session.id,
-    text: taskActionFollowupText(item, eventResult?.event),
-    event_ids: eventId ? [eventId] : [],
-    idempotency_key: `queue_action_${item.id}_${action.id}`,
-  }, {
-    origin: "queue_action",
-    occurredAt: options.now ? options.now().toISOString() : new Date().toISOString(),
-    queueItemId: item.id,
-    taskId,
-    eventId,
-  });
-
-  if (isRecord(taskMessage) && taskMessage.status === "blocked") {
-    return {
-      ok: false,
-      status: 409,
-      code: "task_message_blocked",
-      message: `task session ${session.id} did not accept followup`,
-      details: taskMessage,
-    };
-  }
-
-  return {
-    ok: true,
-    result: {
-      type: "resume_agent",
-      queue_item_id: item.id,
-      review_packet_id: item.review_packet_id,
-      task_id: taskId,
-      task_session_id: session.id,
-      task_message: taskMessage,
-      executed_at: now.toISOString(),
-    },
-  };
-}
-
-function taskActionFollowupText(item: QueueItemWithPacket, event: McpEvent | undefined): string {
-  const packet = item.review_packet;
-  const lines = [
-    "Human approved this queue item. Continue work with this context.",
-    `Queue item: ${item.id}`,
-    `Packet: ${packet.title}`,
-    `Summary: ${packet.summary}`,
-  ];
-  if (packet.decision_needed) lines.push(`Decision: ${packet.decision_needed}`);
-  if (event) {
-    lines.push(`Source event: ${event.source} ${event.id}`);
-    lines.push(`Raw ref: ${event.raw_ref.uri}`);
-  }
-  const links = [
-    ...packet.context.flatMap((resource) => resource.url ? [resource.url] : []),
-    ...packet.evidence.flatMap((evidence) => evidence.url ? [evidence.url] : []),
-  ];
-  if (links.length > 0) {
-    lines.push(`Links: ${links.join(", ")}`);
-  }
-  return lines.join("\n");
-}
-
-function validateQueueActionRequest(input: unknown): { ok: true; actorId: string } | { ok: false; message: string } {
-  if (!isRecord(input)) {
-    return { ok: false, message: "queue action request must be an object" };
-  }
-
-  return {
-    ok: true,
-    actorId: typeof input.actor_id === "string" && input.actor_id ? input.actor_id : "unknown",
-  };
-}
-
 function taskIdForHint(taskHint: string | undefined): string | undefined {
   return taskHint ? `task_${stableId(taskHint)}` : undefined;
 }
@@ -1436,11 +982,6 @@ function readOptionalString(input: Record<string, unknown>, key: string): string
   return typeof value === "string" && value ? value : undefined;
 }
 
-function stringFromRecord(input: Record<string, unknown>, key: string): string | undefined {
-  const value = input[key];
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
 function stableId(input: string): string {
   const normalized = input.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   return normalized || "unknown";
@@ -1482,7 +1023,7 @@ function sendRouteResult(response: ServerResponse, context: RequestContext, resu
   if (result.ok) {
     return sendJson(response, result.status, result.body);
   }
-  return sendError(response, result.status, context, result.code, result.message);
+  return sendError(response, result.status, context, result.code, result.message, result.details);
 }
 
 function sendError(
