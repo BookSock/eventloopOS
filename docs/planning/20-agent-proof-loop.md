@@ -16,7 +16,7 @@ Each meaningful implementation agent should leave:
 
 ## Proof Commands
 
-Keep `make ci` as baseline correctness.
+Keep `make ci` as baseline correctness. It must exercise the proof harness, not merely run loose commands.
 
 Current implementation:
 
@@ -28,7 +28,9 @@ Current implementation:
 - manifest: `artifacts/proof-manifest.json`
 - live manifest: `artifacts/proof-live-manifest.json`
 - per-command logs: `artifacts/proof-agent/<run-id>/`
-- override for cheap CI/tool smoke: `EVENTLOOPOS_PROOF_COMMANDS='[...]'`
+- override for cheap tool smoke: `EVENTLOOPOS_PROOF_COMMANDS='[...]'`
+
+`pnpm run ci` first runs the cheap `test:proof-agent` override to prove custom proof-command parsing and manifest writing, then runs the full `proof:agent` bundle. This means every CI pass leaves a durable proof manifest plus per-command logs.
 
 `proof:agent` is the broad fixture/default lane. `proof:live` is the stronger local lane: it starts a temp orchestrator, runs live E2E, runs dogfood threshold checks before shutdown, launches the packaged Mac app for live queue mutation and task handoff smokes, then verifies the composite Codex + Claude task-runtime surface.
 

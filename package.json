@@ -50,7 +50,7 @@
     "packets:golden": "pnpm --filter @eventloopos/test-harness --if-present packets:golden",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "node --check bin/live-smoke && node --check bin/dev-dogfood && node --check bin/proof-agent && node --check bin/task-runtime-smoke && pnpm -r --if-present typecheck",
-    "ci": "pnpm lint && pnpm typecheck && pnpm test:proof-agent && pnpm test && pnpm test:e2e"
+    "ci": "pnpm test:proof-agent && pnpm proof:agent"
   },
   "devDependencies": {
     "@types/node": "^24.10.2",
