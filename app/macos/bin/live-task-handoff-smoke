@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { spawn } from "node:child_process";
 import {
   buildPackagedQueueAppBundle,
@@ -9,28 +12,34 @@ import {
 } from "./smoke-app-bundle.mjs";
 
 if (process.platform !== "darwin") {
-  console.log("macOS live queue UI smoke skipped: requires darwin");
+  console.log("macOS live task handoff smoke skipped: requires darwin");
   process.exit(0);
 }
 
-if (process.env.EVENTLOOPOS_ENABLE_MACOS_LIVE_UI_SMOKE !== "1") {
-  console.log("macOS live queue UI smoke skipped: set EVENTLOOPOS_ENABLE_MACOS_LIVE_UI_SMOKE=1");
+if (process.env.EVENTLOOPOS_ENABLE_MACOS_LIVE_HANDOFF_SMOKE !== "1") {
+  console.log("macOS live task handoff smoke skipped: set EVENTLOOPOS_ENABLE_MACOS_LIVE_HANDOFF_SMOKE=1");
   process.exit(0);
 }
 
-const port = process.env.EVENTLOOPOS_MACOS_LIVE_UI_SMOKE_PORT ?? "4383";
+const port = process.env.EVENTLOOPOS_MACOS_LIVE_HANDOFF_SMOKE_PORT ?? "4384";
 const baseUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? `http://127.0.0.1:${port}`;
 let server;
 let bundle;
 let app;
+let tempDir;
 
 try {
+  tempDir = await mkdtemp(join(tmpdir(), "eventloopos-live-handoff-"));
+  const seedFixture = join(tempDir, "seed-review-packets.json");
+  await writeFile(seedFixture, JSON.stringify([buildTaskHandoffPacket()], null, 2));
+
   await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "build"]);
   server = spawn("pnpm", ["--filter", "@eventloopos/orchestrator", "start"], {
     env: {
       ...process.env,
       ORCHESTRATOR_HOST: "127.0.0.1",
       ORCHESTRATOR_PORT: port,
+      ORCHESTRATOR_SEED_FIXTURE: seedFixture,
       ORCHESTRATOR_WORKSPACE: "off",
       ORCHESTRATOR_MCP_SOURCES: "off",
       ORCHESTRATOR_TASK_SESSIONS: "fake",
@@ -41,7 +50,7 @@ try {
 
   const initialReady = await fetchJson(new URL("/queue?state=ready", baseUrl));
   if (initialReady.count !== 1) {
-    throw new Error(`expected 1 ready queue item before app launch, got ${initialReady.count}`);
+    throw new Error(`expected 1 ready handoff queue item before app launch, got ${initialReady.count}`);
   }
 
   bundle = await buildPackagedQueueAppBundle();
@@ -51,14 +60,29 @@ try {
       EVENTLOOP_ORCHESTRATOR_URL: baseUrl,
     },
   });
-  const appOutput = captureOutput(app);
+  captureOutput(app);
 
   await waitForProcess(bundle.executablePath, 8_000);
-  const uiProof = await runLiveUiProof();
+  const uiProof = await runLiveHandoffProof();
 
   const doneQueue = await waitForDoneQueueItem(baseUrl);
-  const activity = await waitForActivity(baseUrl, "queue_item_done");
+  const attempted = await waitForActivity(baseUrl, "task_followup_attempted");
+  const sent = await waitForActivity(baseUrl, "task_followup_sent");
+  const done = await waitForActivity(baseUrl, "queue_item_done");
+  const taskSessions = await fetchJson(new URL("/task-sessions", baseUrl));
   const metrics = await fetchJson(new URL("/metrics", baseUrl));
+  const blogSession = taskSessions.sessions?.find((session) => session.id === "task_session_blog");
+
+  if (!blogSession) throw new Error("task_session_blog missing after handoff");
+  if (blogSession.status !== "running") {
+    throw new Error(`expected task_session_blog status running after handoff, got ${blogSession.status}`);
+  }
+  if ((metrics.metrics?.counters?.task_followups_sent_total ?? 0) !== 1) {
+    throw new Error("expected task_followups_sent_total to be 1");
+  }
+  if ((metrics.metrics?.counters?.queue_items_done_total ?? 0) !== 1) {
+    throw new Error("expected queue_items_done_total to be 1");
+  }
 
   await cleanupApp();
   console.log(JSON.stringify({
@@ -67,9 +91,13 @@ try {
     ui_proof: uiProof,
     done_queue_count: doneQueue.count,
     done_queue_item_id: doneQueue.items[0]?.id,
-    activity_id: activity.id,
-    activity_type: activity.type,
-    queue_items_done_total: metrics.metrics?.counters?.queue_items_done_total ?? 0,
+    task_session_id: blogSession.id,
+    task_session_status: blogSession.status,
+    task_followup_attempted_activity_id: attempted.id,
+    task_followup_sent_activity_id: sent.id,
+    queue_item_done_activity_id: done.id,
+    task_followups_sent_total: metrics.metrics.counters.task_followups_sent_total,
+    queue_items_done_total: metrics.metrics.counters.queue_items_done_total,
   }, null, 2));
 } catch (error) {
   if (app && bundle) {
@@ -84,9 +112,62 @@ try {
     server.kill("SIGTERM");
     await onceExit(server);
   }
+  if (tempDir) {
+    await rm(tempDir, { recursive: true, force: true });
+  }
 }
 
-async function runLiveUiProof() {
+function buildTaskHandoffPacket() {
+  return {
+    id: "pkt_live_task_handoff",
+    task_id: "task_blog_feedback",
+    title: "Route blog feedback to task agent",
+    summary: "Human approved routing this blog feedback packet back to the running task agent.",
+    decision_needed: "Confirm the blog agent should continue with this feedback.",
+    risk_level: "medium",
+    confidence: "high",
+    risk_tags: ["agent_handoff"],
+    evidence: [
+      {
+        id: "ev_live_handoff_seed",
+        kind: "test_run",
+        title: "Live Mac handoff smoke fixture",
+        url: "artifact://mac/live-task-handoff",
+      },
+    ],
+    context: [
+      {
+        id: "ctx_live_handoff_doc",
+        kind: "document",
+        title: "Blog feedback draft",
+        url: "file:///tmp/eventloopos/blog-feedback.md",
+        restore_confidence: "medium",
+      },
+    ],
+    recommended_action: {
+      id: "act_live_task_handoff_resume",
+      type: "resume_agent",
+      label: "Route to task agent",
+      requires_confirmation: false,
+      side_effect: "local",
+      payload: {},
+    },
+    alternate_actions: [
+      {
+        id: "act_live_task_handoff_done",
+        type: "mark_done",
+        label: "Mark done",
+        requires_confirmation: false,
+        side_effect: "none",
+        payload: {},
+      },
+    ],
+    created_at: "2026-05-07T00:00:00.000Z",
+    updated_at: "2026-05-07T00:00:00.000Z",
+  };
+}
+
+async function runLiveHandoffProof() {
   const script = `
 on waitForMenuBarExtra()
   repeat with attempt from 1 to 80
@@ -102,30 +183,6 @@ on waitForMenuBarExtra()
   error "EventLoopQueueApp menu bar extra did not appear"
 end waitForMenuBarExtra
 
-on menuItemNames()
-  waitForMenuBarExtra()
-  tell application "System Events"
-    tell process "EventLoopQueueApp"
-      tell menu bar item 1 of menu bar 2
-        click
-        delay 0.2
-        set namesList to name of menu items of menu 1
-      end tell
-      key code 53
-    end tell
-  end tell
-  return namesList
-end menuItemNames
-
-on waitForMenuItem(expectedValue)
-  repeat with attempt from 1 to 50
-    set itemsList to menuItemNames()
-    if itemsList contains expectedValue then return
-    delay 0.1
-  end repeat
-  error "missing menu item after wait: " & expectedValue
-end waitForMenuItem
-
 on clickMenuItem(itemName)
   waitForMenuBarExtra()
   tell application "System Events"
@@ -139,13 +196,36 @@ on clickMenuItem(itemName)
   end tell
 end clickMenuItem
 
-waitForMenuItem("Pull Next Paper")
+on waitForEnabledMenuItem(expectedValue)
+  repeat with attempt from 1 to 60
+    waitForMenuBarExtra()
+    tell application "System Events"
+      tell process "EventLoopQueueApp"
+        tell menu bar item 1 of menu bar 2
+          click
+          delay 0.2
+          if exists menu item expectedValue of menu 1 then
+            set itemEnabled to enabled of menu item expectedValue of menu 1
+            key code 53
+            if itemEnabled then return
+          else
+            key code 53
+          end if
+        end tell
+      end tell
+    end tell
+    delay 0.1
+  end repeat
+  error "menu item never enabled: " & expectedValue
+end waitForEnabledMenuItem
+
+waitForEnabledMenuItem("Pull Next Paper")
 clickMenuItem("Pull Next Paper")
-delay 0.4
-waitForMenuItem("Review seeded agent change")
-clickMenuItem("Done / Next")
-delay 0.5
-return "live queue mutation clicked"
+delay 0.6
+waitForEnabledMenuItem("Route to task agent")
+clickMenuItem("Route to task agent")
+delay 0.6
+return "live task handoff clicked"
 `;
 
   const result = await spawnChecked("osascript", ["-e", script]);
@@ -159,13 +239,13 @@ async function waitForDoneQueueItem(url) {
     if (queue.count === 1 && queue.items?.[0]?.state === "done") return queue;
     await sleep(200);
   }
-  throw new Error("timed out waiting for done queue item after live UI action");
+  throw new Error("timed out waiting for done queue item after live handoff action");
 }
 
 async function waitForActivity(url, type) {
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
-    const activity = await fetchJson(new URL("/activity?limit=20", url));
+    const activity = await fetchJson(new URL("/activity?limit=30", url));
     const found = activity.events?.find((event) => event.type === type);
     if (found) return found;
     await sleep(200);
@@ -207,7 +287,7 @@ async function fetchJson(url) {
   const response = await fetch(url);
   const body = await response.json();
   if (!response.ok) {
-    throw new Error(`GET ${url.pathname} failed with ${response.status}: ${JSON.stringify(body)}`);
+    throw new Error(`${response.status} ${url.pathname}: ${JSON.stringify(body)}`);
   }
   return body;
 }
@@ -240,11 +320,10 @@ async function tryTerminate(executablePath, child) {
 }
 
 async function onceExit(child) {
-  return await new Promise((resolve) => {
-    child.once("exit", resolve);
-  });
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await new Promise((resolve) => child.once("exit", resolve));
 }
 
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }

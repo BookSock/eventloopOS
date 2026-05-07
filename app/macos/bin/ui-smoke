@@ -115,6 +115,15 @@ assertContains(initialItems, "Open Queue")
 assertContains(initialItems, "Enter Manual Mode")
 assertContains(initialItems, "Restore Queue Workspace")
 assertContains(initialItems, "Pull Next Paper")
+assertContains(initialItems, "Run Recommended Action")
+
+tell application "System Events"
+  tell process "EventLoopQueueApp"
+    click menu item "Pull Next Paper" of menu 1 of menu bar item 1 of menu bar 2
+  end tell
+end tell
+delay 0.5
+
 waitForEnabledMenuItem("Approve revised angle or ask for another pass.")
 waitForEnabledMenuItem("Restore Queue Workspace")
 

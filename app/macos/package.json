@@ -9,7 +9,8 @@
     "test:e2e:launch": "bin/launch-smoke",
     "test:e2e:ui": "bin/ui-smoke",
     "test:e2e:live-ui": "bin/live-ui-smoke",
+    "test:e2e:live-handoff": "bin/live-task-handoff-smoke",
     "run:queue-app": "bin/run-queue-app",
-    "typecheck": "node --check bin/launch-smoke && node --check bin/ui-smoke && node --check bin/live-ui-smoke && node --check bin/run-queue-app && node --check bin/smoke-app-bundle.mjs && swift build"
+    "typecheck": "node --check bin/launch-smoke && node --check bin/ui-smoke && node --check bin/live-ui-smoke && node --check bin/live-task-handoff-smoke && node --check bin/run-queue-app && node --check bin/smoke-app-bundle.mjs && swift build"
   }
 }

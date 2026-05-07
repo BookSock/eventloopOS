@@ -3,22 +3,24 @@ import XCTest
 
 @MainActor
 final class QueueViewModelTests: XCTestCase {
-    func testLoadQueueSelectsFirstPacket() async {
-        let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
+    func testLoadQueueShowsStackWithoutActivePaper() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
 
         await viewModel.loadQueue()
 
         XCTAssertEqual(viewModel.state, .loaded)
         XCTAssertEqual(viewModel.packets.count, 3)
-        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
-        XCTAssertEqual(viewModel.selectedPacket?.title, "Review blog feedback draft")
+        XCTAssertNil(viewModel.selectedPacketID)
+        XCTAssertNil(viewModel.selectedPacket)
+        XCTAssertEqual(client.leasedPacketIds, [])
     }
 
-    func testLoadQueueLeasesSelectedPacketBeforeRenewal() async {
+    func testPullNextPaperLeasesSelectedPacketBeforeRenewal() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
 
-        await viewModel.loadQueue()
+        await viewModel.pullNextPaper()
         await viewModel.renewSelectedLease()
 
         XCTAssertEqual(client.leasedPacketIds, ["packet-blog-feedback"])
@@ -76,12 +78,12 @@ final class QueueViewModelTests: XCTestCase {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
 
-        await viewModel.loadQueue()
-        await viewModel.loadQueue()
+        await viewModel.pullNextPaper()
+        await viewModel.refreshQueue()
 
         XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
         XCTAssertEqual(client.leasedPacketIds, ["packet-blog-feedback"])
-        XCTAssertEqual(client.renewedPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(client.renewedPacketIds, [])
     }
 
     func testSelectIgnoresUnknownPacket() async {
@@ -147,7 +149,7 @@ final class QueueViewModelTests: XCTestCase {
     func testDoneAndNextCompletesSelectedPacketAndAdvances() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
-        await viewModel.loadQueue()
+        await viewModel.pullNextPaper()
 
         await viewModel.doneAndNext()
 
@@ -162,7 +164,7 @@ final class QueueViewModelTests: XCTestCase {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
         let dueAt = Date(timeIntervalSince1970: 1_778_074_500)
-        await viewModel.loadQueue()
+        await viewModel.pullNextPaper()
 
         await viewModel.deferSelectedPacket(until: dueAt)
 
@@ -177,7 +179,7 @@ final class QueueViewModelTests: XCTestCase {
     func testIgnoreSelectedPacketAdvances() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
-        await viewModel.loadQueue()
+        await viewModel.pullNextPaper()
 
         await viewModel.ignoreSelectedPacket()
 
@@ -191,7 +193,7 @@ final class QueueViewModelTests: XCTestCase {
     func testMoveToNextLeasesNextWithoutCompletingCurrentPacket() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
-        await viewModel.loadQueue()
+        await viewModel.pullNextPaper()
 
         await viewModel.moveToNext()
 
@@ -204,7 +206,7 @@ final class QueueViewModelTests: XCTestCase {
     func testMoveToNextKeepsSelectionWhenNoNextPacketIsAvailable() async {
         let client = FakeQueueClient(packets: [SeededQueue.packets[0]])
         let viewModel = QueueViewModel(client: client)
-        await viewModel.loadQueue()
+        await viewModel.pullNextPaper()
 
         await viewModel.moveToNext()
 
@@ -225,8 +227,7 @@ final class QueueViewModelTests: XCTestCase {
         )
         let client = FakeQueueClient(packets: [packet])
         let viewModel = QueueViewModel(client: client)
-        await viewModel.loadQueue()
-        await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
+        await viewModel.pullNextPaper()
 
         await viewModel.executeRecommendedActionAndNext()
 
@@ -263,6 +264,9 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.loadQueue()
 
         XCTAssertFalse(viewModel.canExecuteSelectedRecommendedAction)
+        XCTAssertNil(viewModel.selectedRecommendedActionBlockReason)
+        viewModel.select(packetId: "packet-route")
+        XCTAssertFalse(viewModel.canExecuteSelectedRecommendedAction)
         XCTAssertEqual(
             viewModel.selectedRecommendedActionBlockReason,
             "Bind a task session to task_blog_feedback before resuming agent"
@@ -287,7 +291,7 @@ final class QueueViewModelTests: XCTestCase {
         )
         let client = FakeQueueClient(packets: [packet], taskSessions: [])
         let viewModel = QueueViewModel(client: client)
-        await viewModel.loadQueue()
+        await viewModel.pullNextPaper()
 
         await viewModel.executeRecommendedActionAndNext()
 
@@ -321,6 +325,7 @@ final class QueueViewModelTests: XCTestCase {
             )
         )
         await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-route")
 
         await viewModel.loadTaskSessions()
 
@@ -349,7 +354,7 @@ final class QueueViewModelTests: XCTestCase {
                 ]
             )
         )
-        await viewModel.loadQueue()
+        await viewModel.pullNextPaper()
 
         await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
 
@@ -397,6 +402,7 @@ final class QueueViewModelTests: XCTestCase {
         )
         let viewModel = QueueViewModel(client: client)
         await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-route")
 
         await viewModel.bindSelectedPacket(toTaskSessionId: "task_session_unbound")
 
@@ -422,7 +428,7 @@ final class QueueViewModelTests: XCTestCase {
 
     func testRenewSelectedLeaseKeepsSelectionLoaded() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
-        await viewModel.loadQueue()
+        await viewModel.pullNextPaper()
 
         await viewModel.renewSelectedLease()
 
@@ -434,7 +440,7 @@ final class QueueViewModelTests: XCTestCase {
     func testAutomaticLeaseRenewalKeepsSelectedPacketLeased() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
-        await viewModel.loadQueue()
+        await viewModel.pullNextPaper()
 
         viewModel.startAutomaticLeaseRenewal(intervalNanoseconds: 1_000_000, maxRenewals: 2)
 
@@ -461,7 +467,8 @@ final class QueueViewModelTests: XCTestCase {
         viewModel.stopAutomaticQueueRefresh()
 
         XCTAssertEqual(viewModel.packets.map(\.id), ["packet-blog-feedback"])
-        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertNil(viewModel.selectedPacketID)
+        XCTAssertEqual(client.leasedPacketIds, [])
     }
 
     func testManualModePausesWorkspaceRestoreWithoutClearingQueue() async {
@@ -472,7 +479,7 @@ final class QueueViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.mode, .manual)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
-        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertNil(viewModel.selectedPacketID)
         XCTAssertEqual(viewModel.packets.count, 3)
 
         viewModel.returnToEventLoopMode()
@@ -593,6 +600,7 @@ final class QueueViewModelTests: XCTestCase {
             workspaceClient: workspaceClient
         )
         await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-with-workspace")
         viewModel.enterManualMode()
 
         await viewModel.returnToEventLoopModeAndPrepareWorkspaceRestore()
@@ -687,6 +695,7 @@ final class QueueViewModelTests: XCTestCase {
             workspaceClient: workspaceClient
         )
         await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-with-workspace")
 
         await viewModel.prepareSelectedWorkspaceRestore()
 
@@ -721,6 +730,7 @@ final class QueueViewModelTests: XCTestCase {
             workspaceClient: workspaceClient
         )
         await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-with-workspace")
 
         await viewModel.prepareSelectedWorkspaceRestore()
 
@@ -749,6 +759,7 @@ final class QueueViewModelTests: XCTestCase {
             workspaceClient: workspaceClient
         )
         await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-with-workspace")
 
         XCTAssertEqual(viewModel.selectedWorkspaceSnapshot, snapshot)
         XCTAssertTrue(viewModel.canRestoreSelectedWorkspace)
