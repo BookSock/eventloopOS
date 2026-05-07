@@ -102,6 +102,28 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.executeSupported, false)
     }
 
+    func testWorkspaceCaptureEnvelopeDecodesSnapshot() throws {
+        let data = """
+        {
+          "snapshot": {
+            "backend": "aerospace",
+            "windows": [
+              { "id": 9, "app": "Ghostty", "title": "codex", "workspace": "eventloop-blog" }
+            ],
+            "activeWorkspace": "eventloop-blog",
+            "focusedWindowId": 9
+          }
+        }
+        """.data(using: .utf8)!
+
+        let envelope = try QueueCoders.makeDecoder().decode(WorkspaceCaptureEnvelope.self, from: data)
+
+        XCTAssertEqual(envelope.snapshot.backend, "aerospace")
+        XCTAssertEqual(envelope.snapshot.windows.first?.app, "Ghostty")
+        XCTAssertEqual(envelope.snapshot.activeWorkspace, "eventloop-blog")
+        XCTAssertEqual(envelope.snapshot.focusedWindowId, 9)
+    }
+
     func testTaskSessionsEnvelopeDecodesSessions() throws {
         let data = """
         {
@@ -237,6 +259,30 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.plan.commands.first?.args, ["workspace", "eventloop-blog"])
         XCTAssertEqual(envelope.receipt.commands.first?.stdout, "ok")
         XCTAssertEqual(envelope.idempotencyKey, "idem_workspace_restore")
+    }
+
+    func testHTTPWorkspaceClientCapturesWorkspaceSnapshot() async throws {
+        let (client, recorder) = makeHTTPWorkspaceClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/workspace/capture")
+            return """
+            {
+              "snapshot": {
+                "backend": "aerospace",
+                "windows": [
+                  { "id": 9, "app": "Ghostty", "title": "codex", "workspace": "eventloop-blog" }
+                ],
+                "activeWorkspace": "eventloop-blog"
+              }
+            }
+            """
+        }
+
+        let snapshot = try await client.capture()
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertEqual(snapshot.windows.map(\.id), [9])
+        XCTAssertEqual(snapshot.activeWorkspace, "eventloop-blog")
     }
 
     func testContextRestorePlanEnvelopeDecodesBrowserExtensionMessage() throws {
@@ -417,6 +463,27 @@ final class QueueClientTests: XCTestCase {
         configuration.protocolClasses = [MockURLProtocol.self]
         let session = URLSession(configuration: configuration)
         return (HTTPQueueClient(baseURL: URL(string: "http://127.0.0.1:4377")!, session: session), recorder)
+    }
+
+    private func makeHTTPWorkspaceClient(
+        body: @escaping (URLRequest) throws -> String
+    ) -> (HTTPWorkspaceClient, HTTPClientRecorder) {
+        let recorder = HTTPClientRecorder()
+        MockURLProtocol.registry.setHandler { request in
+            recorder.requests.append(request)
+            let data = try body(request).data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, data)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        return (HTTPWorkspaceClient(baseURL: URL(string: "http://127.0.0.1:4377")!, session: session), recorder)
     }
 }
 

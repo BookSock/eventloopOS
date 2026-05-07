@@ -332,6 +332,30 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
     }
 
+    func testEnteringManualModeCapturesCurrentWorkspaceSnapshot() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog"),
+                WorkspaceWindow(id: 10, app: "Google Chrome", title: "Launch doc", workspace: "eventloop-blog")
+            ],
+            activeWorkspace: "eventloop-blog"
+        )
+        let workspaceClient = FakeWorkspaceClient(captureSnapshot: snapshot)
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+
+        await viewModel.enterManualModeAndCaptureWorkspace()
+
+        XCTAssertEqual(viewModel.mode, .manual)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .skippedManualMode)
+        XCTAssertEqual(viewModel.manualWorkspaceSnapshot, snapshot)
+        XCTAssertEqual(viewModel.manualWorkspaceCaptureState, .captured(snapshot))
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
+    }
+
     func testReturningToEventLoopModePlansSelectedWorkspaceRestore() async {
         let snapshot = WorkspaceSnapshot(
             windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],

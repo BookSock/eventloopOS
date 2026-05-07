@@ -63,6 +63,7 @@ Done:
 - Render smoke test for real SwiftUI `QueueWindowView` using seeded queue data and nonblank image pixel check.
 - Launch smoke test builds `EventLoopQueueApp`, packages a temporary `.app` bundle, starts it in test mode through Launch Services, verifies it stays alive, then terminates it.
 - Workspace restore planning pause in manual mode.
+- Manual Mode captures the current workspace snapshot and shows saved-window count, so normal-computer context is not silently lost when leaving the event loop.
 - Context resource restore request from queue UI.
 - Restore request status refresh.
 - Automatic restore request status polling while Mac UI is open.
@@ -123,6 +124,7 @@ Strong tests now:
 - Opt-in fixture-audio STT smoke passed locally with `EVENTLOOPOS_ENABLE_VOICE_STT_SMOKE=1 EVENTLOOPOS_WHISPER_MODEL=external-resources/models/whisper/ggml-tiny.en.bin pnpm run voice:stt-smoke`; transcript was `computer blog post priority changed.`
 - `dev:doctor` reports whether `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` is configured and can launch with `--help`; unconfigured voice command is treated as optional/pass.
 - Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
+- Mac unit tests cover Manual Mode workspace capture through `HTTPWorkspaceClient.capture()` and `QueueViewModel.enterManualModeAndCaptureWorkspace()`.
 
 Weak tests:
 

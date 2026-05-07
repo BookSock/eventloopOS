@@ -2,6 +2,7 @@ import Foundation
 
 public protocol WorkspaceClient: Sendable {
     func status() async throws -> WorkspaceStatusEnvelope
+    func capture() async throws -> WorkspaceSnapshot
     func restorePlan(snapshot: WorkspaceSnapshot, currentWindows: [WorkspaceWindow]?) async throws -> WorkspaceRestorePlanEnvelope
     func restore(snapshot: WorkspaceSnapshot, currentWindows: [WorkspaceWindow]?, idempotencyKey: String) async throws -> WorkspaceRestoreExecutionEnvelope
 }
@@ -32,6 +33,14 @@ public struct WorkspaceCapabilityStatus: Codable, Equatable, Sendable {
         self.backend = backend
         self.reason = reason
         self.detail = detail
+    }
+}
+
+public struct WorkspaceCaptureEnvelope: Codable, Equatable, Sendable {
+    public let snapshot: WorkspaceSnapshot
+
+    public init(snapshot: WorkspaceSnapshot) {
+        self.snapshot = snapshot
     }
 }
 
@@ -210,6 +219,16 @@ public struct HTTPWorkspaceClient: WorkspaceClient {
         return try decoder.decode(WorkspaceStatusEnvelope.self, from: data)
     }
 
+    public func capture() async throws -> WorkspaceSnapshot {
+        let url = baseURL.appending(path: "workspace/capture")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(WorkspaceCaptureEnvelope.self, from: data).snapshot
+    }
+
     public func restorePlan(
         snapshot: WorkspaceSnapshot,
         currentWindows: [WorkspaceWindow]? = nil
@@ -277,8 +296,10 @@ private struct WorkspaceRestoreRequest: Encodable {
 public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
     private let lock = NSLock()
     private let statusEnvelope: WorkspaceStatusEnvelope
+    private let captureSnapshot: WorkspaceSnapshot
     private let planEnvelope: WorkspaceRestorePlanEnvelope
     private let restoreEnvelope: WorkspaceRestoreExecutionEnvelope
+    private var captureCount = 0
     private var requestedSnapshots: [WorkspaceSnapshot] = []
     private var restoreKeys: [String] = []
 
@@ -287,6 +308,7 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
             status: WorkspaceCapabilityStatus(available: true),
             executeSupported: false
         ),
+        captureSnapshot: WorkspaceSnapshot = WorkspaceSnapshot(windows: []),
         planEnvelope: WorkspaceRestorePlanEnvelope = WorkspaceRestorePlanEnvelope(
             plan: WorkspaceRestorePlan(commands: [], skipped: []),
             executeSupported: false
@@ -300,8 +322,13 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
         )
     ) {
         self.statusEnvelope = statusEnvelope
+        self.captureSnapshot = captureSnapshot
         self.planEnvelope = planEnvelope
         self.restoreEnvelope = restoreEnvelope
+    }
+
+    public var workspaceCaptureCount: Int {
+        lock.withLock { captureCount }
     }
 
     public var restorePlanSnapshots: [WorkspaceSnapshot] {
@@ -314,6 +341,13 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
 
     public func status() async throws -> WorkspaceStatusEnvelope {
         statusEnvelope
+    }
+
+    public func capture() async throws -> WorkspaceSnapshot {
+        lock.withLock {
+            captureCount += 1
+        }
+        return captureSnapshot
     }
 
     public func restorePlan(snapshot: WorkspaceSnapshot, currentWindows: [WorkspaceWindow]?) async throws -> WorkspaceRestorePlanEnvelope {
@@ -343,6 +377,10 @@ public struct NoOpWorkspaceClient: WorkspaceClient {
             status: WorkspaceCapabilityStatus(available: false, reason: "not_configured"),
             executeSupported: false
         )
+    }
+
+    public func capture() async throws -> WorkspaceSnapshot {
+        WorkspaceSnapshot(windows: [])
     }
 
     public func restorePlan(snapshot: WorkspaceSnapshot, currentWindows: [WorkspaceWindow]?) async throws -> WorkspaceRestorePlanEnvelope {

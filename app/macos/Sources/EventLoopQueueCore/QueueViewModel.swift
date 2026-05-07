@@ -1,5 +1,12 @@
 import Foundation
 
+public enum ManualWorkspaceCaptureState: Equatable, Sendable {
+    case idle
+    case capturing
+    case captured(WorkspaceSnapshot)
+    case failed(String)
+}
+
 @MainActor
 public final class QueueViewModel: ObservableObject {
     @Published public private(set) var packets: [ReviewPacket]
@@ -8,6 +15,8 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var mode: EventLoopMode
     @Published public private(set) var shouldRestoreWorkspace: Bool
     @Published public private(set) var workspaceRestoreState: WorkspaceRestoreState
+    @Published public private(set) var manualWorkspaceSnapshot: WorkspaceSnapshot?
+    @Published public private(set) var manualWorkspaceCaptureState: ManualWorkspaceCaptureState
     @Published public private(set) var contextRestoreState: ContextRestoreState
     @Published public private(set) var taskSessions: [TaskSession]
     @Published public private(set) var taskBindingState: TaskBindingState
@@ -31,6 +40,8 @@ public final class QueueViewModel: ObservableObject {
         self.mode = .eventLoop
         self.shouldRestoreWorkspace = true
         self.workspaceRestoreState = .idle
+        self.manualWorkspaceSnapshot = nil
+        self.manualWorkspaceCaptureState = .idle
         self.contextRestoreState = .idle
         self.taskSessions = []
         self.taskBindingState = .idle
@@ -165,6 +176,19 @@ public final class QueueViewModel: ObservableObject {
         workspaceRestoreState = .skippedManualMode
     }
 
+    public func enterManualModeAndCaptureWorkspace() async {
+        enterManualMode()
+        manualWorkspaceCaptureState = .capturing
+        do {
+            let snapshot = try await workspaceClient.capture()
+            manualWorkspaceSnapshot = snapshot
+            manualWorkspaceCaptureState = .captured(snapshot)
+        } catch {
+            manualWorkspaceSnapshot = nil
+            manualWorkspaceCaptureState = .failed(error.localizedDescription)
+        }
+    }
+
     public func returnToEventLoopMode() {
         mode = .eventLoop
         shouldRestoreWorkspace = true
@@ -185,7 +209,7 @@ public final class QueueViewModel: ObservableObject {
 
     public func toggleManualModeAndPrepareWorkspaceRestoreIfNeeded() async {
         if mode == .eventLoop {
-            enterManualMode()
+            await enterManualModeAndCaptureWorkspace()
         } else {
             await returnToEventLoopModeAndPrepareWorkspaceRestore()
         }

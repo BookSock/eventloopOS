@@ -113,6 +113,7 @@ struct QueueWindowView: View {
             VStack(alignment: .leading, spacing: 8) {
                 StatusBanner(state: viewModel.state)
                 WorkspaceRestoreBanner(state: viewModel.workspaceRestoreState)
+                ManualWorkspaceCaptureBanner(state: viewModel.manualWorkspaceCaptureState)
                 ContextRestoreBanner(state: viewModel.contextRestoreState) {
                     Task {
                         await viewModel.refreshContextRestoreRequest()
@@ -706,6 +707,38 @@ private struct WorkspaceRestoreBanner: View {
                 .background(.red.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityIdentifier("workspace-restore-failed")
+        }
+    }
+}
+
+private struct ManualWorkspaceCaptureBanner: View {
+    let state: ManualWorkspaceCaptureState
+
+    var body: some View {
+        switch state {
+        case .idle:
+            EmptyView()
+        case .capturing:
+            Text("Capturing manual workspace")
+                .font(.caption)
+                .padding(8)
+                .background(.secondary.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("manual-workspace-capturing")
+        case let .captured(snapshot):
+            Text("Manual workspace saved: \(snapshot.windows.count) windows")
+                .font(.caption)
+                .padding(8)
+                .background(.green.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("manual-workspace-captured")
+        case let .failed(message):
+            Text("Manual workspace capture failed: \(message)")
+                .font(.caption)
+                .padding(8)
+                .background(.red.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("manual-workspace-capture-failed")
         }
     }
 }
