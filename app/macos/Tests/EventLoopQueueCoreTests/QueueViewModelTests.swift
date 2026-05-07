@@ -561,9 +561,18 @@ final class QueueViewModelTests: XCTestCase {
     }
 
     func testSelectedWorkspaceRestoreRequiresPacketSnapshot() async {
+        let packet = ReviewPacket(
+            id: "packet-no-workspace",
+            title: "Review without workspace",
+            summary: "Needs review without restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
         let workspaceClient = FakeWorkspaceClient()
         let viewModel = QueueViewModel(
-            client: FakeQueueClient(packets: SeededQueue.packets),
+            client: FakeQueueClient(packets: [packet]),
             workspaceClient: workspaceClient
         )
         await viewModel.loadQueue()
@@ -578,9 +587,18 @@ final class QueueViewModelTests: XCTestCase {
     }
 
     func testSelectedWorkspaceRestorePlanningSkipsMissingSnapshot() async {
+        let packet = ReviewPacket(
+            id: "packet-no-workspace",
+            title: "Review without workspace",
+            summary: "Needs review without restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
         let workspaceClient = FakeWorkspaceClient()
         let viewModel = QueueViewModel(
-            client: FakeQueueClient(packets: SeededQueue.packets),
+            client: FakeQueueClient(packets: [packet]),
             workspaceClient: workspaceClient
         )
         await viewModel.loadQueue()

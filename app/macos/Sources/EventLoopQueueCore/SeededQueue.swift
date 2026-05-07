@@ -1,6 +1,15 @@
 import Foundation
 
 public enum SeededQueue {
+    public static let blogFeedbackWorkspace = WorkspaceSnapshot(
+        windows: [
+            WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog"),
+            WorkspaceWindow(id: 10, app: "Google Chrome", title: "Launch doc", workspace: "eventloop-blog")
+        ],
+        activeWorkspace: "eventloop-blog",
+        focusedWindowId: 9
+    )
+
     public static let packets: [ReviewPacket] = [
         ReviewPacket(
             id: "packet-blog-feedback",
@@ -11,7 +20,8 @@ public enum SeededQueue {
             priority: 90,
             recommendedAction: "Approve revised angle or ask for another pass.",
             recommendedActionType: "resume_agent",
-            createdAt: Date(timeIntervalSince1970: 1_767_027_600)
+            createdAt: Date(timeIntervalSince1970: 1_767_027_600),
+            workspaceSnapshot: blogFeedbackWorkspace
         ),
         ReviewPacket(
             id: "packet-ci-failed",

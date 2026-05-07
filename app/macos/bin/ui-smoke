@@ -113,7 +113,18 @@ end assertContains
 set initialItems to menuItemNames()
 assertContains(initialItems, "Open Queue")
 assertContains(initialItems, "Enter Manual Mode")
+assertContains(initialItems, "Restore Queue Workspace")
 waitForEnabledMenuItem("Approve revised angle or ask for another pass.")
+waitForEnabledMenuItem("Restore Queue Workspace")
+
+tell application "System Events"
+  tell process "EventLoopQueueApp"
+    click menu item "Restore Queue Workspace" of menu 1 of menu bar item 1 of menu bar 2
+  end tell
+end tell
+delay 0.5
+set queueRestoreItems to menuItemNames()
+assertContains(queueRestoreItems, "Workspace restored: 0 commands")
 
 tell application "System Events"
   tell process "EventLoopQueueApp"
@@ -177,7 +188,7 @@ return queueWindowName
   const result = await spawnChecked("osascript", ["-e", script]);
   return {
     window_name: result.stdout.trim(),
-    mode_toggle_proof: "Skip / Next Item changed selection; menu item changed Enter Manual Mode -> Return to Event Loop -> Enter Manual Mode; Restore Manual Workspace executed with receipt",
+    mode_toggle_proof: "Restore Queue Workspace executed with receipt; Skip / Next Item changed selection; menu item changed Enter Manual Mode -> Return to Event Loop -> Enter Manual Mode; Restore Manual Workspace executed with receipt",
   };
 }
 

@@ -51,6 +51,15 @@ struct EventLoopQueueApp: App {
                 .keyboardShortcut(.return, modifiers: [.command])
                 .accessibilityIdentifier("queue-command-done-next")
 
+                Button("Restore Queue Workspace") {
+                    Task {
+                        await viewModel.confirmSelectedWorkspaceRestore()
+                    }
+                }
+                .keyboardShortcut("r", modifiers: [.command, .option])
+                .disabled(!viewModel.canRestoreSelectedWorkspace)
+                .accessibilityIdentifier("queue-command-restore-queue-workspace")
+
                 Button("Skip / Next Item") {
                     Task {
                         await viewModel.moveToNext()
@@ -160,6 +169,15 @@ private struct QueueMenuView: View {
             }
             .keyboardShortcut(.return, modifiers: [.command])
             .accessibilityIdentifier("queue-menu-done-next")
+
+            Button("Restore Queue Workspace") {
+                Task {
+                    await viewModel.confirmSelectedWorkspaceRestore()
+                }
+            }
+            .keyboardShortcut("r", modifiers: [.command, .option])
+            .disabled(!viewModel.canRestoreSelectedWorkspace)
+            .accessibilityIdentifier("queue-menu-restore-queue-workspace")
 
             Button("Skip / Next Item") {
                 Task {
