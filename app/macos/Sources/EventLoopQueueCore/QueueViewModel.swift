@@ -47,7 +47,26 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public var canExecuteSelectedRecommendedAction: Bool {
-        selectedPacket?.recommendedActionType == "resume_agent"
+        guard selectedPacket?.recommendedActionType == "resume_agent" else {
+            return false
+        }
+        guard selectedTaskId != nil else {
+            return false
+        }
+        return !selectedTaskSessions.isEmpty
+    }
+
+    public var selectedRecommendedActionBlockReason: String? {
+        guard selectedPacket?.recommendedActionType == "resume_agent" else {
+            return nil
+        }
+        guard let selectedTaskId else {
+            return "Selected packet has no task id"
+        }
+        guard !selectedTaskSessions.isEmpty else {
+            return "Bind a task session to \(selectedTaskId) before resuming agent"
+        }
+        return nil
     }
 
     public var selectedTaskId: String? {
@@ -191,6 +210,10 @@ public final class QueueViewModel: ObservableObject {
 
     public func executeRecommendedActionAndNext() async {
         guard let packetId = selectedPacketID else {
+            return
+        }
+        guard canExecuteSelectedRecommendedAction else {
+            taskBindingState = .failed(selectedRecommendedActionBlockReason ?? "Recommended action is not ready")
             return
         }
 

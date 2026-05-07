@@ -63,16 +63,28 @@ final class QueueViewModelTests: XCTestCase {
     }
 
     func testExecuteRecommendedActionCompletesSelectedPacketAndAdvances() async {
-        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let packet = ReviewPacket(
+            id: "packet-route",
+            taskId: "task_blog_feedback",
+            title: "Route feedback",
+            summary: "Human approved agent handoff.",
+            source: "manual://review",
+            priority: 90,
+            recommendedAction: "Route to task agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(packets: [packet])
         let viewModel = QueueViewModel(client: client)
         await viewModel.loadQueue()
+        await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
 
         await viewModel.executeRecommendedActionAndNext()
 
-        XCTAssertEqual(client.executedRecommendedActions, ["packet-blog-feedback"])
+        XCTAssertEqual(client.executedRecommendedActions, ["packet-route"])
         XCTAssertEqual(viewModel.state, .loaded)
-        XCTAssertEqual(viewModel.packets.map(\.id), ["packet-ci-failed", "packet-external-send"])
-        XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+        XCTAssertEqual(viewModel.packets, [])
+        XCTAssertNil(viewModel.selectedPacketID)
     }
 
     func testRecommendedActionAvailabilityFollowsSelectedPacket() async {
@@ -101,9 +113,41 @@ final class QueueViewModelTests: XCTestCase {
 
         await viewModel.loadQueue()
 
+        XCTAssertFalse(viewModel.canExecuteSelectedRecommendedAction)
+        XCTAssertEqual(
+            viewModel.selectedRecommendedActionBlockReason,
+            "Bind a task session to task_blog_feedback before resuming agent"
+        )
+        await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
         XCTAssertTrue(viewModel.canExecuteSelectedRecommendedAction)
         viewModel.select(packetId: "packet-done")
         XCTAssertFalse(viewModel.canExecuteSelectedRecommendedAction)
+    }
+
+    func testExecuteRecommendedActionRequiresBoundTaskSession() async {
+        let packet = ReviewPacket(
+            id: "packet-route",
+            taskId: "task_blog_feedback",
+            title: "Route feedback",
+            summary: "Human approved agent handoff.",
+            source: "manual://review",
+            priority: 90,
+            recommendedAction: "Route to task agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(packets: [packet], taskSessions: [])
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.loadQueue()
+
+        await viewModel.executeRecommendedActionAndNext()
+
+        XCTAssertEqual(client.executedRecommendedActions, [])
+        XCTAssertEqual(
+            viewModel.taskBindingState,
+            .failed("Bind a task session to task_blog_feedback before resuming agent")
+        )
+        XCTAssertEqual(viewModel.packets.map(\.id), ["packet-route"])
     }
 
     func testLoadTaskSessionsFindsSelectedTaskSessions() async {

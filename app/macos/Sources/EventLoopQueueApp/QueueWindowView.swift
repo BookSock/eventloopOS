@@ -81,7 +81,8 @@ struct QueueWindowView: View {
                 ),
                 taskSessions: viewModel.taskSessions,
                 selectedTaskSessions: viewModel.selectedTaskSessions,
-                taskBindingState: viewModel.taskBindingState
+                taskBindingState: viewModel.taskBindingState,
+                canExecuteRecommendedAction: viewModel.canExecuteSelectedRecommendedAction
             ) {
                 Task {
                     await viewModel.doneAndNext()
@@ -199,6 +200,7 @@ private struct PacketDetail: View {
     let taskSessions: [TaskSession]
     let selectedTaskSessions: [TaskSession]
     let taskBindingState: TaskBindingState
+    let canExecuteRecommendedAction: Bool
     let doneAndNext: () -> Void
     let executeRecommendedAction: () -> Void
     let refreshQueue: () -> Void
@@ -312,6 +314,7 @@ private struct PacketDetail: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
+                        .disabled(!canExecuteRecommendedAction)
                         .accessibilityIdentifier("queue-execute-recommended-action-button")
                     }
                     Button {

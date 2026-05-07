@@ -79,58 +79,63 @@ private struct QueueMenuView: View {
     }
 
     var body: some View {
-        Text(summary.title)
-            .font(.headline)
-            .accessibilityIdentifier("queue-menu-count")
-        Text(summary.subtitle)
-            .lineLimit(2)
-            .accessibilityIdentifier("queue-menu-selection")
-        Text(summary.modeLabel)
-            .accessibilityIdentifier("queue-menu-mode")
-        if let restoreLabel = summary.restoreLabel {
-            Text(restoreLabel)
+        Group {
+            Text(summary.title)
+                .font(.headline)
+                .accessibilityIdentifier("queue-menu-count")
+            Text(summary.subtitle)
                 .lineLimit(2)
-                .accessibilityIdentifier("queue-menu-restore")
-        }
-
-        Divider()
-
-        Button("Open Queue") {
-            openWindow(id: windowID)
-        }
-        .keyboardShortcut("o", modifiers: [.command])
-        .accessibilityIdentifier("queue-menu-open-window")
-
-        Button("Refresh Queue") {
-            Task {
-                await viewModel.refreshQueue()
+                .accessibilityIdentifier("queue-menu-selection")
+            Text(summary.modeLabel)
+                .accessibilityIdentifier("queue-menu-mode")
+            if let restoreLabel = summary.restoreLabel {
+                Text(restoreLabel)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("queue-menu-restore")
             }
-        }
-        .accessibilityIdentifier("queue-menu-refresh")
 
-        Button(viewModel.selectedPacket?.recommendedAction ?? "Run Recommended Action") {
-            Task {
-                await viewModel.executeRecommendedActionAndNext()
-            }
-        }
-        .keyboardShortcut(.return, modifiers: [.command, .shift])
-        .disabled(!viewModel.canExecuteSelectedRecommendedAction)
-        .accessibilityIdentifier("queue-menu-execute-recommended-action")
+            Divider()
 
-        Button("Done / Next") {
-            Task {
-                await viewModel.doneAndNext()
+            Button("Open Queue") {
+                openWindow(id: windowID)
             }
-        }
-        .keyboardShortcut(.return, modifiers: [.command])
-        .accessibilityIdentifier("queue-menu-done-next")
+            .keyboardShortcut("o", modifiers: [.command])
+            .accessibilityIdentifier("queue-menu-open-window")
 
-        Button(viewModel.isManualMode ? "Return to Event Loop" : "Enter Manual Mode") {
-            Task {
-                await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+            Button("Refresh Queue") {
+                Task {
+                    await viewModel.refreshQueue()
+                }
             }
+            .accessibilityIdentifier("queue-menu-refresh")
+
+            Button(viewModel.selectedPacket?.recommendedAction ?? "Run Recommended Action") {
+                Task {
+                    await viewModel.executeRecommendedActionAndNext()
+                }
+            }
+            .keyboardShortcut(.return, modifiers: [.command, .shift])
+            .disabled(!viewModel.canExecuteSelectedRecommendedAction)
+            .accessibilityIdentifier("queue-menu-execute-recommended-action")
+
+            Button("Done / Next") {
+                Task {
+                    await viewModel.doneAndNext()
+                }
+            }
+            .keyboardShortcut(.return, modifiers: [.command])
+            .accessibilityIdentifier("queue-menu-done-next")
+
+            Button(viewModel.isManualMode ? "Return to Event Loop" : "Enter Manual Mode") {
+                Task {
+                    await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+                }
+            }
+            .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+            .accessibilityIdentifier("queue-menu-mode-toggle")
         }
-        .keyboardShortcut("m", modifiers: [.command, .option, .shift])
-        .accessibilityIdentifier("queue-menu-mode-toggle")
+        .task(id: viewModel.selectedTaskId) {
+            await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
+        }
     }
 }
