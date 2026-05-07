@@ -41,6 +41,7 @@ describe("dogfood review CLI", () => {
     assert.match(output, /Sessions:\n- task_session_blog events=4 routed=1 queued=1 done=1 followups_attempted=1 followups_sent=1 followups_blocked=0 failed=0/);
     assert.match(output, /Queues:\n- qit_review_1 task=task_blog_feedback session=task_session_blog events=2 done_in=20.0m: Queue item done: Launch review/);
     assert.match(output, /Restore Providers:\n- browser requested=1 done=1 failed=1 retried=0 success=0.50 reasons=browser_quote_fallback/);
+    assert.match(output, /Daily Activity:\n- 2026-05-06 events=7 routed=1 queued=1 done=1 followups_sent=1 failed=1/);
     assert.match(output, /queue_item_done ok task=task_blog_feedback queue=qit_review_1: Queue item done: Launch review/);
     assert.doesNotMatch(output, /Old event before window/);
   });
@@ -75,6 +76,7 @@ describe("dogfood review CLI", () => {
       session_rollups: Array<{ id: string; routed: number }>;
       queue_rollups: Array<{ id: string; time_to_done_ms: number }>;
       restore_provider_rollups: Array<{ provider: string; success_rate: number }>;
+      daily_rollups: Array<{ date: string; events: number; followups_sent: number; failed: number }>;
       derived: { queue_clearance_rate: number };
     };
     assert.equal(parsed.metrics.counters.events_ingested_total, 2);
@@ -111,6 +113,17 @@ describe("dogfood review CLI", () => {
       success_rate: rollup.success_rate,
     })), [
       { provider: "browser", success_rate: 0.5 },
+    ]);
+    assert.deepEqual(parsed.daily_rollups, [
+      {
+        date: "2026-05-06",
+        events: 7,
+        routed: 1,
+        queued: 1,
+        done: 1,
+        followups_sent: 1,
+        failed: 1,
+      },
     ]);
     assert.equal(parsed.derived.queue_clearance_rate, 0.5);
   });

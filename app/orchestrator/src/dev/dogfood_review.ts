@@ -34,6 +34,7 @@ type DogfoodReviewReport = {
   session_rollups: RollupSummary[];
   queue_rollups: QueueRollupSummary[];
   restore_provider_rollups: RestoreProviderRollupSummary[];
+  daily_rollups: DailyActivityRollupSummary[];
   derived: {
     restore_success_rate: number | null;
     queue_clearance_rate: number | null;
@@ -75,6 +76,16 @@ type RestoreProviderRollupSummary = {
   success_rate: number | null;
   last_activity_at: string;
   confidence_reasons: string[];
+};
+
+type DailyActivityRollupSummary = {
+  date: string;
+  events: number;
+  routed: number;
+  queued: number;
+  done: number;
+  followups_sent: number;
+  failed: number;
 };
 
 export function dogfoodReviewOptionsFromEnv(env: NodeJS.ProcessEnv): DogfoodReviewOptions {
@@ -142,6 +153,7 @@ function buildDogfoodReviewReport(input: {
     session_rollups: rollupBy(input.events, (event) => event.task_session_id),
     queue_rollups: queueRollups(input.events),
     restore_provider_rollups: restoreProviderRollups(input.events),
+    daily_rollups: dailyActivityRollups(input.events),
     derived: {
       restore_success_rate: ratio(
         input.metrics.counters.restore_requests_done_total,
@@ -203,6 +215,17 @@ function formatTextReport(report: DogfoodReviewReport): string {
       const reasons = rollup.confidence_reasons.length > 0 ? ` reasons=${rollup.confidence_reasons.join(",")}` : "";
       lines.push(
         `- ${rollup.provider} requested=${rollup.requested} done=${rollup.done} failed=${rollup.failed} retried=${rollup.retried} success=${formatRatio(rollup.success_rate)}${reasons} last=${rollup.last_activity_at}`,
+      );
+    }
+  }
+
+  lines.push("", "Daily Activity:");
+  if (report.daily_rollups.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const rollup of report.daily_rollups) {
+      lines.push(
+        `- ${rollup.date} events=${rollup.events} routed=${rollup.routed} queued=${rollup.queued} done=${rollup.done} followups_sent=${rollup.followups_sent} failed=${rollup.failed}`,
       );
     }
   }
@@ -307,6 +330,30 @@ function restoreProviderRollups(events: ActivityEvent[]): RestoreProviderRollupS
     rollups.set(provider, rollup);
   }
   return [...rollups.values()].sort((left, right) => right.last_activity_at.localeCompare(left.last_activity_at));
+}
+
+function dailyActivityRollups(events: ActivityEvent[]): DailyActivityRollupSummary[] {
+  const rollups = new Map<string, DailyActivityRollupSummary>();
+  for (const event of events) {
+    const date = event.occurred_at.slice(0, 10);
+    const rollup = rollups.get(date) ?? {
+      date,
+      events: 0,
+      routed: 0,
+      queued: 0,
+      done: 0,
+      followups_sent: 0,
+      failed: 0,
+    };
+    rollup.events += 1;
+    if (event.type === "event_routed") rollup.routed += 1;
+    if (event.type === "event_routed" && event.queue_item_id) rollup.queued += 1;
+    if (event.type === "queue_item_done") rollup.done += 1;
+    if (event.type === "task_followup_sent") rollup.followups_sent += 1;
+    if (event.status === "failed") rollup.failed += 1;
+    rollups.set(date, rollup);
+  }
+  return [...rollups.values()].sort((left, right) => right.date.localeCompare(left.date));
 }
 
 function appendRollupLines(lines: string[], rollups: RollupSummary[]): void {
