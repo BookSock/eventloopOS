@@ -23,6 +23,10 @@ try {
     ...process.env,
     EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl
   });
+  await spawnChecked("pnpm", ["--filter", "@eventloopos/macos", "test:e2e"], {
+    ...process.env,
+    EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL: orchestratorUrl
+  });
   await spawnChecked("pnpm", ["--filter", "@eventloopos/browser-extension", "test:e2e"]);
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

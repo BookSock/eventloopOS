@@ -10,6 +10,7 @@ Repo now has working MVP spine:
 - Native host = Chrome Native Messaging bridge.
 - Test harness = repeatable agent feedback loop.
 - `pnpm run test:e2e:live:boot` boots orchestrator, runs live harness/native/browser E2E, then stops server.
+- Boot live smoke also runs Mac `HTTPQueueClient` against the live orchestrator and proves context restore request create/read round-trip.
 
 Main command:
 
@@ -102,13 +103,14 @@ Strong tests now:
 - Real Chromium Playwright extension E2E.
 - Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06.
 - `voice:listen` accepts line-delimited local STT transcript streams, optional wake phrase filtering, and forwards into `/voice/commands`.
+- Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
 
 Weak tests:
 
 - Postgres live tests skip when Docker absent.
 - AeroSpace live restore needs installed/running AeroSpace.
 - AeroSpace live smoke exists, but `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm --filter @eventloopos/orchestrator run live:aerospace` currently reports `server_unavailable` because AeroSpace.app is not running.
-- No full installed extension + native host + Mac app manual UI flow.
+- No full installed extension + native host + Mac app manual UI flow; current live coverage proves Mac client/orchestrator API round-trip but not rendered app interaction.
 - No local voice wake-word/STT test.
 
 ## Next Best Work
