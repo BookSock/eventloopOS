@@ -53,9 +53,28 @@ describe("live AeroSpace smoke", () => {
         backend: "aerospace",
       },
       window_count: 2,
+      restore_plan_target_window_id: 8,
       restore_plan_command_count: 2,
       restore_plan_skip_count: 0,
     });
+  });
+
+  it("requires at least one captured window for enabled non-destructive proof", async () => {
+    const exec: ExecFunction = async (_command, args) => {
+      if (args[0] === "list-windows") {
+        return { stdout: "[]" };
+      }
+      throw new Error(`unexpected command ${args.join(" ")}`);
+    };
+
+    const result = await runLiveAerospaceSmoke({ enabled: true, exec });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.skipped, false);
+    if (!result.ok) {
+      assert.equal(result.reason, "no_windows");
+      assert.equal(result.detail, "AeroSpace capture returned no windows");
+    }
   });
 
   it("optionally proves restore execution by moving a window to a scratch workspace and back", async () => {
@@ -147,9 +166,12 @@ describe("live AeroSpace smoke", () => {
       throw new Error(`unexpected command ${args.join(" ")}`);
     };
 
-    await assert.rejects(
-      () => runLiveAerospaceSmoke({ enabled: true, executeRestore: true, exec }),
-      /no AeroSpace windows available for restore execution proof/,
-    );
+    const result = await runLiveAerospaceSmoke({ enabled: true, executeRestore: true, exec });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.skipped, false);
+    if (!result.ok) {
+      assert.equal(result.reason, "no_windows");
+    }
   });
 });

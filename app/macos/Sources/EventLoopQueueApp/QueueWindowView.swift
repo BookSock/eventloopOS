@@ -229,6 +229,11 @@ private struct QueueRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+            Text(packet.taskId ?? packet.reviewPacketId)
+                .font(.caption2.monospaced())
+                .foregroundStyle(.tertiary)
+                .lineLimit(1)
+                .accessibilityIdentifier("queue-row-identity-\(packet.id)")
         }
         .padding(.vertical, 4)
     }
@@ -259,6 +264,7 @@ private struct PacketDetail: View {
         VStack(alignment: .leading, spacing: 18) {
             if let packet {
                 VStack(alignment: .leading, spacing: 8) {
+                    PacketIdentityStrip(packet: packet, selectedTaskSessions: selectedTaskSessions)
                     HStack(spacing: 12) {
                         Label("\(queueCount) in stack", systemImage: "tray.full")
                             .font(.callout.weight(.medium))
@@ -524,6 +530,50 @@ private struct QueueLineageSection: View {
     }
 }
 
+private struct PacketIdentityStrip: View {
+    let packet: ReviewPacket
+    let selectedTaskSessions: [TaskSession]
+
+    private var presentation: QueuePacketIdentityPresentation {
+        QueuePacketIdentityPresentation(packet: packet, selectedTaskSessions: selectedTaskSessions)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 8) {
+                Label(presentation.taskLabel, systemImage: presentation.taskId == nil ? "link.badge.plus" : "tag")
+                    .lineLimit(1)
+                    .accessibilityIdentifier("packet-identity-task")
+                Text(presentation.packetId)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("packet-identity-packet")
+                Spacer(minLength: 0)
+            }
+            .font(.caption.weight(.medium))
+
+            HStack(spacing: 8) {
+                if let workspaceLabel = presentation.workspaceLabel {
+                    Label(workspaceLabel, systemImage: "rectangle.3.group")
+                        .accessibilityIdentifier("packet-identity-workspace")
+                }
+                if let sendBackLabel = presentation.sendBackLabel {
+                    Label(sendBackLabel, systemImage: "paperplane")
+                        .accessibilityIdentifier("packet-identity-send-back")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        .padding(8)
+        .background(.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .accessibilityIdentifier("packet-identity-strip")
+    }
+}
+
 private struct QueueLineageActivityRow: View {
     let activity: QueueLineageActivity
 
@@ -766,8 +816,15 @@ private struct SendBackTargetBanner: View {
 
     var body: some View {
         Label {
-            Text("Will send to \(presentation.provider): \(presentation.title)")
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Will send to \(presentation.provider): \(presentation.title)")
+                    .lineLimit(1)
+                Text(presentation.identityLabel)
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+                    .accessibilityIdentifier("queue-send-back-target-identity")
+            }
         } icon: {
             Image(systemName: "paperplane.circle.fill")
         }

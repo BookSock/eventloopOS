@@ -7,6 +7,7 @@ export type MasterCommandCliOptions = {
   text?: string;
   taskHint?: string;
   newTask?: boolean;
+  help?: boolean;
   cwd?: string;
   model?: string;
   idempotencyKey?: string;
@@ -41,9 +42,14 @@ export async function runMasterCommandCli(options: MasterCommandCliOptions): Pro
   const fetchFn = options.fetchFn ?? fetch;
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
+  if (options.help) {
+    stdout.write(masterCommandHelp());
+    return 0;
+  }
   const text = (options.text ?? await readStdin(options.stdin ?? process.stdin)).trim();
   if (!text) {
-    stderr.write("text must be provided with --text, EVENTLOOPOS_MASTER_TEXT, or stdin\n");
+    stderr.write("text must be provided as a positional argument, with --text, EVENTLOOPOS_MASTER_TEXT, or stdin\n");
+    stderr.write("try: pnpm run master:send -- \"tell the current task the launch date moved\"\n");
     return 1;
   }
 
@@ -66,23 +72,31 @@ async function startNewTask(options: RequiredTransport & {
     return 1;
   }
   const idempotencyKey = options.idempotencyKey ?? `master_start_${stableHash([taskId, options.text])}`;
-  const response = await options.fetchFn(new URL("/task-sessions", options.baseUrl), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "idempotency-key": idempotencyKey,
-    },
-    body: JSON.stringify({
-      task_id: taskId,
-      prompt: masterPromptForNewTask(options.text, taskId),
-      cwd: options.cwd,
-      model: options.model,
-      idempotency_key: idempotencyKey,
-    }),
-  });
-  const body = await response.json() as unknown;
-  options.stdout.write(`${JSON.stringify(body)}\n`);
-  return response.ok ? 0 : 1;
+  try {
+    const response = await options.fetchFn(new URL("/task-sessions", options.baseUrl), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": idempotencyKey,
+      },
+      body: JSON.stringify({
+        task_id: taskId,
+        prompt: masterPromptForNewTask(options.text, taskId),
+        cwd: options.cwd,
+        model: options.model,
+        idempotency_key: idempotencyKey,
+      }),
+    });
+    const body = await readResponseJson(response);
+    options.stdout.write(`${JSON.stringify(body)}\n`);
+    if (!response.ok) {
+      options.stderr.write(`master start-new-task failed with HTTP ${response.status}\n`);
+    }
+    return response.ok ? 0 : 1;
+  } catch (error) {
+    options.stderr.write(`master start-new-task failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
 }
 
 async function routeMasterText(options: RequiredTransport & {
@@ -91,22 +105,30 @@ async function routeMasterText(options: RequiredTransport & {
   idempotencyKey?: string;
 }): Promise<number> {
   const idempotencyKey = options.idempotencyKey ?? `master_route_${stableHash([options.taskHint ?? "", options.text])}`;
-  const response = await options.fetchFn(new URL("/voice/commands", options.baseUrl), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "idempotency-key": idempotencyKey,
-    },
-    body: JSON.stringify({
-      transcript: options.text,
-      task_hint: options.taskHint,
-      idempotency_key: idempotencyKey,
-      source_id: idempotencyKey,
-    }),
-  });
-  const body = await response.json() as unknown;
-  options.stdout.write(`${JSON.stringify(body)}\n`);
-  return response.ok ? 0 : 1;
+  try {
+    const response = await options.fetchFn(new URL("/voice/commands", options.baseUrl), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": idempotencyKey,
+      },
+      body: JSON.stringify({
+        transcript: options.text,
+        task_hint: options.taskHint,
+        idempotency_key: idempotencyKey,
+        source_id: idempotencyKey,
+      }),
+    });
+    const body = await readResponseJson(response);
+    options.stdout.write(`${JSON.stringify(body)}\n`);
+    if (!response.ok) {
+      options.stderr.write(`master route failed with HTTP ${response.status}\n`);
+    }
+    return response.ok ? 0 : 1;
+  } catch (error) {
+    options.stderr.write(`master route failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
 }
 
 type RequiredTransport = {
@@ -141,10 +163,22 @@ async function readStdin(stdin: StdinLike): Promise<string> {
 
 function parseArgs(argv: string[]): Partial<MasterCommandCliOptions> {
   const options: Partial<MasterCommandCliOptions> = {};
+  const positional: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--") continue;
+    if (arg === "start-new-task" || arg === "new-task") {
+      options.newTask = true;
+      continue;
+    }
+    if (arg === "route" || arg === "send") {
+      continue;
+    }
     switch (arg) {
+      case "--help":
+      case "-h":
+        options.help = true;
+        break;
       case "--base-url":
         options.baseUrl = readArgValue(argv, ++index, arg);
         break;
@@ -168,8 +202,17 @@ function parseArgs(argv: string[]): Partial<MasterCommandCliOptions> {
         options.idempotencyKey = readArgValue(argv, ++index, arg);
         break;
       default:
-        throw new Error(`unknown argument: ${arg}`);
+        if (arg.startsWith("-")) {
+          throw new Error(`unknown argument: ${arg}`);
+        }
+        positional.push(arg);
     }
+  }
+  if (positional.length > 0) {
+    if (options.text) {
+      throw new Error("provide text either positionally or with --text, not both");
+    }
+    options.text = positional.join(" ");
   }
   return options;
 }
@@ -186,7 +229,48 @@ function stableHash(parts: string[]): string {
   return createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 16);
 }
 
+async function readResponseJson(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return {
+      ok: false,
+      status: response.status,
+      body: text,
+    };
+  }
+}
+
+function masterCommandHelp(): string {
+  return [
+    "Usage:",
+    "  pnpm run master:send -- \"message for current task or voice router\"",
+    "  pnpm run master:send -- start-new-task --task \"blog feedback\" \"draft the post\"",
+    "",
+    "Default routes text through /voice/commands so current task followup behavior applies.",
+    "Use start-new-task, new-task, or --new-task to create a task session directly.",
+    "",
+    "Options:",
+    "  --task, --task-hint <hint>        Task hint for routing or task_id derivation",
+    "  --new-task                       Start a new task session",
+    "  --cwd <path>                     Working directory for new task session",
+    "  --model <name>                   Model for new task session",
+    "  --base-url <url>                 Orchestrator URL",
+    "  --idempotency-key <key>          Stable retry key",
+    "  --text <text>                    Text instead of positional argument",
+    "",
+  ].join("\n");
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const exitCode = await runMasterCommandCli(masterCommandOptionsFromEnvAndArgv(process.env, process.argv.slice(2)));
-  process.exitCode = exitCode;
+  try {
+    const exitCode = await runMasterCommandCli(masterCommandOptionsFromEnvAndArgv(process.env, process.argv.slice(2)));
+    process.exitCode = exitCode;
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    process.stderr.write("run with --help for usage\n");
+    process.exitCode = 1;
+  }
 }

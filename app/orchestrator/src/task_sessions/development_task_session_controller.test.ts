@@ -34,6 +34,7 @@ describe("DevelopmentTaskSessionController", () => {
     });
 
     assert.equal(first.status, "sent");
+    assert.equal(first.provider, "fake");
     assert.equal(first.sent_at, "2026-05-06T22:00:00.000Z");
     assert.equal(first.id, "task_msg_idem_followup_blog");
     assert.deepEqual(first.event_ids, ["evt_browser_context_attach_task"]);

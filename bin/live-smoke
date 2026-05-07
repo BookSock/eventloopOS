@@ -1,14 +1,45 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
+import { accessSync, constants, mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const port = process.env.ORCHESTRATOR_PORT ?? "4377";
 const host = process.env.ORCHESTRATOR_HOST ?? "127.0.0.1";
 const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? `http://${host}:${port}`;
+const startedAt = new Date();
+const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+const artifactDir = resolve(process.cwd(), process.env.EVENTLOOPOS_LIVE_SMOKE_ARTIFACT_DIR ?? `artifacts/live-smoke/${runId}`);
+const manifestPath = resolve(artifactDir, "manifest.json");
+const stepTimeoutMs = positiveInt(process.env.EVENTLOOPOS_LIVE_SMOKE_STEP_TIMEOUT_MS, 10 * 60 * 1000);
+const healthTimeoutMs = positiveInt(process.env.EVENTLOOPOS_LIVE_SMOKE_HEALTH_TIMEOUT_MS, 15_000);
 
 let server;
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.live_smoke",
+  run_id: runId,
+  started_at: startedAt.toISOString(),
+  finished_at: undefined,
+  duration_ms: undefined,
+  orchestrator_url: orchestratorUrl,
+  artifact_dir: artifactDir,
+  environment: {
+    require_real_mac: process.env.EVENTLOOPOS_LIVE_SMOKE_REQUIRE_REAL_MAC === "1",
+    require_aerospace: process.env.EVENTLOOPOS_LIVE_SMOKE_REQUIRE_AEROSPACE === "1",
+    require_native_browser: process.env.EVENTLOOPOS_ENABLE_NATIVE_BROWSER_LIVE_SMOKE === "1",
+    step_timeout_ms: stepTimeoutMs,
+    health_timeout_ms: healthTimeoutMs
+  },
+  steps: [],
+  passed: false
+};
+
+mkdirSync(artifactDir, { recursive: true });
+writeManifest();
 
 try {
-  await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "build"]);
+  await runStep("preflight", async () => preflight());
+  await runStep("build orchestrator", async () => spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "build"]));
   server = spawn("pnpm", ["--filter", "@eventloopos/orchestrator", "start"], {
     env: {
       ...process.env,
@@ -18,35 +49,37 @@ try {
     stdio: "inherit"
   });
 
-  await waitForHealth(orchestratorUrl, server);
-  await spawnChecked("pnpm", ["run", "test:e2e:live"], {
+  await runStep("orchestrator health", async () => waitForHealth(orchestratorUrl, server));
+  await runStep("live harness scenarios", async () => spawnChecked("pnpm", ["run", "test:e2e:live"], {
     ...process.env,
     EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl
-  });
-  await spawnChecked("pnpm", ["--filter", "@eventloopos/macos", "test:e2e"], {
+  }));
+  await runStep("macos fixture e2e", async () => spawnChecked("pnpm", ["--filter", "@eventloopos/macos", "test:e2e"], {
     ...process.env,
     EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL: orchestratorUrl
-  });
-  await spawnChecked("pnpm", ["--filter", "@eventloopos/browser-extension", "test:e2e"]);
+  }));
+  await runStep("browser extension fixture e2e", async () => spawnChecked("pnpm", ["--filter", "@eventloopos/browser-extension", "test:e2e"]));
   if (process.env.EVENTLOOPOS_LIVE_SMOKE_DOGFOOD_CHECK === "1") {
-    await spawnChecked("pnpm", ["dogfood:check"], {
+    await runStep("dogfood check", async () => spawnChecked("pnpm", ["dogfood:check"], {
       ...process.env,
       EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl
-    });
+    }));
   }
   if (process.env.EVENTLOOPOS_ENABLE_NATIVE_BROWSER_LIVE_SMOKE === "1") {
-    await spawnChecked("node", ["--test", "app/browser-extension/e2e/native-messaging-host.test.js"], {
+    await runStep("native browser capture smoke", async () => spawnChecked("node", ["--test", "app/browser-extension/e2e/native-messaging-host.test.js"], {
       ...process.env,
       EVENTLOOPOS_ENABLE_REAL_ORCHESTRATOR_NATIVE_BROWSER_SMOKE: "1",
       EVENTLOOPOS_REAL_ORCHESTRATOR_URL: orchestratorUrl
-    });
-    await spawnChecked("node", ["--test", "app/browser-extension/e2e/mac-browser-restore.test.js"], {
+    }));
+    await runStep("native browser restore smoke", async () => spawnChecked("node", ["--test", "app/browser-extension/e2e/mac-browser-restore.test.js"], {
       ...process.env,
       EVENTLOOPOS_ENABLE_MAC_BROWSER_RESTORE_SMOKE: "1",
       EVENTLOOPOS_REAL_ORCHESTRATOR_URL: orchestratorUrl
-    });
+    }));
   }
+  manifest.passed = true;
 } catch (error) {
+  manifest.error = error instanceof Error ? error.message : String(error);
   console.error(error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 } finally {
@@ -54,10 +87,14 @@ try {
     server.kill("SIGTERM");
     await onceExit(server);
   }
+  manifest.finished_at = new Date().toISOString();
+  manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+  writeManifest();
+  console.log(`live-smoke manifest: ${manifestPath}`);
 }
 
 async function waitForHealth(url, child) {
-  const deadline = Date.now() + 15_000;
+  const deadline = Date.now() + healthTimeoutMs;
   let exited = false;
   child.once("exit", () => {
     exited = true;
@@ -82,12 +119,29 @@ async function waitForHealth(url, child) {
 
 async function spawnChecked(file, args, env = process.env) {
   return await new Promise((resolve, reject) => {
+    let timedOut = false;
+    let killTimer;
     const child = spawn(file, args, {
       env,
       stdio: "inherit"
     });
-    child.on("error", reject);
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+    }, stepTimeoutMs);
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
+      reject(error);
+    });
     child.on("exit", (code, signal) => {
+      clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
+      if (timedOut) {
+        reject(new Error(`${file} ${args.join(" ")} timed out after ${stepTimeoutMs}ms`));
+        return;
+      }
       if (code === 0) {
         resolve();
         return;
@@ -95,6 +149,78 @@ async function spawnChecked(file, args, env = process.env) {
       reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}`));
     });
   });
+}
+
+async function runStep(name, run) {
+  const step = {
+    name,
+    status: "running",
+    started_at: new Date().toISOString(),
+    finished_at: undefined,
+    duration_ms: undefined,
+    error: undefined
+  };
+  manifest.steps.push(step);
+  writeManifest();
+  try {
+    await run();
+    step.status = "passed";
+  } catch (error) {
+    step.status = "failed";
+    step.error = error instanceof Error ? error.message : String(error);
+    throw error;
+  } finally {
+    step.finished_at = new Date().toISOString();
+    step.duration_ms = Date.parse(step.finished_at) - Date.parse(step.started_at);
+    writeManifest();
+  }
+}
+
+async function preflight() {
+  await requireExecutable("pnpm");
+  if (process.env.EVENTLOOPOS_LIVE_SMOKE_REQUIRE_REAL_MAC === "1" && process.platform !== "darwin") {
+    throw new Error("proof:live requires macOS; use pnpm proof:agent for fixture proof on non-Mac hosts");
+  }
+  if (process.env.EVENTLOOPOS_LIVE_SMOKE_REQUIRE_AEROSPACE === "1") {
+    await requireExecutable("aerospace", "AeroSpace CLI missing. Install with: brew install --cask nikitabobko/tap/aerospace");
+    await spawnChecked("aerospace", ["--version"]);
+  }
+  if (process.env.EVENTLOOPOS_ENABLE_NATIVE_BROWSER_LIVE_SMOKE === "1") {
+    requirePath(resolve(process.cwd(), "app/browser-extension/manifest.json"), "browser extension manifest missing");
+    requirePath(resolve(process.cwd(), "app/native-host/bin/install-chrome-host"), "native host installer missing");
+    await requireChromium();
+  }
+}
+
+function requireExecutable(command, message = `${command} missing from PATH`) {
+  const result = spawn(command, ["--version"], {
+    env: process.env,
+    stdio: "ignore"
+  });
+  return new Promise((resolve, reject) => {
+    result.on("error", () => reject(new Error(message)));
+    result.on("exit", () => resolve());
+  });
+}
+
+function requirePath(path, message) {
+  try {
+    accessSync(path, constants.R_OK);
+  } catch {
+    throw new Error(message);
+  }
+}
+
+async function requireChromium() {
+  let browser;
+  try {
+    const { chromium } = await import("playwright");
+    browser = await chromium.launch({ channel: "chromium", headless: true });
+  } catch (error) {
+    throw new Error(`Chromium/Playwright browser setup missing: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    await browser?.close();
+  }
 }
 
 async function onceExit(child) {
@@ -105,4 +231,14 @@ async function onceExit(child) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function positiveInt(value, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return Math.floor(parsed);
+}
+
+function writeManifest() {
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 }

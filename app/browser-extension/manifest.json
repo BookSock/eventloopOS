@@ -3,8 +3,9 @@
   "name": "eventloopOS Browser Context",
   "version": "0.0.1",
   "description": "Captures and restores browser context for eventloopOS.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA17WP4Vm2x43OvR4Ubtm7neIZHu38QAZuYDAx9T26iRpUnxqsfR6OgF1eHQExD9gY/c2JkDdnyJGfCIUjwnbFn22NjgKaGnRbLAA4gVzRTjyHArtOtX+pKnilOqkeLXKPm1q7dXNbOxy8KH3H9VKaAGtCrBo8xy8EW6n0RDW1GXWSDdlLVcuou6rK3MZ//g7PvQdIkfQlV/31jSauNQoC9666uFUGfIU/Xbf6VMI/WV61X/yhbJBKkSthyLmulv89fll3kP32X/sk9fu0EAqiQQMuIUjsX7sbt+i5cWpO75kE8qA7Qd0oWyf6uWqlhpg7cqDFfGrehZSWkHg8IV3U1QIDAQAB",
   "permissions": ["activeTab", "alarms", "nativeMessaging", "scripting", "storage", "tabs"],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": ["file:///*", "http://localhost/*", "http://127.0.0.1/*"],
   "background": {
     "service_worker": "src/background.js",
     "type": "module"

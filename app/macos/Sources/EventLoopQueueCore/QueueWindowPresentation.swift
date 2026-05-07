@@ -99,6 +99,7 @@ public struct TaskSessionTargetPresentation: Equatable, Sendable {
     public let provider: String
     public let status: String
     public let sessionId: String
+    public let identityLabel: String
 
     public init(session: TaskSession) {
         let displayName = session.name?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -107,6 +108,16 @@ public struct TaskSessionTargetPresentation: Equatable, Sendable {
         self.status = taskSessionStatusLabel(session.status)
         self.sessionId = session.id
         self.subtitle = "\(provider) | \(status) | \(session.id)"
+        self.identityLabel = [
+            session.taskId,
+            "\(provider) \(status)",
+            session.id,
+        ]
+            .compactMap { value in
+                let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed?.isEmpty == false ? trimmed : nil
+            }
+            .joined(separator: " | ")
 
         let preview = session.preview?.trimmingCharacters(in: .whitespacesAndNewlines)
         let cwd = session.cwd?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -116,6 +127,36 @@ public struct TaskSessionTargetPresentation: Equatable, Sendable {
             self.detail = cwd
         } else {
             self.detail = nil
+        }
+    }
+}
+
+public struct QueuePacketIdentityPresentation: Equatable, Sendable {
+    public let packetId: String
+    public let taskId: String?
+    public let taskLabel: String
+    public let workspaceLabel: String?
+    public let sendBackLabel: String?
+
+    public init(packet: ReviewPacket, selectedTaskSessions: [TaskSession] = []) {
+        packetId = packet.reviewPacketId
+        taskId = packet.taskId
+        taskLabel = packet.taskId ?? "No task linked"
+
+        if let snapshot = packet.workspaceSnapshot {
+            let workspace = snapshot.activeWorkspace?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let workspaceName = workspace?.isEmpty == false ? workspace! : "captured workspace"
+            workspaceLabel = "\(workspaceName) | \(snapshot.windows.count) windows"
+        } else {
+            workspaceLabel = nil
+        }
+
+        if let session = selectedTaskSessions.first {
+            sendBackLabel = TaskSessionTargetPresentation(session: session).identityLabel
+        } else if let taskId = packet.taskId {
+            sendBackLabel = "Waiting for bound session | \(taskId)"
+        } else {
+            sendBackLabel = nil
         }
     }
 }

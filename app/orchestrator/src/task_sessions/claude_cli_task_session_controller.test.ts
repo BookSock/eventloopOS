@@ -85,6 +85,7 @@ describe("ClaudeCliTaskSessionController", () => {
     });
 
     assert.equal(first.status, "sent");
+    assert.equal(first.provider, "claude");
     assert.equal(first.native_session_id, "claude-session-blog");
     assert.equal(first.native_result_session_id, "claude-session-blog");
     assert.equal(first.sent_at, "2026-05-06T22:30:00.000Z");

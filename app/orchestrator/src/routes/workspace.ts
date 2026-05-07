@@ -44,7 +44,7 @@ export async function handleWorkspaceRoute(input: {
     }
 
     const parsed = await input.readJsonBody();
-    if (!parsed.ok) return schemaError(parsed.message);
+    if (parsed.ok === false) return schemaError(parsed.message);
 
     try {
       const requestBody = parseRestorePlanRequest(parsed.value);
@@ -84,7 +84,7 @@ export async function handleWorkspaceRoute(input: {
     }
 
     const parsed = await input.readJsonBody();
-    if (!parsed.ok) return schemaError(parsed.message);
+    if (parsed.ok === false) return schemaError(parsed.message);
 
     try {
       const requestBody = parseRestoreExecuteRequest(parsed.value);

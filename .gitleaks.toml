@@ -1,0 +1,5 @@
+[allowlist]
+description = "Project-specific false positives"
+regexes = [
+  '''"key":\s*"MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA17WP4Vm2x43OvR4Ubtm7neIZHu38QAZuYDAx9T26iRpUnxqsfR6OgF1eHQExD9gY/c2JkDdnyJGfCIUjwnbFn22NjgKaGnRbLAA4gVzRTjyHArtOtX\+pKnilOqkeLXKPm1q7dXNbOxy8KH3H9VKaAGtCrBo8xy8EW6n0RDW1GXWSDdlLVcuou6rK3MZ//g7PvQdIkfQlV/31jSauNQoC9666uFUGfIU/Xbf6VMI/WV61X/yhbJBKkSthyLmulv89fll3kP32X/sk9fu0EAqiQQMuIUjsX7sbt\+i5cWpO75kE8qA7Qd0oWyf6uWqlhpg7cqDFfGrehZSWkHg8IV3U1QIDAQAB"''',
+]

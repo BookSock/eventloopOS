@@ -3179,13 +3179,37 @@ class WorkspaceRestoreDisabledScenario:
             raise
 
     def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
+        snapshot = self._workspace_snapshot()
+        current_windows = self._current_windows()
+        restore_plan = self._restore_plan()
         observed = {
-            "error": {
+            "capture": {
+                "snapshot": snapshot,
+                "request_id": "req_workspace_capture_fixture",
+            },
+            "restore_plan": {
+                "plan": restore_plan,
+                "execute_supported": False,
+                "request_id": "req_workspace_restore_plan_fixture",
+            },
+            "restore_error": {
                 "code": "workspace_execute_disabled",
                 "status": 403,
-            }
+            },
+            "status": {
+                "status": {
+                    "available": True,
+                    "backend": "aerospace",
+                },
+                "execute_supported": False,
+                "request_id": "req_workspace_status_fixture",
+            },
         }
+        self._assert_capture_plan_disabled_status(observed)
+        log["steps"].append({"name": "workspace_capture", "window_count": len(snapshot["windows"])})
+        log["steps"].append({"name": "workspace_restore_plan", "command_count": len(restore_plan["commands"])})
         log["steps"].append({"name": "assert_restore_disabled", "status": 403})
+        log["steps"].append({"name": "workspace_status", "execute_supported": False})
         self.writer.write_json("observed.json", observed)
         return ScenarioResult(
             scenario=WORKSPACE_RESTORE_DISABLED,
@@ -3195,6 +3219,8 @@ class WorkspaceRestoreDisabledScenario:
             details={
                 "error_code": "workspace_execute_disabled",
                 "status": 403,
+                "window_count": len(snapshot["windows"]),
+                "restore_plan_command_count": len(restore_plan["commands"]),
             },
         )
 
@@ -3202,14 +3228,42 @@ class WorkspaceRestoreDisabledScenario:
         if self.orchestrator_url is None:
             raise ScenarioFailure("orchestrator_url required")
         client = OrchestratorClient(self.orchestrator_url)
+        status_before = client.workspace_status()
+        if status_before.get("status", {}).get("available") is True:
+            capture = client._request("POST", "/workspace/capture", {}) or {}
+            snapshot = capture.get("snapshot")
+            if not isinstance(snapshot, dict):
+                raise ScenarioFailure(f"workspace capture response missing snapshot: {capture!r}")
+            windows = snapshot.get("windows")
+            if not isinstance(windows, list) or len(windows) == 0:
+                raise ScenarioFailure(f"workspace capture must include at least one window: {capture!r}")
+            restore_plan = client._request(
+                "POST",
+                "/workspace/restore-plan",
+                {"snapshot": snapshot, "current_windows": windows},
+            ) or {}
+            plan = restore_plan.get("plan")
+            if not isinstance(plan, dict):
+                raise ScenarioFailure(f"workspace restore-plan response missing plan: {restore_plan!r}")
+            if restore_plan.get("execute_supported") is not False:
+                raise ScenarioFailure(f"workspace restore-plan must report execute_supported false: {restore_plan!r}")
+            log["steps"].append({"name": "workspace_capture", "window_count": len(windows)})
+            log["steps"].append({"name": "workspace_restore_plan", "command_count": len(plan.get("commands", []))})
+        else:
+            capture = None
+            restore_plan = None
+            log["steps"].append(
+                {
+                    "name": "workspace_capture_skipped",
+                    "reason": status_before.get("status", {}).get("reason", "unavailable"),
+                }
+            )
         try:
             client.restore_workspace(
                 {
                     "confirm_execute": True,
-                    "snapshot": {
-                        "backend": "aerospace",
-                        "windows": [],
-                    },
+                    "snapshot": self._workspace_snapshot(),
+                    "current_windows": self._current_windows(),
                 },
                 idempotency_key="idem_workspace_restore_disabled_harness",
             )
@@ -3218,12 +3272,17 @@ class WorkspaceRestoreDisabledScenario:
             if "HTTP 403" not in message or "workspace_execute_disabled" not in message:
                 raise ScenarioFailure(f"expected disabled workspace restore error, got {message}") from exc
             log["steps"].append({"name": "assert_restore_disabled", "status": 403})
+            status_after = client.workspace_status()
+            log["steps"].append({"name": "workspace_status", "execute_supported": status_after.get("execute_supported")})
             observed = {
+                "capture": capture,
+                "restore_plan": restore_plan,
                 "error": {
                     "code": "workspace_execute_disabled",
                     "status": 403,
                     "message": message,
-                }
+                },
+                "status": status_after,
             }
             self.writer.write_json("observed.json", observed)
             return ScenarioResult(
@@ -3234,7 +3293,59 @@ class WorkspaceRestoreDisabledScenario:
                 details={
                     "error_code": "workspace_execute_disabled",
                     "status": 403,
+                    "captured_live_windows": (
+                        len(capture.get("snapshot", {}).get("windows", [])) if isinstance(capture, dict) else 0
+                    ),
                 },
             )
 
         raise ScenarioFailure("expected workspace restore to be disabled")
+
+    @staticmethod
+    def _workspace_snapshot() -> dict[str, Any]:
+        return {
+            "backend": "aerospace",
+            "active_workspace": "eventloop-blog",
+            "focused_window_id": 21,
+            "windows": [
+                {"id": 21, "app": "Ghostty", "title": "codex", "workspace": "eventloop-blog"},
+                {"id": 22, "app": "Chrome", "title": "draft", "workspace": "eventloop-web"},
+            ],
+        }
+
+    @staticmethod
+    def _current_windows() -> list[dict[str, Any]]:
+        return [
+            {"id": 21, "app": "Ghostty", "title": "codex", "workspace": "manual"},
+            {"id": 22, "app": "Chrome", "title": "draft", "workspace": "manual"},
+        ]
+
+    @staticmethod
+    def _restore_plan() -> dict[str, Any]:
+        return {
+            "skipped": [],
+            "commands": [
+                {"command": "aerospace", "args": ["move-node-to-workspace", "--window-id", "21", "eventloop-blog"]},
+                {"command": "aerospace", "args": ["move-node-to-workspace", "--window-id", "22", "eventloop-web"]},
+                {"command": "aerospace", "args": ["workspace", "eventloop-blog"]},
+                {"command": "aerospace", "args": ["focus", "--window-id", "21"]},
+            ],
+        }
+
+    @staticmethod
+    def _assert_capture_plan_disabled_status(observed: dict[str, Any]) -> None:
+        snapshot = observed.get("capture", {}).get("snapshot")
+        if not isinstance(snapshot, dict) or snapshot.get("backend") != "aerospace":
+            raise ScenarioFailure("workspace capture missing aerospace snapshot")
+        windows = snapshot.get("windows")
+        if not isinstance(windows, list) or len(windows) == 0:
+            raise ScenarioFailure("workspace capture missing windows")
+        plan = observed.get("restore_plan", {}).get("plan")
+        if not isinstance(plan, dict) or len(plan.get("commands", [])) != 4:
+            raise ScenarioFailure(f"workspace restore plan mismatch: {plan!r}")
+        if observed.get("restore_plan", {}).get("execute_supported") is not False:
+            raise ScenarioFailure("workspace restore plan must keep execution disabled")
+        if observed.get("restore_error", {}).get("code") != "workspace_execute_disabled":
+            raise ScenarioFailure("workspace disabled restore error missing")
+        if observed.get("status", {}).get("execute_supported") is not False:
+            raise ScenarioFailure("workspace status must report execution disabled")

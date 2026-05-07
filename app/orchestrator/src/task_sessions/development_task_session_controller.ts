@@ -18,6 +18,7 @@ export type DevelopmentTaskSession = {
 export type DevelopmentTaskMessage = {
   id: string;
   task_session_id: string;
+  provider: "fake";
   mode: "followup";
   text: string;
   event_ids: string[];
@@ -127,6 +128,7 @@ export class DevelopmentTaskSessionController {
     const message: DevelopmentTaskMessage = {
       id: `task_msg_${stableId(input.idempotency_key)}`,
       task_session_id: input.task_session_id,
+      provider: "fake",
       mode: "followup",
       text: input.text,
       event_ids: input.event_ids,

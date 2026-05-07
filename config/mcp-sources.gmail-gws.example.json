@@ -1,0 +1,47 @@
+{
+  "sources": [
+    {
+      "id": "gmail_unread_source",
+      "server": {
+        "name": "eventloopos-script-events",
+        "command": "node",
+        "args": ["dist/src/mcp_sources/script_events_server.js"],
+        "envAllowlist": [
+          "EVENTLOOPOS_SCRIPT_EVENTS_COMMAND",
+          "EVENTLOOPOS_SCRIPT_EVENTS_ARGS",
+          "EVENTLOOPOS_GMAIL_COMMAND",
+          "EVENTLOOPOS_GMAIL_CONFIG_DIR",
+          "EVENTLOOPOS_GMAIL_USER_ID",
+          "EVENTLOOPOS_GMAIL_QUERY",
+          "EVENTLOOPOS_GMAIL_LIMIT",
+          "EVENTLOOPOS_GMAIL_TASK_HINT",
+          "EVENTLOOPOS_GMAIL_PROJECT_HINT",
+          "EVENTLOOPOS_GMAIL_TIMEOUT_MS",
+          "EVENTLOOPOS_GMAIL_MAX_BUFFER_BYTES",
+          "PATH",
+          "HOME",
+          "XDG_CONFIG_HOME",
+          "XDG_RUNTIME_DIR"
+        ],
+        "stderrLogPath": "var/log/mcp/gmail_unread_source.stderr.log"
+      },
+      "poll": {
+        "tool": "poll_script",
+        "args": {},
+        "timeoutMs": 15000
+      },
+      "cursor": {
+        "strategy": "field",
+        "field": "id",
+        "dedupeWindow": 2000
+      },
+      "eventMapper": "generic_item_to_event",
+      "riskPolicy": {
+        "readOnly": true,
+        "allowWriteTools": false,
+        "maxRiskLevel": "low",
+        "untrustedTextFields": ["title", "summary", "text"]
+      }
+    }
+  ]
+}

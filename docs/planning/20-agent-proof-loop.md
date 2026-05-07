@@ -34,9 +34,11 @@ Current implementation:
 - default commands: lint, typecheck, test, test:e2e
 - manifest: `artifacts/proof-manifest.json`
 - live manifest: `artifacts/proof-live-manifest.json`
+- live-smoke step manifest: `artifacts/live-smoke/<run-id>/manifest.json`
 - per-command logs: `artifacts/proof-agent/<run-id>/`
 - override for cheap tool smoke: `EVENTLOOPOS_PROOF_COMMANDS='[...]'`
-- command timeout: `timeout_ms` per command or `EVENTLOOPOS_PROOF_COMMAND_TIMEOUT_MS`; manifest writes at start and after each command so interrupted/hung runs leave partial proof
+- command timeout: `timeout_ms` per proof command or `EVENTLOOPOS_PROOF_COMMAND_TIMEOUT_MS`; `bin/live-smoke` also enforces `EVENTLOOPOS_LIVE_SMOKE_STEP_TIMEOUT_MS`
+- incremental manifests: `bin/proof-agent` writes at run start, command start, command finish, parse failure, signal interruption, and finalization; `bin/live-smoke` writes before and after each live step. Interrupted or hung runs should leave active command/step data plus stdout/stderr artifact paths.
 
 Planning/product changes should also run:
 
@@ -48,7 +50,9 @@ This is not a correctness test by itself. It is a guardrail so agents re-read cu
 
 `pnpm run ci` first runs the cheap `test:proof-agent` override to prove custom proof-command parsing and manifest writing, then runs the full `proof:agent` bundle. This means every CI pass leaves a durable proof manifest plus per-command logs.
 
-`proof:agent` is the broad fixture/default lane. `proof:live` is the stronger local lane: it starts a temp orchestrator, runs live E2E, runs dogfood threshold checks before shutdown, launches the packaged Mac app for live queue mutation and task handoff smokes, then verifies the composite Codex + Claude task-runtime surface.
+`proof:agent` is the broad fixture/default lane. Run it for normal agent handoff proof and CI-style correctness when real Mac/browser automation is not part of the claim.
+
+`proof:live` is the stronger real-host lane. Run it on a Mac when claiming local live behavior: it requires macOS, AeroSpace, and the native browser/Chrome-compatible Playwright path. It starts a temp orchestrator, runs live E2E, runs native browser capture/restore against the live orchestrator, runs dogfood threshold checks before shutdown, launches the packaged Mac app for live queue mutation and task handoff smokes, then verifies the composite Codex + Claude task-runtime surface. Setup failures should fail in preflight with a clear message instead of silently skipping.
 
 The handoff lane should cover:
 
@@ -62,7 +66,7 @@ The handoff lane should cover:
 - Postgres restart/idempotency smoke when Docker or local Postgres available
 - proof manifest write to `artifacts/proof-manifest.json`
 
-The proof lane can skip unavailable live capabilities, but skips must be explicit and machine-readable.
+The fixture proof lane can skip unavailable live capabilities, but skips must be explicit and machine-readable. The live proof lane should fail when required real-host capabilities are missing.
 
 ## Failure Recovery Scenarios
 

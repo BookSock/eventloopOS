@@ -10,11 +10,6 @@ const positionalArgs = args.filter((arg, index) =>
 );
 const extensionId = positionalArgs[0] ?? process.env.EVENTLOOPOS_CHROME_EXTENSION_ID;
 
-if (!extensionId) {
-  console.error("usage: eventloop-install-chrome-host <chrome-extension-id> [--browser chrome|chrome-for-testing|chromium] [--dry-run]");
-  process.exit(2);
-}
-
 if (browserFlagIndex !== -1 && !browser) {
   console.error("--browser requires a value");
   process.exit(2);
@@ -25,7 +20,7 @@ try {
   if (dryRun) {
     process.stdout.write(result.body);
   } else {
-    process.stdout.write(`installed ${result.path}\n`);
+    process.stdout.write(`installed ${result.path}\nextension_id ${result.extensionId}\n`);
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));

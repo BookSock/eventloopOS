@@ -1,6 +1,7 @@
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
-export type TaskSessionCliCommand = "list" | "bind" | "messages";
+export type TaskSessionCliCommand = "list" | "bind" | "messages" | "followup";
 
 export type TaskSessionCliOptions = {
   command: TaskSessionCliCommand;
@@ -8,8 +9,10 @@ export type TaskSessionCliOptions = {
   taskSessionId?: string;
   taskId?: string;
   taskHint?: string;
+  text?: string;
   queueItemId?: string;
   eventId?: string;
+  eventIds?: string[];
   idempotencyKey?: string;
   status?: string;
   limit?: number;
@@ -29,8 +32,10 @@ export function taskSessionCliOptionsFromEnvAndArgv(
     taskSessionId: args.taskSessionId ?? env.EVENTLOOPOS_TASK_SESSION_ID,
     taskId: args.taskId ?? env.EVENTLOOPOS_TASK_ID,
     taskHint: args.taskHint ?? env.EVENTLOOPOS_TASK_HINT,
+    text: args.text ?? env.EVENTLOOPOS_TASK_MESSAGE_TEXT,
     queueItemId: args.queueItemId ?? env.EVENTLOOPOS_QUEUE_ITEM_ID,
     eventId: args.eventId ?? env.EVENTLOOPOS_EVENT_ID,
+    eventIds: args.eventIds,
     idempotencyKey: args.idempotencyKey ?? env.EVENTLOOPOS_IDEMPOTENCY_KEY,
     status: args.status ?? env.EVENTLOOPOS_TASK_MESSAGE_STATUS,
     limit: args.limit ?? numberFromEnv(env.EVENTLOOPOS_TASK_MESSAGE_LIMIT),
@@ -43,6 +48,9 @@ export async function runTaskSessionCli(options: TaskSessionCliOptions): Promise
   }
   if (options.command === "messages") {
     return await listTaskMessages(options);
+  }
+  if (options.command === "followup") {
+    return await sendTaskFollowup(options);
   }
   return await bindTaskSession(options);
 }
@@ -127,6 +135,50 @@ async function bindTaskSession(options: TaskSessionCliOptions): Promise<number> 
   }
 }
 
+async function sendTaskFollowup(options: TaskSessionCliOptions): Promise<number> {
+  const fetchFn = options.fetchFn ?? fetch;
+  const stdout = options.stdout ?? process.stdout;
+  const stderr = options.stderr ?? process.stderr;
+  const taskSessionId = options.taskSessionId?.trim();
+  const text = options.text?.trim();
+  const eventIds = normalizedEventIds(options);
+
+  if (!taskSessionId) {
+    stderr.write("task session id must be provided with --session or EVENTLOOPOS_TASK_SESSION_ID\n");
+    return 1;
+  }
+  if (!text) {
+    stderr.write("followup text must be provided as a positional argument, with --text, or EVENTLOOPOS_TASK_MESSAGE_TEXT\n");
+    return 1;
+  }
+
+  const idempotencyKey = options.idempotencyKey ?? `task_followup_${stableHash([taskSessionId, text, eventIds.join("\0")])}`;
+
+  try {
+    const response = await fetchFn(new URL(`/task-sessions/${encodeURIComponent(taskSessionId)}/followup`, options.baseUrl), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": idempotencyKey,
+      },
+      body: JSON.stringify({
+        text,
+        event_ids: eventIds,
+        idempotency_key: idempotencyKey,
+      }),
+    });
+    const body = await readResponseJson(response);
+    stdout.write(`${JSON.stringify(body)}\n`);
+    if (!response.ok) {
+      stderr.write(`task followup failed with HTTP ${response.status}\n`);
+    }
+    return response.ok ? 0 : 1;
+  } catch (error) {
+    stderr.write(`task followup failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+}
+
 export function normalizeTaskId(input: string | undefined): string | undefined {
   const trimmed = input?.trim();
   if (!trimmed) return undefined;
@@ -136,12 +188,13 @@ export function normalizeTaskId(input: string | undefined): string | undefined {
 
 function parseArgs(argv: string[]): Partial<TaskSessionCliOptions> {
   const options: Partial<TaskSessionCliOptions> = {};
+  const positional: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === "--") {
       continue;
     }
-    if (arg === "list" || arg === "bind" || arg === "messages") {
+    if (arg === "list" || arg === "bind" || arg === "messages" || arg === "followup") {
       options.command = arg;
       continue;
     }
@@ -165,6 +218,10 @@ function parseArgs(argv: string[]): Partial<TaskSessionCliOptions> {
       case "--event-id":
         options.eventId = readArgValue(argv, ++index, arg);
         break;
+      case "--events":
+      case "--event-ids":
+        options.eventIds = readArgValue(argv, ++index, arg).split(",").map((value) => value.trim()).filter(Boolean);
+        break;
       case "--idempotency-key":
         options.idempotencyKey = readArgValue(argv, ++index, arg);
         break;
@@ -178,9 +235,21 @@ function parseArgs(argv: string[]): Partial<TaskSessionCliOptions> {
       case "--task-hint":
         options.taskHint = readArgValue(argv, ++index, arg);
         break;
+      case "--text":
+        options.text = readArgValue(argv, ++index, arg);
+        break;
       default:
-        throw new Error(`unknown argument: ${arg}`);
+        if (arg.startsWith("-")) {
+          throw new Error(`unknown argument: ${arg}`);
+        }
+        positional.push(arg);
     }
+  }
+  if (positional.length > 0) {
+    if (options.text) {
+      throw new Error("provide followup text either positionally or with --text, not both");
+    }
+    options.text = positional.join(" ");
   }
   return options;
 }
@@ -194,7 +263,7 @@ function readArgValue(argv: string[], index: number, flag: string): string {
 }
 
 function commandFromEnv(input: string | undefined): TaskSessionCliCommand | undefined {
-  if (input === "list" || input === "bind" || input === "messages") return input;
+  if (input === "list" || input === "bind" || input === "messages" || input === "followup") return input;
   return undefined;
 }
 
@@ -216,6 +285,31 @@ function appendQuery(url: URL, name: string, value: string | undefined): void {
   if (trimmed) {
     url.searchParams.set(name, trimmed);
   }
+}
+
+function normalizedEventIds(options: TaskSessionCliOptions): string[] {
+  return [
+    ...(options.eventIds ?? []),
+    ...(options.eventId ? [options.eventId] : []),
+  ].map((value) => value.trim()).filter(Boolean);
+}
+
+async function readResponseJson(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return {
+      ok: false,
+      status: response.status,
+      body: text,
+    };
+  }
+}
+
+function stableHash(parts: string[]): string {
+  return createHash("sha256").update(parts.join("\0")).digest("hex").slice(0, 16);
 }
 
 function stableId(input: string): string {

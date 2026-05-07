@@ -7,6 +7,7 @@ coverage/
 .env
 .env.local
 config/mcp-sources.json
+config/*.local.json
 config/codex-task-map.json
 var/
 bin/dev-jason-dogfood

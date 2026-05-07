@@ -24,6 +24,15 @@ describe("onboarding task grouping", () => {
     assert.equal(scan.proposals[0]?.confidence, "high");
     assert.equal(scan.proposals[0]?.windows.length, 1);
     assert.equal(scan.proposals[0]?.task_sessions.length, 1);
+    assert.equal(scan.active_workspace, "main");
+    assert.equal(scan.focused_window_id, 1);
+    assert.deepEqual(scan.summary, {
+      window_count: 2,
+      grouped_window_count: 2,
+      ungrouped_window_count: 0,
+      task_session_count: 1,
+      proposal_count: 2,
+    });
     assert.equal(scan.proposals.some((proposal) => proposal.task_id === "task_reading_queue"), true);
   });
 

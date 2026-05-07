@@ -26,6 +26,24 @@ pnpm run dev:doctor
 
 `dev:doctor` builds the orchestrator and reports readiness. For a real trial, AeroSpace should report healthy before starting the dogfood stack. Launch AeroSpace once after installing it so the CLI can talk to the app server.
 
+## Proof commands
+
+Use the fixture proof when you want the broad deterministic lane without requiring real Mac automation:
+
+```sh
+pnpm proof:agent
+```
+
+It writes `artifacts/proof-manifest.json` and per-command logs under `artifacts/proof-agent/<run-id>/`.
+
+Use the live proof only on a real Mac with AeroSpace running and the browser stack available:
+
+```sh
+pnpm proof:live
+```
+
+It fails during preflight when macOS, AeroSpace, or native browser setup is missing. It writes `artifacts/proof-live-manifest.json`, `artifacts/live-smoke/<run-id>/manifest.json`, and per-command logs under `artifacts/proof-agent/<run-id>/`.
+
 ## Run the queue app
 
 Start the local dogfood stack:
@@ -104,12 +122,13 @@ cp config/mcp-sources.example.json config/mcp-sources.json
 1. Open `chrome://extensions`.
 2. Enable Developer Mode.
 3. Choose "Load unpacked" and select `app/browser-extension`.
-4. Copy the extension ID from Chrome.
-5. Install the native messaging host:
+4. Install the native messaging host:
 
 ```sh
-pnpm --filter @eventloopos/native-host exec ./bin/install-chrome-host <chrome-extension-id> --browser chrome
+pnpm --filter @eventloopos/native-host exec ./bin/install-chrome-host --browser chrome
 ```
+
+The unpacked extension has a stable development ID, so the installer can derive the matching native host allow-list from `app/browser-extension/manifest.json`. Click the extension icon on an allowed page to capture title, URL, scroll position, and selected text. Local/file pages are allowed by default; add other trusted origins in the extension options only when needed.
 
 Then run:
 

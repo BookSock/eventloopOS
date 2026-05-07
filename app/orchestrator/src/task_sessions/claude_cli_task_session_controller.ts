@@ -36,6 +36,7 @@ export type ClaudeCliTaskSession = {
 export type ClaudeCliTaskMessage = {
   id: string;
   task_session_id: string;
+  provider: "claude";
   native_session_id?: string;
   native_result_session_id?: string;
   mode: "followup";
@@ -190,6 +191,7 @@ export class ClaudeCliTaskSessionController implements TaskSessionController {
     const message: ClaudeCliTaskMessage = {
       id: `claude_task_msg_${stableId(input.idempotency_key)}`,
       task_session_id: input.task_session_id,
+      provider: "claude",
       native_session_id: input.nativeSessionId,
       native_result_session_id: input.nativeResultSessionId,
       mode: "followup",

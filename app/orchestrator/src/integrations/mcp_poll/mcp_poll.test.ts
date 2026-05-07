@@ -328,6 +328,38 @@ describe("MCP poll ingestion", () => {
     assert.equal(afterRestart?.cursor, "456.000");
   });
 
+  it("commits explicit script nextCursor after item cursor fields", async () => {
+    const config = await readConfig("../../config/mcp-sources.script-events.example.json");
+    const state = createMcpPollerState(config);
+
+    const result = await pollMcpSource({
+      config,
+      state,
+      runner: {
+        callTool: async (_config, args) => {
+          assert.equal(args.cursor, undefined);
+          return {
+            items: [
+              {
+                id: "todo-1",
+                source: "todo_md",
+                type: "todo_md.item",
+                title: "Draft launch note",
+                summary: "Draft launch note",
+              },
+            ],
+            nextCursor: "cursor-after-script-run",
+          };
+        },
+      },
+      receivedAt: "2026-05-06T17:04:00Z",
+    });
+
+    assert.equal(result.events.length, 1);
+    assert.equal(result.cursor, "cursor-after-script-run");
+    assert.equal(result.state.cursor, "cursor-after-script-run");
+  });
+
   it("validates documented MCP source config example", async () => {
     const configs = await readMcpSourceConfigs(join(process.cwd(), "../../config/mcp-sources.example.json"));
 
@@ -336,6 +368,18 @@ describe("MCP poll ingestion", () => {
     assert.equal(configs[0].riskPolicy.allowWriteTools, false);
     assert.equal(configs[1].server.command, "docker");
     assert.equal(configs[2].eventMapper, "generic_item_to_event");
+  });
+
+  it("validates documented local integration source examples", async () => {
+    const scriptConfigs = await readMcpSourceConfigs(join(process.cwd(), "../../config/mcp-sources.script-events.example.json"));
+    const todoConfigs = await readMcpSourceConfigs(join(process.cwd(), "../../config/mcp-sources.todo-md.example.json"));
+    const gmailConfigs = await readMcpSourceConfigs(join(process.cwd(), "../../config/mcp-sources.gmail-gws.example.json"));
+    const slackConfigs = await readMcpSourceConfigs(join(process.cwd(), "../../config/mcp-sources.agent-slack.example.json"));
+
+    assert.equal(scriptConfigs[0].id, "script_events_source");
+    assert.equal(todoConfigs[0].id, "todo_md_source");
+    assert.equal(gmailConfigs[0].server.envAllowlist.includes("EVENTLOOPOS_GMAIL_CONFIG_DIR"), true);
+    assert.equal(slackConfigs[0].eventMapper, "slack_message_to_event");
   });
 
   it("rejects write-enabled MCP source configs for MVP polling", async () => {
@@ -359,13 +403,37 @@ describe("MCP poll ingestion", () => {
       "riskPolicy.maxRiskLevel must be low for MVP polling sources",
     ]);
   });
+
+  it("rejects secret-like env allowlist entries", async () => {
+    const rawConfig = JSON.parse(await readFile(join(process.cwd(), "../../tests/fixtures/mcp/source-generic.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    const server = rawConfig.server as Record<string, unknown>;
+    server.envAllowlist = ["GOOD_TOKEN", "GOOD_TOKEN", "bad-token", "SECRET=value"];
+
+    const result = validateMcpPollSourceConfig(rawConfig);
+
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.ok ? [] : result.issues, [
+      "server.envAllowlist entry GOOD_TOKEN must be unique",
+      "server.envAllowlist entry bad-token must be an environment variable name, not a value",
+      "server.envAllowlist entry SECRET=value must be an environment variable name, not a value",
+      "server.envAllowlist entry SECRET=value must not contain a secret or assignment",
+    ]);
+  });
 });
 
 async function readConfig(path: string): Promise<McpPollSourceConfig> {
   const parsed = JSON.parse(await readFile(join(process.cwd(), path), "utf8")) as unknown;
-  const result = validateMcpPollSourceConfig(parsed);
-  if (!result.ok) {
-    throw new Error(result.issues.join(", "));
+  const rawConfig = isRecord(parsed) && Array.isArray(parsed.sources) ? parsed.sources[0] : parsed;
+  const sourceResult = validateMcpPollSourceConfig(rawConfig);
+  if (!sourceResult.ok) {
+    throw new Error(sourceResult.issues.join(", "));
   }
-  return result.value;
+  return sourceResult.value;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

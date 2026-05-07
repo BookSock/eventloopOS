@@ -11,13 +11,12 @@ const manifestPath = resolve(repoRoot, options.manifest);
 const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
 const runDir = resolve(artifactRoot, "proof-agent", runId);
 const defaultCommandTimeoutMs = positiveInt(process.env.EVENTLOOPOS_PROOF_COMMAND_TIMEOUT_MS, 15 * 60 * 1000);
-const commands = parseCommands(process.env.EVENTLOOPOS_PROOF_COMMANDS);
 
 mkdirSync(runDir, { recursive: true });
 mkdirSync(dirname(manifestPath), { recursive: true });
 
 const manifest = {
-  schema_version: 1,
+  schema_version: 2,
   kind: "eventloopos.agent_proof",
   run_id: runId,
   started_at: startedAt.toISOString(),
@@ -32,6 +31,9 @@ const manifest = {
   },
   environment: summarizeEnvironment(process.env),
   commands: [],
+  expected_command_count: 0,
+  completed_command_count: 0,
+  active_command: undefined,
   passed: false,
 };
 
@@ -43,6 +45,13 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
     manifest.passed = false;
     manifest.finished_at = new Date().toISOString();
     manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+    const activeResult = manifest.commands.find((command) => command.id === manifest.active_command?.id);
+    if (activeResult && activeResult.status === "running") {
+      activeResult.status = "interrupted";
+      activeResult.signal = signal;
+      activeResult.finished_at = manifest.finished_at;
+      activeResult.duration_ms = Date.parse(activeResult.finished_at) - Date.parse(activeResult.started_at);
+    }
     writeManifest();
     process.exit(signal === "SIGINT" ? 130 : 143);
   });
@@ -51,11 +60,27 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 writeManifest();
 
 let passed = true;
-for (const command of commands) {
-  const result = await runCommand(command, runDir, repoRoot);
-  manifest.commands.push(result);
+let commands;
+try {
+  commands = parseCommands(process.env.EVENTLOOPOS_PROOF_COMMANDS);
+  manifest.expected_command_count = commands.length;
   writeManifest();
-  if (result.exit_code !== 0 || result.signal) {
+} catch (error) {
+  manifest.error = error instanceof Error ? error.message : String(error);
+  manifest.finished_at = new Date().toISOString();
+  manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+  writeManifest();
+  console.error(manifest.error);
+  console.error(`proof manifest: ${manifestPath}`);
+  process.exit(1);
+}
+
+for (let index = 0; index < commands.length; index += 1) {
+  const result = await runCommand(commands[index], index, runDir, repoRoot);
+  manifest.completed_command_count = manifest.commands.filter((command) => command.status !== "running").length;
+  manifest.active_command = undefined;
+  writeManifest();
+  if (result.status !== "passed") {
     passed = false;
     break;
   }
@@ -69,7 +94,7 @@ console.log(`proof manifest: ${manifestPath}`);
 console.log(`proof artifacts: ${runDir}`);
 process.exitCode = passed ? 0 : 1;
 
-async function runCommand(command, dir, cwd) {
+async function runCommand(command, index, dir, cwd) {
   const name = command.name ?? [command.cmd, ...(command.args ?? [])].join(" ");
   const started = new Date();
   const safeName = stableFileName(name);
@@ -80,8 +105,33 @@ async function runCommand(command, dir, cwd) {
   const timeoutMs = command.timeout_ms ?? defaultCommandTimeoutMs;
   let timedOut = false;
   let killTimer;
+  const result = {
+    id: `${String(index + 1).padStart(2, "0")}-${safeName}`,
+    status: "running",
+    name,
+    cmd: command.cmd,
+    args: command.args ?? [],
+    started_at: started.toISOString(),
+    finished_at: undefined,
+    duration_ms: undefined,
+    timeout_ms: timeoutMs,
+    exit_code: undefined,
+    signal: undefined,
+    error: undefined,
+    stdout_path: stdoutPath,
+    stderr_path: stderrPath,
+  };
 
   console.log(`proof start: ${name}`);
+  manifest.active_command = {
+    id: result.id,
+    name: result.name,
+    started_at: result.started_at,
+    stdout_path: result.stdout_path,
+    stderr_path: result.stderr_path,
+  };
+  manifest.commands.push(result);
+  writeManifest();
   const child = spawn(command.cmd, command.args ?? [], {
     cwd,
     env: process.env,
@@ -118,22 +168,21 @@ async function runCommand(command, dir, cwd) {
   await closeStream(stderr);
 
   const finished = new Date();
-  const result = {
-    name,
-    cmd: command.cmd,
-    args: command.args ?? [],
-    started_at: started.toISOString(),
-    finished_at: finished.toISOString(),
-    duration_ms: finished.getTime() - started.getTime(),
-    timeout_ms: timeoutMs,
-    exit_code: exit.code,
-    signal: exit.signal,
-    error: exit.error,
-    stdout_path: stdoutPath,
-    stderr_path: stderrPath,
-  };
-  console.log(`proof ${result.exit_code === 0 && !result.signal ? "pass" : "fail"}: ${name}`);
+  result.finished_at = finished.toISOString();
+  result.duration_ms = finished.getTime() - started.getTime();
+  result.exit_code = exit.code;
+  result.signal = exit.signal;
+  result.error = exit.error;
+  result.status = commandStatus(result);
+  console.log(`proof ${result.status === "passed" ? "pass" : "fail"}: ${name}`);
   return result;
+}
+
+function commandStatus(result) {
+  if (result.error?.startsWith("timed out after ")) return "timed_out";
+  if (result.signal) return "signaled";
+  if (result.exit_code === 0) return "passed";
+  return "failed";
 }
 
 function parseCommands(value) {

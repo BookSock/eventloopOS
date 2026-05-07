@@ -7,7 +7,10 @@ import {
   HOST_NAME,
   buildChromeHostManifest,
   CHROME_BROWSER_FLAVORS,
+  DEFAULT_BROWSER_EXTENSION_ID,
   chromeNativeMessagingHostsDir,
+  chromeExtensionIdFromManifestKey,
+  readChromeExtensionIdFromManifest,
   installChromeHostManifest
 } from "../src/install.js";
 
@@ -33,6 +36,14 @@ test("builds Chrome native messaging manifest with strict extension id", () => {
   );
 });
 
+test("derives stable Chrome extension id from browser extension manifest key", async () => {
+  const extensionManifest = JSON.parse(await readFile(new URL("../../browser-extension/manifest.json", import.meta.url), "utf8"));
+  const derived = await readChromeExtensionIdFromManifest();
+
+  assert.equal(derived, DEFAULT_BROWSER_EXTENSION_ID);
+  assert.equal(chromeExtensionIdFromManifestKey(extensionManifest.key), DEFAULT_BROWSER_EXTENSION_ID);
+});
+
 test("installs manifest under macOS Chrome native messaging path", async () => {
   const homeDir = await mkdtemp(join(tmpdir(), "eventloop-native-host-"));
 
@@ -47,6 +58,18 @@ test("installs manifest under macOS Chrome native messaging path", async () => {
     join(chromeNativeMessagingHostsDir(homeDir), `${HOST_NAME}.json`)
   );
   assert.deepEqual(JSON.parse(await readFile(result.path, "utf8")), result.manifest);
+});
+
+test("installs manifest using browser extension manifest id by default", async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), "eventloop-native-host-default-id-"));
+
+  const result = await installChromeHostManifest({
+    homeDir,
+    hostPath: "/tmp/eventloop-native-host"
+  });
+
+  assert.equal(result.extensionId, DEFAULT_BROWSER_EXTENSION_ID);
+  assert.deepEqual(result.manifest.allowed_origins, [`chrome-extension://${DEFAULT_BROWSER_EXTENSION_ID}/`]);
 });
 
 test("installs manifests under browser-specific macOS native messaging paths", async () => {

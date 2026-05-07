@@ -14,6 +14,24 @@ If you are trying this from a fresh clone on another Mac, start with [docs/try-o
 
 ## Current Proof
 
+Fixture/default proof for agent handoff:
+
+```sh
+pnpm proof:agent
+```
+
+This runs lint, typecheck, unit tests, and fixture E2E through `bin/proof-agent`. It writes `artifacts/proof-manifest.json` plus per-command stdout/stderr logs under `artifacts/proof-agent/<run-id>/`. The manifest is machine-readable and is updated at run start, command start, command finish, and interruption.
+
+Full local Mac proof:
+
+```sh
+pnpm proof:live
+```
+
+This is the real-host lane. It requires macOS, AeroSpace (`brew install --cask nikitabobko/tap/aerospace`), and a runnable Chromium/Playwright browser stack for native browser capture/restore. It writes `artifacts/proof-live-manifest.json`, `artifacts/live-smoke/<run-id>/manifest.json`, and per-command logs under `artifacts/proof-agent/<run-id>/`. Use this when claiming the Mac app, live orchestrator, AeroSpace readiness, and browser/native-host path work on a real machine.
+
+Baseline CI proof:
+
 ```sh
 make ci
 ```
@@ -169,10 +187,10 @@ The Mac queue app shows task-session binding controls on review packets with `ta
 Chrome native host install:
 
 ```sh
-pnpm --filter @eventloopos/native-host exec ./bin/install-chrome-host <chrome-extension-id> --browser chrome
+pnpm --filter @eventloopos/native-host exec ./bin/install-chrome-host --browser chrome
 ```
 
-Use `--browser chromium` for local Chromium/Playwright smoke, or `--browser chrome-for-testing` for Google Chrome for Testing. The opt-in real browser native messaging smoke installs a temporary Chromium host manifest, launches the unpacked extension, captures a tab through `chrome.runtime.sendNativeMessage`, forwards it through the native host to the orchestrator fixture, then restores the previous manifest:
+The dev extension ID is stable from `app/browser-extension/manifest.json`; pass an explicit extension ID only when using a different signed build. Use `--browser chromium` for local Chromium/Playwright smoke, or `--browser chrome-for-testing` for Google Chrome for Testing. The opt-in real browser native messaging smoke installs a temporary Chromium host manifest, launches the unpacked extension, captures a tab through `chrome.runtime.sendNativeMessage`, forwards it through the native host to the orchestrator fixture, then restores the previous manifest:
 
 ```sh
 pnpm run test:e2e:native-browser

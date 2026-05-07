@@ -78,6 +78,7 @@ describe("CodexNativeThreadController", () => {
     });
 
     assert.equal(first.status, "sent");
+    assert.equal(first.provider, "codex");
     assert.equal(first.native_thread_id, "thread_blog_123");
     assert.equal(first.native_turn_id, "turn_1");
     assert.equal(first.sent_at, "2026-05-06T22:30:00.000Z");
@@ -192,6 +193,7 @@ describe("CodexNativeThreadController", () => {
 
     assert.equal(result.ok, true);
     assert.equal(result.native_thread_id, "thread_blog_123");
+    assert.equal(result.session?.provider, "codex");
     assert.equal(result.session?.task_id, "task_blog_feedback");
     assert.deepEqual(bindings, [{ threadId: "thread_blog_123", taskId: "task_blog_feedback" }]);
   });

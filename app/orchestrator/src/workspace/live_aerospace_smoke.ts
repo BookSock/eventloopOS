@@ -16,6 +16,7 @@ export type LiveAerospaceSmokeResult =
       skipped: false;
       status: WorkspaceCapabilityStatus;
       window_count: number;
+      restore_plan_target_window_id: number;
       restore_plan_command_count: number;
       restore_plan_skip_count: number;
       execution_proof?: LiveAerospaceExecutionProof;
@@ -65,6 +66,17 @@ export async function runLiveAerospaceSmoke(options: {
   }
 
   const snapshot = await controller.capture();
+  const target = pickRestoreExecutionTarget(snapshot.windows);
+  if (!target) {
+    return {
+      ok: false,
+      skipped: false,
+      status,
+      reason: "no_windows",
+      detail: "AeroSpace capture returned no windows",
+    };
+  }
+
   const current = await controller.capture();
   const plan = await controller.planRestore(snapshot, current.windows);
   const executionProof = options.executeRestore
@@ -76,6 +88,7 @@ export async function runLiveAerospaceSmoke(options: {
     skipped: false,
     status,
     window_count: snapshot.windows.length,
+    restore_plan_target_window_id: target.id,
     restore_plan_command_count: plan.commands.length,
     restore_plan_skip_count: plan.skipped.length,
   };

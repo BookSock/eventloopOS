@@ -34,6 +34,14 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
     await page.goto(url);
     await page.waitForSelector("[data-context-quote]");
     await page.evaluate(() => window.scrollTo(0, 360));
+    await page.evaluate(() => {
+      const quote = document.querySelector("[data-context-quote]");
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(quote);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
 
     const captured = await assertEventually(async () =>
       await sendContentMessageFromServiceWorker(serviceWorker, url, { type: "eventloop.capturePage" })
@@ -41,6 +49,7 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
 
     assert.equal(captured.url, url);
     assert.equal(captured.title, "Launch brief");
+    assert.equal(captured.quote.strategy, "selection");
     assert.equal(captured.quote.text, "Launch date moved up. Human review needed.");
     assert.equal(captured.scroll.y, 360);
 

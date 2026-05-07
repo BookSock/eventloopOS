@@ -32,6 +32,14 @@ describe("master command CLI", () => {
     assert.deepEqual(writes, [`${JSON.stringify({ ok: true, event: { id: "evt_voice" } })}\n`]);
   });
 
+  it("accepts pnpm-style positional text for default routing", async () => {
+    const options = masterCommandOptionsFromEnvAndArgv({}, ["Blog launch is higher priority."]);
+
+    assert.equal(options.baseUrl, "http://127.0.0.1:4377");
+    assert.equal(options.text, "Blog launch is higher priority.");
+    assert.equal(options.newTask, false);
+  });
+
   it("starts a new task session when requested", async () => {
     const writes: string[] = [];
     let requestedUrl = "";
@@ -62,6 +70,32 @@ describe("master command CLI", () => {
     assert.equal(body.idempotency_key, "idem_master_start");
     assert.match(String(body.prompt), /Draft email to Sam/);
     assert.deepEqual(writes, [`${JSON.stringify({ ok: true, started: { task_id: "task_sam_launch_email" } })}\n`]);
+  });
+
+  it("supports explicit start-new-task command", async () => {
+    const options = masterCommandOptionsFromEnvAndArgv({}, [
+      "start-new-task",
+      "--task",
+      "sam launch email",
+      "Draft email to Sam.",
+    ]);
+
+    assert.equal(options.newTask, true);
+    assert.equal(options.taskHint, "sam launch email");
+    assert.equal(options.text, "Draft email to Sam.");
+  });
+
+  it("prints help without requiring text", async () => {
+    const writes: string[] = [];
+    const exitCode = await runMasterCommandCli({
+      baseUrl: "http://127.0.0.1:4377",
+      help: true,
+      stdout: { write: (chunk) => { writes.push(String(chunk)); return true; } },
+    });
+
+    assert.equal(exitCode, 0);
+    assert.match(writes.join(""), /pnpm run master:send -- "/);
+    assert.match(writes.join(""), /start-new-task/);
   });
 
   it("parses env and argv", () => {

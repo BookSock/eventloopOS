@@ -104,6 +104,53 @@ final class QueueWindowRenderTests: XCTestCase {
         try writePNGArtifact(cgImage, name: "queue-window-loaded-lineage.png")
     }
 
+    func testQueueWindowRendersTaskIdentityAndSendBackTargetWithoutBlanking() async throws {
+        let packet = ReviewPacket(
+            id: "packet-agent-target",
+            taskId: "task_blog_feedback",
+            title: "Review agent handoff target",
+            summary: "Human needs to see exact session before sending back.",
+            source: "slack://thread/agent-target",
+            priority: 91,
+            recommendedAction: "Send selected answer to agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 1_767_040_000),
+            workspaceSnapshot: WorkspaceSnapshot(
+                windows: [
+                    WorkspaceWindow(id: 1, app: "Ghostty", title: "codex [task:blog feedback]", workspace: "eventloop-blog"),
+                    WorkspaceWindow(id: 2, app: "Safari", title: "Launch doc", workspace: "eventloop-blog")
+                ],
+                activeWorkspace: "eventloop-blog"
+            )
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(
+                packets: [packet],
+                taskSessions: [
+                    TaskSession(
+                        id: "codex_thread_blog_feedback",
+                        taskId: "task_blog_feedback",
+                        provider: "codex",
+                        status: "running",
+                        name: "Blog feedback agent",
+                        preview: "Waiting for send-back decision"
+                    )
+                ]
+            ),
+            initialPackets: [packet]
+        )
+        await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
+        let view = QueueWindowView(viewModel: viewModel)
+            .frame(width: 760, height: 560)
+
+        let cgImage = try render(view, width: 760, height: 560)
+
+        XCTAssertEqual(cgImage.width, 760)
+        XCTAssertEqual(cgImage.height, 560)
+        try assertQueueSurfaceRendered(in: cgImage)
+        try writePNGArtifact(cgImage, name: "queue-window-task-identity.png")
+    }
+
     private func render<Content: View>(_ view: Content, width: CGFloat, height: CGFloat) throws -> CGImage {
         let hostingView = NSHostingView(rootView: view)
         hostingView.frame = CGRect(x: 0, y: 0, width: width, height: height)

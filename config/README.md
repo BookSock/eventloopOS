@@ -9,6 +9,8 @@ cp config/mcp-sources.example.json config/mcp-sources.json
 ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.json pnpm --filter @eventloopos/orchestrator start
 ```
 
+Keep private paths, queries, tokens, and local account names in ignored files or environment variables. `config/mcp-sources.json` and `config/*.local.json` are ignored; `config/*.example.json` must stay shareable and contain only env var names in `server.envAllowlist`, never `NAME=value`.
+
 `pnpm run dev:doctor` validates this file when `ORCHESTRATOR_MCP_SOURCES_PATH` is set or `config/mcp-sources.json` exists. Missing default config is treated as optional; malformed configured JSON fails the readiness report.
 Paths like `config/mcp-sources.json` are resolved from the repo root even when `pnpm --filter` runs the orchestrator from `app/orchestrator`.
 
@@ -47,6 +49,8 @@ pnpm --filter @eventloopos/orchestrator start
 
 Script stdout must be JSON shaped like `{"items":[...],"nextCursor":"optional"}` or a bare item array. Items should use `generic_item_to_event` fields: `id`, `source`, `type`, `title`, `summary`, optional `url`, `task_hint`, `project_hint`, `links`, and `resources`. Cursor is passed as configured arg and/or env var.
 
+For local script sources, put script-specific env vars in `server.envAllowlist`. The orchestrator passes only those names into the child MCP server, and the script server passes that filtered env to the script. Cursor state is sent to the script as `cursor` in poll args plus any configured `EVENTLOOPOS_SCRIPT_EVENTS_CURSOR_ARG` / `EVENTLOOPOS_SCRIPT_EVENTS_CURSOR_ENV`.
+
 Todo files can use the bundled script source:
 
 ```sh
@@ -59,6 +63,27 @@ pnpm --filter @eventloopos/orchestrator start
 ```
 
 The todo script emits unchecked markdown tasks (`- [ ] ...`) and `- TODO: ...` lines as generic events. Add `[task:blog feedback]` inside a todo line when it should route to an existing task session.
+
+Gmail unread polling can use the bundled script source with the local `gws` CLI:
+
+```sh
+pnpm --filter @eventloopos/orchestrator build
+EVENTLOOPOS_SCRIPT_EVENTS_COMMAND=node \
+EVENTLOOPOS_SCRIPT_EVENTS_ARGS='["../../scripts/poll-gmail-unread.mjs"]' \
+EVENTLOOPOS_GMAIL_COMMAND=gws \
+EVENTLOOPOS_GMAIL_QUERY='in:inbox is:unread newer_than:7d' \
+ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.gmail-gws.example.json \
+pnpm --filter @eventloopos/orchestrator start
+```
+
+Optional Gmail env:
+
+- `EVENTLOOPOS_GMAIL_CONFIG_DIR` for a private `gws` config directory.
+- `EVENTLOOPOS_GMAIL_USER_ID`, default `me`.
+- `EVENTLOOPOS_GMAIL_LIMIT`, default `10`.
+- `EVENTLOOPOS_GMAIL_PROJECT_HINT` / `EVENTLOOPOS_GMAIL_TASK_HINT` for routing.
+
+The Gmail script calls only `gmail.users.messages.list` and `gmail.users.messages.get` with `format: "metadata"` and emits generic events with Gmail links. Keep account-specific config in `EVENTLOOPOS_GMAIL_CONFIG_DIR` or your shell env, not in tracked examples.
 
 Inspect configured sources before routing:
 

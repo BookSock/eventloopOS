@@ -68,6 +68,25 @@ describe("task session CLI", () => {
     assert.equal(options.limit, 5);
   });
 
+  it("parses followup command with positional text and event ids", () => {
+    const options = taskSessionCliOptionsFromEnvAndArgv(
+      {},
+      [
+        "followup",
+        "--session",
+        "codex_thread_abc",
+        "--event-ids",
+        "evt_1, evt_2",
+        "Launch moved up.",
+      ],
+    );
+
+    assert.equal(options.command, "followup");
+    assert.equal(options.taskSessionId, "codex_thread_abc");
+    assert.equal(options.text, "Launch moved up.");
+    assert.deepEqual(options.eventIds, ["evt_1", "evt_2"]);
+  });
+
   it("lists task sessions through orchestrator", async () => {
     const writes: string[] = [];
     let requestedUrl = "";
@@ -132,6 +151,55 @@ describe("task session CLI", () => {
     assert.equal(requestedUrl, "http://127.0.0.1:4377/task-sessions/codex_thread_abc/task-binding");
     assert.deepEqual(JSON.parse(requestedBody), { task_id: "task_blog_feedback" });
     assert.deepEqual(writes, [`${JSON.stringify({ ok: true, binding: { task_id: "task_blog_feedback" } })}\n`]);
+  });
+
+  it("sends idempotent task followup through orchestrator with clear session identity", async () => {
+    const writes: string[] = [];
+    let requestedUrl = "";
+    let requestedBody = "";
+    let requestedIdempotencyKey = "";
+
+    const exitCode = await runTaskSessionCli({
+      command: "followup",
+      baseUrl: "http://127.0.0.1:4377",
+      taskSessionId: "codex_thread_abc",
+      text: "Launch moved up.",
+      eventIds: ["evt_launch"],
+      idempotencyKey: "idem_followup_launch",
+      stdout: { write: (chunk) => { writes.push(String(chunk)); return true; } },
+      fetchFn: (async (url, init) => {
+        requestedUrl = String(url);
+        requestedBody = String(init?.body);
+        requestedIdempotencyKey = String(new Headers(init?.headers).get("idempotency-key"));
+        return response({
+          ok: true,
+          message: {
+            task_session_id: "codex_thread_abc",
+            provider: "codex",
+            native_thread_id: "thread_abc",
+            status: "sent",
+          },
+        }, 202);
+      }) as typeof fetch,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(requestedUrl, "http://127.0.0.1:4377/task-sessions/codex_thread_abc/followup");
+    assert.equal(requestedIdempotencyKey, "idem_followup_launch");
+    assert.deepEqual(JSON.parse(requestedBody), {
+      text: "Launch moved up.",
+      event_ids: ["evt_launch"],
+      idempotency_key: "idem_followup_launch",
+    });
+    assert.deepEqual(writes, [`${JSON.stringify({
+      ok: true,
+      message: {
+        task_session_id: "codex_thread_abc",
+        provider: "codex",
+        native_thread_id: "thread_abc",
+        status: "sent",
+      },
+    })}\n`]);
   });
 
   it("rejects bind command missing required fields before network calls", async () => {

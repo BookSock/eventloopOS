@@ -141,6 +141,45 @@ test("captures fixture marker quote and scroll from page-like objects", () => {
   assert.equal(page.quote.text, "Fixture quote alpha anchors context capture after scroll restore.");
 });
 
+test("captures active selection text before fixture marker fallback", () => {
+  const selection = {
+    toString: () => " selected launch quote ",
+    getRangeAt: () => ({
+      cloneRange: () => ({
+        startContainer: { length: 64 },
+        startOffset: 10,
+        endContainer: { length: 64 },
+        endOffset: 31,
+        setStart() {},
+        setEnd() {},
+        toString: () => "selected launch quote"
+      })
+    })
+  };
+  const doc = {
+    title: "Selection fixture",
+    location: { href: "http://127.0.0.1/selection" },
+    scrollingElement: { scrollWidth: 800, scrollHeight: 1200 },
+    documentElement: { scrollWidth: 800, scrollHeight: 1200 },
+    querySelector: () => ({ textContent: "fixture fallback quote" }),
+    body: { textContent: "fallback body" }
+  };
+  const win = {
+    scrollX: 0,
+    scrollY: 12,
+    innerWidth: 800,
+    innerHeight: 600,
+    getSelection: () => selection
+  };
+
+  const page = capturePageContext(win, doc);
+
+  assert.equal(page.title, "Selection fixture");
+  assert.equal(page.url, "http://127.0.0.1/selection");
+  assert.equal(page.quote.strategy, "selection");
+  assert.equal(page.quote.text, "selected launch quote");
+});
+
 test("buildContextResource rejects malformed payloads", () => {
   assert.throws(
     () =>

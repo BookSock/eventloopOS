@@ -97,6 +97,7 @@ final class QueueWindowPresentationTests: XCTestCase {
         XCTAssertEqual(summary.status, "Running")
         XCTAssertEqual(summary.sessionId, "codex_thread_abc")
         XCTAssertEqual(summary.subtitle, "Codex | Running | codex_thread_abc")
+        XCTAssertEqual(summary.identityLabel, "task_blog_feedback | Codex Running | codex_thread_abc")
         XCTAssertEqual(summary.detail, "Editing launch paragraph")
     }
 
@@ -114,5 +115,64 @@ final class QueueWindowPresentationTests: XCTestCase {
         XCTAssertEqual(summary.title, "claude_session_123")
         XCTAssertEqual(summary.subtitle, "Claude Code | Idle | claude_session_123")
         XCTAssertEqual(summary.detail, "/Users/jason/project")
+    }
+
+    func testPacketIdentityPresentationShowsTaskWorkspaceAndSendBackTarget() {
+        let packet = ReviewPacket(
+            id: "packet-review-1",
+            reviewPacketId: "review_packet_1",
+            taskId: "task_blog_feedback",
+            title: "Review feedback",
+            summary: "Needs human call.",
+            source: "slack://thread/1",
+            priority: 90,
+            recommendedAction: "Send back",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: WorkspaceSnapshot(
+                windows: [
+                    WorkspaceWindow(id: 1, app: "Ghostty", title: "codex", workspace: "eventloop-blog"),
+                    WorkspaceWindow(id: 2, app: "Safari", title: "Blog", workspace: "eventloop-blog")
+                ],
+                activeWorkspace: "eventloop-blog"
+            )
+        )
+        let summary = QueuePacketIdentityPresentation(
+            packet: packet,
+            selectedTaskSessions: [
+                TaskSession(
+                    id: "codex_thread_abc",
+                    taskId: "task_blog_feedback",
+                    provider: "codex",
+                    status: "running",
+                    name: "Blog launch agent"
+                )
+            ]
+        )
+
+        XCTAssertEqual(summary.packetId, "review_packet_1")
+        XCTAssertEqual(summary.taskLabel, "task_blog_feedback")
+        XCTAssertEqual(summary.workspaceLabel, "eventloop-blog | 2 windows")
+        XCTAssertEqual(summary.sendBackLabel, "task_blog_feedback | Codex Running | codex_thread_abc")
+    }
+
+    func testPacketIdentityPresentationShowsMissingSession() {
+        let packet = ReviewPacket(
+            id: "packet-review-1",
+            taskId: "task_blog_feedback",
+            title: "Review feedback",
+            summary: "Needs human call.",
+            source: "manual://review",
+            priority: 90,
+            recommendedAction: "Send back",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+
+        let summary = QueuePacketIdentityPresentation(packet: packet)
+
+        XCTAssertEqual(summary.taskLabel, "task_blog_feedback")
+        XCTAssertEqual(summary.sendBackLabel, "Waiting for bound session | task_blog_feedback")
+        XCTAssertNil(summary.workspaceLabel)
     }
 }

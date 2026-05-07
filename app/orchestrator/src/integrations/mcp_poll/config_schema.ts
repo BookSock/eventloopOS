@@ -6,6 +6,7 @@ export type McpSourceConfigValidationResult =
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const DEFAULT_DEDUPE_WINDOW = 1_000;
+const ENV_NAME_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
 
 export function validateMcpPollSourceConfig(input: unknown): McpSourceConfigValidationResult {
   const issues: string[] = [];
@@ -146,6 +147,25 @@ function readStringArray(input: Record<string, unknown>, key: string, issues: st
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
     issues.push(`${label} must be an array of strings`);
     return [];
+  }
+  if (label === "server.envAllowlist") {
+    const seen = new Set<string>();
+    for (const item of value) {
+      if (!item.trim()) {
+        issues.push("server.envAllowlist entries must be non-empty environment variable names");
+        continue;
+      }
+      if (!ENV_NAME_PATTERN.test(item)) {
+        issues.push(`server.envAllowlist entry ${item} must be an environment variable name, not a value`);
+      }
+      if (item.includes("=")) {
+        issues.push(`server.envAllowlist entry ${item} must not contain a secret or assignment`);
+      }
+      if (seen.has(item)) {
+        issues.push(`server.envAllowlist entry ${item} must be unique`);
+      }
+      seen.add(item);
+    }
   }
   return value;
 }

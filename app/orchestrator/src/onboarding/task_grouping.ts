@@ -24,6 +24,15 @@ export type OnboardingTaskProposal = {
 export type OnboardingScan = {
   ok: true;
   captured_at: string;
+  active_workspace?: string;
+  focused_window_id?: number;
+  summary: {
+    window_count: number;
+    grouped_window_count: number;
+    ungrouped_window_count: number;
+    task_session_count: number;
+    proposal_count: number;
+  };
   proposals: OnboardingTaskProposal[];
   ungrouped_windows: OnboardingWindow[];
   task_sessions: TaskRuntimeSession[];
@@ -100,6 +109,15 @@ export function buildOnboardingScan(input: {
   return {
     ok: true,
     captured_at: input.capturedAt,
+    active_workspace: input.snapshot?.activeWorkspace,
+    focused_window_id: input.snapshot?.focusedWindowId,
+    summary: {
+      window_count: windows.length,
+      grouped_window_count: groupedWindowIds.size,
+      ungrouped_window_count: windows.length - groupedWindowIds.size,
+      task_session_count: taskSessions.length,
+      proposal_count: proposals.length,
+    },
     proposals,
     ungrouped_windows: windows.filter((window) => !groupedWindowIds.has(window.id)),
     task_sessions: taskSessions,

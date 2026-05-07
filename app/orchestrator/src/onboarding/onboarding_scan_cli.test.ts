@@ -21,6 +21,15 @@ describe("onboarding scan CLI", () => {
       stdout: { write: (chunk: string) => { output += chunk; return true; } },
       fetchFn: async () => new Response(JSON.stringify({
         ok: true,
+        active_workspace: "main",
+        focused_window_id: 1,
+        summary: {
+          window_count: 2,
+          grouped_window_count: 1,
+          ungrouped_window_count: 1,
+          task_session_count: 1,
+          proposal_count: 1,
+        },
         proposals: [
           { task_id: "task_blog", title: "Blog", confidence: "high", windows: [{ id: 1 }], task_sessions: [] },
         ],
@@ -30,5 +39,7 @@ describe("onboarding scan CLI", () => {
 
     assert.equal(exitCode, 0);
     assert.match(output, /task_blog/);
+    assert.match(output, /workspace: main; focused window: 1/);
+    assert.match(output, /scan: 2 windows, 1 grouped, 1 task sessions/);
   });
 });

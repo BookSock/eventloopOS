@@ -62,6 +62,7 @@ export type CodexTaskSession = {
 export type CodexTaskMessage = {
   id: string;
   task_session_id: string;
+  provider: "codex";
   native_thread_id?: string;
   native_turn_id?: string;
   mode: "followup";
@@ -295,6 +296,7 @@ export class CodexNativeThreadController implements TaskSessionController {
     const message: CodexTaskMessage = {
       id: `codex_task_msg_${stableId(input.idempotency_key)}`,
       task_session_id: input.task_session_id,
+      provider: "codex",
       native_thread_id: input.nativeThreadId,
       native_turn_id: input.nativeTurnId,
       mode: "followup",
