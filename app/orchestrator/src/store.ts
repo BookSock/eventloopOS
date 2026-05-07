@@ -776,6 +776,12 @@ function decisionNeededForRoute(routeDecision: RouteDecision): string {
   if (routeDecision.action === "create_review_packet") {
     return "Review prepared work and decide next action.";
   }
+  if (routeDecision.action === "ask_human_now" && routeDecision.target_task_id) {
+    return "Human approval needed before this update is sent back to the task agent.";
+  }
+  if (routeDecision.action === "ask_human_now") {
+    return "No confident task match. Decide whether this event needs a task, can be ignored, or should wait.";
+  }
   return "Decide whether to route this new event into a task agent now.";
 }
 

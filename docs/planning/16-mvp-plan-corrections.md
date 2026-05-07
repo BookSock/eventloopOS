@@ -198,6 +198,7 @@ Real gaps:
 - Mac queue load/refresh is read-only: opening the app shows the stack without selecting/leasing active work. `Pull Next Paper` is now the canonical transition into a current paper.
 - Live Mac queue mutation proof now exists: `pnpm test:e2e:macos-live-ui` launches the packaged app against a temp live orchestrator, clicks `Pull Next Paper` and `Done / Next`, then asserts queue done state, activity, and metrics. It is included in `pnpm proof:live`.
 - Live Mac task handoff proof now exists: `pnpm test:e2e:macos-live-handoff` launches the packaged app against a temp live orchestrator, clicks `Pull Next Paper` and `Route to task agent`, then asserts queue done state, task followup attempted/sent activity, metrics, and `task_session_blog.status=running`. It is included in `pnpm proof:live`.
+- Human queue packet copy now distinguishes task-matched approvals from unmatched/ambiguous events, so the current paper says why human judgment is needed instead of asking vaguely whether to route an event.
 - GatewayStore remains broad. Conformance tests reduce risk; split into smaller store ports later, after dogfood-critical safety/history patches.
 
 Latest user steering:
@@ -223,6 +224,6 @@ Release guardrails:
 
 1. Wire dogfood threshold checks into a real local Postgres + MCP source dogfood session.
 2. Add safe real Claude followup smoke against an explicitly supplied disposable Claude session.
-3. Tighten router copy/decision states so queue items say exactly why human judgment is needed.
+3. Tighten router route states further so queue creation is limited to `human_blocked`, `ambiguous`, or `risky` categories.
 4. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
 5. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.

@@ -2126,7 +2126,7 @@ describe("orchestrator gateway API", () => {
       assert.equal(body.ok, true);
       assert.equal(body.route_decision.action, "ask_human_now");
       assert.ok(body.queue_item?.id);
-      assert.match(body.review_packet?.decision_needed ?? "", /route this new event into a task agent/);
+      assert.match(body.review_packet?.decision_needed ?? "", /Human approval needed before this update is sent back to the task agent/);
       assert.equal(body.task_message, undefined);
       assert.equal(messages.size, 0);
     } finally {
@@ -2586,6 +2586,7 @@ describe("orchestrator gateway API", () => {
           target_task_id?: string;
         };
         queue_item?: unknown;
+        review_packet?: { decision_needed: string };
         task_message?: unknown;
       };
 
@@ -2593,6 +2594,10 @@ describe("orchestrator gateway API", () => {
       assert.equal(body.route_decision.action, "ask_human_now");
       assert.equal(body.route_decision.target_task_id, undefined);
       assert.notEqual(body.queue_item, undefined);
+      assert.equal(
+        body.review_packet?.decision_needed,
+        "No confident task match. Decide whether this event needs a task, can be ignored, or should wait.",
+      );
       assert.equal(body.task_message, undefined);
       assert.equal(messages.length, 0);
     } finally {
@@ -2742,6 +2747,7 @@ describe("orchestrator gateway API", () => {
           target_task_id?: string;
         };
         queue_item?: unknown;
+        review_packet?: { decision_needed: string };
         task_message?: unknown;
       };
 
@@ -2749,6 +2755,10 @@ describe("orchestrator gateway API", () => {
       assert.equal(body.route_decision.action, "ask_human_now");
       assert.equal(body.route_decision.target_task_id, undefined);
       assert.notEqual(body.queue_item, undefined);
+      assert.equal(
+        body.review_packet?.decision_needed,
+        "No confident task match. Decide whether this event needs a task, can be ignored, or should wait.",
+      );
       assert.equal(body.task_message, undefined);
       assert.equal(messages.length, 0);
     } finally {
@@ -3592,7 +3602,7 @@ describe("orchestrator gateway API", () => {
         type: "system",
       },
       task_hint: "browser review",
-      type: "browser.context_captured",
+      type: "browser.review_requested",
       title: "Browser context",
       summary: "Captured context should become a review packet.",
       raw_ref: {
@@ -3634,6 +3644,10 @@ describe("orchestrator gateway API", () => {
     assert.equal(artifacts.route_decision.id, "rte_evt_shared_builder");
     assert.equal(artifacts.route_decision.target_task_id, "task_browser_review");
     assert.equal(artifacts.review_packet.id, "pkt_evt_shared_builder");
+    assert.equal(
+      artifacts.review_packet.decision_needed,
+      "Human approval needed before this update is sent back to the task agent.",
+    );
     assert.equal(artifacts.review_packet.context[0].kind, "browser_tab");
     assert.equal(artifacts.review_packet.context[1]?.kind, "workspace_snapshot");
     assert.equal(artifacts.review_packet.context[1]?.snapshot?.windows[0]?.workspace, "eventloop-blog");

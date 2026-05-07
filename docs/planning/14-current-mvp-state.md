@@ -183,6 +183,7 @@ Strong tests now:
 - macOS render E2E now writes inspectable screenshots to `artifacts/screenshots/queue-window-selected-packet.png` and `artifacts/screenshots/queue-window-long-packet.png`; the long-content fixture catches basic one-paper wrapping/nonblank regressions.
 - Mac queue has a one-step Pull Next Paper action in the menu, command menu, toolbar, and global hotkey (`Cmd+Opt+Shift+J`). It leases the top/current packet, returns from Manual Mode when needed, captures the manual workspace before return, loads matching task sessions, and plans queue workspace restore.
 - Opening or refreshing the Mac queue is read-only now: it loads the stack without selecting/leasing an active paper. `Pull Next Paper` is the canonical action that turns a queued packet into the current paper.
+- Router-created review packets now use human-block-specific decision copy: task-matched packets ask for approval before sending an update back to the task agent, while unmatched packets say there is no confident task match.
 - Opt-in AppleScript UI smoke now proves the Pull Next Paper menu item exists and that Manual Mode captures workspace only on return to Event Loop, then Restore Manual Workspace returns the user to manual mode.
 
 Weak tests:
@@ -199,5 +200,5 @@ Weak tests:
 1. Wire `dogfood:check` into a real local Postgres + MCP dogfood run once those sources are active.
 2. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
 3. Add safe real Claude followup smoke against an explicitly supplied disposable Claude session.
-4. Tighten router copy/decision states so queue items say exactly why human judgment is needed.
+4. Tighten router route states further so queue creation is limited to `human_blocked`, `ambiguous`, or `risky` categories.
 5. Later: real microphone/wake-word proof and always-listening voice UX.
