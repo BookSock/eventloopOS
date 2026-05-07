@@ -25,7 +25,7 @@ This is the current reality map for agents. Pick the narrowest command that prov
 | Full local installed smoke | `pnpm run test:e2e:live:full` | One booted orchestrator reused by harness scenarios, Mac client smoke, browser E2E, and installed Chromium extension/native host capture | Best local daily-driver verifier. |
 | AeroSpace backend | `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm run live:aerospace` | Live AeroSpace status/capture/restore-plan without executing moves | Currently reports `server_unavailable` if AeroSpace.app is not running. |
 | Voice transcript command | `pnpm run voice:listen-command` with `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` | External line-delimited STT command can feed router | Fake process path is unit-tested; real mic/STT still pending. |
-| Dev readiness | `pnpm run dev:doctor` | JSON readiness for orchestrator health, AeroSpace, Docker, browser E2E, optional STT command, Codex app-server | Doctor is a readiness report, not a substitute for smoke tests. |
+| Dev readiness | `pnpm run dev:doctor` | JSON readiness for orchestrator health, AeroSpace, Docker, browser E2E, Mac/browser restore smoke prerequisites, optional STT command, Codex app-server | Doctor is a readiness report, not a substitute for smoke tests. |
 
 ## Agent Handoff Rule
 

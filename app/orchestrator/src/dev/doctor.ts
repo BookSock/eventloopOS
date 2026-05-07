@@ -16,6 +16,7 @@ export type DoctorCheckName =
   | "docker_daemon"
   | "codex_app_server"
   | "browser_e2e"
+  | "mac_browser_restore_smoke"
   | "voice_transcript_command";
 
 export type DoctorCheck = {
@@ -39,6 +40,7 @@ export type DoctorOptions = {
   execFn?: ExecFunction;
   fetchFn?: typeof fetch;
   codexCheckFn?: () => Promise<DoctorCheck> | DoctorCheck;
+  platform?: NodeJS.Platform;
   voiceTranscriptCommand?: string;
   voiceTranscriptArgs?: string[];
   voiceTranscriptCommandConfigured?: boolean;
@@ -64,6 +66,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     checkAerospaceDaemon(execFn),
     checkDockerDaemon(execFn),
     checkBrowserE2E(execFn),
+    checkMacBrowserRestoreSmoke(execFn, options.platform ?? process.platform),
     checkVoiceTranscriptCommand(options, execFn),
     options.codexCheckFn ? options.codexCheckFn() : checkCodexAppServer(),
   ]);
@@ -215,6 +218,42 @@ async function checkBrowserE2E(execFn: ExecFunction): Promise<DoctorCheck> {
       detail: classifyCommandFailure(error),
       command,
       source_url: "https://playwright.dev/docs/chrome-extensions",
+    };
+  }
+}
+
+async function checkMacBrowserRestoreSmoke(execFn: ExecFunction, platform: NodeJS.Platform): Promise<DoctorCheck> {
+  const command = ["swift", "--version"];
+  if (platform !== "darwin") {
+    return {
+      name: "mac_browser_restore_smoke",
+      ok: false,
+      detail: "Mac client + browser restore smoke requires macOS",
+      command,
+      source_url: "https://www.swift.org/getting-started/",
+    };
+  }
+
+  try {
+    const result = await execFn(command[0] ?? "swift", command.slice(1));
+    const version = result.stdout.trim().split(/\r?\n/, 1)[0] ?? "";
+
+    return {
+      name: "mac_browser_restore_smoke",
+      ok: Boolean(version),
+      detail: version
+        ? `Swift available for mac-browser restore smoke: ${version}`
+        : "Swift returned empty version",
+      command,
+      source_url: "https://www.swift.org/getting-started/",
+    };
+  } catch (error) {
+    return {
+      name: "mac_browser_restore_smoke",
+      ok: false,
+      detail: classifyCommandFailure(error),
+      command,
+      source_url: "https://www.swift.org/getting-started/",
     };
   }
 }

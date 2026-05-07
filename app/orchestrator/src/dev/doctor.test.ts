@@ -7,6 +7,7 @@ describe("developer doctor", () => {
     const report = await runDoctor({
       baseUrl: "http://127.0.0.1:4377",
       now: () => new Date("2026-05-06T18:00:00.000Z"),
+      platform: "darwin",
       fetchFn: async (url) => {
         assert.equal(String(url), "http://127.0.0.1:4377/health");
         return response({ ok: true }, 200);
@@ -23,6 +24,10 @@ describe("developer doctor", () => {
         if (command === "pnpm") {
           assert.deepEqual(args, ["--filter", "@eventloopos/browser-extension", "exec", "playwright", "--version"]);
           return { stdout: "Version 1.59.1\n", stderr: "" };
+        }
+        if (command === "swift") {
+          assert.deepEqual(args, ["--version"]);
+          return { stdout: "swift-driver version: 1.127.8 Apple Swift version 6.2.1\n", stderr: "" };
         }
         throw new Error(`unexpected command ${command}`);
       },
@@ -68,6 +73,13 @@ describe("developer doctor", () => {
           source_url: "https://playwright.dev/docs/chrome-extensions",
         },
         {
+          name: "mac_browser_restore_smoke",
+          ok: true,
+          detail: "Swift available for mac-browser restore smoke: swift-driver version: 1.127.8 Apple Swift version 6.2.1",
+          command: ["swift", "--version"],
+          source_url: "https://www.swift.org/getting-started/",
+        },
+        {
           name: "voice_transcript_command",
           ok: true,
           detail: "optional voice transcript command is not configured",
@@ -87,13 +99,18 @@ describe("developer doctor", () => {
   it("surfaces blocked daemons without hiding other checks", async () => {
     const report = await runDoctor({
       baseUrl: "http://127.0.0.1:4377",
+      platform: "darwin",
       fetchFn: async () => response({ ok: true }, 200),
-      execFn: async (command) => {
+      execFn: async (command, args) => {
         if (command === "aerospace") {
           throw new Error("Can't connect to AeroSpace server. Is AeroSpace.app running?");
         }
         if (command === "pnpm") {
           return { stdout: "Version 1.59.1\n", stderr: "" };
+        }
+        if (command === "swift") {
+          assert.deepEqual(args, ["--version"]);
+          return { stdout: "swift-driver version: 1.127.8 Apple Swift version 6.2.1\n", stderr: "" };
         }
         const error = new Error("docker failed") as Error & { stderr: string };
         error.stderr = "failed to connect to the docker API";
@@ -112,6 +129,7 @@ describe("developer doctor", () => {
       ["aerospace_daemon", false, "Can't connect to AeroSpace server. Is AeroSpace.app running?"],
       ["docker_daemon", false, "failed to connect to the docker API"],
       ["browser_e2e", true, "Playwright available: Version 1.59.1"],
+      ["mac_browser_restore_smoke", true, "Swift available for mac-browser restore smoke: swift-driver version: 1.127.8 Apple Swift version 6.2.1"],
       ["voice_transcript_command", true, "optional voice transcript command is not configured"],
       ["codex_app_server", true, "Codex app-server responded; sampled 1 thread(s)"],
     ]);
@@ -120,6 +138,7 @@ describe("developer doctor", () => {
   it("checks configured local voice transcript command", async () => {
     const report = await runDoctor({
       baseUrl: "http://127.0.0.1:4377",
+      platform: "darwin",
       voiceTranscriptCommand: "whisper-stream",
       voiceTranscriptArgs: ["--model", "ggml-base.en.bin"],
       voiceTranscriptCommandConfigured: true,
@@ -128,6 +147,10 @@ describe("developer doctor", () => {
         if (command === "whisper-stream") {
           assert.deepEqual(args, ["--model", "ggml-base.en.bin", "--help"]);
           return { stdout: "usage: whisper-stream\n", stderr: "" };
+        }
+        if (command === "swift") {
+          assert.deepEqual(args, ["--version"]);
+          return { stdout: "swift-driver version: 1.127.8 Apple Swift version 6.2.1\n", stderr: "" };
         }
         return { stdout: command === "docker" ? "29.3.1\n" : "[]", stderr: "" };
       },
@@ -149,6 +172,7 @@ describe("developer doctor", () => {
     const writes: string[] = [];
     const exitCode = await runDoctorCli({
       baseUrl: "http://127.0.0.1:4377",
+      platform: "darwin",
       fetchFn: async () => {
         throw new Error("fetch failed");
       },
