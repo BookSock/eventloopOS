@@ -214,7 +214,7 @@ Review outcome:
 - Passive notification UX, calendar gates, Focus integration, voice-out, budget dashboard, multi-device sync, and enterprise controls remain deferred.
 - `server.ts` god-file critique is stale; it is now a thin route dispatcher. Keep route files from growing too much, but do not spend MVP time on churny extraction.
 - Metrics/observability critique is partly stale; `/metrics`, `/activity`, route counters, `dogfood:review`, `dogfood:check`, and Postgres activity persistence exist.
-- Main lineage gap is reduced: durable `task_messages`, filtered `GET /task-messages`, queue-filtered `/activity`, `GET /queue/:id/lineage`, and `pnpm queue:lineage` exist. Mac UI still does not expose the joined lineage panel yet.
+- Main lineage gap is reduced: durable `task_messages`, filtered `GET /task-messages`, queue-filtered `/activity`, `GET /queue/:id/lineage`, `pnpm queue:lineage`, and the Mac UI joined lineage panel exist. Mac UI still shows compact lineage only; deeper drilldown can wait for dogfood.
 - Runtime typing gap is reduced: Codex and Claude run behind shared typed session/message/capability/binding/error shapes. Fields remain tolerant because providers still carry metadata differently.
 - Dogfood observability gap is reduced: daily review/check now exposes queue depth, restore backlog, followup status counts, runtime failures, and threshold checks for backlog/failure saturation.
 - Main recovery gap is smaller now: stale `attempted` task-message visibility exists through `dogfood:check`, and `POST /task-messages/reconcile-attempted` can mark stale attempts failed without raw text leakage. True automatic retry is intentionally deferred unless the payload-storage privacy tradeoff changes.
@@ -222,11 +222,9 @@ Review outcome:
 
 Near-term implementation order:
 
-1. Surface queue lineage inside Mac UI only if CLI/API dogfood proves useful.
-2. Add stricter runtime normalization only if dogfood shows provider-specific shape drift.
-3. Promote extra live smokes into `proof:live` when local prerequisites make sense.
-4. Promote extra live smokes into `proof:live` when local prerequisites make sense.
-5. Keep XCUITest as later hardening unless AppleScript/live smokes miss real bugs.
+1. Add stricter runtime normalization only if dogfood shows provider-specific shape drift.
+2. Promote extra live smokes into `proof:live` when local prerequisites make sense.
+3. Keep XCUITest as later hardening unless AppleScript/live smokes miss real bugs.
 
 Latest user steering:
 
@@ -249,9 +247,7 @@ Release guardrails:
 
 ## Next Best Work
 
-1. Surface queue lineage inside Mac UI only if CLI/API dogfood proves useful.
-2. Add stricter runtime normalization only if dogfood shows provider-specific shape drift.
-3. Decide whether `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
-4. Decide whether `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
-5. Add app bundle/XCUITest smoke later if current AppleScript/live smokes miss UI regressions.
-6. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.
+1. Add stricter runtime normalization only if dogfood shows provider-specific shape drift.
+2. Decide whether `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
+3. Add app bundle/XCUITest smoke later if current AppleScript/live smokes miss UI regressions.
+4. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.

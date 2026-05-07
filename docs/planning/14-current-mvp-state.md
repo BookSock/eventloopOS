@@ -98,7 +98,7 @@ Done:
 - Claude session config can pin `model`, `tools`, and `max_budget_usd`, so real smoke/followup runs can force cheap read-only behavior instead of inheriting an expensive or tool-enabled default.
 - `ORCHESTRATOR_TASK_SESSIONS` now accepts comma-separated modes, so `codex_app_server,claude_cli` exposes Codex App Server threads and configured Claude Code sessions in one daemon. A composite task-session controller lists both providers and routes followups/bindings to the owner runtime by session ID.
 - Task runtime boundary now has shared typed shapes for sessions, messages, capabilities, bindings, and errors. The contract is intentionally tolerant for MVP because Codex, Claude, fake, and terminal runtimes still carry provider-specific metadata, but controller methods no longer return raw `unknown`.
-- `GET /queue/:id/lineage` and `pnpm queue:lineage -- --queue-item-id <id>` show the selected paper's queue item, review packet, related source events, activity timeline, and sanitized task-message history in one response. This makes after-the-fact debugging queue-item-centered instead of forcing global `/activity` and `/task-messages` dumps.
+- `GET /queue/:id/lineage`, `pnpm queue:lineage -- --queue-item-id <id>`, and the Mac queue Lineage panel show the selected paper's queue item, review packet, related source events, activity timeline, and sanitized task-message history in one response. This makes after-the-fact debugging queue-item-centered instead of forcing global `/activity` and `/task-messages` dumps.
 - `dogfood:review` now reports queue depth by state, pending/failed restore backlog, task followup status counts, and runtime failure count. `dogfood:check` has thresholds for ready queue depth, pending restore requests, and runtime failures.
 - `POST /task-messages/reconcile-attempted` marks stale `attempted` task messages as failed with audit activity. It deliberately does not retry because raw followup text is not stored; agents should inspect queue lineage and resend manually when needed.
 - `pnpm task:runtime-smoke` starts a temporary orchestrator with `codex_app_server,claude_cli`, checks live Codex app-server sessions plus a configured Claude session are exposed together, then shuts the daemon down.
@@ -209,10 +209,8 @@ Weak tests:
 
 ## Next Best Work
 
-1. Surface queue lineage inside Mac UI only if CLI/API dogfood proves useful.
-2. Add stricter runtime normalization later only if provider-specific metadata starts leaking into queue UI or history.
-3. Decide whether to promote `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
-4. Decide whether to promote `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
-5. Add app bundle/XCUITest smoke only if the current SwiftUI render, launch, AppleScript, and live Mac handoff smokes stop catching enough UI regressions.
-6. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.
-7. Later: real microphone/wake-word proof and always-listening voice UX.
+1. Add stricter runtime normalization later only if provider-specific metadata starts leaking into queue UI or history.
+2. Decide whether to promote `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
+3. Add app bundle/XCUITest smoke only if the current SwiftUI render, launch, AppleScript, and live Mac handoff smokes stop catching enough UI regressions.
+4. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.
+5. Later: real microphone/wake-word proof and always-listening voice UX.
