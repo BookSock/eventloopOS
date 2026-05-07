@@ -23,6 +23,7 @@
     "test:db:docker": "pnpm --filter @eventloopos/orchestrator run test:db:docker",
     "test:db:native": "pnpm --filter @eventloopos/orchestrator run test:db:native",
     "dev:doctor": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dev:doctor",
+    "dogfood:review": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dogfood:review",
     "dev:postgres": "pnpm --filter @eventloopos/orchestrator run dev:postgres",
     "dev:postgres:up": "pnpm --filter @eventloopos/orchestrator run dev:postgres up",
     "dev:postgres:down": "pnpm --filter @eventloopos/orchestrator run dev:postgres down",

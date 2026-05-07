@@ -45,6 +45,7 @@ Local dogfood inspection:
 ```sh
 curl http://127.0.0.1:4377/metrics
 curl http://127.0.0.1:4377/activity?limit=20
+pnpm run dogfood:review
 ```
 
 These endpoints expose counters and recent activity for local debugging. In Postgres mode they persist across orchestrator restarts; in empty in-memory mode they reset with the process.

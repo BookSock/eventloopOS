@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev:doctor": "node dist/src/dev/doctor.js",
+    "dogfood:review": "node dist/src/dev/dogfood_review.js",
     "dev:postgres": "bin/dev-postgres",
     "live:aerospace": "pnpm run build && node dist/src/workspace/live_aerospace_smoke.js",
     "mcp:local-events": "node dist/src/mcp_sources/local_events_server.js",

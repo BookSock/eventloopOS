@@ -134,6 +134,7 @@ Strong tests now:
 - Config paths for MCP sources, Codex task maps, and seed fixtures resolve existing repo-root relative files even when package scripts run from `app/orchestrator`.
 - File-backed local events MCP server exists for dogfood. `config/mcp-sources.local-events.example.json` launches it over stdio, reads `EVENTLOOPOS_LOCAL_EVENTS_PATH`, and returns generic event-ish `items[]` for MCP poll routing.
 - `GET /metrics` and `GET /activity?limit=` expose local dogfood counters and recent activity. Postgres mode persists them across orchestrator restarts; in-memory mode keeps current-process history. Current coverage records event routing, queue done, context restore request/done, and MCP poll cycles.
+- `pnpm run dogfood:review` prints a local daily-ish review from `/metrics` and `/activity`; set `EVENTLOOPOS_DOGFOOD_REVIEW_FORMAT=json` for agent-readable output.
 - Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
 - Mac unit tests cover Manual Mode workspace capture/restore through `HTTPWorkspaceClient.capture()`, `QueueViewModel.enterManualModeAndCaptureWorkspace()`, and `QueueViewModel.confirmManualWorkspaceRestore()`.
 - `pnpm run dev:dogfood:smoke` starts orchestrator + Mac queue app in empty in-memory mode, waits for health, launches the queue app, then exits automatically after a short smoke window.
@@ -145,12 +146,12 @@ Weak tests:
 - AeroSpace live restore needs installed/running AeroSpace. Local live smoke proves capture, planning, and opt-in one-window restore execution; it does not prove full multi-window layout reconstruction under every app/window edge case.
 - No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, temp `.app` bundle launch, and opt-in AppleScript menu/window/manual-mode interaction.
 - No real microphone wake-word proof yet; current coverage proves fixture-audio STT with `whisper-cli`, local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
-- Daily dogfood review/report is still missing. Activity history is durable in Postgres mode and process-local in in-memory mode.
+- Activity history is durable in Postgres mode and process-local in in-memory mode. The report is intentionally simple and does not yet group by task/session or compare trends across days.
 - `server.ts` is still a large mixed route/policy file; split route modules before much more orchestrator feature width.
 
 ## Next Best Work
 
-1. Add daily dogfood review/report over the activity history.
+1. Add task/session grouping and trend comparisons to `dogfood:review`.
 2. Extract `server.ts` route/policy modules without behavior change.
 3. Add real Slack/GitHub MCP source dogfood config for Jason's installed servers, using the local-events MCP recipe as the template.
 4. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.

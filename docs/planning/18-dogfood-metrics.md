@@ -79,7 +79,7 @@ MVP surfaces:
 
 - `GET /activity?limit=...`
 - `GET /metrics`
-- `pnpm run dogfood:review` later
+- `pnpm run dogfood:review`
 - Mac queue footer: queue count, done today, restore success today
 
 Current implementation:
@@ -88,6 +88,7 @@ Current implementation:
 - `GET /metrics` exists as local counters.
 - Postgres mode persists `activity_events` and `metric_counters` through `0003_observability.sql`.
 - In-memory mode remains process-local for fast tests and empty local smoke runs.
+- `pnpm run dogfood:review` reads `/metrics` and `/activity`, prints text by default, and supports `EVENTLOOPOS_DOGFOOD_REVIEW_FORMAT=json` for agents.
 
 ## Privacy
 
@@ -103,6 +104,7 @@ Tests needed:
 - E2E: MCP local event poll increments ingested/routed/queue counters.
 - E2E: browser restore done increments restore counters.
 - E2E: task followup success/fail increments task counters.
+- CLI: `dogfood:review` filters current-day activity and fails cleanly when orchestrator is unavailable.
 
 ## Success Thresholds
 

@@ -97,8 +97,8 @@ Do behavior-preserving extraction first. Add tests before changing policy.
 
 ## Next Best Work
 
-1. Daily dogfood review/report over activity history.
-2. Restore failure/retry path.
-3. Provider deeplink/resource normalizers.
-4. `server.ts` route/policy extraction.
-5. Claude Code task-session adapter.
+1. Restore failure/retry path.
+2. Provider deeplink/resource normalizers.
+3. `server.ts` route/policy extraction.
+4. Claude Code task-session adapter.
+5. Task/session grouping in dogfood review.
