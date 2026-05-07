@@ -204,6 +204,97 @@ describe("PostgresQueueStore", () => {
     assert.equal((await store.pool.query("SELECT count(*)::int AS count FROM queue_items")).rows[0]?.count, 1);
   });
 
+  it("keeps failed restore request retryable across orchestrator restart", async (t) => {
+    if (!store) {
+      t.skip(skipReason);
+      return;
+    }
+
+    const created = await withPostgresGateway(store, async (baseUrl) => {
+      const createResponse = await fetch(`${baseUrl}/contexts/restore-requests`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_restore_restart",
+        },
+        body: JSON.stringify({
+          resource: {
+            id: "ctx_restore_restart_browser",
+            kind: "browser_tab",
+            title: "Restore restart doc",
+            url: "https://example.test/restore-restart",
+            restore_confidence: "high",
+          },
+        }),
+      });
+      assert.equal(createResponse.status, 202);
+      const createBody = await createResponse.json() as {
+        restore_request: { id: string; status: string };
+      };
+      assert.equal(createBody.restore_request.status, "pending");
+
+      const claimResponse = await fetch(`${baseUrl}/contexts/restore-requests/claim-next`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lease_owner: "browser_before_restart", lease_ms: 1_000 }),
+      });
+      const claimBody = await claimResponse.json() as {
+        restore_request: { id: string; status: string; lease_owner?: string };
+      };
+      assert.equal(claimResponse.status, 200);
+      assert.equal(claimBody.restore_request.id, createBody.restore_request.id);
+      assert.equal(claimBody.restore_request.status, "leased");
+
+      const failedResponse = await fetch(`${baseUrl}/contexts/restore-requests/${createBody.restore_request.id}/failed`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ result: { ok: false, error: "tab went away" } }),
+      });
+      const failedBody = await failedResponse.json() as {
+        restore_request: { id: string; status: string; result: Record<string, unknown> };
+      };
+      assert.equal(failedResponse.status, 200);
+      assert.equal(failedBody.restore_request.status, "failed");
+      assert.deepEqual(failedBody.restore_request.result, { ok: false, error: "tab went away" });
+      return failedBody.restore_request;
+    });
+
+    await withPostgresGateway(store, async (baseUrl) => {
+      const getFailedResponse = await fetch(`${baseUrl}/contexts/restore-requests/${created.id}`);
+      const getFailedBody = await getFailedResponse.json() as {
+        restore_request: { id: string; status: string; result: Record<string, unknown> };
+      };
+      assert.equal(getFailedResponse.status, 200);
+      assert.equal(getFailedBody.restore_request.status, "failed");
+      assert.deepEqual(getFailedBody.restore_request.result, { ok: false, error: "tab went away" });
+
+      const retryResponse = await fetch(`${baseUrl}/contexts/restore-requests/${created.id}/retry`, {
+        method: "POST",
+      });
+      const retryBody = await retryResponse.json() as {
+        restore_request: { id: string; status: string; result?: unknown };
+      };
+      assert.equal(retryResponse.status, 200);
+      assert.equal(retryBody.restore_request.status, "pending");
+      assert.equal(retryBody.restore_request.result, undefined);
+
+      const claimResponse = await fetch(`${baseUrl}/contexts/restore-requests/claim-next`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ lease_owner: "browser_after_restart", lease_ms: 1_000 }),
+      });
+      const claimBody = await claimResponse.json() as {
+        restore_request: { id: string; status: string; lease_owner?: string };
+      };
+      assert.equal(claimResponse.status, 200);
+      assert.equal(claimBody.restore_request.id, created.id);
+      assert.equal(claimBody.restore_request.status, "leased");
+      assert.equal(claimBody.restore_request.lease_owner, "browser_after_restart");
+    });
+
+    assert.equal((await store.pool.query("SELECT count(*)::int AS count FROM context_restore_requests")).rows[0]?.count, 1);
+  });
+
   it("leases next ready item with SKIP LOCKED semantics and reaps stale leases", async (t) => {
     if (!store) {
       t.skip(skipReason);

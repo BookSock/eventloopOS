@@ -97,7 +97,7 @@ Required now:
 - Dogfood logs make after-the-fact debugging possible.
 - Duplicate/retried events return stored route before side effects.
 - In Postgres mode, activity and metric history survive orchestrator restart.
-- Restart-proof proof path now covers event routing: use same Postgres DB, ingest event, restart orchestrator server, assert duplicate route returns stored result and queue item. Remaining restart proof should cover leased queue item or restore request retry visibility.
+- Restart-proof proof path now covers event routing and restore retry: use same Postgres DB, ingest event or create failed restore request, restart orchestrator server, assert duplicate route returns stored result and failed restore can be retried/reclaimed.
 - Task followup chaos proof: runtime throw should record attempted + failed activity and avoid duplicate followup on retry.
 
 Later:
