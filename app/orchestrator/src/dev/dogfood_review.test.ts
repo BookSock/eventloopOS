@@ -31,6 +31,9 @@ describe("dogfood review CLI", () => {
       EVENTLOOPOS_DOGFOOD_MIN_RESTORE_SUCCESS_RATE: "0.75",
       EVENTLOOPOS_DOGFOOD_MAX_FOLLOWUP_FAILURES: "1",
       EVENTLOOPOS_DOGFOOD_MAX_STALE_LEASES: "2",
+      EVENTLOOPOS_DOGFOOD_MAX_READY_QUEUE_DEPTH: "9",
+      EVENTLOOPOS_DOGFOOD_MAX_PENDING_RESTORE_REQUESTS: "3",
+      EVENTLOOPOS_DOGFOOD_MAX_RUNTIME_FAILURES: "4",
       EVENTLOOPOS_DOGFOOD_MAX_PENDING_RESTORE_AGE_MS: "60000",
       EVENTLOOPOS_DOGFOOD_MAX_ATTEMPTED_TASK_MESSAGE_AGE_MS: "120000",
     }), {
@@ -43,6 +46,9 @@ describe("dogfood review CLI", () => {
         minRestoreSuccessRate: 0.75,
         maxFollowupFailures: 1,
         maxStaleLeases: 2,
+        maxReadyQueueDepth: 9,
+        maxPendingRestoreRequests: 3,
+        maxRuntimeFailures: 4,
         maxPendingRestoreAgeMs: 60000,
         maxAttemptedTaskMessageAgeMs: 120000,
       },
@@ -69,6 +75,9 @@ describe("dogfood review CLI", () => {
     assert.match(output, /EventloopOS Dogfood Review/);
     assert.match(output, /events_ingested_total: 2/);
     assert.match(output, /queue_clearance_rate: 0.50/);
+    assert.match(output, /Gauges:\n- queue_depth ready=2 leased=1 deferred=1 done=3 dead=1/);
+    assert.match(output, /restore_requests pending=1 failed_total=1/);
+    assert.match(output, /task_followups attempted=1 sent=1 blocked=0 failed=0/);
     assert.match(output, /Tasks:\n- task_blog_feedback events=4 routed=1 queued=1 done=1 followups_attempted=1 followups_sent=1 followups_blocked=0 failed=0/);
     assert.match(output, /Sessions:\n- task_session_blog events=4 routed=1 queued=1 done=1 followups_attempted=1 followups_sent=1 followups_blocked=0 failed=0/);
     assert.match(output, /Queues:\n- qit_review_1 task=task_blog_feedback session=task_session_blog events=2 done_in=20.0m: Queue item done: Launch review/);
@@ -109,6 +118,12 @@ describe("dogfood review CLI", () => {
       session_rollups: Array<{ id: string; routed: number }>;
       queue_rollups: Array<{ id: string; time_to_done_ms: number }>;
       restore_provider_rollups: Array<{ provider: string; success_rate: number }>;
+      gauges: {
+        queue_depth_by_state: Record<string, number>;
+        restore_requests_pending: number;
+        task_followups_by_status: { failed: number };
+        runtime_failures_total: number;
+      };
       daily_rollups: Array<{ date: string; events: number; followups_sent: number; failed: number }>;
       attempted_task_messages: Array<{ id: string }>;
       fetched_attempted_task_message_count: number;
@@ -161,6 +176,16 @@ describe("dogfood review CLI", () => {
       },
     ]);
     assert.equal(parsed.derived.queue_clearance_rate, 0.5);
+    assert.deepEqual(parsed.gauges.queue_depth_by_state, {
+      ready: 2,
+      leased: 1,
+      deferred: 1,
+      done: 3,
+      dead: 1,
+    });
+    assert.equal(parsed.gauges.restore_requests_pending, 1);
+    assert.equal(parsed.gauges.task_followups_by_status.failed, 0);
+    assert.equal(parsed.gauges.runtime_failures_total, 0);
     assert.deepEqual(parsed.attempted_task_messages, []);
     assert.equal(parsed.fetched_attempted_task_message_count, 0);
   });
@@ -247,6 +272,9 @@ describe("dogfood review CLI", () => {
         minRestoreSuccessRate: 0.7,
         maxFollowupFailures: 0,
         maxStaleLeases: 0,
+        maxReadyQueueDepth: 5,
+        maxPendingRestoreRequests: 5,
+        maxRuntimeFailures: 0,
         maxPendingRestoreAgeMs: 30 * 60 * 1000,
         maxAttemptedTaskMessageAgeMs: 30 * 60 * 1000,
       },
@@ -270,6 +298,9 @@ describe("dogfood review CLI", () => {
       ["restore_success_rate", true],
       ["task_followup_failures", true],
       ["stale_queue_leases", true],
+      ["ready_queue_depth", true],
+      ["pending_restore_requests", true],
+      ["runtime_failures", true],
       ["pending_restore_age_ms", true],
       ["attempted_task_message_age_ms", true],
     ]);
@@ -287,6 +318,9 @@ describe("dogfood review CLI", () => {
         minRestoreSuccessRate: 0.8,
         maxFollowupFailures: 0,
         maxStaleLeases: 0,
+        maxReadyQueueDepth: 5,
+        maxPendingRestoreRequests: 5,
+        maxRuntimeFailures: 0,
         maxPendingRestoreAgeMs: 30 * 60 * 1000,
         maxAttemptedTaskMessageAgeMs: 30 * 60 * 1000,
       },
@@ -316,6 +350,9 @@ describe("dogfood review CLI", () => {
         minRestoreSuccessRate: 0.7,
         maxFollowupFailures: 0,
         maxStaleLeases: 0,
+        maxReadyQueueDepth: 5,
+        maxPendingRestoreRequests: 5,
+        maxRuntimeFailures: 0,
         maxPendingRestoreAgeMs: 30 * 60 * 1000,
         maxAttemptedTaskMessageAgeMs: 30 * 60 * 1000,
       },
@@ -358,6 +395,7 @@ function responseForUrl(url: string): Response {
           queue_items_done_total: 1,
           task_followups_attempted_total: 1,
           task_followups_sent_total: 1,
+          restore_requests_created_total: 5,
           restore_requests_done_total: 3,
           restore_requests_failed_total: 1,
           restore_requests_done_provider_browser: 1,
@@ -486,7 +524,28 @@ function responseForUrl(url: string): Response {
     });
   }
 
+  const queueState = queueStateFromUrl(url);
+  if (queueState) {
+    const counts: Record<string, number> = {
+      ready: 2,
+      leased: 1,
+      deferred: 1,
+      done: 3,
+      dead: 1,
+    };
+    return jsonResponse({
+      count: counts[queueState] ?? 0,
+      items: Array.from({ length: counts[queueState] ?? 0 }, (_, index) => ({ id: `qit_${queueState}_${index}` })),
+    });
+  }
+
   return jsonResponse({ error: "not found" }, 404);
+}
+
+function queueStateFromUrl(url: string): string | undefined {
+  const parsed = new URL(url);
+  if (parsed.pathname !== "/queue") return undefined;
+  return parsed.searchParams.get("state") ?? undefined;
 }
 
 function jsonResponse(body: unknown, status = 200): Response {

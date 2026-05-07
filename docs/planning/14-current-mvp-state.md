@@ -99,6 +99,7 @@ Done:
 - `ORCHESTRATOR_TASK_SESSIONS` now accepts comma-separated modes, so `codex_app_server,claude_cli` exposes Codex App Server threads and configured Claude Code sessions in one daemon. A composite task-session controller lists both providers and routes followups/bindings to the owner runtime by session ID.
 - Task runtime boundary now has shared typed shapes for sessions, messages, capabilities, bindings, and errors. The contract is intentionally tolerant for MVP because Codex, Claude, fake, and terminal runtimes still carry provider-specific metadata, but controller methods no longer return raw `unknown`.
 - `GET /queue/:id/lineage` and `pnpm queue:lineage -- --queue-item-id <id>` show the selected paper's queue item, review packet, related source events, activity timeline, and sanitized task-message history in one response. This makes after-the-fact debugging queue-item-centered instead of forcing global `/activity` and `/task-messages` dumps.
+- `dogfood:review` now reports queue depth by state, pending/failed restore backlog, task followup status counts, and runtime failure count. `dogfood:check` has thresholds for ready queue depth, pending restore requests, and runtime failures.
 - `pnpm task:runtime-smoke` starts a temporary orchestrator with `codex_app_server,claude_cli`, checks live Codex app-server sessions plus a configured Claude session are exposed together, then shuts the daemon down.
 - `GET /contexts` ranked search.
 - `POST /contexts/restore-plan`.
@@ -207,7 +208,7 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add dogfood gauges/checks for queue depth by state, pending/failed restore requests, followup status counts, and runtime failure counts.
+1. Add retry/resume policy for stale attempted task messages if dogfood finds real stale attempts.
 2. Surface queue lineage inside Mac UI only if CLI/API dogfood proves useful.
 3. Add stricter runtime normalization later only if provider-specific metadata starts leaking into queue UI or history.
 4. Decide whether to promote `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.

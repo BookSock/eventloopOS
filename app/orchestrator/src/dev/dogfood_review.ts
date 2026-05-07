@@ -32,6 +32,9 @@ export type DogfoodCheckThresholds = {
   minRestoreSuccessRate: number;
   maxFollowupFailures: number;
   maxStaleLeases: number;
+  maxReadyQueueDepth: number;
+  maxPendingRestoreRequests: number;
+  maxRuntimeFailures: number;
   maxPendingRestoreAgeMs: number;
   maxAttemptedTaskMessageAgeMs: number;
 };
@@ -51,6 +54,11 @@ type TaskMessagesResponse = {
   count: number;
 };
 
+type QueueResponse = {
+  items: unknown[];
+  count: number;
+};
+
 type TaskMessageSummary = {
   id: string;
   task_session_id: string;
@@ -67,6 +75,7 @@ type DogfoodReviewReport = {
   fetched_activity_count: number;
   attempted_task_messages: TaskMessageSummary[];
   fetched_attempted_task_message_count: number;
+  gauges: DogfoodGauges;
   task_rollups: RollupSummary[];
   session_rollups: RollupSummary[];
   queue_rollups: QueueRollupSummary[];
@@ -79,6 +88,21 @@ type DogfoodReviewReport = {
     task_session_route_rate: number | null;
   };
 };
+
+type DogfoodGauges = {
+  queue_depth_by_state: Record<QueueStateName, number>;
+  restore_requests_pending: number;
+  restore_requests_failed_total: number;
+  task_followups_by_status: {
+    attempted: number;
+    sent: number;
+    blocked: number;
+    failed: number;
+  };
+  runtime_failures_total: number;
+};
+
+type QueueStateName = "ready" | "leased" | "deferred" | "done" | "dead";
 
 type DogfoodCheckReport = {
   generated_at: string;
@@ -173,6 +197,9 @@ export function dogfoodCheckOptionsFromEnv(env: NodeJS.ProcessEnv): DogfoodCheck
       minRestoreSuccessRate: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MIN_RESTORE_SUCCESS_RATE, 0.8),
       maxFollowupFailures: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_FOLLOWUP_FAILURES, 0),
       maxStaleLeases: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_STALE_LEASES, 0),
+      maxReadyQueueDepth: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_READY_QUEUE_DEPTH, 50),
+      maxPendingRestoreRequests: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_PENDING_RESTORE_REQUESTS, 5),
+      maxRuntimeFailures: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_RUNTIME_FAILURES, 0),
       maxPendingRestoreAgeMs: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_PENDING_RESTORE_AGE_MS, 30 * 60 * 1000),
       maxAttemptedTaskMessageAgeMs: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_ATTEMPTED_TASK_MESSAGE_AGE_MS, 30 * 60 * 1000),
     },
@@ -220,10 +247,11 @@ async function fetchDogfoodReport(options: Pick<DogfoodReviewOptions, "baseUrl" 
   const fetchFn = options.fetchFn ?? fetch;
   const now = options.now ?? (() => new Date());
 
-  const [metrics, activity, taskMessages] = await Promise.all([
+  const [metrics, activity, taskMessages, queueDepthByState] = await Promise.all([
     fetchJson<MetricsResponse>(fetchFn, new URL("/metrics", options.baseUrl)),
     fetchJson<ActivityResponse>(fetchFn, new URL(`/activity?limit=${options.limit}`, options.baseUrl)),
     fetchJson<TaskMessagesResponse>(fetchFn, new URL(`/task-messages?status=attempted&limit=${options.limit}`, options.baseUrl)),
+    fetchQueueDepthByState(fetchFn, options.baseUrl),
   ]);
   const generatedAt = metrics.generated_at ?? now().toISOString();
   const since = options.since ?? startOfLocalDay(now()).toISOString();
@@ -236,7 +264,17 @@ async function fetchDogfoodReport(options: Pick<DogfoodReviewOptions, "baseUrl" 
     fetched_activity_count: activity.count,
     attempted_task_messages: taskMessages.messages,
     fetched_attempted_task_message_count: taskMessages.count,
+    gauges: buildDogfoodGauges(metrics.metrics.counters, events, queueDepthByState),
   });
+}
+
+async function fetchQueueDepthByState(fetchFn: typeof fetch, baseUrl: string): Promise<Record<QueueStateName, number>> {
+  const states: QueueStateName[] = ["ready", "leased", "deferred", "done", "dead"];
+  const entries = await Promise.all(states.map(async (state): Promise<[QueueStateName, number]> => {
+    const response = await fetchJson<QueueResponse>(fetchFn, new URL(`/queue?state=${state}`, baseUrl));
+    return [state, response.count ?? response.items.length];
+  }));
+  return Object.fromEntries(entries) as Record<QueueStateName, number>;
 }
 
 async function fetchJson<T>(fetchFn: typeof fetch, url: URL): Promise<T> {
@@ -256,6 +294,7 @@ function buildDogfoodReviewReport(input: {
   fetched_activity_count: number;
   attempted_task_messages: TaskMessageSummary[];
   fetched_attempted_task_message_count: number;
+  gauges: DogfoodGauges;
 }): DogfoodReviewReport {
   const dailyRollups = dailyActivityRollups(input.events);
   return {
@@ -299,6 +338,12 @@ function formatTextReport(report: DogfoodReviewReport): string {
   lines.push(`- queue_clearance_rate: ${formatRatio(report.derived.queue_clearance_rate)}`);
   lines.push(`- task_session_route_rate: ${formatRatio(report.derived.task_session_route_rate)}`);
   lines.push(`- restore_success_rate: ${formatRatio(report.derived.restore_success_rate)}`);
+
+  lines.push("", "Gauges:");
+  lines.push(`- queue_depth ready=${report.gauges.queue_depth_by_state.ready} leased=${report.gauges.queue_depth_by_state.leased} deferred=${report.gauges.queue_depth_by_state.deferred} done=${report.gauges.queue_depth_by_state.done} dead=${report.gauges.queue_depth_by_state.dead}`);
+  lines.push(`- restore_requests pending=${report.gauges.restore_requests_pending} failed_total=${report.gauges.restore_requests_failed_total}`);
+  lines.push(`- task_followups attempted=${report.gauges.task_followups_by_status.attempted} sent=${report.gauges.task_followups_by_status.sent} blocked=${report.gauges.task_followups_by_status.blocked} failed=${report.gauges.task_followups_by_status.failed}`);
+  lines.push(`- runtime_failures_total: ${report.gauges.runtime_failures_total}`);
 
   lines.push("", "Tasks:");
   appendRollupLines(lines, report.task_rollups);
@@ -387,7 +432,7 @@ function buildDogfoodCheckReport(report: DogfoodReviewReport, thresholds: Dogfoo
     ),
     maxCheck(
       "task_followup_failures",
-      counters.task_followups_failed_total ?? 0,
+      report.gauges.task_followups_by_status.failed,
       thresholds.maxFollowupFailures,
       "failed task followup count",
     ),
@@ -396,6 +441,24 @@ function buildDogfoodCheckReport(report: DogfoodReviewReport, thresholds: Dogfoo
       counters.queue_stale_leases_total ?? counters.stale_queue_leases_total ?? 0,
       thresholds.maxStaleLeases,
       "stale queue lease count",
+    ),
+    maxCheck(
+      "ready_queue_depth",
+      report.gauges.queue_depth_by_state.ready,
+      thresholds.maxReadyQueueDepth,
+      "ready queue depth",
+    ),
+    maxCheck(
+      "pending_restore_requests",
+      report.gauges.restore_requests_pending,
+      thresholds.maxPendingRestoreRequests,
+      "created restore requests minus done and failed restore requests",
+    ),
+    maxCheck(
+      "runtime_failures",
+      report.gauges.runtime_failures_total,
+      thresholds.maxRuntimeFailures,
+      "failed task runtime or followup activity events in the dogfood window",
     ),
     maxCheck(
       "pending_restore_age_ms",
@@ -415,6 +478,35 @@ function buildDogfoodCheckReport(report: DogfoodReviewReport, thresholds: Dogfoo
     since: report.since,
     passed: checks.every((check) => check.passed),
     checks,
+  };
+}
+
+function buildDogfoodGauges(
+  counters: Record<string, number>,
+  events: ActivityEvent[],
+  queueDepthByState: Record<QueueStateName, number>,
+): DogfoodGauges {
+  const taskFollowupsByStatus = {
+    attempted: counters.task_followups_attempted_total ?? 0,
+    sent: counters.task_followups_sent_total ?? 0,
+    blocked: counters.task_followups_blocked_total ?? 0,
+    failed: counters.task_followups_failed_total ?? 0,
+  };
+  return {
+    queue_depth_by_state: queueDepthByState,
+    restore_requests_pending: Math.max(
+      0,
+      (counters.restore_requests_created_total ?? 0)
+        - (counters.restore_requests_done_total ?? 0)
+        - (counters.restore_requests_failed_total ?? 0),
+    ),
+    restore_requests_failed_total: counters.restore_requests_failed_total ?? 0,
+    task_followups_by_status: taskFollowupsByStatus,
+    runtime_failures_total: events.filter((event) => {
+      if (event.type === "task_followup_failed") return true;
+      if (event.type.startsWith("task_runtime_") && event.status === "failed") return true;
+      return false;
+    }).length,
   };
 }
 

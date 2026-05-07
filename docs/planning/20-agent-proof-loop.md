@@ -26,6 +26,7 @@ Current implementation:
 - `pnpm proof:live`
 - `pnpm task:messages`
 - `pnpm queue:lineage`
+- `EVENTLOOPOS_DOGFOOD_CHECK_FORMAT=json pnpm dogfood:check`
 - `make proof-agent`
 - `make proof-live`
 - default commands: lint, typecheck, test, test:e2e

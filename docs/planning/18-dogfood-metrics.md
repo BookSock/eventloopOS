@@ -121,10 +121,10 @@ Current implementation:
 - Durable `task_messages` now persist followup status by idempotency key across Postgres restarts. The durable record stores payload hash/length and sanitized runtime metadata, not raw followup text. Duplicate retries return the stored task-message result before runtime side effects.
 - `GET /task-messages` and `pnpm task:messages` expose that durable task-message history with filters for task session, task, queue item, event, status, and idempotency key.
 - `pnpm dogfood:check` reads the same local metrics/activity plus attempted task-message history and exits non-zero when dogfood thresholds fail. Current checks cover ignored queue item rate, restore success rate, task followup failures, stale queue leases, oldest pending restore age, and oldest `attempted` task-message age. Use `EVENTLOOPOS_DOGFOOD_CHECK_FORMAT=json` for agent-readable output.
+- `dogfood:review` also fetches queue depth by state and emits gauges for ready/leased/deferred/done/dead queue depth, pending restore requests, failed restore total, task followup attempted/sent/blocked/failed counts, and runtime failure count. `dogfood:check` can fail on ready queue depth, pending restore request backlog, and runtime failures.
 
 Near-term gaps:
 
-- Add gauges for queue depth by state, pending/failed restore requests, task followup status counts, and runtime failure counts.
 - Teach `dogfood:review` to read durable task-message history directly, not only recent activity rows.
 - Wire `dogfood:check` into a real dogfood daemon run once Postgres + MCP sources are the default local workflow.
 - Keep metric rows content-light: IDs, hashes, lengths, statuses, providers, and durations; raw Slack/doc content belongs in event artifacts, not metrics.
