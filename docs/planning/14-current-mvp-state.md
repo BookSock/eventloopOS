@@ -160,7 +160,8 @@ Strong tests now:
 - Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
 - Mac unit tests cover Manual Mode workspace capture/restore through `HTTPWorkspaceClient.capture()`, `QueueViewModel.enterManualModeAndCaptureWorkspace()`, and `QueueViewModel.confirmManualWorkspaceRestore()`.
 - `pnpm run dev:dogfood:smoke` starts orchestrator + Mac queue app in empty in-memory mode, waits for health, launches the queue app, then exits automatically after a short smoke window.
-- Real local-events MCP dogfood proof passed: started orchestrator with `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json` and `EVENTLOOPOS_LOCAL_EVENTS_PATH=config/local-events.example.json`, ran `poll:mcp:once`, saw 1 event routed into a human queue item.
+- Real local-events MCP dogfood proof passed again after the SDK read-only tool gate: started orchestrator with `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json` and `EVENTLOOPOS_LOCAL_EVENTS_PATH=config/local-events.example.json`, ran `poll:mcp:once`, saw 1 event routed into a human queue item.
+- Real agent-slack MCP no-content smoke passed with an impossible query and content cap: started orchestrator with `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.agent-slack.example.json`, `EVENTLOOPOS_AGENT_SLACK_QUERY='eventloopos-impossible-query-4388-no-results'`, `EVENTLOOPOS_AGENT_SLACK_LIMIT=1`, and `EVENTLOOPOS_AGENT_SLACK_MAX_CONTENT_CHARS=80`; `poll:mcp:once` returned 0 events, 0 errors, proving the wrapper starts and passes the read-only tool metadata gate without printing Slack content.
 
 Weak tests:
 
@@ -173,10 +174,8 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add GatewayStore conformance tests for event idempotency, queue leasing/defer/ignore, context restore retry, workspace restore receipt replay, and context search.
-2. Add restart/failure smoke around Postgres state, restore retry, and task followup chaos.
-3. Add trend comparisons to `dogfood:review`.
-4. Add real Slack/GitHub MCP source dogfood config for Jason's installed servers, using the local-events MCP recipe as the template.
-5. Real Claude+Codex composite dogfood with harmless sessions configured together.
-6. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-7. Later: real microphone/wake-word proof and always-listening voice UX.
+1. Add trend comparisons to `dogfood:review`.
+2. Add a real GitHub MCP source dogfood config for Jason's installed tools, using the local-events and agent-slack recipes as templates.
+3. Real Claude+Codex composite dogfood with harmless sessions configured together.
+4. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+5. Later: real microphone/wake-word proof and always-listening voice UX.
