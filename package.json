@@ -28,6 +28,7 @@
     "dev:postgres:down": "pnpm --filter @eventloopos/orchestrator run dev:postgres down",
     "dev:postgres:url": "pnpm --filter @eventloopos/orchestrator run dev:postgres url",
     "dev:dogfood": "bin/dev-dogfood",
+    "dev:dogfood:smoke": "EVENTLOOPOS_DOGFOOD_POSTGRES=0 EVENTLOOPOS_DOGFOOD_SMOKE_MS=3000 bin/dev-dogfood",
     "queue:add": "pnpm --filter @eventloopos/orchestrator run queue:add",
     "task:sessions": "pnpm --filter @eventloopos/orchestrator run task:sessions",
     "task:bind": "pnpm --filter @eventloopos/orchestrator run task:bind",

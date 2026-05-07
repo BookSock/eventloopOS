@@ -9,6 +9,7 @@ This is the current reality map for agents. Pick the narrowest command that prov
 | Any code change | `make ci` | `pnpm run test:e2e:live:boot` | Terminal pass/fail, harness artifacts |
 | Command/script wiring | `pnpm run typecheck` | `make ci` | Node syntax checks, Swift build, package tests |
 | Current MVP live spine | `pnpm run test:e2e:live:boot` | `pnpm run test:e2e:live:full` | Orchestrator boot, live scenarios, native/browser/Mac smoke |
+| Dogfood stack launch | `pnpm run dev:dogfood:smoke` | `pnpm run dev:dogfood` | Orchestrator + Mac queue app startup path |
 
 ## Subsystem Proofs
 

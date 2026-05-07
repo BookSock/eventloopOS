@@ -129,6 +129,7 @@ Strong tests now:
 - `dev:doctor` reports whether `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` is configured and can launch with `--help`; unconfigured voice command is treated as optional/pass.
 - Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
 - Mac unit tests cover Manual Mode workspace capture/restore through `HTTPWorkspaceClient.capture()`, `QueueViewModel.enterManualModeAndCaptureWorkspace()`, and `QueueViewModel.confirmManualWorkspaceRestore()`.
+- `pnpm run dev:dogfood:smoke` starts orchestrator + Mac queue app in empty in-memory mode, waits for health, launches the queue app, then exits automatically after a short smoke window.
 
 Weak tests:
 
@@ -139,6 +140,6 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add real microphone/wake-word smoke for local voice ingress.
+1. Add real MCP source dogfood recipe for Jason's Slack/GitHub-like local servers and prove an unhinted polled event routes through `ambient_context_route` behavior.
 2. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-3. Add real microphone/STT adapter feeding `voice:listen` (whisper.cpp, MLX Whisper, or macOS Speech).
+3. Later: real microphone/wake-word proof and always-listening voice UX.
