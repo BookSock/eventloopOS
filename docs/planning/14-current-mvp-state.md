@@ -97,6 +97,7 @@ Done:
 - `ORCHESTRATOR_TASK_SESSIONS=claude_cli` exposes configured Claude Code sessions from `ORCHESTRATOR_CLAUDE_SESSIONS` through the same task-session API; followups run `claude -p --output-format json --resume <session>` in the configured `cwd`.
 - Claude session config can pin `model`, `tools`, and `max_budget_usd`, so real smoke/followup runs can force cheap read-only behavior instead of inheriting an expensive or tool-enabled default.
 - `ORCHESTRATOR_TASK_SESSIONS` now accepts comma-separated modes, so `codex_app_server,claude_cli` exposes Codex App Server threads and configured Claude Code sessions in one daemon. A composite task-session controller lists both providers and routes followups/bindings to the owner runtime by session ID.
+- Task runtime boundary now has shared typed shapes for sessions, messages, capabilities, bindings, and errors. The contract is intentionally tolerant for MVP because Codex, Claude, fake, and terminal runtimes still carry provider-specific metadata, but controller methods no longer return raw `unknown`.
 - `pnpm task:runtime-smoke` starts a temporary orchestrator with `codex_app_server,claude_cli`, checks live Codex app-server sessions plus a configured Claude session are exposed together, then shuts the daemon down.
 - `GET /contexts` ranked search.
 - `POST /contexts/restore-plan`.
@@ -205,9 +206,9 @@ Weak tests:
 
 ## Next Best Work
 
-1. Tighten the Codex + Claude task-runtime seam with shared typed session/message/capability/error shapes instead of `unknown` return contracts.
+1. Add a small Mac/UI affordance or CLI wrapper that links a selected queue item to its event/task-message lineage without dumping global history.
 2. Add dogfood gauges/checks for queue depth by state, pending/failed restore requests, followup status counts, and runtime failure counts.
-3. Add a small Mac/UI affordance or CLI wrapper that links a selected queue item to its event/task-message lineage without dumping global history.
+3. Add stricter runtime normalization later only if provider-specific metadata starts leaking into queue UI or history.
 4. Decide whether to promote `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
 5. Add app bundle/XCUITest smoke only if the current SwiftUI render, launch, AppleScript, and live Mac handoff smokes stop catching enough UI regressions.
 6. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.

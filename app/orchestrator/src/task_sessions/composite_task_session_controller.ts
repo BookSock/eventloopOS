@@ -1,4 +1,10 @@
-import type { TaskFollowupInput, TaskSessionController } from "./types.js";
+import type {
+  TaskFollowupInput,
+  TaskRuntimeBinding,
+  TaskRuntimeMessage,
+  TaskRuntimeSession,
+  TaskSessionController,
+} from "./types.js";
 
 export type CompositeTaskSessionRuntime = {
   name: string;
@@ -8,18 +14,18 @@ export type CompositeTaskSessionRuntime = {
 export class CompositeTaskSessionController implements TaskSessionController {
   constructor(private readonly runtimes: CompositeTaskSessionRuntime[]) {}
 
-  async listSessions(): Promise<unknown[]> {
+  async listSessions(): Promise<TaskRuntimeSession[]> {
     const lists = await Promise.all(
       this.runtimes.map(async (runtime) => runtime.controller.listSessions ? await runtime.controller.listSessions() : []),
     );
     return lists.flat().sort((left, right) => sessionSortKey(left).localeCompare(sessionSortKey(right)));
   }
 
-  async getSession(taskSessionId: string): Promise<unknown | undefined> {
+  async getSession(taskSessionId: string): Promise<TaskRuntimeSession | undefined> {
     return (await this.ownerForSession(taskSessionId))?.session;
   }
 
-  async sendFollowupMessage(input: TaskFollowupInput): Promise<unknown> {
+  async sendFollowupMessage(input: TaskFollowupInput): Promise<TaskRuntimeMessage> {
     const owner = await this.ownerForSession(input.task_session_id);
     if (!owner) {
       return blockedTaskMessage(input, `task session ${input.task_session_id} was not found`);
@@ -27,7 +33,7 @@ export class CompositeTaskSessionController implements TaskSessionController {
     return owner.runtime.controller.sendFollowupMessage(input);
   }
 
-  async bindTaskSession(input: { task_session_id: string; task_id: string }): Promise<unknown> {
+  async bindTaskSession(input: { task_session_id: string; task_id: string }): Promise<TaskRuntimeBinding> {
     const owner = await this.ownerForSession(input.task_session_id);
     if (!owner) {
       return {
@@ -50,7 +56,7 @@ export class CompositeTaskSessionController implements TaskSessionController {
 
   private async ownerForSession(taskSessionId: string): Promise<{
     runtime: CompositeTaskSessionRuntime;
-    session: unknown;
+    session: TaskRuntimeSession;
   } | undefined> {
     for (const runtime of this.runtimes) {
       if (runtime.controller.getSession) {
@@ -67,17 +73,17 @@ export class CompositeTaskSessionController implements TaskSessionController {
   }
 }
 
-function sessionId(session: unknown): string | undefined {
+function sessionId(session: TaskRuntimeSession): string | undefined {
   if (!session || typeof session !== "object" || Array.isArray(session)) return undefined;
   const id = (session as Record<string, unknown>).id;
   return typeof id === "string" && id.length > 0 ? id : undefined;
 }
 
-function sessionSortKey(session: unknown): string {
+function sessionSortKey(session: TaskRuntimeSession): string {
   return sessionId(session) ?? "";
 }
 
-function blockedTaskMessage(input: TaskFollowupInput, error: string): Record<string, unknown> {
+function blockedTaskMessage(input: TaskFollowupInput, error: string): TaskRuntimeMessage {
   return {
     id: `composite_task_msg_${stableId(input.idempotency_key)}`,
     task_session_id: input.task_session_id,
