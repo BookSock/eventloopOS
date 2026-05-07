@@ -24,4 +24,6 @@ chrome.alarms?.onAlarm?.addListener((alarm) => {
   }
 });
 
-ensureRestorePollAlarm(chrome.alarms);
+ensureRestorePollAlarm(chrome.alarms).catch((error) => {
+  console.warn("eventloopOS restore poll alarm setup failed", error);
+});
