@@ -8,6 +8,8 @@ import type { ReviewPacket } from "../src/contracts.js";
 import { createPostgresGatewayStore } from "../src/gateway_store.js";
 import { PostgresObservability } from "../src/observability.js";
 import { createGatewayServer } from "../src/server.js";
+import type { RestorePlan } from "../src/workspace/aerospace.js";
+import type { WorkspaceController } from "../src/workspace/controller.js";
 
 const createdAt = "2026-05-06T12:00:00.000Z";
 
@@ -295,6 +297,70 @@ describe("PostgresQueueStore", () => {
     assert.equal((await store.pool.query("SELECT count(*)::int AS count FROM context_restore_requests")).rows[0]?.count, 1);
   });
 
+  it("replays workspace restore execution receipts across orchestrator restart", async (t) => {
+    if (!store) {
+      t.skip(skipReason);
+      return;
+    }
+
+    const executedPlans: unknown[] = [];
+    const first = await withPostgresGateway<{
+      idempotency_replayed: boolean;
+      receipt: { commands: Array<{ stdout: string }> };
+    }>(store, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/workspace/restore`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_workspace_restore_restart",
+        },
+        body: JSON.stringify({
+          confirm_execute: true,
+          snapshot: { backend: "aerospace", windows: [] },
+        }),
+      });
+      assert.equal(response.status, 200);
+      return await response.json() as {
+        idempotency_replayed: boolean;
+        receipt: { commands: Array<{ stdout: string }> };
+      };
+    }, {
+      workspaceExecuteEnabled: true,
+      workspace: makeWorkspaceController(executedPlans),
+    });
+
+    const afterRestart = await withPostgresGateway<{
+      idempotency_replayed: boolean;
+      receipt: { commands: Array<{ stdout: string }> };
+    }>(store, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/workspace/restore`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_workspace_restore_restart",
+        },
+        body: JSON.stringify({
+          confirm_execute: true,
+          snapshot: { backend: "aerospace", windows: [] },
+        }),
+      });
+      assert.equal(response.status, 200);
+      return await response.json() as {
+        idempotency_replayed: boolean;
+        receipt: { commands: Array<{ stdout: string }> };
+      };
+    }, {
+      workspaceExecuteEnabled: true,
+      workspace: makeWorkspaceController(executedPlans),
+    });
+
+    assert.equal(first.idempotency_replayed, false);
+    assert.equal(afterRestart.idempotency_replayed, true);
+    assert.equal(afterRestart.receipt.commands[0]?.stdout, "ok");
+    assert.equal(executedPlans.length, 1);
+    assert.equal((await store.pool.query("SELECT count(*)::int AS count FROM receipts")).rows[0]?.count, 1);
+  });
+
   it("leases next ready item with SKIP LOCKED semantics and reaps stale leases", async (t) => {
     if (!store) {
       t.skip(skipReason);
@@ -459,11 +525,16 @@ describe("PostgresQueueStore", () => {
   });
 });
 
-async function withPostgresGateway<T>(store: PostgresQueueStore, callback: (baseUrl: string) => Promise<T>): Promise<T> {
+async function withPostgresGateway<T>(
+  store: PostgresQueueStore,
+  callback: (baseUrl: string) => Promise<T>,
+  overrides: Partial<Parameters<typeof createGatewayServer>[0]> = {},
+): Promise<T> {
   const server = createGatewayServer({
     store: createPostgresGatewayStore(store),
     observability: new PostgresObservability(store.pool),
     now: () => new Date(createdAt),
+    ...overrides,
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
@@ -472,6 +543,47 @@ async function withPostgresGateway<T>(store: PostgresQueueStore, callback: (base
   } finally {
     await closeServer(server);
   }
+}
+
+function makeWorkspaceController(executedPlans: unknown[]): WorkspaceController {
+  return {
+    status() {
+      return {
+        available: true,
+        backend: "aerospace" as const,
+      };
+    },
+    capture() {
+      return {
+        backend: "aerospace" as const,
+        windows: [],
+      };
+    },
+    planRestore() {
+      return {
+        commands: [
+          {
+            command: "aerospace" as const,
+            args: ["workspace", "eventloop-blog"],
+          },
+        ],
+        skipped: [],
+      };
+    },
+    executeRestorePlan(plan: RestorePlan) {
+      executedPlans.push(plan);
+      return {
+        commands: [
+          {
+            command: "aerospace" as const,
+            args: ["workspace", "eventloop-blog"],
+            stdout: "ok",
+          },
+        ],
+        skipped: [],
+      };
+    },
+  };
 }
 
 async function closeServer(server: Server): Promise<void> {

@@ -178,6 +178,19 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           return sendError(response, 400, context, "missing_idempotency_key", "workspace restore requires idempotency-key header");
         }
 
+        const existingReceipt = await options.store.getWorkspaceRestoreReceipt(context.idempotencyKey);
+        if (existingReceipt) {
+          return sendJson(response, 200, {
+            ok: true,
+            plan: existingReceipt.plan,
+            receipt: existingReceipt.receipt,
+            execute_supported: true,
+            idempotency_key: context.idempotencyKey,
+            idempotency_replayed: true,
+            request_id: context.requestId,
+          });
+        }
+
         const parsed = await readJsonBody(request);
         if (!parsed.ok) {
           return sendSchemaError(response, context, parsed.message);
@@ -187,12 +200,19 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           const requestBody = parseRestoreExecuteRequest(parsed.value);
           const plan = await options.workspace.planRestore(requestBody.snapshot, requestBody.currentWindows);
           const receipt = await options.workspace.executeRestorePlan(plan);
+          await options.store.recordWorkspaceRestoreReceipt({
+            idempotencyKey: context.idempotencyKey,
+            plan,
+            receipt,
+            now: now(),
+          });
           return sendJson(response, 200, {
             ok: true,
             plan,
             receipt,
             execute_supported: true,
             idempotency_key: context.idempotencyKey,
+            idempotency_replayed: false,
             request_id: context.requestId,
           });
         } catch (error) {

@@ -1235,6 +1235,7 @@ describe("orchestrator gateway API", () => {
   it("executes workspace restore only when enabled, confirmed, and idempotent", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const executedPlans: unknown[] = [];
+    let restorePlanCalls = 0;
     const workspaceServer = createGatewayServer({
       store,
       workspaceExecuteEnabled: true,
@@ -1252,6 +1253,7 @@ describe("orchestrator gateway API", () => {
           };
         },
         planRestore() {
+          restorePlanCalls += 1;
           return {
             commands: [
               {
@@ -1307,6 +1309,7 @@ describe("orchestrator gateway API", () => {
         ok: boolean;
         execute_supported: boolean;
         idempotency_key: string;
+        idempotency_replayed: boolean;
         receipt: {
           commands: Array<{
             stdout: string;
@@ -1317,7 +1320,35 @@ describe("orchestrator gateway API", () => {
       assert.equal(restoreBody.ok, true);
       assert.equal(restoreBody.execute_supported, true);
       assert.equal(restoreBody.idempotency_key, "idem_workspace_restore_001");
+      assert.equal(restoreBody.idempotency_replayed, false);
       assert.equal(restoreBody.receipt.commands[0]?.stdout, "ok");
+      assert.equal(executedPlans.length, 1);
+
+      const duplicateRestoreResponse = await fetch(`${workspaceBaseUrl}/workspace/restore`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_workspace_restore_001",
+        },
+        body: JSON.stringify({
+          confirm_execute: true,
+          snapshot: { backend: "aerospace", windows: [] },
+        }),
+      });
+      const duplicateRestoreBody = await duplicateRestoreResponse.json() as {
+        ok: boolean;
+        idempotency_replayed: boolean;
+        receipt: {
+          commands: Array<{
+            stdout: string;
+          }>;
+        };
+      };
+      assert.equal(duplicateRestoreResponse.status, 200);
+      assert.equal(duplicateRestoreBody.ok, true);
+      assert.equal(duplicateRestoreBody.idempotency_replayed, true);
+      assert.equal(duplicateRestoreBody.receipt.commands[0]?.stdout, "ok");
+      assert.equal(restorePlanCalls, 1);
       assert.equal(executedPlans.length, 1);
     } finally {
       await new Promise<void>((resolve, reject) => {

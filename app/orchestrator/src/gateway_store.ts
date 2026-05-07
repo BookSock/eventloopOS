@@ -1,5 +1,7 @@
 import type { QueueItemWithPacket, QueueState, ReviewPacket } from "./contracts.js";
 import type { PostgresQueueStore } from "./db/postgres_queue_store.js";
+import type { RestoreExecutionReceipt, RestorePlan } from "./workspace/aerospace.js";
+import type { WorkspaceRestoreReceiptRecord } from "./workspace/restore_receipts.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import {
   getReviewPacket,
@@ -62,9 +64,19 @@ export type GatewayStore = {
   retryContextRestoreRequest(id: string, now: Date): Promise<ContextRestoreRequestRecord | undefined>;
   ingestEventAsReviewPacket(event: McpEvent, now: Date): Promise<StoredEventResult>;
   recordEventRoute(event: McpEvent, routeDecision: RouteDecision, now: Date): Promise<StoredEventResult>;
+  getWorkspaceRestoreReceipt(idempotencyKey: string): Promise<WorkspaceRestoreReceiptRecord | undefined>;
+  recordWorkspaceRestoreReceipt(input: {
+    idempotencyKey: string;
+    plan: RestorePlan;
+    receipt: RestoreExecutionReceipt;
+    now: Date;
+  }): Promise<WorkspaceRestoreReceiptRecord>;
 };
 
 export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
+  const workspaceRestoreReceipts = store.workspaceRestoreReceipts ?? new Map<string, WorkspaceRestoreReceiptRecord>();
+  store.workspaceRestoreReceipts = workspaceRestoreReceipts;
+
   return {
     async listQueue(state, now) {
       if (now) reapDueDeferredItems(store, now);
@@ -127,6 +139,23 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     },
     async recordEventRoute(event, routeDecision) {
       return recordEventRoute(store, event, routeDecision);
+    },
+    async getWorkspaceRestoreReceipt(idempotencyKey) {
+      return workspaceRestoreReceipts.get(idempotencyKey);
+    },
+    async recordWorkspaceRestoreReceipt(input) {
+      const existing = workspaceRestoreReceipts.get(input.idempotencyKey);
+      if (existing) return existing;
+
+      const record = {
+        id: `rcpt_workspace_restore_${stableId(input.idempotencyKey)}`,
+        idempotency_key: input.idempotencyKey,
+        plan: input.plan,
+        receipt: input.receipt,
+        created_at: input.now.toISOString(),
+      };
+      workspaceRestoreReceipts.set(input.idempotencyKey, record);
+      return record;
     },
   };
 }
@@ -206,5 +235,15 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
         route_decision: result.route_decision,
       };
     },
+    async getWorkspaceRestoreReceipt(idempotencyKey) {
+      return store.getWorkspaceRestoreReceipt(idempotencyKey);
+    },
+    async recordWorkspaceRestoreReceipt(input) {
+      return store.recordWorkspaceRestoreReceipt(input);
+    },
   };
+}
+
+function stableId(input: string): string {
+  return input.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "unknown";
 }

@@ -99,6 +99,7 @@ Required now:
 - In Postgres mode, activity and metric history survive orchestrator restart.
 - Restart-proof proof path now covers event routing and restore retry: use same Postgres DB, ingest event or create failed restore request, restart orchestrator server, assert duplicate route returns stored result and failed restore can be retried/reclaimed.
 - Task followup chaos proof: runtime throw should record attempted + failed activity and avoid duplicate followup on retry.
+- Workspace restore execution receipt replay proof: duplicate `POST /workspace/restore` calls return the first plan/receipt without executing again, and Postgres mode keeps that receipt across orchestrator restart.
 
 Later:
 
@@ -165,9 +166,10 @@ Other architecture notes:
 
 ## Next Best Work
 
-1. Continue behavior-preserving `server.ts` route extraction, especially MCP sources, events, and workspace.
-2. Add restart/failure smoke around Postgres state, restore retry, and task followup chaos.
-3. Add real MCP/Slack source dogfood config around Jason's installed tools.
-4. Add trend comparisons to `dogfood:review`.
-5. Real Claude+Codex composite dogfood against harmless configured sessions.
-6. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.
+1. Wire the `before_task_message` safety policy into event-route and direct task-session followups so untrusted MCP/Slack/GitHub text is quoted as data and suspicious instructions fall back to the human queue.
+2. Continue behavior-preserving `server.ts` route extraction, especially MCP sources, events, and workspace.
+3. Add GatewayStore conformance tests for event idempotency, queue leasing/defer/ignore, context restore retry, workspace restore receipt replay, and context search.
+4. Add real MCP/Slack source dogfood config around Jason's installed tools.
+5. Add trend comparisons to `dogfood:review`.
+6. Real Claude+Codex composite dogfood against harmless configured sessions.
+7. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.

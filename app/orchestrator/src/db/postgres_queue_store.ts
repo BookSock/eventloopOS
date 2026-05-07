@@ -12,6 +12,8 @@ import type {
   RiskLevel,
 } from "../contracts.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
+import type { RestoreExecutionReceipt, RestorePlan } from "../workspace/aerospace.js";
+import type { WorkspaceRestoreReceiptRecord } from "../workspace/restore_receipts.js";
 import {
   buildReviewArtifactsFromEvent,
   contextEntriesForResult,
@@ -94,6 +96,57 @@ export class PostgresQueueStore {
     if (this.ownsPool) {
       await this.pool.end();
     }
+  }
+
+  async getWorkspaceRestoreReceipt(idempotencyKey: string): Promise<WorkspaceRestoreReceiptRecord | undefined> {
+    const result = await this.pool.query(
+      `
+        SELECT *
+        FROM receipts
+        WHERE receipt_type = 'workspace_restore'
+          AND details->>'idempotency_key' = $1
+        ORDER BY created_at ASC
+        LIMIT 1
+      `,
+      [idempotencyKey],
+    );
+    const row = result.rows[0];
+    return row ? rowToWorkspaceRestoreReceipt(row) : undefined;
+  }
+
+  async recordWorkspaceRestoreReceipt(input: {
+    idempotencyKey: string;
+    plan: RestorePlan;
+    receipt: RestoreExecutionReceipt;
+    now: Date;
+  }): Promise<WorkspaceRestoreReceiptRecord> {
+    const id = `rcpt_workspace_restore_${stableId(input.idempotencyKey)}`;
+    const details = {
+      idempotency_key: input.idempotencyKey,
+      plan: input.plan,
+      receipt: input.receipt,
+    };
+
+    await this.pool.query(
+      `
+        INSERT INTO receipts (
+          id,
+          receipt_type,
+          status,
+          details,
+          created_at
+        )
+        VALUES ($1, 'workspace_restore', 'ok', $2::jsonb, $3::timestamptz)
+        ON CONFLICT (id) DO NOTHING
+      `,
+      [id, JSON.stringify(details), input.now.toISOString()],
+    );
+
+    const existing = await this.getWorkspaceRestoreReceipt(input.idempotencyKey);
+    if (!existing) {
+      throw new Error(`workspace restore receipt ${input.idempotencyKey} was not found after insert`);
+    }
+    return existing;
   }
 
   async recordEventWithReviewPacket(
@@ -1090,6 +1143,17 @@ function rowToContextRestoreRequestRecord(row: QueryResultRow): ContextRestoreRe
   };
 }
 
+function rowToWorkspaceRestoreReceipt(row: QueryResultRow): WorkspaceRestoreReceiptRecord {
+  const details = isRecord(row.details) ? row.details : {};
+  return {
+    id: String(row.id),
+    idempotency_key: String(details.idempotency_key),
+    plan: details.plan as RestorePlan,
+    receipt: details.receipt as RestoreExecutionReceipt,
+    created_at: requiredDateToIso(row.created_at),
+  };
+}
+
 function jsonOrNull(value: unknown): string | null {
   return value === undefined ? null : JSON.stringify(value);
 }
@@ -1113,4 +1177,8 @@ function dateToIso(value: unknown): string | undefined {
   }
 
   return new Date(String(value)).toISOString();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

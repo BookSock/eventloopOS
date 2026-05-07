@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Action, ContextResource, EvidenceRef, QueueItem, QueueItemWithPacket, QueueState, ReviewPacket } from "./contracts.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
+import type { WorkspaceRestoreReceiptRecord } from "./workspace/restore_receipts.js";
 
 const FIXTURE_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -18,6 +19,7 @@ export type InMemoryStore = {
   eventsById: Map<string, StoredEventResult>;
   contextRestoreRequests: Map<string, ContextRestoreRequestRecord>;
   contextRestoreRequestIdsByIdempotencyKey: Map<string, string>;
+  workspaceRestoreReceipts?: Map<string, WorkspaceRestoreReceiptRecord>;
 };
 
 export type RouteDecision = {
