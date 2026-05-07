@@ -1,0 +1,100 @@
+#!/usr/bin/env node
+import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+
+if (process.env.EVENTLOOPOS_ENABLE_VOICE_STT_SMOKE !== "1") {
+  console.log("voice STT smoke skipped: set EVENTLOOPOS_ENABLE_VOICE_STT_SMOKE=1");
+  process.exit(0);
+}
+
+const text = process.env.EVENTLOOPOS_VOICE_STT_FIXTURE_TEXT ?? "computer blog post priority changed";
+const expectedTerms = (process.env.EVENTLOOPOS_VOICE_STT_EXPECTED_TERMS ?? "computer,blog,priority")
+  .split(",")
+  .map((term) => term.trim().toLowerCase())
+  .filter(Boolean);
+const model = resolvePath(process.env.EVENTLOOPOS_WHISPER_MODEL);
+const whisperCli = process.env.EVENTLOOPOS_WHISPER_CLI_BIN ?? "whisper-cli";
+
+if (!model) {
+  console.error("EVENTLOOPOS_WHISPER_MODEL is required for voice STT smoke");
+  process.exit(1);
+}
+
+let tempDir;
+try {
+  tempDir = await mkdtemp(path.join(tmpdir(), "eventloopos-voice-stt-"));
+  const aiffPath = path.join(tempDir, "fixture.aiff");
+  const wavPath = path.join(tempDir, "fixture.wav");
+
+  await spawnChecked("say", ["-v", process.env.EVENTLOOPOS_VOICE_STT_SAY_VOICE ?? "Samantha", "-o", aiffPath, text]);
+  await spawnChecked("ffmpeg", ["-y", "-loglevel", "error", "-i", aiffPath, "-ar", "16000", "-ac", "1", wavPath]);
+  const transcriptResult = await spawnChecked(whisperCli, ["-m", model, "-f", wavPath, "-nt", "-np"]);
+  const transcript = extractTranscript(transcriptResult.stdout);
+  const normalizedTranscript = transcript.toLowerCase();
+  const missingTerms = expectedTerms.filter((term) => !normalizedTranscript.includes(term));
+  if (missingTerms.length > 0) {
+    throw new Error(`transcript missing expected term(s): ${missingTerms.join(", ")}; transcript: ${transcript}`);
+  }
+
+  console.log(JSON.stringify({
+    ok: true,
+    transcript,
+    expected_terms: expectedTerms,
+    model,
+    command: [whisperCli, "-m", model, "-f", "<generated-fixture.wav>", "-nt", "-np"],
+  }, null, 2));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  if (tempDir) {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+function extractTranscript(stdout) {
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith("load_backend:"))
+    .filter((line) => !line.startsWith("ggml_"));
+  return lines.at(-1) ?? "";
+}
+
+function resolvePath(value) {
+  if (!value || path.isAbsolute(value)) return value;
+  const candidates = [
+    path.resolve(process.env.INIT_CWD ?? "", value),
+    path.resolve(process.cwd(), value),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
+async function spawnChecked(file, args) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}\n${stdout}${stderr}`));
+    });
+  });
+}

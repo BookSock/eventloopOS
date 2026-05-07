@@ -7,9 +7,11 @@ coverage/
 .env
 .env.local
 external-resources/repos/*
+external-resources/models/*
 artifacts/logs/*
 artifacts/screenshots/*
 artifacts/traces/*
 artifacts/coverage/*
 artifacts/test-harness/*
+artifacts/voice/*
 !artifacts/**/.gitkeep

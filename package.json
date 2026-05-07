@@ -25,6 +25,7 @@
     "dev:postgres": "pnpm --filter @eventloopos/orchestrator run dev:postgres",
     "live:aerospace": "pnpm --filter @eventloopos/orchestrator run live:aerospace",
     "voice:listen-command": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run voice:listen-command",
+    "voice:stt-smoke": "pnpm --filter @eventloopos/orchestrator run voice:stt-smoke",
     "test:contracts": "pnpm --filter @eventloopos/shared --if-present test:contracts",
     "test:architecture": "pnpm -r --if-present test:architecture",
     "test:mcp-stability": "pnpm --filter @eventloopos/orchestrator --if-present test:mcp-stability",

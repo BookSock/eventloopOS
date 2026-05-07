@@ -94,6 +94,7 @@ Done:
 - `pnpm --filter @eventloopos/orchestrator run live:aerospace` builds and emits a machine-readable skip by default. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1`, it checks live AeroSpace status/capture/restore-plan without executing workspace moves. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE_EXECUTE=1`, it also moves one real window to a scratch workspace, restores it, and verifies it returned.
 - `voice:listen-command` runs a configured local STT command and pipes line-delimited transcripts into the same wake-phrase voice router. Command args are JSON argv, not shell-parsed strings.
 - `voice:listen-command` also supports `EVENTLOOPOS_VOICE_STT_PRESET=whisper_cpp_stream` so local whisper.cpp microphone capture can be configured with env vars (`EVENTLOOPOS_WHISPER_MODEL`, optional step/length/keep/thread/capture/language settings) instead of manual JSON argv.
+- `voice:stt-smoke` is an opt-in fixture-audio proof for local `whisper-cli`: it generates spoken audio with macOS `say`, converts it with `ffmpeg`, transcribes with a real GGML model, and checks expected transcript terms.
 
 Gap:
 
@@ -116,6 +117,7 @@ Strong tests now:
 - Opt-in macOS UI automation smoke passed locally with `EVENTLOOPOS_ENABLE_MACOS_UI_SMOKE=1 pnpm run test:e2e:macos-ui`; it opens the menu bar extra, opens the queue window, toggles Manual Mode, and toggles back to Event Loop.
 - `voice:listen` accepts line-delimited local STT transcript streams, optional wake phrase filtering, and forwards into `/voice/commands`.
 - `voice:listen-command` lets whisper.cpp stream, MLX Whisper wrappers, or other local STT tools feed the same router while staying unit-testable through an injected process. The whisper.cpp stream preset is unit-covered and doctor-checked.
+- Opt-in fixture-audio STT smoke passed locally with `EVENTLOOPOS_ENABLE_VOICE_STT_SMOKE=1 EVENTLOOPOS_WHISPER_MODEL=external-resources/models/whisper/ggml-tiny.en.bin pnpm run voice:stt-smoke`; transcript was `computer blog post priority changed.`
 - `dev:doctor` reports whether `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` is configured and can launch with `--help`; unconfigured voice command is treated as optional/pass.
 - Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
 
@@ -124,10 +126,10 @@ Weak tests:
 - Docker-backed Postgres live tests pass on this machine after launching Docker.app; native Postgres live tests also pass.
 - AeroSpace live restore needs installed/running AeroSpace. Local live smoke proves capture, planning, and opt-in one-window restore execution; it does not prove full multi-window layout reconstruction under every app/window edge case.
 - No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, temp `.app` bundle launch, and opt-in AppleScript menu/window/manual-mode interaction.
-- No real microphone wake-word/STT audio proof yet; current coverage proves the local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
+- No real microphone wake-word proof yet; current coverage proves fixture-audio STT with `whisper-cli`, local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
 
 ## Next Best Work
 
-1. Add real microphone/STT audio smoke or fixture-audio smoke for local voice ingress.
+1. Add real microphone/wake-word smoke for local voice ingress.
 2. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
 3. Add real microphone/STT adapter feeding `voice:listen` (whisper.cpp, MLX Whisper, or macOS Speech).

@@ -64,6 +64,15 @@ After `pnpm --filter @eventloopos/orchestrator build`, `pnpm --filter @eventloop
 Local STT tools can pipe transcripts into the router with `pnpm --filter @eventloopos/orchestrator run voice:send`. Use `EVENTLOOPOS_VOICE_TRANSCRIPT`, or pipe text on stdin. Optional hints: `EVENTLOOPOS_VOICE_PROJECT_HINT`, `EVENTLOOPOS_VOICE_TASK_HINT`, and `EVENTLOOPOS_VOICE_IDEMPOTENCY_KEY`.
 For line-delimited local STT streams, use `pnpm --filter @eventloopos/orchestrator run voice:listen`. Optional `EVENTLOOPOS_VOICE_WAKE_PHRASE=computer` filters ambient transcripts and strips the wake phrase before forwarding.
 For a local STT command that prints line-delimited transcripts, use `pnpm run voice:listen-command` with `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` and optional `EVENTLOOPOS_VOICE_TRANSCRIPT_ARGS_JSON='["--arg","value"]'`. This launches the command with argv, pipes stdout into the wake-phrase router, and is checked by `pnpm run dev:doctor` when configured.
+For deterministic local STT proof with real audio, install `whisper-cpp`, download a GGML model outside git, then run:
+
+```sh
+EVENTLOOPOS_ENABLE_VOICE_STT_SMOKE=1 \
+EVENTLOOPOS_WHISPER_MODEL=external-resources/models/whisper/ggml-tiny.en.bin \
+pnpm run voice:stt-smoke
+```
+
+This uses macOS `say`, `ffmpeg`, and `whisper-cli` to generate and transcribe fixture audio.
 
 To check live AeroSpace status/capture/restore-plan without moving windows:
 
@@ -91,6 +100,12 @@ Rendered Mac queue UI smoke:
 
 ```sh
 pnpm run test:e2e:macos
+```
+
+Opt-in Mac app UI interaction smoke requires Accessibility permission for `osascript`/System Events:
+
+```sh
+EVENTLOOPOS_ENABLE_MACOS_UI_SMOKE=1 pnpm run test:e2e:macos-ui
 ```
 
 Real orchestrator + installed Chromium extension/native host smoke:
