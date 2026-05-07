@@ -372,6 +372,7 @@ async function executeQueueAction(
   const taskMessage = await sendTaskFollowupWithActivity({
     taskSessions: input.taskSessions,
     observability: input.observability,
+    taskMessageStore: input.store,
   }, {
     task_session_id: session.id,
     text: taskActionFollowupText(item, eventResult?.event),

@@ -283,7 +283,7 @@ Phase 3:
 
 Phase 4:
 
-- Full E2E: incoming Slack event -> task linked -> agent run -> review packet -> queue item -> hotkey opens context -> user action -> agent resumes.
+- Full E2E: incoming Slack event -> task linked -> existing agent session gets followup when safe -> human queue only if blocked/ambiguous/risky -> hotkey opens context -> user action -> agent resumes or queue advances.
 
 ## Conflict Rules
 

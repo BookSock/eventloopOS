@@ -1586,11 +1586,11 @@ describe("orchestrator gateway API", () => {
           activity_count: number;
         };
       };
-      assert.equal(metricsBody.metrics.counters.task_followups_attempted_total, 2);
-      assert.equal(metricsBody.metrics.counters.task_followups_sent_total, 2);
-      assert.equal(metricsBody.metrics.activity_count, 4);
+      assert.equal(metricsBody.metrics.counters.task_followups_attempted_total, 1);
+      assert.equal(metricsBody.metrics.counters.task_followups_sent_total, 1);
+      assert.equal(metricsBody.metrics.activity_count, 2);
 
-      const activityResponse = await fetch(`${taskBaseUrl}/activity?limit=4`);
+      const activityResponse = await fetch(`${taskBaseUrl}/activity?limit=2`);
       const activityBody = await activityResponse.json() as {
         events: Array<{
           type: string;
@@ -1602,11 +1602,10 @@ describe("orchestrator gateway API", () => {
       assert.deepEqual(activityBody.events.map((event) => event.type), [
         "task_followup_sent",
         "task_followup_attempted",
-        "task_followup_sent",
-        "task_followup_attempted",
       ]);
       assert.equal(activityBody.events[0].task_session_id, "task_session_blog");
       assert.equal(activityBody.events[0].details.idempotency_key, "idem_task_followup_1");
+      assert.equal((activityBody.events[0].details.message as Record<string, unknown> | undefined)?.text, undefined);
 
       const filteredActivityResponse = await fetch(`${taskBaseUrl}/activity?task_session_id=task_session_blog&status=ok&since=2026-05-06T11:59:00.000Z`);
       const filteredActivityBody = await filteredActivityResponse.json() as {
@@ -1614,7 +1613,7 @@ describe("orchestrator gateway API", () => {
         events: Array<{ task_session_id?: string; status?: string }>;
       };
       assert.equal(filteredActivityResponse.status, 200);
-      assert.equal(filteredActivityBody.count, 4);
+      assert.equal(filteredActivityBody.count, 2);
       assert.ok(filteredActivityBody.events.every((event) => event.task_session_id === "task_session_blog"));
       assert.ok(filteredActivityBody.events.every((event) => event.status === "ok"));
     } finally {
@@ -1763,6 +1762,16 @@ describe("orchestrator gateway API", () => {
       assert.equal(metricsBody.metrics.counters.task_followups_attempted_total, 1);
       assert.equal(metricsBody.metrics.counters.task_followups_blocked_total, 1);
       assert.equal(metricsBody.metrics.activity_count, 2);
+
+      const activityResponse = await fetch(`${taskBaseUrl}/activity?limit=2`);
+      const activityBody = await activityResponse.json() as {
+        events: Array<{
+          type: string;
+          details: Record<string, unknown>;
+        }>;
+      };
+      assert.equal(activityBody.events[0]?.type, "task_followup_blocked");
+      assert.equal((activityBody.events[0]?.details.message as Record<string, unknown> | undefined)?.text, undefined);
     } finally {
       await new Promise<void>((resolve, reject) => {
         taskServer.close((error) => (error ? reject(error) : resolve()));

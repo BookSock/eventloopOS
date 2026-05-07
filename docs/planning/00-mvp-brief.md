@@ -18,7 +18,7 @@ Not AI assistant. Not generic automation builder. Not window manager. Not notifi
 
 Start with agent-heavy founders + devs using:
 
-- Slack for interrupts + feedback.
+- Slack for incoming signals and feedback.
 - GitHub for code review + CI.
 - local Markdown/Notion/GitHub issues for task state.
 - Chrome/Arc for docs, issues, dashboards, web apps.
@@ -53,7 +53,7 @@ Escape hatch:
 - Manual mode stops automatic workspace switching/restores.
 - Queue and background agents keep running.
 - Current windows stay where user left them unless user explicitly returns to event-loop mode.
-- Returning to event-loop mode should snapshot the manual layout, then restore next queued task context. Current implementation captures the prior layout when entering manual mode; exit-time capture is the next fix.
+- Returning to event-loop mode snapshots the manual layout, then restores next queued task context. The user can later restore that normal-computer layout from Manual Mode.
 - If restore confidence is low, system shows briefing/links without moving windows.
 
 ## MVP Scope

@@ -159,6 +159,8 @@ Strong tests now:
 - `pnpm run dogfood:review` prints a local daily-ish review from `/metrics` and `/activity`; set `EVENTLOOPOS_DOGFOOD_REVIEW_FORMAT=json` for agent-readable output. The report now includes derived rates, task rollups, task-session rollups, queue rollups, queue time-to-done, daily rollups, and adjacent-day trend deltas.
 - Restore activity and counters include provider-specific created/done/failed/retried data, and `dogfood:review` groups provider restore success/failure.
 - Task followups record attempted plus sent/blocked/failed activity with origin, task session ID, idempotency key, event IDs, and text length, giving a lightweight outbox-style audit trail without a separate durable outbox table.
+- Postgres and in-memory gateway stores now persist durable `task_messages` by idempotency key. Records keep internal stable IDs, runtime message IDs in sanitized message metadata, task/session/event linkage, status, payload hash/length, native thread/turn IDs when available, timestamps, and error summary.
+- Duplicate task followups now return the durable stored result before runtime side effects, without incrementing counters or writing duplicate activity. Activity details sanitize runtime messages so raw followup text is not stored in metrics/history.
 - Task followup chaos tests prove an event-route runtime failure or blocked followup creates a human queue fallback, records attempted/failed or attempted/blocked activity, and dedupes retry without sending another task message.
 - Task-message policy tests prove direct followups with prompt-injection-looking text are blocked before runtime send, and task-hinted events with suspicious source text become human queue items instead of agent injections.
 - Terminal task-session adapter tests prove visible-draft safety: omitted `submit` sends text only, does not press Enter, and does not append a Ghostty newline. Tmux argv and Ghostty AppleScript escaping are covered for shell-ish text, multiline text, and escaped targets.
@@ -182,8 +184,8 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add durable `task_messages` history for Codex/Claude followups and idempotency.
-2. Real Claude+Codex composite dogfood with harmless sessions configured together.
-3. Make the Mac queue UI more one-paper-at-a-time: current packet dominates; queue list is secondary navigation.
+1. Real Claude+Codex composite dogfood with harmless sessions configured together.
+2. Make the Mac queue UI more one-paper-at-a-time: current packet dominates; queue list is secondary navigation.
+3. Add `proof:agent` manifest lane so implementation agents leave machine-checkable evidence.
 4. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
 5. Later: real microphone/wake-word proof and always-listening voice UX.

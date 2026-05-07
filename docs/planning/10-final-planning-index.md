@@ -37,7 +37,9 @@ Clarified product stance:
 12. `16-mvp-plan-corrections.md` - clarified product stance: intake stack, not aggressive interrupt UX.
 13. `17-deeplink-strategies.md` - provider IDs + URL + browser fallback restore plan.
 14. `18-dogfood-metrics.md` - local history/metrics plan.
-15. `15-agent-test-matrix.md` - current command matrix mapping subsystem changes to concrete proof.
+15. `19-one-paper-queue-ui.md` - Mac queue UX contract for the current-paper-first loop.
+16. `20-agent-proof-loop.md` - proof bundle and stronger agent handoff gate plan.
+17. `15-agent-test-matrix.md` - current command matrix mapping subsystem changes to concrete proof.
 
 Supporting:
 

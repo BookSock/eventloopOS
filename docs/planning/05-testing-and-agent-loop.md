@@ -125,10 +125,11 @@ Run:
 4. Browser extension loaded.
 5. macOS queue app launched in test mode.
 6. Fixture event posted.
-7. Queue item appears.
-8. Hotkey/next opens context.
-9. Approve/reject action sent.
-10. Agent run resumes or queue advances.
+7. Router proves one of three outcomes: `store_only`, `task_session`, or `human_queue`.
+8. If human-blocked, queue item appears.
+9. Hotkey/next opens context.
+10. Approve/reject/defer/ignore action sent.
+11. Agent run resumes or queue advances.
 
 This scenario is daily-driver proof.
 

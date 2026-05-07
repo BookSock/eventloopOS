@@ -1,4 +1,5 @@
 import type { Observability } from "../observability.js";
+import type { GatewayStore } from "../gateway_store.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
 import type { JsonBodyReader } from "./context_restore.js";
@@ -8,6 +9,7 @@ export async function handleTaskSessionsRoute(input: {
   method: string | undefined;
   pathname: string;
   readJsonBody: JsonBodyReader;
+  store: GatewayStore;
   taskSessions?: TaskSessionController;
   observability?: Observability;
   now: Date;
@@ -38,6 +40,7 @@ export async function handleTaskSessionsRoute(input: {
     return handleTaskFollowupRoute({
       taskSessions: input.taskSessions,
       observability: input.observability,
+      store: input.store,
       taskSessionId: decodeURIComponent(taskFollowupMatch[1] ?? ""),
       body: parsed.value,
       idempotencyKey: input.idempotencyKey,
@@ -124,6 +127,7 @@ export async function handleGetTaskSessionRoute(input: {
 export async function handleTaskFollowupRoute(input: {
   taskSessions?: TaskSessionController;
   observability?: Observability;
+  store: GatewayStore;
   taskSessionId: string;
   body: unknown;
   idempotencyKey?: string;
@@ -152,6 +156,7 @@ export async function handleTaskFollowupRoute(input: {
   const message = await sendTaskFollowupWithActivity({
     taskSessions: input.taskSessions,
     observability: input.observability,
+    taskMessageStore: input.store,
   }, {
     task_session_id: input.taskSessionId,
     text: validation.text,

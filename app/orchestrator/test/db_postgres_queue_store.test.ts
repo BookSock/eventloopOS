@@ -64,6 +64,7 @@ describe("PostgresQueueStore", () => {
       { id: "0003_observability.sql" },
       { id: "0004_context_restore_failures.sql" },
       { id: "0005_mcp_poll_states.sql" },
+      { id: "0006_task_messages.sql" },
     ]);
   });
 
@@ -638,6 +639,7 @@ async function clearTestData(store: PostgresQueueStore) {
     TRUNCATE
       metric_counters,
       mcp_poll_states,
+      task_messages,
       activity_events,
       receipts,
       route_decisions,

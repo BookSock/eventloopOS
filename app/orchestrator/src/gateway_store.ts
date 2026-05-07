@@ -5,6 +5,13 @@ import type { WorkspaceRestoreReceiptRecord } from "./workspace/restore_receipts
 import type { McpCursorState, McpEvent } from "./integrations/mcp_poll/types.js";
 import type { McpPollStateSnapshot } from "./integrations/mcp_poll/persistent_cursor_store.js";
 import {
+  buildTaskMessageAttemptRecord,
+  finalizeTaskMessageRecord,
+  type DurableTaskMessageAttemptInput,
+  type DurableTaskMessageFinalInput,
+  type DurableTaskMessageRecord,
+} from "./task_sessions/task_message_history.js";
+import {
   getReviewPacket,
   getStoredEvent,
   getStoredEventByIdempotencyKey,
@@ -74,13 +81,18 @@ export type GatewayStore = {
   }): Promise<WorkspaceRestoreReceiptRecord>;
   getMcpPollState(sourceId: string): Promise<McpPollStateSnapshot | undefined>;
   saveMcpPollState(sourceId: string, state: McpCursorState, now: Date): Promise<McpPollStateSnapshot>;
+  getTaskMessageByIdempotencyKey(idempotencyKey: string): Promise<DurableTaskMessageRecord | undefined>;
+  recordTaskMessageAttempt(input: DurableTaskMessageAttemptInput): Promise<DurableTaskMessageRecord>;
+  finalizeTaskMessage(input: DurableTaskMessageFinalInput): Promise<DurableTaskMessageRecord | undefined>;
 };
 
 export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   const workspaceRestoreReceipts = store.workspaceRestoreReceipts ?? new Map<string, WorkspaceRestoreReceiptRecord>();
   const mcpPollStates = store.mcpPollStates ?? new Map<string, McpPollStateSnapshot>();
+  const taskMessagesByIdempotencyKey = store.taskMessagesByIdempotencyKey ?? new Map<string, DurableTaskMessageRecord>();
   store.workspaceRestoreReceipts = workspaceRestoreReceipts;
   store.mcpPollStates = mcpPollStates;
+  store.taskMessagesByIdempotencyKey = taskMessagesByIdempotencyKey;
 
   return {
     async listQueue(state, now) {
@@ -174,6 +186,25 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
       };
       mcpPollStates.set(sourceId, snapshot);
       return snapshot;
+    },
+    async getTaskMessageByIdempotencyKey(idempotencyKey) {
+      return taskMessagesByIdempotencyKey.get(idempotencyKey);
+    },
+    async recordTaskMessageAttempt(input) {
+      const existing = taskMessagesByIdempotencyKey.get(input.idempotency_key);
+      if (existing) return existing;
+
+      const record = buildTaskMessageAttemptRecord(input);
+      taskMessagesByIdempotencyKey.set(record.idempotency_key, record);
+      return record;
+    },
+    async finalizeTaskMessage(input) {
+      const existing = taskMessagesByIdempotencyKey.get(input.idempotency_key);
+      if (!existing) return undefined;
+
+      const record = finalizeTaskMessageRecord(existing, input);
+      taskMessagesByIdempotencyKey.set(record.idempotency_key, record);
+      return record;
     },
   };
 }
@@ -272,6 +303,15 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async saveMcpPollState(sourceId, state, now) {
       return store.saveMcpPollState(sourceId, state, now);
+    },
+    async getTaskMessageByIdempotencyKey(idempotencyKey) {
+      return store.getTaskMessageByIdempotencyKey(idempotencyKey);
+    },
+    async recordTaskMessageAttempt(input) {
+      return store.recordTaskMessageAttempt(input);
+    },
+    async finalizeTaskMessage(input) {
+      return store.finalizeTaskMessage(input);
     },
   };
 }

@@ -154,6 +154,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         method: request.method,
         pathname: context.url.pathname,
         readJsonBody: () => readJsonBody(request),
+        store: options.store,
         taskSessions: options.taskSessions,
         observability,
         now: now(),

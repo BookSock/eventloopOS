@@ -14,6 +14,13 @@ import type {
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import type { McpCursorState } from "../integrations/mcp_poll/types.js";
 import type { McpPollStateSnapshot } from "../integrations/mcp_poll/persistent_cursor_store.js";
+import {
+  buildTaskMessageAttemptRecord,
+  finalizeTaskMessageRecord,
+  type DurableTaskMessageAttemptInput,
+  type DurableTaskMessageFinalInput,
+  type DurableTaskMessageRecord,
+} from "../task_sessions/task_message_history.js";
 import type { RestoreExecutionReceipt, RestorePlan } from "../workspace/aerospace.js";
 import type { WorkspaceRestoreReceiptRecord } from "../workspace/restore_receipts.js";
 import {
@@ -153,6 +160,110 @@ export class PostgresQueueStore {
 
   async clearMcpPollState(sourceId: string): Promise<void> {
     await this.pool.query("DELETE FROM mcp_poll_states WHERE source_id = $1", [sourceId]);
+  }
+
+  async getTaskMessageByIdempotencyKey(idempotencyKey: string): Promise<DurableTaskMessageRecord | undefined> {
+    const result = await this.pool.query(
+      `
+        SELECT *
+        FROM task_messages
+        WHERE idempotency_key = $1
+        LIMIT 1
+      `,
+      [idempotencyKey],
+    );
+    const row = result.rows[0];
+    return row ? rowToTaskMessageRecord(row) : undefined;
+  }
+
+  async recordTaskMessageAttempt(input: DurableTaskMessageAttemptInput): Promise<DurableTaskMessageRecord> {
+    const record = buildTaskMessageAttemptRecord(input);
+    await this.pool.query(
+      `
+        INSERT INTO task_messages (
+          id,
+          idempotency_key,
+          task_session_id,
+          task_id,
+          queue_item_id,
+          event_ids,
+          origin,
+          source_id,
+          mode,
+          status,
+          text_hash,
+          text_length,
+          message,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11, $12, $13::jsonb,
+          $14::timestamptz, $15::timestamptz
+        )
+        ON CONFLICT (idempotency_key) DO NOTHING
+      `,
+      [
+        record.id,
+        record.idempotency_key,
+        record.task_session_id,
+        record.task_id ?? null,
+        record.queue_item_id ?? null,
+        JSON.stringify(record.event_ids),
+        record.origin,
+        record.source_id ?? null,
+        record.mode,
+        record.status,
+        record.text_hash,
+        record.text_length,
+        JSON.stringify(record.message),
+        record.created_at,
+        record.updated_at,
+      ],
+    );
+    const existing = await this.getTaskMessageByIdempotencyKey(input.idempotency_key);
+    if (!existing) {
+      throw new Error(`task message ${input.idempotency_key} was not found after insert`);
+    }
+    return existing;
+  }
+
+  async finalizeTaskMessage(input: DurableTaskMessageFinalInput): Promise<DurableTaskMessageRecord | undefined> {
+    const existing = await this.getTaskMessageByIdempotencyKey(input.idempotency_key);
+    if (!existing) return undefined;
+
+    const record = finalizeTaskMessageRecord(existing, input);
+    const result = await this.pool.query(
+      `
+        UPDATE task_messages
+        SET status = $2,
+            provider = $3,
+            native_thread_id = $4,
+            native_turn_id = $5,
+            native_session_id = $6,
+            native_result_session_id = $7,
+            error = $8,
+            message = $9::jsonb,
+            updated_at = $10::timestamptz,
+            sent_at = $11::timestamptz
+        WHERE idempotency_key = $1
+        RETURNING *
+      `,
+      [
+        record.idempotency_key,
+        record.status,
+        record.provider ?? null,
+        record.native_thread_id ?? null,
+        record.native_turn_id ?? null,
+        record.native_session_id ?? null,
+        record.native_result_session_id ?? null,
+        record.error ?? null,
+        JSON.stringify(record.message),
+        record.updated_at,
+        record.sent_at ?? null,
+      ],
+    );
+    return result.rows[0] ? rowToTaskMessageRecord(result.rows[0]) : undefined;
   }
 
   async recordWorkspaceRestoreReceipt(input: {
@@ -1201,6 +1312,33 @@ function rowToMcpPollStateSnapshot(row: QueryResultRow): McpPollStateSnapshot {
     cursor: row.cursor ?? undefined,
     seen: Array.isArray(row.seen) ? row.seen.filter((item): item is string => typeof item === "string") : [],
     updated_at: requiredDateToIso(row.updated_at),
+  };
+}
+
+function rowToTaskMessageRecord(row: QueryResultRow): DurableTaskMessageRecord {
+  return {
+    id: String(row.id),
+    idempotency_key: String(row.idempotency_key),
+    task_session_id: String(row.task_session_id),
+    task_id: row.task_id ?? undefined,
+    queue_item_id: row.queue_item_id ?? undefined,
+    event_ids: Array.isArray(row.event_ids) ? row.event_ids.filter((item): item is string => typeof item === "string") : [],
+    origin: String(row.origin),
+    source_id: row.source_id ?? undefined,
+    mode: "followup",
+    status: row.status,
+    text_hash: String(row.text_hash),
+    text_length: Number(row.text_length),
+    provider: row.provider ?? undefined,
+    native_thread_id: row.native_thread_id ?? undefined,
+    native_turn_id: row.native_turn_id ?? undefined,
+    native_session_id: row.native_session_id ?? undefined,
+    native_result_session_id: row.native_result_session_id ?? undefined,
+    error: row.error ?? undefined,
+    message: isRecord(row.message) ? row.message : {},
+    created_at: requiredDateToIso(row.created_at),
+    updated_at: requiredDateToIso(row.updated_at),
+    sent_at: dateToIso(row.sent_at),
   };
 }
 

@@ -118,11 +118,13 @@ Current implementation:
 - Queue done activity records task ID, and recommended resume-agent actions also record task-session ID, so after-the-fact session history can connect queue work back to agent runtime.
 - Queue defer/ignore actions record `queue_item_deferred` / `queue_item_ignored` activity and increment `queue_items_deferred_total` / `queue_items_ignored_total`.
 - Task followup calls now emit attempted plus sent/blocked/failed activity with task session ID, idempotency key, event IDs, payload length, and origin (`event_route`, `queue_action`, or `task_session_api`).
+- Durable `task_messages` now persist followup status by idempotency key across Postgres restarts. The durable record stores payload hash/length and sanitized runtime metadata, not raw followup text. Duplicate retries return the stored task-message result before runtime side effects.
 
 Near-term gaps:
 
 - Add gauges for queue depth by state, stale queue leases, pending/failed restore requests, task followup status counts, and runtime failure counts.
-- Add durable task-message history so `dogfood:review` can reconstruct Codex/Claude followup attempts after orchestrator restart.
+- Teach `dogfood:review` to read durable task-message history directly, not only recent activity rows.
+- Add dogfood threshold checks for ignored-item rate, restore success, followup failures, stale leases, and pending restore age.
 - Keep metric rows content-light: IDs, hashes, lengths, statuses, providers, and durations; raw Slack/doc content belongs in event artifacts, not metrics.
 
 ## Privacy

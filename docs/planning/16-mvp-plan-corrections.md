@@ -185,7 +185,7 @@ Real gaps:
 
 - Browser extension now has app-level allowed-origin gating and no manifest-level all-page content-script injection. Remaining gap: Chrome `host_permissions` is still `<all_urls>` for programmatic injection; optional host permission UX can come later if this permission warning blocks dogfood.
 - MCP poll cursor/seen state now persists through the gateway store and commits only after successful routing. Use Postgres mode for real Slack/GitHub dogfood if restart-proof cursor state matters.
-- Task followup/session history is not durable enough. Add `task_messages` persistence with idempotency key, runtime, session ID, status, text hash/length, event IDs, native turn ID, timestamps, and error summary.
+- Task followup/session history now has 90/10 durability through `task_messages`: idempotency key, runtime/session/task/event linkage, status, text hash/length, sanitized runtime metadata, native turn IDs, timestamps, and error summary. Remaining gap: stale `attempted` retry policy after crash.
 - Task runtime types are too loose. Replace `unknown`-heavy boundaries with shared `TaskSession`, `TaskMessage`, `TaskRuntimeCapabilities`, and `TaskRuntimeError` shapes for Codex and Claude.
 - Manual-mode exit snapshot semantics now match product intent: entering Manual Mode pauses automation, and returning to Event Loop captures the manual layout before restoring queue context.
 - Operational metrics need useful gauges: queue depth by state, stale leases, restore pending/failed, followup status counts, runtime failure counts.
@@ -212,8 +212,8 @@ Release guardrails:
 
 ## Next Best Work
 
-1. Add durable `task_messages` history for Codex/Claude followups and idempotency.
-2. Real Claude+Codex composite dogfood against harmless configured sessions.
-3. Make Mac queue focus mode more one-paper-at-a-time: current packet dominates, queue list stays secondary.
+1. Real Claude+Codex composite dogfood against harmless configured sessions.
+2. Make Mac queue focus mode more one-paper-at-a-time: current packet dominates, queue list stays secondary.
+3. Add `proof:agent` manifest lane and dogfood thresholds so agents have harder-to-fake feedback.
 4. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
 5. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.

@@ -153,7 +153,11 @@ export async function routeEventThroughGateway(
       options.taskSessions,
       options.store,
       now,
-      (followupInput) => sendTaskFollowupWithActivity(options, followupInput, {
+      (followupInput) => sendTaskFollowupWithActivity({
+        taskSessions: options.taskSessions,
+        observability: options.observability,
+        taskMessageStore: options.store,
+      }, followupInput, {
         origin: "event_route",
         occurredAt: now.toISOString(),
         eventId: event.id,

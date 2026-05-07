@@ -278,6 +278,8 @@ type RouteDecision = {
 };
 ```
 
+Naming note: `ask_human_now` means “create or update a human review packet in the intake stack.” It must not steal focus or trigger passive interruption in MVP.
+
 Rules:
 
 - low evidence cannot silently start external work.

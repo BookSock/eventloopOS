@@ -291,6 +291,83 @@ function runGatewayStoreContract(
         await harness.cleanup();
       }
     });
+
+    it("dedupes and finalizes task message history consistently", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        const first = await harness.store.recordTaskMessageAttempt({
+          task_session_id: "task_session_blog",
+          text: "Continue blog work.",
+          event_ids: ["evt_gateway_task_message"],
+          idempotency_key: "idem_gateway_task_message",
+          origin: "event_route",
+          occurred_at: createdAt,
+          task_id: "task_blog",
+          source_id: "slack:T123:C123:1",
+        });
+        const duplicate = await harness.store.recordTaskMessageAttempt({
+          task_session_id: "task_session_blog",
+          text: "Different text should not replace first attempt.",
+          event_ids: ["evt_gateway_task_message_retry"],
+          idempotency_key: "idem_gateway_task_message",
+          origin: "event_route",
+          occurred_at: "2026-05-06T12:01:00.000Z",
+        });
+        const sent = await harness.store.finalizeTaskMessage({
+          idempotency_key: "idem_gateway_task_message",
+          status: "sent",
+          occurred_at: "2026-05-06T12:02:00.000Z",
+          message: {
+            id: "codex_task_msg_idem_gateway_task_message",
+            task_session_id: "task_session_blog",
+            native_thread_id: "thread_123",
+            native_turn_id: "turn_456",
+            status: "sent",
+            text: "raw text must not be persisted in sanitized message",
+          },
+        });
+        await harness.store.recordTaskMessageAttempt({
+          task_session_id: "task_session_other",
+          text: "Second message can share runtime-local message id.",
+          event_ids: ["evt_gateway_task_message_2"],
+          idempotency_key: "idem_gateway_task_message_2",
+          origin: "task_session_api",
+          occurred_at: "2026-05-06T12:03:00.000Z",
+        });
+        const sentWithSameRuntimeId = await harness.store.finalizeTaskMessage({
+          idempotency_key: "idem_gateway_task_message_2",
+          status: "sent",
+          occurred_at: "2026-05-06T12:04:00.000Z",
+          message: {
+            id: "codex_task_msg_idem_gateway_task_message",
+            task_session_id: "task_session_other",
+            native_thread_id: "thread_789",
+            status: "sent",
+          },
+        });
+        const fetched = await harness.store.getTaskMessageByIdempotencyKey("idem_gateway_task_message");
+
+        assert.equal(first.status, "attempted");
+        assert.equal(first.text_length, "Continue blog work.".length);
+        assert.equal(duplicate.id, first.id);
+        assert.equal(duplicate.text_hash, first.text_hash);
+        assert.equal(sent?.status, "sent");
+        assert.equal(sent?.provider, "codex");
+        assert.equal(sent?.id, first.id);
+        assert.equal(sent?.native_thread_id, "thread_123");
+        assert.equal(sent?.native_turn_id, "turn_456");
+        assert.equal(sent?.sent_at, "2026-05-06T12:02:00.000Z");
+        assert.equal(sent?.message.text, undefined);
+        assert.equal(sentWithSameRuntimeId?.status, "sent");
+        assert.notEqual(sentWithSameRuntimeId?.id, sent?.id);
+        assert.equal(sentWithSameRuntimeId?.message.id, sent?.message.id);
+        assert.deepEqual(fetched, sent);
+      } finally {
+        await harness.cleanup();
+      }
+    });
   });
 }
 
@@ -371,6 +448,7 @@ async function clearPostgresTestData(store: PostgresQueueStore): Promise<void> {
     TRUNCATE
       metric_counters,
       mcp_poll_states,
+      task_messages,
       activity_events,
       receipts,
       route_decisions,

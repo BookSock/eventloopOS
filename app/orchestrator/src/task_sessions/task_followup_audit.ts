@@ -1,11 +1,17 @@
 import { evaluateHook } from "../hooks/evaluator.js";
 import type { Observability } from "../observability.js";
+import {
+  sanitizeTaskMessage,
+  taskMessageRecordToApiMessage,
+  type TaskMessageHistoryStore,
+} from "./task_message_history.js";
 import type { TaskFollowupPolicyMeta } from "./task_followup_policy.js";
 import type { TaskFollowupInput, TaskSessionController } from "./types.js";
 
 export type TaskFollowupAuditOptions = {
   taskSessions?: TaskSessionController;
   observability?: Observability;
+  taskMessageStore?: TaskMessageHistoryStore;
 };
 
 export type TaskFollowupAuditMeta = {
@@ -30,12 +36,30 @@ export async function sendTaskFollowupWithActivity(
   const { policy: inputPolicy, ...runtimeInput } = input;
   const policy = meta.policy ?? inputPolicy;
   const observability = options.observability;
+  const taskMessageStore = options.taskMessageStore;
   const details = {
     origin: meta.origin,
     idempotency_key: input.idempotency_key,
     text_length: input.text.length,
     event_count: input.event_ids.length,
   };
+
+  const existing = await taskMessageStore?.getTaskMessageByIdempotencyKey(input.idempotency_key);
+  if (existing) {
+    return taskMessageRecordToApiMessage(existing);
+  }
+
+  await taskMessageStore?.recordTaskMessageAttempt({
+    task_session_id: input.task_session_id,
+    text: input.text,
+    event_ids: input.event_ids,
+    idempotency_key: input.idempotency_key,
+    origin: meta.origin,
+    occurred_at: meta.occurredAt,
+    task_id: meta.taskId,
+    queue_item_id: meta.queueItemId,
+    source_id: meta.sourceId,
+  });
 
   await observability?.incrementCounter("task_followups_attempted_total");
   await observability?.recordActivity({
@@ -69,6 +93,13 @@ export async function sendTaskFollowupWithActivity(
         blocked_reason: decision.reason ?? "task message blocked by policy",
         policy_decision: decision,
       };
+      await taskMessageStore?.finalizeTaskMessage({
+        idempotency_key: input.idempotency_key,
+        status: "blocked",
+        occurred_at: meta.occurredAt,
+        message,
+        error: decision.reason ?? "task message blocked by policy",
+      });
       await observability?.incrementCounter("task_followups_blocked_total");
       await observability?.recordActivity({
         type: "task_followup_blocked",
@@ -83,7 +114,7 @@ export async function sendTaskFollowupWithActivity(
         summary: `Task followup blocked: ${input.task_session_id}`,
         details: {
           ...details,
-          message,
+          message: sanitizeTaskMessage(message),
         },
       });
       return message;
@@ -93,6 +124,13 @@ export async function sendTaskFollowupWithActivity(
   try {
     const message = await options.taskSessions.sendFollowupMessage(runtimeInput);
     const blocked = isRecord(message) && message.status === "blocked";
+    await taskMessageStore?.finalizeTaskMessage({
+      idempotency_key: input.idempotency_key,
+      status: blocked ? "blocked" : "sent",
+      occurred_at: meta.occurredAt,
+      message,
+      error: blocked && isRecord(message) && typeof message.error === "string" ? message.error : undefined,
+    });
     await observability?.incrementCounter(blocked ? "task_followups_blocked_total" : "task_followups_sent_total");
     await observability?.recordActivity({
       type: blocked ? "task_followup_blocked" : "task_followup_sent",
@@ -107,12 +145,18 @@ export async function sendTaskFollowupWithActivity(
       summary: `${blocked ? "Task followup blocked" : "Task followup sent"}: ${input.task_session_id}`,
       details: {
         ...details,
-        message,
+        message: sanitizeTaskMessage(message),
       },
     });
     return message;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    await taskMessageStore?.finalizeTaskMessage({
+      idempotency_key: input.idempotency_key,
+      status: "failed",
+      occurred_at: meta.occurredAt,
+      error: message,
+    });
     await observability?.incrementCounter("task_followups_failed_total");
     await observability?.recordActivity({
       type: "task_followup_failed",
