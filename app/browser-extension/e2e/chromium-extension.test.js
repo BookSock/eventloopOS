@@ -24,6 +24,7 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
     const serviceWorker =
       context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker", { timeout: 10_000 }));
     assert.match(serviceWorker.url(), /^chrome-extension:\/\//);
+    const extensionId = new URL(serviceWorker.url()).host;
 
     const page = context.pages()[0] ?? (await context.newPage());
     const url = `${server.origin}/launch`;
@@ -59,6 +60,17 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
 
     const getConfig = await sendRuntimeMessageFromTab(serviceWorker, url, { type: "eventloop.getConfig" });
     assert.deepEqual(getConfig, { orchestratorUrl: "http://127.0.0.1:9999" });
+
+    const optionsPage = await context.newPage();
+    await optionsPage.goto(`chrome-extension://${extensionId}/options.html`);
+    await optionsPage.fill("#orchestrator-url", "http://127.0.0.1:8888/");
+    await optionsPage.click("button[type='submit']");
+    await optionsPage.waitForSelector('#status[data-state="saved"]');
+    assert.equal(await optionsPage.inputValue("#orchestrator-url"), "http://127.0.0.1:8888");
+    assert.deepEqual(await serviceWorker.evaluate(async () => await chrome.storage.local.get("orchestratorUrl")), {
+      orchestratorUrl: "http://127.0.0.1:8888"
+    });
+    await optionsPage.close();
 
     await page.evaluate(() => window.scrollTo(0, 0));
     const restoreResult = await sendRuntimeMessageFromTab(serviceWorker, url, {

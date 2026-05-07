@@ -12,6 +12,10 @@
   "action": {
     "default_title": "Capture browser context"
   },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

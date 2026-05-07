@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>eventloopOS Browser Context Options</title>
+    <link rel="stylesheet" href="src/options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>eventloopOS</h1>
+      <form id="config-form">
+        <label for="orchestrator-url">Orchestrator URL</label>
+        <div class="row">
+          <input id="orchestrator-url" name="orchestratorUrl" type="url" required />
+          <button type="submit">Save</button>
+        </div>
+        <p id="status" role="status" aria-live="polite"></p>
+      </form>
+    </main>
+    <script type="module" src="src/options.js"></script>
+  </body>
+</html>
