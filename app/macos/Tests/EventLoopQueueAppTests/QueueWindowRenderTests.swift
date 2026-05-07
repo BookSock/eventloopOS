@@ -14,21 +14,15 @@ final class QueueWindowRenderTests: XCTestCase {
         let view = QueueWindowView(viewModel: viewModel)
             .frame(width: 900, height: 540)
 
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 1
-
-        guard let cgImage = renderer.cgImage else {
-            XCTFail("QueueWindowView did not render an image")
-            return
-        }
+        let cgImage = try render(view, width: 900, height: 540)
 
         XCTAssertGreaterThan(cgImage.width, 800)
         XCTAssertGreaterThan(cgImage.height, 500)
-        XCTAssertGreaterThan(try countNonBlankPixels(in: cgImage), 1_000)
+        try assertQueueSurfaceRendered(in: cgImage)
         try writePNGArtifact(cgImage, name: "queue-window-selected-packet.png")
     }
 
-    func testQueueWindowRendersLongPacketWithoutBlanking() throws {
+    func testQueueWindowRendersLongPacketWithoutBlanking() async throws {
         let packet = ReviewPacket(
             id: "packet-long-copy",
             taskId: "task_long_copy",
@@ -62,23 +56,30 @@ final class QueueWindowRenderTests: XCTestCase {
             workspaceSnapshot: SeededQueue.blogFeedbackWorkspace
         )
         let viewModel = QueueViewModel(
-            client: FakeQueueClient(packets: [packet]),
+            client: FakeQueueClient(
+                packets: [packet],
+                taskSessions: [
+                    TaskSession(
+                        id: "codex_thread_launch_copy",
+                        taskId: "task_long_copy",
+                        provider: "codex",
+                        status: "running",
+                        name: "Launch copy agent",
+                        preview: "Waiting for narrative priority"
+                    )
+                ]
+            ),
             initialPackets: [packet]
         )
+        await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
         let view = QueueWindowView(viewModel: viewModel)
             .frame(width: 700, height: 560)
 
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 1
-
-        guard let cgImage = renderer.cgImage else {
-            XCTFail("QueueWindowView did not render a long-content image")
-            return
-        }
+        let cgImage = try render(view, width: 700, height: 560)
 
         XCTAssertEqual(cgImage.width, 700)
         XCTAssertEqual(cgImage.height, 560)
-        XCTAssertGreaterThan(try countNonBlankPixels(in: cgImage), 1_000)
+        try assertQueueSurfaceRendered(in: cgImage)
         try writePNGArtifact(cgImage, name: "queue-window-long-packet.png")
     }
 
@@ -95,21 +96,44 @@ final class QueueWindowRenderTests: XCTestCase {
         let view = QueueWindowView(viewModel: viewModel)
             .frame(width: 760, height: 560)
 
-        let renderer = ImageRenderer(content: view)
-        renderer.scale = 1
-
-        guard let cgImage = renderer.cgImage else {
-            XCTFail("QueueWindowView did not render loaded lineage")
-            return
-        }
+        let cgImage = try render(view, width: 760, height: 560)
 
         XCTAssertEqual(cgImage.width, 760)
         XCTAssertEqual(cgImage.height, 560)
-        XCTAssertGreaterThan(try countNonBlankPixels(in: cgImage), 1_000)
+        try assertQueueSurfaceRendered(in: cgImage)
         try writePNGArtifact(cgImage, name: "queue-window-loaded-lineage.png")
     }
 
-    private func countNonBlankPixels(in image: CGImage) throws -> Int {
+    private func render<Content: View>(_ view: Content, width: CGFloat, height: CGFloat) throws -> CGImage {
+        let hostingView = NSHostingView(rootView: view)
+        hostingView.frame = CGRect(x: 0, y: 0, width: width, height: height)
+        hostingView.layoutSubtreeIfNeeded()
+        guard let bitmap = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds) else {
+            throw RenderSmokeError.contextCreationFailed
+        }
+        hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+        guard let image = bitmap.cgImage else {
+            throw RenderSmokeError.contextCreationFailed
+        }
+        return image
+    }
+
+    private func assertQueueSurfaceRendered(in image: CGImage) throws {
+        let stats = try pixelStats(in: image)
+        XCTAssertGreaterThan(stats.nonBlank, 1_000)
+        XCTAssertLessThan(
+            stats.yellowBackgroundRatio,
+            0.5,
+            "Render output looks like an SF Symbol fallback placeholder, not the queue UI."
+        )
+        XCTAssertLessThan(
+            stats.redForegroundRatio,
+            0.25,
+            "Render output looks like an SF Symbol fallback placeholder, not the queue UI."
+        )
+    }
+
+    private func pixelStats(in image: CGImage) throws -> (nonBlank: Int, yellowBackgroundRatio: Double, redForegroundRatio: Double) {
         let width = image.width
         let height = image.height
         var pixels = [UInt8](repeating: 0, count: width * height * 4)
@@ -128,6 +152,8 @@ final class QueueWindowRenderTests: XCTestCase {
         context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
 
         var nonBlank = 0
+        var yellowBackground = 0
+        var redForeground = 0
         for offset in stride(from: 0, to: pixels.count, by: 4) {
             let red = pixels[offset]
             let green = pixels[offset + 1]
@@ -136,8 +162,15 @@ final class QueueWindowRenderTests: XCTestCase {
             if alpha > 0 && !(red > 245 && green > 245 && blue > 245) {
                 nonBlank += 1
             }
+            if alpha > 0 && red > 230 && green > 170 && blue < 40 {
+                yellowBackground += 1
+            }
+            if alpha > 0 && red > 220 && green < 80 && blue < 90 {
+                redForeground += 1
+            }
         }
-        return nonBlank
+        let total = Double(width * height)
+        return (nonBlank, Double(yellowBackground) / total, Double(redForeground) / total)
     }
 
     private func writePNGArtifact(_ image: CGImage, name: String) throws {

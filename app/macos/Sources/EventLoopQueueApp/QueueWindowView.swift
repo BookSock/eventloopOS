@@ -378,6 +378,9 @@ private struct PacketDetail: View {
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("queue-recommended-action-block-reason")
                 }
+                if packet.recommendedActionType == "resume_agent", let session = selectedTaskSessions.first {
+                    SendBackTargetBanner(session: session)
+                }
 
                 HStack {
                     Spacer()
@@ -385,7 +388,7 @@ private struct PacketDetail: View {
                         Button {
                             executeRecommendedAction()
                         } label: {
-                            Label(packet.recommendedAction, systemImage: "arrowshape.turn.up.right.circle")
+                            Label("Send to Agent", systemImage: "arrowshape.turn.up.right.circle")
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
@@ -660,10 +663,7 @@ private struct TaskSessionBindingSection: View {
                 .accessibilityIdentifier("packet-task-id")
 
             if let session = selectedTaskSessions.first {
-                Label(taskSessionLabel(session), systemImage: "checkmark.circle")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .accessibilityIdentifier("packet-bound-task-session")
+                TaskSessionTargetCard(session: session)
             } else {
                 Text("No matching task session loaded.")
                     .font(.caption)
@@ -718,6 +718,62 @@ private struct TaskSessionBindingSection: View {
             }
         }
         .accessibilityIdentifier("packet-task-session-binding")
+    }
+}
+
+private struct TaskSessionTargetCard: View {
+    let session: TaskSession
+
+    private var presentation: TaskSessionTargetPresentation {
+        TaskSessionTargetPresentation(session: session)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Label("Send-back target", systemImage: "checkmark.circle.fill")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.green)
+            Text(presentation.title)
+                .font(.callout.weight(.medium))
+                .lineLimit(1)
+                .accessibilityIdentifier("packet-bound-task-session-title")
+            Text(presentation.subtitle)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .accessibilityIdentifier("packet-bound-task-session-subtitle")
+            if let detail = presentation.detail {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("packet-bound-task-session-detail")
+            }
+        }
+        .padding(8)
+        .background(.green.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .accessibilityIdentifier("packet-bound-task-session")
+    }
+}
+
+private struct SendBackTargetBanner: View {
+    let session: TaskSession
+
+    private var presentation: TaskSessionTargetPresentation {
+        TaskSessionTargetPresentation(session: session)
+    }
+
+    var body: some View {
+        Label {
+            Text("Will send to \(presentation.provider): \(presentation.title)")
+                .lineLimit(1)
+        } icon: {
+            Image(systemName: "paperplane.circle.fill")
+        }
+        .font(.caption.weight(.medium))
+        .foregroundStyle(.secondary)
+        .accessibilityIdentifier("queue-send-back-target")
     }
 }
 

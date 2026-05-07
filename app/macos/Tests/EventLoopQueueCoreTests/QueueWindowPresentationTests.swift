@@ -78,4 +78,41 @@ final class QueueWindowPresentationTests: XCTestCase {
         XCTAssertFalse(summary.showsProgress)
         XCTAssertTrue(summary.showsRetry)
     }
+
+    func testTaskSessionTargetPresentationShowsProviderStatusAndIdentity() {
+        let summary = TaskSessionTargetPresentation(
+            session: TaskSession(
+                id: "codex_thread_abc",
+                taskId: "task_blog_feedback",
+                provider: "codex",
+                status: "running",
+                name: "Blog launch agent",
+                preview: "Editing launch paragraph",
+                cwd: "/tmp/eventloop"
+            )
+        )
+
+        XCTAssertEqual(summary.title, "Blog launch agent")
+        XCTAssertEqual(summary.provider, "Codex")
+        XCTAssertEqual(summary.status, "Running")
+        XCTAssertEqual(summary.sessionId, "codex_thread_abc")
+        XCTAssertEqual(summary.subtitle, "Codex | Running | codex_thread_abc")
+        XCTAssertEqual(summary.detail, "Editing launch paragraph")
+    }
+
+    func testTaskSessionTargetPresentationFallsBackToCwdWhenNoPreview() {
+        let summary = TaskSessionTargetPresentation(
+            session: TaskSession(
+                id: "claude_session_123",
+                taskId: "task_blog_feedback",
+                provider: "claude",
+                status: "idle",
+                cwd: "/Users/jason/project"
+            )
+        )
+
+        XCTAssertEqual(summary.title, "claude_session_123")
+        XCTAssertEqual(summary.subtitle, "Claude Code | Idle | claude_session_123")
+        XCTAssertEqual(summary.detail, "/Users/jason/project")
+    }
 }

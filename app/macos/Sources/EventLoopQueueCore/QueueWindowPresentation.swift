@@ -91,3 +91,57 @@ public struct QueueWindowDetailSummary: Equatable, Sendable {
         }
     }
 }
+
+public struct TaskSessionTargetPresentation: Equatable, Sendable {
+    public let title: String
+    public let subtitle: String
+    public let detail: String?
+    public let provider: String
+    public let status: String
+    public let sessionId: String
+
+    public init(session: TaskSession) {
+        let displayName = session.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.title = displayName?.isEmpty == false ? displayName! : session.id
+        self.provider = taskSessionProviderLabel(session.provider)
+        self.status = taskSessionStatusLabel(session.status)
+        self.sessionId = session.id
+        self.subtitle = "\(provider) | \(status) | \(session.id)"
+
+        let preview = session.preview?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cwd = session.cwd?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if preview?.isEmpty == false {
+            self.detail = preview
+        } else if cwd?.isEmpty == false {
+            self.detail = cwd
+        } else {
+            self.detail = nil
+        }
+    }
+}
+
+private func taskSessionProviderLabel(_ provider: String) -> String {
+    switch provider.lowercased() {
+    case "codex":
+        return "Codex"
+    case "claude":
+        return "Claude Code"
+    case "fake":
+        return "Fake"
+    case "terminal":
+        return "Terminal"
+    case "composite":
+        return "Composite"
+    default:
+        return provider.isEmpty ? "Agent" : provider
+    }
+}
+
+private func taskSessionStatusLabel(_ status: String) -> String {
+    status
+        .split(separator: "_")
+        .map { part in
+            part.prefix(1).uppercased() + part.dropFirst().lowercased()
+        }
+        .joined(separator: " ")
+}
