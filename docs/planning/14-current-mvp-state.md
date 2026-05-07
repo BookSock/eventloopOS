@@ -57,6 +57,7 @@ Done:
 - Manual mode hotkey (`Cmd-Option-Shift-M`).
 - Menu bar shell with queue count, selected item, mode, restore state, open queue, refresh, done/next, and mode toggle.
 - Full window empty/loading/error placeholders with retry affordance and unit-covered presentation copy.
+- Render smoke test for real SwiftUI `QueueWindowView` using seeded queue data and nonblank image pixel check.
 - Workspace restore planning pause in manual mode.
 - Context resource restore request from queue UI.
 - Restore request status refresh.
@@ -113,7 +114,7 @@ Weak tests:
 - Docker-backed Postgres live tests skip when Docker absent, but native Postgres live tests pass on this machine.
 - AeroSpace live restore needs installed/running AeroSpace.
 - AeroSpace live smoke exists, but `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm --filter @eventloopos/orchestrator run live:aerospace` currently reports `server_unavailable` because AeroSpace.app is not running.
-- No full installed extension + native host + Mac app manual UI flow; current live coverage proves Mac client/orchestrator API round-trip but not rendered app interaction.
+- No full installed extension + native host + Mac app manual UI flow; current coverage proves Mac client/orchestrator API round-trip and rendered Mac queue view, but not one combined installed flow.
 - No real microphone wake-word/STT test yet; current coverage proves the local transcript command pipe and router contract with fake process output.
 
 ## Next Best Work
