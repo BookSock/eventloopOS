@@ -61,6 +61,24 @@ class OrchestratorClient:
     def context_restore_plan(self, resource: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/contexts/restore-plan", {"resource": resource}) or {}
 
+    def request_context_restore(self, resource: dict[str, Any], idempotency_key: str) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/contexts/restore-requests",
+            {"resource": resource},
+            headers={"Idempotency-Key": idempotency_key},
+        ) or {}
+
+    def next_context_restore_request(self) -> dict[str, Any] | None:
+        payload = self._request("GET", "/contexts/restore-requests/next")
+        if not isinstance(payload, dict):
+            return None
+        restore_request = payload.get("restore_request")
+        return restore_request if isinstance(restore_request, dict) else None
+
+    def mark_context_restore_done(self, restore_request_id: str, result: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", f"/contexts/restore-requests/{restore_request_id}/done", {"result": result}) or {}
+
     def list_task_sessions(self) -> dict[str, Any]:
         return self._request("GET", "/task-sessions") or {}
 

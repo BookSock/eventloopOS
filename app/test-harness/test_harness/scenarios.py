@@ -1052,11 +1052,21 @@ class BrowserContextStoreOnlyScenario:
         log["steps"].append({"name": "assert_no_queue_item"})
         restore_plan = self._restore_plan_for_resource(event["resources"][0])
         log["steps"].append({"name": "context_restore_plan", "kind": restore_plan["kind"]})
+        restore_request = self._restore_request_for_resource(event["resources"][0], restore_plan)
+        log["steps"].append({"name": "context_restore_request", "restore_request_id": restore_request["id"]})
+        completed_restore_request = {
+            **restore_request,
+            "status": "done",
+            "result": self._restore_result_for_resource(event["resources"][0]),
+        }
+        log["steps"].append({"name": "context_restore_done", "restore_request_id": restore_request["id"]})
 
         observed = {
             "event": event,
             "route_decision": route_decision,
             "restore_plan": restore_plan,
+            "restore_request": restore_request,
+            "completed_restore_request": completed_restore_request,
             "review_packet": None,
             "next_queue_item": None,
             "final_queue": {"item": None},
@@ -1112,6 +1122,32 @@ class BrowserContextStoreOnlyScenario:
             raise ScenarioFailure(f"context restore-plan response missing restore_plan: {restore_plan_response!r}")
         log["steps"].append({"name": "context_restore_plan", "kind": restore_plan.get("kind")})
 
+        restore_request_response = client.request_context_restore(
+            matched_context["resource"],
+            idempotency_key=f"idem_{event['id']}_context_restore",
+        )
+        restore_request = restore_request_response.get("restore_request") if isinstance(restore_request_response, dict) else None
+        if not isinstance(restore_request, dict):
+            raise ScenarioFailure(f"context restore request response missing restore_request: {restore_request_response!r}")
+        log["steps"].append({"name": "context_restore_request", "restore_request_id": restore_request.get("id")})
+
+        polled_restore_request = client.next_context_restore_request()
+        if not isinstance(polled_restore_request, dict) or polled_restore_request.get("id") != restore_request.get("id"):
+            raise ScenarioFailure(f"context restore poll mismatch: {polled_restore_request!r}")
+        log["steps"].append({"name": "context_restore_poll", "restore_request_id": restore_request.get("id")})
+
+        restore_result = self._restore_result_for_resource(matched_context["resource"])
+        done_response = client.mark_context_restore_done(restore_request["id"], restore_result)
+        completed_restore_request = done_response.get("restore_request") if isinstance(done_response, dict) else None
+        if not isinstance(completed_restore_request, dict) or completed_restore_request.get("status") != "done":
+            raise ScenarioFailure(f"context restore done response mismatch: {done_response!r}")
+        log["steps"].append({"name": "context_restore_done", "restore_request_id": restore_request.get("id")})
+
+        next_restore_request = client.next_context_restore_request()
+        if next_restore_request is not None:
+            raise ScenarioFailure(f"expected no pending restore request after done, got {next_restore_request!r}")
+        log["steps"].append({"name": "assert_no_pending_context_restore"})
+
         final_queue_item = client.next_queue_item()
         log["steps"].append({"name": "assert_queue_empty"})
         if final_queue_item is not None:
@@ -1121,6 +1157,8 @@ class BrowserContextStoreOnlyScenario:
             "event": event,
             "route_decision": route_decision,
             "restore_plan": restore_plan,
+            "restore_request": restore_request,
+            "completed_restore_request": completed_restore_request,
             "review_packet": None,
             "next_queue_item": None,
             "final_queue": {"item": None},
@@ -1177,6 +1215,19 @@ class BrowserContextStoreOnlyScenario:
             for field, value in expected_restore_plan.items():
                 if restore_plan.get(field) != value:
                     raise ScenarioFailure(f"restore plan {field} mismatch: expected {value!r}, got {restore_plan.get(field)!r}")
+        expected_restore_request = golden.get("expected_restore_request")
+        if expected_restore_request is not None:
+            restore_request = observed.get("restore_request")
+            if not isinstance(restore_request, dict):
+                raise ScenarioFailure("expected restore request")
+            for field, value in expected_restore_request.items():
+                if restore_request.get(field) != value:
+                    raise ScenarioFailure(
+                        f"restore request {field} mismatch: expected {value!r}, got {restore_request.get(field)!r}"
+                    )
+            completed_restore_request = observed.get("completed_restore_request")
+            if not isinstance(completed_restore_request, dict) or completed_restore_request.get("status") != "done":
+                raise ScenarioFailure("expected completed restore request")
 
     def _drain_existing_queue(self, client: OrchestratorClient, log: dict[str, Any]) -> None:
         drained = 0
@@ -1223,6 +1274,29 @@ class BrowserContextStoreOnlyScenario:
                 "execute_supported": False,
             }
         raise ScenarioFailure(f"fixture resource is not restorable: {resource!r}")
+
+    def _restore_request_for_resource(self, resource: dict[str, Any], restore_plan: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": f"ctx_restore_{self._stable_id(resource['id'])}",
+            "status": "pending",
+            "resource": resource,
+            "restore_plan": {
+                **restore_plan,
+                "message": {
+                    "type": "eventloop.restore",
+                    "resource": resource,
+                },
+            },
+        }
+
+    @staticmethod
+    def _restore_result_for_resource(resource: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "tabId": int(resource["tab_id"]) if isinstance(resource.get("tab_id"), str) and resource["tab_id"].isdigit() else None,
+            "url": resource.get("url"),
+            "restoredScroll": isinstance(resource.get("scroll_y"), int),
+        }
 
 
 class BrowserContextAttachTaskScenario(BrowserContextStoreOnlyScenario):

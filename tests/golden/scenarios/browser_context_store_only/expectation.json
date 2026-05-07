@@ -10,6 +10,9 @@
     "side_effect": "local",
     "execute_supported": false
   },
+  "expected_restore_request": {
+    "status": "pending"
+  },
   "expected_review_packet": null,
   "expected_queue_item": null
 }
