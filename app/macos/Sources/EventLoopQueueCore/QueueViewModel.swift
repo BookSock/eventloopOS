@@ -236,6 +236,39 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    public func pullNextPaper() async {
+        if mode == .manual {
+            await captureManualWorkspaceSnapshot()
+            returnToEventLoopMode()
+        }
+
+        state = .loading
+        do {
+            let selectedID = selectedPacketID
+            let leasedPacket: ReviewPacket?
+            if let selectedID, packets.contains(where: { $0.id == selectedID }) {
+                do {
+                    _ = try await client.renewLease(packetId: selectedID)
+                    leasedPacket = selectedPacket
+                } catch {
+                    leasedPacket = try await client.next(after: nil)
+                }
+            } else {
+                leasedPacket = try await client.next(after: nil)
+            }
+
+            packets = try await client.fetchQueue()
+            selectedPacketID = leasedPacket?.id ?? packets.first?.id
+            state = .loaded
+        } catch {
+            state = .failed(error.localizedDescription)
+            return
+        }
+
+        await loadTaskSessionsForSelectedPacketIfNeeded()
+        await prepareSelectedWorkspaceRestore()
+    }
+
     public func doneAndNext() async {
         guard let packetId = selectedPacketID else {
             return

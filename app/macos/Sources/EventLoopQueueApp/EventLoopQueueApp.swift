@@ -1,3 +1,4 @@
+import AppKit
 import EventLoopQueueCore
 import SwiftUI
 
@@ -14,12 +15,20 @@ struct EventLoopQueueApp: App {
             workspaceClient: configuration.makeWorkspaceClient()
         )
         _viewModel = StateObject(wrappedValue: viewModel)
-        globalHotKeyController = GlobalHotKeyController {
-            Task {
-                await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+        globalHotKeyController = GlobalHotKeyController(
+            pullNextPaper: {
+                NSApp.activate(ignoringOtherApps: true)
+                Task {
+                    await viewModel.pullNextPaper()
+                }
+            },
+            toggleManualMode: {
+                Task {
+                    await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+                }
             }
-        }
-        globalHotKeyController.registerToggleManualModeHotKey()
+        )
+        globalHotKeyController.registerHotKeys()
     }
 
     var body: some Scene {
@@ -34,6 +43,14 @@ struct EventLoopQueueApp: App {
         }
         .commands {
             CommandMenu("Queue") {
+                Button("Pull Next Paper") {
+                    Task {
+                        await viewModel.pullNextPaper()
+                    }
+                }
+                .keyboardShortcut("j", modifiers: [.command, .option, .shift])
+                .accessibilityIdentifier("queue-command-pull-next-paper")
+
                 Button(viewModel.selectedPacket?.recommendedAction ?? "Run Recommended Action") {
                     Task {
                         await viewModel.executeRecommendedActionAndNext()
@@ -169,6 +186,14 @@ private struct QueueMenuView: View {
                 }
             }
             .accessibilityIdentifier("queue-menu-refresh")
+
+            Button("Pull Next Paper") {
+                Task {
+                    await viewModel.pullNextPaper()
+                }
+            }
+            .keyboardShortcut("j", modifiers: [.command, .option, .shift])
+            .accessibilityIdentifier("queue-menu-pull-next-paper")
 
             Button(viewModel.selectedPacket?.recommendedAction ?? "Run Recommended Action") {
                 Task {

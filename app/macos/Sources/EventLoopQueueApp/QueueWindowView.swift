@@ -45,6 +45,15 @@ struct QueueWindowView: View {
             .toolbar {
                 ToolbarItemGroup {
                     Button {
+                        Task {
+                            await viewModel.pullNextPaper()
+                        }
+                    } label: {
+                        Label("Pull Next Paper", systemImage: "doc.text.magnifyingglass")
+                    }
+                    .accessibilityIdentifier("queue-pull-next-paper-button")
+
+                    Button {
                         workspaceRestoreCandidate = viewModel.selectedWorkspaceSnapshot
                     } label: {
                         Label("Restore Workspace", systemImage: "rectangle.3.group")

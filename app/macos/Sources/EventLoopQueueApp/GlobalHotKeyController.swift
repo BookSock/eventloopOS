@@ -3,21 +3,27 @@ import Foundation
 
 final class GlobalHotKeyController: @unchecked Sendable {
     private static let signature = OSType(0x45564C51) // EVLQ
-    private static let toggleManualModeHotKeyID = UInt32(1)
+    private static let pullNextPaperHotKeyID = UInt32(1)
+    private static let toggleManualModeHotKeyID = UInt32(2)
 
-    private var hotKeyRef: EventHotKeyRef?
+    private var hotKeyRefs: [EventHotKeyRef] = []
     private var eventHandlerRef: EventHandlerRef?
-    private let handler: @MainActor @Sendable () -> Void
+    private let pullNextPaper: @MainActor @Sendable () -> Void
+    private let toggleManualMode: @MainActor @Sendable () -> Void
 
-    init(handler: @escaping @MainActor @Sendable () -> Void) {
-        self.handler = handler
+    init(
+        pullNextPaper: @escaping @MainActor @Sendable () -> Void,
+        toggleManualMode: @escaping @MainActor @Sendable () -> Void
+    ) {
+        self.pullNextPaper = pullNextPaper
+        self.toggleManualMode = toggleManualMode
     }
 
     deinit {
         unregister()
     }
 
-    func registerToggleManualModeHotKey() {
+    func registerHotKeys() {
         unregister()
 
         var eventType = EventTypeSpec(
@@ -45,16 +51,16 @@ final class GlobalHotKeyController: @unchecked Sendable {
                 guard status == noErr else {
                     return status
                 }
-                guard hotKeyID.signature == GlobalHotKeyController.signature,
-                      hotKeyID.id == GlobalHotKeyController.toggleManualModeHotKeyID else {
-                    return noErr
-                }
-
                 let controller = Unmanaged<GlobalHotKeyController>
                     .fromOpaque(userData)
                     .takeUnretainedValue()
+                guard hotKeyID.signature == GlobalHotKeyController.signature,
+                      let action = controller.action(for: hotKeyID.id) else {
+                    return noErr
+                }
+
                 Task { @MainActor in
-                    controller.handler()
+                    action()
                 }
                 return noErr
             },
@@ -67,13 +73,34 @@ final class GlobalHotKeyController: @unchecked Sendable {
             return
         }
 
-        let hotKeyID = EventHotKeyID(
-            signature: Self.signature,
+        registerHotKey(
+            keyCode: UInt32(kVK_ANSI_J),
+            modifiers: UInt32(cmdKey | optionKey | shiftKey),
+            id: Self.pullNextPaperHotKeyID
+        )
+        registerHotKey(
+            keyCode: UInt32(kVK_ANSI_M),
+            modifiers: UInt32(cmdKey | optionKey | shiftKey),
             id: Self.toggleManualModeHotKeyID
         )
-        let modifiers = UInt32(cmdKey | optionKey | shiftKey)
+    }
+
+    private func action(for hotKeyID: UInt32) -> (@MainActor @Sendable () -> Void)? {
+        switch hotKeyID {
+        case Self.pullNextPaperHotKeyID:
+            return pullNextPaper
+        case Self.toggleManualModeHotKeyID:
+            return toggleManualMode
+        default:
+            return nil
+        }
+    }
+
+    private func registerHotKey(keyCode: UInt32, modifiers: UInt32, id: UInt32) {
+        var hotKeyRef: EventHotKeyRef?
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: id)
         let registerStatus = RegisterEventHotKey(
-            UInt32(kVK_ANSI_M),
+            keyCode,
             modifiers,
             hotKeyID,
             GetApplicationEventTarget(),
@@ -82,14 +109,18 @@ final class GlobalHotKeyController: @unchecked Sendable {
         )
         if registerStatus != noErr {
             unregister()
+            return
+        }
+        if let hotKeyRef {
+            hotKeyRefs.append(hotKeyRef)
         }
     }
 
     private func unregister() {
-        if let hotKeyRef {
+        for hotKeyRef in hotKeyRefs {
             UnregisterEventHotKey(hotKeyRef)
-            self.hotKeyRef = nil
         }
+        hotKeyRefs.removeAll()
         if let eventHandlerRef {
             RemoveEventHandler(eventHandlerRef)
             self.eventHandlerRef = nil

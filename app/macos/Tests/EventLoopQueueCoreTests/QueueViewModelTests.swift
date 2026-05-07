@@ -26,6 +26,52 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state, .loaded)
     }
 
+    func testPullNextPaperLeasesTopPacketAndPlansWorkspace() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let plan = WorkspaceRestorePlan(
+            commands: [WorkspaceCommand(command: "aerospace", args: ["workspace", "eventloop-blog"])],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            planEnvelope: WorkspaceRestorePlanEnvelope(plan: plan, executeSupported: false)
+        )
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+
+        await viewModel.pullNextPaper()
+
+        XCTAssertEqual(viewModel.mode, .eventLoop)
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(client.leasedPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(viewModel.taskBindingState, .loaded)
+        XCTAssertEqual(viewModel.selectedTaskSessions.map(\.id), ["task_session_blog"])
+        XCTAssertEqual(viewModel.workspaceRestoreState, .planned(plan))
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [SeededQueue.blogFeedbackWorkspace])
+    }
+
+    func testPullNextPaperReturnsFromManualModeAndCapturesManualWorkspace() async {
+        let manualSnapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 77, app: "Ghostty", title: "manual shell", workspace: "manual")],
+            activeWorkspace: "manual"
+        )
+        let workspaceClient = FakeWorkspaceClient(captureSnapshot: manualSnapshot)
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+        viewModel.enterManualMode()
+
+        await viewModel.pullNextPaper()
+
+        XCTAssertEqual(viewModel.mode, .eventLoop)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
+        XCTAssertEqual(viewModel.manualWorkspaceSnapshot, manualSnapshot)
+        XCTAssertEqual(viewModel.manualWorkspaceCaptureState, .captured(manualSnapshot))
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [SeededQueue.blogFeedbackWorkspace])
+    }
+
     func testRefreshKeepsExistingLeasedSelection() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)

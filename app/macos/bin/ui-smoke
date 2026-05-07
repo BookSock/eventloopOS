@@ -114,6 +114,7 @@ set initialItems to menuItemNames()
 assertContains(initialItems, "Open Queue")
 assertContains(initialItems, "Enter Manual Mode")
 assertContains(initialItems, "Restore Queue Workspace")
+assertContains(initialItems, "Pull Next Paper")
 waitForEnabledMenuItem("Approve revised angle or ask for another pass.")
 waitForEnabledMenuItem("Restore Queue Workspace")
 
@@ -160,8 +161,17 @@ end tell
 delay 0.5
 set manualItems to menuItemNames()
 assertContains(manualItems, "Return to Event Loop")
-assertContains(manualItems, "Manual workspace saved: 0 windows")
 assertContains(manualItems, "Restore Manual Workspace")
+
+tell application "System Events"
+  tell process "EventLoopQueueApp"
+    click menu item "Return to Event Loop" of menu 1 of menu bar item 1 of menu bar 2
+  end tell
+end tell
+delay 0.5
+set returnedItems to menuItemNames()
+assertContains(returnedItems, "Enter Manual Mode")
+assertContains(returnedItems, "Manual workspace saved: 0 windows")
 
 tell application "System Events"
   tell process "EventLoopQueueApp"

@@ -179,6 +179,8 @@ Strong tests now:
 - `pnpm dogfood:check` exits non-zero when local dogfood thresholds fail. Checks currently cover ignored queue rate, restore success, task followup failures, stale queue leases, and pending restore age.
 - `pnpm proof:live` writes `artifacts/proof-live-manifest.json`, runs `test:e2e:live:boot` with dogfood threshold checks against the temp live orchestrator before shutdown, then runs `task:runtime-smoke`.
 - macOS render E2E now writes inspectable screenshots to `artifacts/screenshots/queue-window-selected-packet.png` and `artifacts/screenshots/queue-window-long-packet.png`; the long-content fixture catches basic one-paper wrapping/nonblank regressions.
+- Mac queue has a one-step Pull Next Paper action in the menu, command menu, toolbar, and global hotkey (`Cmd+Opt+Shift+J`). It leases the top/current packet, returns from Manual Mode when needed, captures the manual workspace before return, loads matching task sessions, and plans queue workspace restore.
+- Opt-in AppleScript UI smoke now proves the Pull Next Paper menu item exists and that Manual Mode captures workspace only on return to Event Loop, then Restore Manual Workspace returns the user to manual mode.
 
 Weak tests:
 
@@ -191,8 +193,8 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add a true pull-next hotkey/action that leases the top packet and restores/briefs its context in one step.
-2. Wire `dogfood:check` into a real local Postgres + MCP dogfood run once those sources are active.
+1. Wire `dogfood:check` into a real local Postgres + MCP dogfood run once those sources are active.
+2. Add live Mac queue mutation smoke that asserts menu/UI actions changed orchestrator `/queue`, `/activity`, and task followup state.
 3. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
 4. Add safe real Claude followup smoke against an explicitly supplied disposable Claude session.
 5. Later: real microphone/wake-word proof and always-listening voice UX.
