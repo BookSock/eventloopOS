@@ -32,7 +32,11 @@
             "title": "Blog feedback thread",
             "url": "slack://thread/blog-feedback",
             "source": "slack",
-            "restore_confidence": "high"
+            "restore_confidence": "high",
+            "details": {
+              "provider": "slack",
+              "confidence_reason": "slack_permalink"
+            }
           },
           {
             "id": "ctx_workspace_blog",
@@ -64,7 +68,11 @@
             "tab_id": "7",
             "scroll_y": 120,
             "text_quote": "Launch pricing note needs review later",
-            "selector_hint": "[data-context-quote]"
+            "selector_hint": "[data-context-quote]",
+            "details": {
+              "provider": "browser",
+              "confidence_reason": "browser_quote_fallback"
+            }
           }
         ]
       }

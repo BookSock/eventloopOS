@@ -115,6 +115,7 @@ public struct ReviewContextResource: Codable, Equatable, Identifiable, Sendable 
     public let path: String?
     public let line: Int?
     public let column: Int?
+    public let details: ReviewContextResourceDetails?
 
     public init(
         id: String,
@@ -130,7 +131,8 @@ public struct ReviewContextResource: Codable, Equatable, Identifiable, Sendable 
         selectorHint: String? = nil,
         path: String? = nil,
         line: Int? = nil,
-        column: Int? = nil
+        column: Int? = nil,
+        details: ReviewContextResourceDetails? = nil
     ) {
         self.id = id
         self.kind = kind
@@ -146,6 +148,7 @@ public struct ReviewContextResource: Codable, Equatable, Identifiable, Sendable 
         self.path = path
         self.line = line
         self.column = column
+        self.details = details
     }
 
     enum CodingKeys: String, CodingKey {
@@ -163,6 +166,22 @@ public struct ReviewContextResource: Codable, Equatable, Identifiable, Sendable 
         case path
         case line
         case column
+        case details
+    }
+}
+
+public struct ReviewContextResourceDetails: Codable, Equatable, Sendable {
+    public let provider: String?
+    public let confidenceReason: String?
+
+    public init(provider: String? = nil, confidenceReason: String? = nil) {
+        self.provider = provider
+        self.confidenceReason = confidenceReason
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case provider
+        case confidenceReason = "confidence_reason"
     }
 }
 
@@ -607,7 +626,8 @@ struct ReviewPacketDTO: Codable, Equatable, Sendable {
                 selectorHint: resource.selectorHint,
                 path: resource.path,
                 line: resource.line,
-                column: resource.column
+                column: resource.column,
+                details: resource.details
             )
         }
     }
@@ -645,6 +665,7 @@ struct ContextResourceDTO: Codable, Equatable, Sendable {
     let line: Int?
     let column: Int?
     let snapshot: WorkspaceSnapshot?
+    let details: ReviewContextResourceDetails?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -662,6 +683,7 @@ struct ContextResourceDTO: Codable, Equatable, Sendable {
         case line
         case column
         case snapshot
+        case details
     }
 
     var workspaceSnapshot: WorkspaceSnapshot? {

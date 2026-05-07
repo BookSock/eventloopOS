@@ -69,6 +69,7 @@ Done:
 - Restore request status refresh.
 - Automatic restore request status polling while Mac UI is open.
 - UI shows queued/done/highlighted/failed restore state.
+- Context resource rows show restore confidence plus provider confidence reason when available, so the user can see whether a restore is backed by a provider anchor or a generic browser fallback.
 - Context restore requests support failed status and retry back to pending. Browser extension marks unsupported/failed restores through `/failed`; `/retry` requeues for another claim.
 - Live Mac client + Chromium extension restore smoke exists: Mac `HTTPQueueClient` creates a real orchestrator restore request, Chromium extension claims it, restores the tab/scroll, and Mac-readable restore request status becomes `done`.
 

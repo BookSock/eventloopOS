@@ -283,7 +283,7 @@ private struct PacketDetail: View {
                                     ForEach(packet.contextResources) { resource in
                                         ResourceRow(
                                             title: resource.title,
-                                            subtitle: resource.url ?? resource.kind,
+                                            subtitle: resourceSubtitle(resource),
                                             badge: resource.restoreConfidence ?? resource.source ?? resource.kind,
                                             url: resource.url,
                                             restoreAction: {
@@ -504,6 +504,21 @@ private func taskSessionLabel(_ session: TaskSession) -> String {
     return session.id
 }
 
+private func resourceSubtitle(_ resource: ReviewContextResource) -> String {
+    let base = resource.url ?? resource.kind
+    guard let reason = resource.details?.confidenceReason, !reason.isEmpty else {
+        return base
+    }
+    return "\(base) • \(confidenceReasonLabel(reason))"
+}
+
+private func confidenceReasonLabel(_ reason: String) -> String {
+    reason
+        .split(separator: "_")
+        .map(String.init)
+        .joined(separator: " ")
+}
+
 private struct PacketPill: View {
     let label: String
     let accessibilityID: String
@@ -561,7 +576,7 @@ private struct ResourceRow: View {
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
             }
             Spacer(minLength: 8)
             if let restoreAction {

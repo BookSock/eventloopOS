@@ -140,9 +140,9 @@ Current implementation:
 - `app/orchestrator/src/context/deeplink_normalizers.ts` normalizes Slack, GitHub, Notion, Google Docs, Figma, and generic browser URLs.
 - MCP poll mappers run resources through the normalizer and preserve existing top-level fields for compatibility.
 - Provider IDs and confidence reasons live in `resource.details`.
+- Mac queue context rows display restore confidence and `details.confidence_reason` when available.
 
 Next:
 
-1. Show restore confidence reason in Mac queue UI.
-2. Track restore success/failure by provider in dogfood metrics.
-3. Dogfood provider anchors against real Slack/GitHub/Notion/Google Docs/Figma pages.
+1. Track restore success/failure by provider in dogfood metrics.
+2. Dogfood provider anchors against real Slack/GitHub/Notion/Google Docs/Figma pages.
