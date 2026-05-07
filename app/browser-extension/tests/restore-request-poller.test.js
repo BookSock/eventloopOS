@@ -127,6 +127,25 @@ test("restore request poller acknowledges unsupported pending request as failed"
   ]);
 });
 
+test("restore request poller reads orchestrator URL at poll time", async () => {
+  const requestedUrls = [];
+  const poller = createRestoreRequestPoller({
+    controller: {
+      restore: async () => {
+        throw new Error("restore should not run");
+      }
+    },
+    fetchImpl: async (url) => {
+      requestedUrls.push(url);
+      return jsonResponse({ restore_request: null });
+    },
+    getOrchestratorUrl: async () => "http://127.0.0.1:9999/"
+  });
+
+  assert.deepEqual(await poller.pollOnce(), { ok: true, restored: false });
+  assert.deepEqual(requestedUrls, ["http://127.0.0.1:9999/contexts/restore-requests/next"]);
+});
+
 test("ensureRestorePollAlarm creates missing MV3 alarm", async () => {
   const calls = [];
   const alarmsApi = {

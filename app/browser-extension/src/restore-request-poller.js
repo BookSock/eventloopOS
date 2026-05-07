@@ -1,10 +1,12 @@
+import { DEFAULT_ORCHESTRATOR_URL } from "./extension-config.js";
+
 export const RESTORE_REQUEST_ALARM = "eventloop.restoreRequests.poll";
-export const DEFAULT_ORCHESTRATOR_URL = "http://127.0.0.1:4377";
 
 export function createRestoreRequestPoller({
   controller,
   fetchImpl = globalThis.fetch?.bind(globalThis),
-  orchestratorUrl = DEFAULT_ORCHESTRATOR_URL
+  orchestratorUrl = DEFAULT_ORCHESTRATOR_URL,
+  getOrchestratorUrl
 }) {
   if (!controller?.restore) {
     throw new Error("controller.restore is required");
@@ -13,9 +15,9 @@ export function createRestoreRequestPoller({
     throw new Error("fetch implementation is required");
   }
 
-  const baseUrl = orchestratorUrl.replace(/\/+$/, "");
-
   async function pollOnce() {
+    const nextOrchestratorUrl = getOrchestratorUrl ? await getOrchestratorUrl() : orchestratorUrl;
+    const baseUrl = nextOrchestratorUrl.replace(/\/+$/, "");
     const next = await fetchJson(fetchImpl, `${baseUrl}/contexts/restore-requests/next`);
     const restoreRequest = next.restore_request;
     if (!restoreRequest) {

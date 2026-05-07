@@ -50,6 +50,46 @@ test("runtime message router returns false for unknown messages", () => {
   assert.equal(handled, false);
 });
 
+test("runtime message router reads extension config", async () => {
+  const responses = [];
+  const handled = handleRuntimeMessage(
+    {},
+    { type: "eventloop.getConfig" },
+    (response) => {
+      responses.push(response);
+    },
+    {
+      configStore: {
+        get: async () => ({ orchestratorUrl: "http://127.0.0.1:4377" })
+      }
+    }
+  );
+  await flushMicrotasks();
+
+  assert.equal(handled, true);
+  assert.deepEqual(responses, [{ orchestratorUrl: "http://127.0.0.1:4377" }]);
+});
+
+test("runtime message router writes extension config", async () => {
+  const responses = [];
+  const handled = handleRuntimeMessage(
+    {},
+    { type: "eventloop.setConfig", config: { orchestratorUrl: "http://127.0.0.1:9999/" } },
+    (response) => {
+      responses.push(response);
+    },
+    {
+      configStore: {
+        set: async (config) => ({ orchestratorUrl: config.orchestratorUrl.replace(/\/+$/, "") })
+      }
+    }
+  );
+  await flushMicrotasks();
+
+  assert.equal(handled, true);
+  assert.deepEqual(responses, [{ orchestratorUrl: "http://127.0.0.1:9999" }]);
+});
+
 function flushMicrotasks() {
   return new Promise((resolve) => setImmediate(resolve));
 }

@@ -3,7 +3,7 @@
   "name": "eventloopOS Browser Context",
   "version": "0.0.1",
   "description": "Captures and restores browser context for eventloopOS.",
-  "permissions": ["activeTab", "alarms", "nativeMessaging", "scripting", "tabs"],
+  "permissions": ["activeTab", "alarms", "nativeMessaging", "scripting", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "src/background.js",
