@@ -124,6 +124,7 @@ Strong tests now:
 - Full live boot smoke can reuse one running orchestrator for harness scenarios, Mac client live smoke, browser extension E2E, and installed Chromium extension/native host capture with `pnpm run test:e2e:live:full`.
 - `queue_bind_then_recommended_action` proves the end-to-end dogfood path where agent handoff blocks before task-session binding, succeeds after binding, sends a task followup, and drains the queue.
 - Orchestrator API regression tests prove duplicate/retried events return the stored route before task-session side effects; a duplicate event that already queued human review cannot later inject into an agent thread after a task session appears.
+- In-memory and Postgres stores both dedupe events by `(source, idempotency_key)`, so two sources can safely reuse the same idempotency token during local fixture tests.
 - Orchestrator API tests and live harness scenario `ambient_context_route` prove browser-captured task context can later route an unhinted Slack/voice-style event into `task_session_blog` with `context_match` evidence and no human queue item.
 - Orchestrator API tests and live harness scenario `mcp_ambient_context_route` prove a generic MCP `poll-and-route` item with no `task_hint` can route into `task_session_blog` using stored browser context and sends matched-context summary text to the task session.
 - macOS menu/window surfaces show why a recommended agent handoff is blocked, so disabled action buttons are auditable instead of silent.
@@ -150,12 +151,12 @@ Weak tests:
 - No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, temp `.app` bundle launch, and opt-in AppleScript menu/window/manual-mode interaction.
 - No real microphone wake-word proof yet; current coverage proves fixture-audio STT with `whisper-cli`, local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
 - Activity history is durable in Postgres mode and process-local in in-memory mode. The report is intentionally simple and does not yet group by task/session or compare trends across days.
-- `server.ts` is still a large mixed route/policy file; split route modules before much more orchestrator feature width.
+- `server.ts` is still large, but task-session injection policy has been extracted into `app/orchestrator/src/routing/task_session_injection.ts`; continue splitting route modules before much more orchestrator feature width.
 
 ## Next Best Work
 
 1. Add task/session grouping and trend comparisons to `dogfood:review`.
-2. Extract `server.ts` route/policy modules without behavior change.
+2. Continue extracting `server.ts` route/policy modules without behavior change.
 3. Add real Slack/GitHub MCP source dogfood config for Jason's installed servers, using the local-events MCP recipe as the template.
 4. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
 5. Later: real microphone/wake-word proof and always-listening voice UX.

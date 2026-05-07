@@ -74,7 +74,7 @@ First integrations:
 Later:
 
 - Notion.
-- Claude.
+- Hardened Claude Code runtime beyond the current configured-session adapter.
 - Gmail/Drive.
 - Safari.
 - Jira.
@@ -175,7 +175,7 @@ Implemented:
 - `app/orchestrator/src/task_sessions`: Codex native thread controller seam maps Codex app-server-style threads to routable task sessions and starts idempotent followup turns through an injected client. The app-server thread client maps `thread/list`, `thread/read`, and `turn/start` request/response shapes behind a testable `CodexAppServerRequest`; stdio transport talks newline JSON to `codex app-server --listen stdio://`. `ORCHESTRATOR_TASK_SESSIONS=codex_app_server` exposes local Codex threads through `/task-sessions`, with task binding from hot-loaded `ORCHESTRATOR_CODEX_TASK_MAP_PATH`, `PUT /task-sessions/:id/task-binding`, env JSON, or `[task:...]` title markers.
 - `app/orchestrator/src/task_sessions`: Claude CLI task-session controller exposes configured Claude Code sessions from `ORCHESTRATOR_CLAUDE_SESSIONS`; followups run `claude -p --output-format json --resume <session>` through injected exec with idempotent message records.
 - `app/macos`: selected review packets with `task_id` now show task-session binding controls. The queue app auto-loads `/task-sessions`, displays matching bound sessions, binds an unbound session through `PUT /task-sessions/:id/task-binding`, then enables the recommended-action handoff only when a matching task session is bound.
-- `app/orchestrator`: ambient route policy now separates passive context storage, task-session injection, and human interrupts. Browser context capture defaults to `store_only`; task-hinted Slack/GitHub/MCP/voice events inject into matching task sessions when available; explicit review requests still create human queue packets.
+- `app/orchestrator`: ambient route policy now separates passive context storage, task-session injection, and human queueing. Browser context capture defaults to `store_only`; task-hinted Slack/GitHub/MCP/voice events inject into matching task sessions when available; explicit review requests still create human queue packets.
 - `app/orchestrator`: `GET /events/:id` retrieves stored events and route decisions, so store-only context is machine-verifiable without queue pollution.
 - `app/orchestrator`: `GET /contexts?source=&task_id=&q=&limit=` lists and ranks stored context resources with event + route metadata, relevance score, and match reasons, giving agents a read path for passive browser captures and task-attached browser context. `POST /contexts/restore-plan` returns side-effect-free local instructions for browser-extension restore, URL open, or file open. Context restore requests now live behind the gateway store abstraction, persist in Postgres mode, support idempotent creation, support read-only peek, and use claim/done/failed/retry state so duplicate browser consumers do not process the same request and failed restores stay visible. `browser_context_ranked_search` proves ranking beats pure recency; `browser_context_store_only` proves passive capture plus context restore-plan, restore-request peek, claim, done, and status.
 - `app/orchestrator`: `GET /mcp-sources`, `GET /mcp-sources/:id`, `POST /mcp-sources/:id/poll`, `POST /mcp-sources/:id/poll-and-route`, and `POST /mcp-sources/poll-all-and-route` expose discoverable MCP polling loops; default mode uses seeded fake sources, and `ORCHESTRATOR_MCP_SOURCES_PATH` loads real read-only local MCP source configs through the SDK runtime.

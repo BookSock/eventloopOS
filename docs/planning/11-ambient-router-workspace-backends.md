@@ -271,7 +271,7 @@ Responsibilities:
 - create normalized events.
 - route events to tasks/agent threads.
 - reorder task queue.
-- decide whether to interrupt human.
+- decide whether to queue human-blocked work.
 - send messages to task agents.
 - maintain workspace/task registry.
 - enforce side-effect policy.
@@ -526,7 +526,7 @@ Rules:
 
 - Manual mode never closes/moves windows automatically.
 - Queue ranking and background agent loops continue.
-- New urgent interrupts may show lightweight notification, but do not steal focus unless user opts in.
+- New urgent work may rise in the queue, but does not steal focus in v1 unless user opts into interrupt behavior later.
 - Returning to event-loop mode records current visible layout as `manual_workspace_snapshot` so it can be restored if user exits again.
 - If task workspace restore has stale/missing windows, fallback is briefing overlay + open links, not aggressive window rearrangement.
 - AeroSpace backend should reserve eventloop-managed workspace names and avoid touching unmanaged workspaces in manual mode.

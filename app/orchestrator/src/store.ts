@@ -213,7 +213,7 @@ export function ingestEventAsReviewPacket(
   event: McpEvent,
   now: Date,
 ): StoredEventResult {
-  const existing = store.eventsByIdempotencyKey.get(event.idempotency_key);
+  const existing = store.eventsByIdempotencyKey.get(eventIdempotencyKey(event.source, event.idempotency_key));
   if (existing) {
     return existing;
   }
@@ -224,7 +224,7 @@ export function ingestEventAsReviewPacket(
       event,
       route_decision: routeDecision,
     };
-    store.eventsByIdempotencyKey.set(event.idempotency_key, result);
+    store.eventsByIdempotencyKey.set(eventIdempotencyKey(event.source, event.idempotency_key), result);
     store.eventsById.set(event.id, result);
     return result;
   }
@@ -239,7 +239,7 @@ export function ingestEventAsReviewPacket(
     review_packet: artifacts.review_packet,
     queue_item: attachPacket(store, artifacts.queue_item),
   };
-  store.eventsByIdempotencyKey.set(event.idempotency_key, result);
+  store.eventsByIdempotencyKey.set(eventIdempotencyKey(event.source, event.idempotency_key), result);
   store.eventsById.set(event.id, result);
   return result;
 }
@@ -249,7 +249,7 @@ export function recordEventRoute(
   event: McpEvent,
   routeDecision: RouteDecision,
 ): StoredEventResult {
-  const existing = store.eventsByIdempotencyKey.get(event.idempotency_key);
+  const existing = store.eventsByIdempotencyKey.get(eventIdempotencyKey(event.source, event.idempotency_key));
   if (existing) {
     return existing;
   }
@@ -258,7 +258,7 @@ export function recordEventRoute(
     event,
     route_decision: routeDecision,
   };
-  store.eventsByIdempotencyKey.set(event.idempotency_key, result);
+  store.eventsByIdempotencyKey.set(eventIdempotencyKey(event.source, event.idempotency_key), result);
   store.eventsById.set(event.id, result);
   return result;
 }
@@ -269,10 +269,10 @@ export function getStoredEvent(store: InMemoryStore, eventId: string): StoredEve
 
 export function getStoredEventByIdempotencyKey(
   store: InMemoryStore,
-  _source: string,
+  source: string,
   idempotencyKey: string,
 ): StoredEventResult | undefined {
-  return store.eventsByIdempotencyKey.get(idempotencyKey);
+  return store.eventsByIdempotencyKey.get(eventIdempotencyKey(source, idempotencyKey));
 }
 
 export function listContextEntries(store: InMemoryStore, query: ContextQuery = {}): ContextEntry[] {
@@ -762,6 +762,10 @@ function priorityReasonsForEvent(event: McpEvent): string[] {
 function stableId(input: string): string {
   const normalized = input.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
   return normalized || "unknown";
+}
+
+function eventIdempotencyKey(source: string, idempotencyKey: string): string {
+  return `${source}:${idempotencyKey}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

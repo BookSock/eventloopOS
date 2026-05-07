@@ -93,7 +93,12 @@ Low-risk split:
 - `routing/task_injection.ts`
 - `queue/execute_action.ts`
 
-Do behavior-preserving extraction first. Add tests before changing policy.
+Current extraction:
+
+- `app/orchestrator/src/routing/task_session_injection.ts` owns ambient/task-hinted injection policy.
+- `server.ts` still owns HTTP routes, validators, queue action execution, MCP poll routes, and workspace routes.
+
+Keep doing behavior-preserving extraction first. Add tests before changing policy.
 
 ## Next Best Work
 

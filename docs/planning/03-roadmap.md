@@ -114,7 +114,7 @@ Goal: add enough breadth for 3-5 trusted users.
 Deliver:
 
 - Notion adapter.
-- Claude adapter.
+- Harden Claude Code adapter beyond the current configured-session MVP.
 - Better workspace restore.
 - Optional ScreenCaptureKit context snapshot.
 - Import/export diagnostics.
