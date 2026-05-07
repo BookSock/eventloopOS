@@ -10,7 +10,12 @@ type ExecResult = {
 
 type ExecFunction = (command: string, args: string[]) => Promise<ExecResult>;
 
-export type DoctorCheckName = "orchestrator_health" | "aerospace_daemon" | "docker_daemon" | "codex_app_server";
+export type DoctorCheckName =
+  | "orchestrator_health"
+  | "aerospace_daemon"
+  | "docker_daemon"
+  | "codex_app_server"
+  | "browser_e2e";
 
 export type DoctorCheck = {
   name: DoctorCheckName;
@@ -51,6 +56,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     checkOrchestratorHealth(options.baseUrl, fetchFn),
     checkAerospaceDaemon(execFn),
     checkDockerDaemon(execFn),
+    checkBrowserE2E(execFn),
     options.codexCheckFn ? options.codexCheckFn() : checkCodexAppServer(),
   ]);
 
@@ -136,6 +142,30 @@ async function checkDockerDaemon(execFn: ExecFunction): Promise<DoctorCheck> {
       detail: classifyCommandFailure(error),
       command,
       source_url: "https://docs.docker.com/reference/cli/docker/system/info/",
+    };
+  }
+}
+
+async function checkBrowserE2E(execFn: ExecFunction): Promise<DoctorCheck> {
+  const command = ["pnpm", "--filter", "@eventloopos/browser-extension", "exec", "playwright", "--version"];
+  try {
+    const result = await execFn(command[0] ?? "pnpm", command.slice(1));
+    const version = result.stdout.trim();
+
+    return {
+      name: "browser_e2e",
+      ok: Boolean(version),
+      detail: version ? `Playwright available: ${version}` : "Playwright returned empty version",
+      command,
+      source_url: "https://playwright.dev/docs/chrome-extensions",
+    };
+  } catch (error) {
+    return {
+      name: "browser_e2e",
+      ok: false,
+      detail: classifyCommandFailure(error),
+      command,
+      source_url: "https://playwright.dev/docs/chrome-extensions",
     };
   }
 }

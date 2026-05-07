@@ -20,6 +20,10 @@ describe("developer doctor", () => {
           assert.deepEqual(args, ["info", "--format", "{{.ServerVersion}}"]);
           return { stdout: "29.3.1\n", stderr: "" };
         }
+        if (command === "pnpm") {
+          assert.deepEqual(args, ["--filter", "@eventloopos/browser-extension", "exec", "playwright", "--version"]);
+          return { stdout: "Version 1.59.1\n", stderr: "" };
+        }
         throw new Error(`unexpected command ${command}`);
       },
       codexCheckFn: async () => ({
@@ -57,6 +61,13 @@ describe("developer doctor", () => {
           source_url: "https://docs.docker.com/reference/cli/docker/system/info/",
         },
         {
+          name: "browser_e2e",
+          ok: true,
+          detail: "Playwright available: Version 1.59.1",
+          command: ["pnpm", "--filter", "@eventloopos/browser-extension", "exec", "playwright", "--version"],
+          source_url: "https://playwright.dev/docs/chrome-extensions",
+        },
+        {
           name: "codex_app_server",
           ok: true,
           detail: "Codex app-server responded; sampled 1 thread(s)",
@@ -75,6 +86,9 @@ describe("developer doctor", () => {
         if (command === "aerospace") {
           throw new Error("Can't connect to AeroSpace server. Is AeroSpace.app running?");
         }
+        if (command === "pnpm") {
+          return { stdout: "Version 1.59.1\n", stderr: "" };
+        }
         const error = new Error("docker failed") as Error & { stderr: string };
         error.stderr = "failed to connect to the docker API";
         throw error;
@@ -91,6 +105,7 @@ describe("developer doctor", () => {
     assert.deepEqual(report.checks.slice(1).map((check) => [check.name, check.ok, check.detail]), [
       ["aerospace_daemon", false, "Can't connect to AeroSpace server. Is AeroSpace.app running?"],
       ["docker_daemon", false, "failed to connect to the docker API"],
+      ["browser_e2e", true, "Playwright available: Version 1.59.1"],
       ["codex_app_server", true, "Codex app-server responded; sampled 1 thread(s)"],
     ]);
   });
