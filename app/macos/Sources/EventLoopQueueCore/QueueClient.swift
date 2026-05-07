@@ -151,6 +151,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private let contextRestorePlanResult: Result<ContextRestorePlan, Error>
     private let contextRestoreRequestResult: Result<ContextRestoreRequest, Error>
     private let contextRestoreStatusResult: Result<ContextRestoreRequest, Error>
+    private var contextRestoreStatusResults: [Result<ContextRestoreRequest, Error>]
     private var completedIds: [String] = []
     private var leasedIds: Set<String> = []
     private var leaseOrder: [String] = []
@@ -199,12 +200,14 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
                 )
             )
         ),
-        contextRestoreStatusResult: Result<ContextRestoreRequest, Error>? = nil
+        contextRestoreStatusResult: Result<ContextRestoreRequest, Error>? = nil,
+        contextRestoreStatusResults: [Result<ContextRestoreRequest, Error>] = []
     ) {
         self.packets = packets.sorted { $0.priority > $1.priority }
         self.contextRestorePlanResult = contextRestorePlanResult
         self.contextRestoreRequestResult = contextRestoreRequestResult
         self.contextRestoreStatusResult = contextRestoreStatusResult ?? contextRestoreRequestResult
+        self.contextRestoreStatusResults = contextRestoreStatusResults
     }
 
     public var completedPacketIds: [String] {
@@ -302,6 +305,9 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     public func contextRestoreRequest(id: String) async throws -> ContextRestoreRequest {
         try lock.withLock {
             contextRestoreStatusIds.append(id)
+            if !contextRestoreStatusResults.isEmpty {
+                return try contextRestoreStatusResults.removeFirst().get()
+            }
             return try contextRestoreStatusResult.get()
         }
     }

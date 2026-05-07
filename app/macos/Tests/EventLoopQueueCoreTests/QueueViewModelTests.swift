@@ -451,6 +451,68 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.contextRestoreState, .requested(resource, doneRequest))
     }
 
+    func testAutomaticContextRestoreRefreshPollsUntilDone() async {
+        let resource = ReviewContextResource(
+            id: "ctx_browser_123",
+            kind: "browser_tab",
+            title: "Launch doc",
+            url: "https://example.test/launch",
+            source: "chrome-extension",
+            restoreConfidence: "high"
+        )
+        let plan = ContextRestorePlan(
+            kind: "browser_extension_message",
+            sideEffect: "local",
+            executeSupported: false,
+            target: "eventloopOS browser extension runtime",
+            message: ContextRestoreMessage(type: "eventloop.restore", resource: resource),
+            url: nil,
+            path: nil,
+            line: nil,
+            column: nil
+        )
+        let pendingRequest = ContextRestoreRequest(
+            id: "ctx_restore_123",
+            status: "pending",
+            resource: resource,
+            restorePlan: plan
+        )
+        let leasedRequest = ContextRestoreRequest(
+            id: "ctx_restore_123",
+            status: "leased",
+            resource: resource,
+            restorePlan: plan
+        )
+        let doneRequest = ContextRestoreRequest(
+            id: "ctx_restore_123",
+            status: "done",
+            resource: resource,
+            restorePlan: plan,
+            result: ContextRestoreResult(
+                ok: true,
+                tabId: 7,
+                url: "https://example.test/launch",
+                restoredScroll: true
+            )
+        )
+        let client = FakeQueueClient(
+            contextRestoreRequestResult: .success(pendingRequest),
+            contextRestoreStatusResults: [.success(leasedRequest), .success(doneRequest)]
+        )
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.requestContextRestore(resource: resource)
+        viewModel.startAutomaticContextRestoreRefresh(intervalNanoseconds: 1_000_000, maxRefreshes: 3)
+
+        for _ in 0..<50 where client.checkedContextRestoreIds.count < 2 {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        viewModel.stopAutomaticContextRestoreRefresh()
+
+        XCTAssertEqual(client.checkedContextRestoreIds, ["ctx_restore_123", "ctx_restore_123"])
+        XCTAssertEqual(viewModel.contextRestoreState, .requested(resource, doneRequest))
+    }
+
     func testPrepareContextRestoreSurfacesFailure() async {
         let resource = ReviewContextResource(
             id: "ctx_unsupported",

@@ -56,12 +56,12 @@ Done:
 - Workspace restore planning pause in manual mode.
 - Context resource restore request from queue UI.
 - Restore request status refresh.
+- Automatic restore request status polling while Mac UI is open.
 - UI shows queued/done/failed restore state.
 
 Gap:
 
 - No polished menu bar app shell yet.
-- No automatic polling of restore status from Mac UI; user clicks refresh.
 - No real installed Chrome extension + Mac app combined live UI test yet.
 
 ## Orchestrator Loop
@@ -106,8 +106,7 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add Mac auto-refresh for requested restore status.
-2. Add installed Chrome/native-host live smoke with real extension ID.
-3. Add local Docker/Postgres runner so live Postgres restore-request tests stop skipping.
-4. Add tiny dev command that boots orchestrator + browser E2E + harness as one command.
-5. Add local voice capture/wake-word adapter behind same `/voice/commands` path.
+1. Add installed Chrome/native-host live smoke with real extension ID.
+2. Add local Docker/Postgres runner so live Postgres restore-request tests stop skipping.
+3. Add tiny dev command that boots orchestrator + browser E2E + harness as one command.
+4. Add local voice capture/wake-word adapter behind same `/voice/commands` path.

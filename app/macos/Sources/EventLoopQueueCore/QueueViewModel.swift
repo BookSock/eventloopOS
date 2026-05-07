@@ -13,6 +13,7 @@ public final class QueueViewModel: ObservableObject {
     private let client: any QueueClient
     private let workspaceClient: any WorkspaceClient
     private var leaseRenewalTask: Task<Void, Never>?
+    private var contextRestoreRefreshTask: Task<Void, Never>?
 
     public init(
         client: any QueueClient,
@@ -32,6 +33,7 @@ public final class QueueViewModel: ObservableObject {
 
     deinit {
         leaseRenewalTask?.cancel()
+        contextRestoreRefreshTask?.cancel()
     }
 
     public var selectedPacket: ReviewPacket? {
@@ -177,6 +179,38 @@ public final class QueueViewModel: ObservableObject {
         leaseRenewalTask = nil
     }
 
+    public func startAutomaticContextRestoreRefresh(
+        intervalNanoseconds: UInt64 = 2_000_000_000,
+        maxRefreshes: Int? = nil
+    ) {
+        stopAutomaticContextRestoreRefresh()
+        contextRestoreRefreshTask = Task { @MainActor [weak self] in
+            var refreshCount = 0
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: intervalNanoseconds)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else {
+                    return
+                }
+                let didRefresh = await self?.refreshContextRestoreRequestIfNeeded() ?? false
+                if didRefresh {
+                    refreshCount += 1
+                }
+                if let maxRefreshes, refreshCount >= maxRefreshes {
+                    return
+                }
+            }
+        }
+    }
+
+    public func stopAutomaticContextRestoreRefresh() {
+        contextRestoreRefreshTask?.cancel()
+        contextRestoreRefreshTask = nil
+    }
+
     public func prepareWorkspaceRestore(snapshot: WorkspaceSnapshot) async {
         guard shouldRestoreWorkspace else {
             workspaceRestoreState = .skippedManualMode
@@ -251,15 +285,25 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func refreshContextRestoreRequest() async {
+        _ = await refreshContextRestoreRequestIfNeeded(allowTerminalRefresh: true)
+    }
+
+    @discardableResult
+    public func refreshContextRestoreRequestIfNeeded(allowTerminalRefresh: Bool = false) async -> Bool {
         guard case let .requested(resource, restoreRequest) = contextRestoreState else {
-            return
+            return false
+        }
+        guard allowTerminalRefresh || restoreRequest.status != "done" else {
+            return false
         }
 
         do {
             let updated = try await client.contextRestoreRequest(id: restoreRequest.id)
             contextRestoreState = .requested(resource, updated)
+            return true
         } catch {
             contextRestoreState = .failed(resource, error.localizedDescription)
+            return true
         }
     }
 

@@ -108,12 +108,14 @@ struct QueueWindowView: View {
         .task {
             await viewModel.loadQueue()
             viewModel.startAutomaticLeaseRenewal()
+            viewModel.startAutomaticContextRestoreRefresh()
         }
         .task(id: viewModel.selectedPacketID) {
             await viewModel.prepareSelectedWorkspaceRestore()
         }
         .onDisappear {
             viewModel.stopAutomaticLeaseRenewal()
+            viewModel.stopAutomaticContextRestoreRefresh()
         }
     }
 }
