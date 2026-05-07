@@ -6,9 +6,10 @@ export type OrchestratorConfig = {
   port: number;
   seedFixturePath?: string;
   databaseUrl?: string;
-  taskSessions: "fake" | "codex_app_server" | "off";
+  taskSessions: "fake" | "codex_app_server" | "claude_cli" | "off";
   codexTaskMap?: Record<string, string>;
   codexTaskMapPath?: string;
+  claudeSessionsRaw?: string;
   mcpSources: "seeded" | "config" | "off";
   mcpSourcesPath?: string;
   workspace: "aerospace" | "off";
@@ -44,11 +45,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
   const codexTaskMapPathRaw = env.ORCHESTRATOR_CODEX_TASK_MAP_PATH;
   const codexTaskMapPath = resolveConfiguredPath(codexTaskMapPathRaw);
   const codexTaskMap = parseCodexTaskMap(codexTaskMapRaw, issues);
+  validateClaudeSessionsRaw(env.ORCHESTRATOR_CLAUDE_SESSIONS, issues);
   if (codexTaskMapPathRaw !== undefined && !codexTaskMapPathRaw.trim()) {
     issues.push("ORCHESTRATOR_CODEX_TASK_MAP_PATH must be non-empty when set");
   }
-  if (taskSessionsRaw !== "fake" && taskSessionsRaw !== "codex_app_server" && taskSessionsRaw !== "off") {
-    issues.push("ORCHESTRATOR_TASK_SESSIONS must be fake, codex_app_server, or off");
+  if (taskSessionsRaw !== "fake" && taskSessionsRaw !== "codex_app_server" && taskSessionsRaw !== "claude_cli" && taskSessionsRaw !== "off") {
+    issues.push("ORCHESTRATOR_TASK_SESSIONS must be fake, codex_app_server, claude_cli, or off");
   }
   if (mcpSourcesRaw !== "seeded" && mcpSourcesRaw !== "config" && mcpSourcesRaw !== "off") {
     issues.push("ORCHESTRATOR_MCP_SOURCES must be seeded, config, or off");
@@ -67,7 +69,13 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
     return { ok: false, issues };
   }
 
-  const taskSessions = taskSessionsRaw === "off" ? "off" : taskSessionsRaw === "codex_app_server" ? "codex_app_server" : "fake";
+  const taskSessions = taskSessionsRaw === "off"
+    ? "off"
+    : taskSessionsRaw === "codex_app_server"
+      ? "codex_app_server"
+      : taskSessionsRaw === "claude_cli"
+        ? "claude_cli"
+        : "fake";
   const mcpSources = mcpSourcesRaw === "config" ? "config" : mcpSourcesRaw === "off" ? "off" : "seeded";
   const workspace = workspaceRaw === "off" ? "off" : "aerospace";
   const workspaceExecute = workspaceExecuteRaw === "enabled" ? "enabled" : "disabled";
@@ -82,6 +90,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
       taskSessions,
       codexTaskMap,
       codexTaskMapPath,
+      claudeSessionsRaw: env.ORCHESTRATOR_CLAUDE_SESSIONS,
       mcpSources,
       mcpSourcesPath,
       workspace,
@@ -123,5 +132,35 @@ function parseCodexTaskMap(raw: string | undefined, issues: string[]): Record<st
   } catch {
     issues.push("ORCHESTRATOR_CODEX_TASK_MAP must be valid JSON");
     return undefined;
+  }
+}
+
+function validateClaudeSessionsRaw(raw: string | undefined, issues: string[]): void {
+  if (!raw) return;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+      issues.push("ORCHESTRATOR_CLAUDE_SESSIONS must be a JSON object mapping Claude session ids to task ids or metadata");
+      return;
+    }
+    for (const [sessionId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!sessionId) {
+        issues.push("ORCHESTRATOR_CLAUDE_SESSIONS entries must have non-empty session ids");
+        return;
+      }
+      if (typeof value === "string") {
+        if (!value) {
+          issues.push("ORCHESTRATOR_CLAUDE_SESSIONS string entries must be non-empty task ids");
+          return;
+        }
+        continue;
+      }
+      if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        issues.push("ORCHESTRATOR_CLAUDE_SESSIONS entries must be task id strings or metadata objects");
+        return;
+      }
+    }
+  } catch {
+    issues.push("ORCHESTRATOR_CLAUDE_SESSIONS must be valid JSON");
   }
 }

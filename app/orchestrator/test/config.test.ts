@@ -68,6 +68,37 @@ describe("orchestrator config schema", () => {
     }
   });
 
+  it("allows Claude CLI task sessions with configured session map", () => {
+    const result = loadConfig({
+      ORCHESTRATOR_TASK_SESSIONS: "claude_cli",
+      ORCHESTRATOR_CLAUDE_SESSIONS: JSON.stringify({
+        "claude-session-blog": {
+          task_id: "task_blog_feedback",
+          name: "Blog feedback",
+          cwd: "/repo",
+        },
+      }),
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.equal(result.value.taskSessions, "claude_cli");
+      assert.equal(result.value.claudeSessionsRaw, "{\"claude-session-blog\":{\"task_id\":\"task_blog_feedback\",\"name\":\"Blog feedback\",\"cwd\":\"/repo\"}}");
+    }
+  });
+
+  it("rejects malformed Claude session config JSON", () => {
+    const result = loadConfig({
+      ORCHESTRATOR_TASK_SESSIONS: "claude_cli",
+      ORCHESTRATOR_CLAUDE_SESSIONS: "{bad json",
+    });
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.deepEqual(result.issues, ["ORCHESTRATOR_CLAUDE_SESSIONS must be valid JSON"]);
+    }
+  });
+
   it("rejects malformed Codex task map JSON", () => {
     const result = loadConfig({
       ORCHESTRATOR_CODEX_TASK_MAP: "{bad json",
@@ -144,7 +175,7 @@ describe("orchestrator config schema", () => {
 
     assert.equal(result.ok, false);
     if (!result.ok) {
-      assert.deepEqual(result.issues, ["ORCHESTRATOR_TASK_SESSIONS must be fake, codex_app_server, or off"]);
+      assert.deepEqual(result.issues, ["ORCHESTRATOR_TASK_SESSIONS must be fake, codex_app_server, claude_cli, or off"]);
     }
   });
 

@@ -98,7 +98,7 @@ Do behavior-preserving extraction first. Add tests before changing policy.
 ## Next Best Work
 
 1. `server.ts` route/policy extraction.
-2. Claude Code task-session adapter.
-3. Task/session grouping in dogfood review.
-4. Browser/UI retry affordance for failed context restore requests.
-5. Show restore confidence reason in Mac queue UI.
+2. Task/session grouping in dogfood review.
+3. Browser/UI retry affordance for failed context restore requests.
+4. Show restore confidence reason in Mac queue UI.
+5. Real Claude followup dogfood against a harmless configured session.

@@ -11,6 +11,7 @@ import { McpSdkRuntime } from "./mcp_sources/runtime/sdk_runtime.js";
 import { createGatewayServer } from "./server.js";
 import { PostgresObservability, type Observability } from "./observability.js";
 import { createSeededStore } from "./store.js";
+import { ClaudeCliTaskSessionController, parseClaudeSessionConfigs } from "./task_sessions/claude_cli_task_session_controller.js";
 import { CodexAppServerThreadClient } from "./task_sessions/codex_app_server_thread_client.js";
 import { createCodexAppServerStdioConnection, type CodexAppServerStdioConnection } from "./task_sessions/codex_app_server_stdio.js";
 import { CodexNativeThreadController } from "./task_sessions/codex_native_thread_controller.js";
@@ -112,14 +113,23 @@ function createTaskSessionRuntime(): { controller: TaskSessionController; close?
     };
   }
 
+  if (config.value.taskSessions === "claude_cli") {
+    return {
+      controller: new ClaudeCliTaskSessionController({
+        sessions: parseClaudeSessionConfigs(config.value.claudeSessionsRaw),
+        execFile: execFilePromise,
+      }),
+    };
+  }
+
   return {
     controller: createSeededDevelopmentTaskSessions(),
   };
 }
 
-async function execFilePromise(command: string, args: string[]) {
+async function execFilePromise(command: string, args: string[], options: { cwd?: string; timeoutMs?: number } = {}) {
   return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    execFile(command, args, { encoding: "utf8", timeout: 5_000 }, (error, stdout, stderr) => {
+    execFile(command, args, { encoding: "utf8", timeout: options.timeoutMs ?? 5_000, cwd: options.cwd }, (error, stdout, stderr) => {
       if (error) {
         reject(error);
         return;
