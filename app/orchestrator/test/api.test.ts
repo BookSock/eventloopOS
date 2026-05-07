@@ -483,6 +483,99 @@ describe("orchestrator gateway API", () => {
       assert.equal(restorePlanBody.restore_plan.message.type, "eventloop.restore");
       assert.equal(restorePlanBody.restore_plan.message.resource.url, "https://example.test/launch");
 
+      const restoreRequestResponse = await fetch(`${routeBaseUrl}/contexts/restore-requests`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_browser_restore_launch",
+        },
+        body: JSON.stringify({ resource: contextsBody.entries[0].resource }),
+      });
+      const restoreRequestBody = await restoreRequestResponse.json() as {
+        restore_request: {
+          id: string;
+          status: string;
+          restore_plan: {
+            kind: string;
+            message: {
+              type: string;
+              resource: {
+                url: string;
+              };
+            };
+          };
+        };
+      };
+      assert.equal(restoreRequestResponse.status, 202);
+      assert.equal(restoreRequestBody.restore_request.status, "pending");
+      assert.equal(restoreRequestBody.restore_request.restore_plan.kind, "browser_extension_message");
+      assert.equal(restoreRequestBody.restore_request.restore_plan.message.type, "eventloop.restore");
+
+      const duplicateRestoreRequestResponse = await fetch(`${routeBaseUrl}/contexts/restore-requests`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_browser_restore_launch",
+        },
+        body: JSON.stringify({ resource: contextsBody.entries[0].resource }),
+      });
+      const duplicateRestoreRequestBody = await duplicateRestoreRequestResponse.json() as {
+        restore_request: { id: string };
+      };
+      assert.equal(duplicateRestoreRequestResponse.status, 200);
+      assert.equal(duplicateRestoreRequestBody.restore_request.id, restoreRequestBody.restore_request.id);
+
+      const nextRestoreRequestResponse = await fetch(`${routeBaseUrl}/contexts/restore-requests/next`);
+      const nextRestoreRequestBody = await nextRestoreRequestResponse.json() as {
+        restore_request: {
+          id: string;
+          restore_plan: {
+            message: {
+              resource: {
+                url: string;
+              };
+            };
+          };
+        };
+      };
+      assert.equal(nextRestoreRequestResponse.status, 200);
+      assert.equal(nextRestoreRequestBody.restore_request.id, restoreRequestBody.restore_request.id);
+      assert.equal(
+        nextRestoreRequestBody.restore_request.restore_plan.message.resource.url,
+        "https://example.test/launch",
+      );
+
+      const doneRestoreRequestResponse = await fetch(
+        `${routeBaseUrl}/contexts/restore-requests/${restoreRequestBody.restore_request.id}/done`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ result: { ok: true, tabId: 7, restoredScroll: true } }),
+        },
+      );
+      const doneRestoreRequestBody = await doneRestoreRequestResponse.json() as {
+        restore_request: {
+          status: string;
+          result: {
+            ok: boolean;
+            tabId: number;
+            restoredScroll: boolean;
+          };
+        };
+      };
+      assert.equal(doneRestoreRequestResponse.status, 200);
+      assert.equal(doneRestoreRequestBody.restore_request.status, "done");
+      assert.deepEqual(doneRestoreRequestBody.restore_request.result, { ok: true, tabId: 7, restoredScroll: true });
+
+      const emptyRestoreRequestResponse = await fetch(`${routeBaseUrl}/contexts/restore-requests/next`);
+      const emptyRestoreRequestBody = await emptyRestoreRequestResponse.json() as {
+        restore_request: unknown;
+      };
+      assert.equal(emptyRestoreRequestResponse.status, 200);
+      assert.equal(emptyRestoreRequestBody.restore_request, null);
+
       const urlRestorePlanResponse = await fetch(`${routeBaseUrl}/contexts/restore-plan`, {
         method: "POST",
         headers: {

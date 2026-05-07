@@ -29,8 +29,21 @@ type RequestContext = {
   url: URL;
 };
 
+type ContextRestoreRequestRecord = {
+  id: string;
+  status: "pending" | "done";
+  created_at: string;
+  updated_at: string;
+  idempotency_key?: string;
+  resource: Record<string, unknown>;
+  restore_plan: Record<string, unknown>;
+  result?: unknown;
+};
+
 export function createGatewayServer(options: GatewayServerOptions): Server {
   const now = options.now ?? (() => new Date());
+  const contextRestoreRequests = new Map<string, ContextRestoreRequestRecord>();
+  const contextRestoreRequestIdsByIdempotencyKey = new Map<string, string>();
 
   return createServer(async (request, response) => {
     const context = buildContext(request);
@@ -98,6 +111,92 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
 
         return sendJson(response, 200, {
           restore_plan: plan,
+          request_id: context.requestId,
+        });
+      }
+
+      if (request.method === "POST" && context.url.pathname === "/contexts/restore-requests") {
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) {
+          return sendSchemaError(response, context, parsed.message);
+        }
+        const validation = validateContextRestorePlanRequest(parsed.value);
+        if (!validation.ok) {
+          return sendSchemaError(response, context, validation.message);
+        }
+        const plan = buildContextRestorePlan(validation.resource);
+        if (!plan) {
+          return sendError(response, 422, context, "context_restore_unsupported", "context resource is not restorable");
+        }
+        if (plan.kind !== "browser_extension_message") {
+          return sendError(
+            response,
+            422,
+            context,
+            "context_restore_not_browser_extension",
+            "context restore request polling only supports browser extension messages",
+          );
+        }
+
+        if (context.idempotencyKey) {
+          const existingId = contextRestoreRequestIdsByIdempotencyKey.get(context.idempotencyKey);
+          if (existingId) {
+            const existing = contextRestoreRequests.get(existingId);
+            if (existing) {
+              return sendJson(response, 200, {
+                restore_request: presentContextRestoreRequest(existing),
+                request_id: context.requestId,
+              });
+            }
+          }
+        }
+
+        const createdAt = now().toISOString();
+        const record: ContextRestoreRequestRecord = {
+          id: `ctx_restore_${randomUUID()}`,
+          status: "pending",
+          created_at: createdAt,
+          updated_at: createdAt,
+          idempotency_key: context.idempotencyKey,
+          resource: validation.resource,
+          restore_plan: plan,
+        };
+        contextRestoreRequests.set(record.id, record);
+        if (context.idempotencyKey) {
+          contextRestoreRequestIdsByIdempotencyKey.set(context.idempotencyKey, record.id);
+        }
+
+        return sendJson(response, 202, {
+          restore_request: presentContextRestoreRequest(record),
+          request_id: context.requestId,
+        });
+      }
+
+      if (request.method === "GET" && context.url.pathname === "/contexts/restore-requests/next") {
+        const nextRequest = Array.from(contextRestoreRequests.values()).find((record) => record.status === "pending");
+        return sendJson(response, 200, {
+          restore_request: nextRequest ? presentContextRestoreRequest(nextRequest) : null,
+          request_id: context.requestId,
+        });
+      }
+
+      const restoreDoneMatch = context.url.pathname.match(/^\/contexts\/restore-requests\/([^/]+)\/done$/);
+      if (request.method === "POST" && restoreDoneMatch) {
+        const restoreRequestId = decodeURIComponent(restoreDoneMatch[1]);
+        const record = contextRestoreRequests.get(restoreRequestId);
+        if (!record) {
+          return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
+        }
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) {
+          return sendSchemaError(response, context, parsed.message);
+        }
+        record.status = "done";
+        record.updated_at = now().toISOString();
+        record.result = isRecord(parsed.value) && "result" in parsed.value ? parsed.value.result : parsed.value;
+
+        return sendJson(response, 200, {
+          restore_request: presentContextRestoreRequest(record),
           request_id: context.requestId,
         });
       }
@@ -793,6 +892,19 @@ function buildContextRestorePlan(resource: Record<string, unknown>): Record<stri
   }
 
   return undefined;
+}
+
+function presentContextRestoreRequest(record: ContextRestoreRequestRecord): Record<string, unknown> {
+  return {
+    id: record.id,
+    status: record.status,
+    created_at: record.created_at,
+    updated_at: record.updated_at,
+    idempotency_key: record.idempotency_key,
+    resource: record.resource,
+    restore_plan: record.restore_plan,
+    result: record.result,
+  };
 }
 
 function validateEventRequest(input: unknown): { ok: true; event: McpEvent } | { ok: false; message: string } {

@@ -9,7 +9,7 @@ test("manifest is Chrome MV3 and points at browser-ready scripts", async () => {
   assert.equal(manifest.manifest_version, 3);
   assert.equal(manifest.background.type, "module");
   assert.equal(manifest.background.service_worker, "src/background.js");
-  assert.deepEqual(manifest.permissions.sort(), ["activeTab", "nativeMessaging", "scripting", "tabs"].sort());
+  assert.deepEqual(manifest.permissions.sort(), ["activeTab", "alarms", "nativeMessaging", "scripting", "tabs"].sort());
   assert.equal(manifest.content_scripts[0].js[0], "src/content-script.js");
   assert.equal(/\bimport\s+/.test(contentScript), false);
 });
