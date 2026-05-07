@@ -10,6 +10,7 @@ Repo now has working MVP spine:
 - Native host = Chrome Native Messaging bridge.
 - Test harness = repeatable agent feedback loop.
 - Planning stance = intentional intake stack, not aggressive interruption product.
+- Voice transcript ingress and AeroSpace execution are optional dogfood experiments, not next-lane MVP requirements.
 - `pnpm run test:e2e:live:boot` boots orchestrator, runs live harness/native/browser E2E, then stops server.
 - Boot live smoke also runs Mac `HTTPQueueClient` against the live orchestrator and proves context restore request create/read round-trip.
 - `pnpm run test:e2e:live:full` runs the same booted-orchestrator smoke plus installed Chromium extension/native host capture against that same orchestrator.
@@ -107,12 +108,11 @@ Done:
 - Postgres API restart smoke also proves a failed browser restore request remains visible after server restart, can be retried to `pending`, and can be claimed again by a browser worker.
 - Event routing now falls back to the human queue when a task-session followup send fails or returns `blocked`. The followup failure/block is recorded in activity/metrics, the event is stored as a normal human queue item, and duplicate retries return the stored queue route without re-sending the failed/blocked followup.
 - Task followups now pass through a shared `before_task_message` policy gate. Prompt-injection-looking untrusted Slack/GitHub/MCP/voice text is fenced as untrusted data in the followup body and blocks before runtime send; event-route blocks fall back to human queue review.
-- Doctor checks orchestrator health, AeroSpace, Docker, browser Playwright readiness, Mac/browser restore smoke Swift readiness, optional MCP source config readiness, optional voice transcript command readiness, and Codex app-server.
+- Doctor checks orchestrator health, optional AeroSpace readiness, Docker, browser Playwright readiness, Mac/browser restore smoke Swift readiness, optional MCP source config readiness, optional voice transcript command readiness, and Codex app-server.
 - `pnpm --filter @eventloopos/orchestrator run live:aerospace` builds and emits a machine-readable skip by default. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1`, it checks live AeroSpace status/capture/restore-plan without executing workspace moves. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE_EXECUTE=1`, it also moves one real window to a scratch workspace, restores it, and verifies it returned.
 - `POST /workspace/restore` now caches execution receipts by `Idempotency-Key`. Duplicate calls return the first plan/receipt without re-executing workspace commands, and Postgres mode preserves this replay behavior across orchestrator restart through the `receipts` table.
-- `voice:listen-command` runs a configured local STT command and pipes line-delimited transcripts into the same wake-phrase voice router. Command args are JSON argv, not shell-parsed strings.
-- `voice:listen-command` also supports `EVENTLOOPOS_VOICE_STT_PRESET=whisper_cpp_stream` so local whisper.cpp microphone capture can be configured with env vars (`EVENTLOOPOS_WHISPER_MODEL`, optional step/length/keep/thread/capture/language settings) instead of manual JSON argv.
-- `voice:stt-smoke` is an opt-in fixture-audio proof for local `whisper-cli`: it generates spoken audio with macOS `say`, converts it with `ffmpeg`, transcribes with a real GGML model, and checks expected transcript terms.
+- Optional voice transcript ingress exists for experiments: `voice:listen-command` runs a configured local STT command and pipes line-delimited transcripts into the same wake-phrase voice router. Command args are JSON argv, not shell-parsed strings.
+- Optional voice smoke support exists: `voice:listen-command` supports `EVENTLOOPOS_VOICE_STT_PRESET=whisper_cpp_stream`, and `voice:stt-smoke` can test local `whisper-cli` with fixture audio.
 
 Gap:
 
@@ -149,7 +149,7 @@ Strong tests now:
 - File-backed local events MCP server exists for dogfood. `config/mcp-sources.local-events.example.json` launches it over stdio, reads `EVENTLOOPOS_LOCAL_EVENTS_PATH`, and returns generic event-ish `items[]` for MCP poll routing.
 - Read-only `agent-slack` MCP wrapper exists for Jason dogfood. `config/mcp-sources.agent-slack.example.json` launches it over stdio, reads `EVENTLOOPOS_AGENT_SLACK_*` filters, shells out to `agent-slack search messages`, maps compact Slack search output into `slack_message_to_event` items, and accepts the orchestrator MCP cursor as an `--after YYYY-MM-DD` fallback when no explicit `EVENTLOOPOS_AGENT_SLACK_AFTER` is set. It does not expose Slack write tools. Same-day refetch is expected; idempotency/cursor dedupe owns exact duplicate suppression.
 - `GET /metrics` and `GET /activity?limit=` expose local dogfood counters and recent activity. Postgres mode persists them across orchestrator restarts; in-memory mode keeps current-process history. Current coverage records event routing, queue done, context restore request/done/failed/retry, and MCP poll cycles.
-- `pnpm run dogfood:review` prints a local daily-ish review from `/metrics` and `/activity`; set `EVENTLOOPOS_DOGFOOD_REVIEW_FORMAT=json` for agent-readable output. The report now includes derived rates, task rollups, task-session rollups, queue rollups, and queue time-to-done.
+- `pnpm run dogfood:review` prints a local daily-ish review from `/metrics` and `/activity`; set `EVENTLOOPOS_DOGFOOD_REVIEW_FORMAT=json` for agent-readable output. The report now includes derived rates, task rollups, task-session rollups, queue rollups, queue time-to-done, daily rollups, and adjacent-day trend deltas.
 - Restore activity and counters include provider-specific created/done/failed/retried data, and `dogfood:review` groups provider restore success/failure.
 - Task followups record attempted plus sent/blocked/failed activity with origin, task session ID, idempotency key, event IDs, and text length, giving a lightweight outbox-style audit trail without a separate durable outbox table.
 - Task followup chaos tests prove an event-route runtime failure or blocked followup creates a human queue fallback, records attempted/failed or attempted/blocked activity, and dedupes retry without sending another task message.
@@ -168,14 +168,17 @@ Weak tests:
 - Docker-backed Postgres live tests pass on this machine after launching Docker.app; native Postgres live tests also pass.
 - AeroSpace live restore needs installed/running AeroSpace. Local live smoke proves capture, planning, and opt-in one-window restore execution; it does not prove full multi-window layout reconstruction under every app/window edge case.
 - No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, temp `.app` bundle launch, and opt-in AppleScript menu/window/manual-mode interaction.
-- No real microphone wake-word proof yet; current coverage proves fixture-audio STT with `whisper-cli`, local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
-- Activity history is durable in Postgres mode and process-local in in-memory mode. The report groups by task/session/queue but does not yet compare trends across days.
+- No real microphone wake-word proof yet. This is deferred; current optional coverage proves fixture-audio STT with `whisper-cli`, local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
+- Activity history is durable in Postgres mode and process-local in in-memory mode. The report groups by task/session/queue and compares adjacent days when the selected window spans multiple days.
 - `server.ts` is much smaller: task-session injection policy, task followup audit, observability routes, task-session routes, context/context-restore routes, queue routes, workspace routes, MCP source routes, and events/voice/review-packet routes have been extracted into smaller modules. It is down to roughly 250 lines after the task-session route split.
 
 ## Next Best Work
 
-1. Add trend comparisons to `dogfood:review`.
-2. Add a real GitHub MCP source dogfood config for Jason's installed tools, using the local-events and agent-slack recipes as templates.
-3. Real Claude+Codex composite dogfood with harmless sessions configured together.
-4. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-5. Later: real microphone/wake-word proof and always-listening voice UX.
+1. Add browser extension domain allowlist gating before broad private-browser dogfood.
+2. Persist MCP poll cursor/seen state so Slack/GitHub polling survives orchestrator restart without noisy refetch.
+3. Add a real GitHub installed-tool MCP source dogfood config/wrapper for Jason's installed tools, using the local-events and agent-slack recipes as templates.
+4. Add durable `task_messages` history for Codex/Claude followups and idempotency.
+5. Real Claude+Codex composite dogfood with harmless sessions configured together.
+6. Fix manual-mode exit snapshot semantics.
+7. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+8. Later: real microphone/wake-word proof and always-listening voice UX.

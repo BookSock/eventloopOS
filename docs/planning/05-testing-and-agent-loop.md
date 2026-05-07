@@ -38,8 +38,8 @@ Required early:
 - hook block/approval/timeout tests.
 - prompt snapshot tests for router/task prompts.
 - receipt chain tests.
-- procedure pause/resume tests.
-- autonomy grant tests by surface.
+- procedure pause/resume tests later, after repeated workflows become formal procedures.
+- autonomy grant tests for risky task-message/terminal surfaces.
 - prompt-injection source fixture tests.
 
 Reason:
@@ -60,7 +60,7 @@ Test pure logic:
 - Review packet schema.
 - URL/context resolver.
 - Native messaging frame encode/decode.
-- Webhook signature verification.
+- Webhook signature verification later, when push/webhook ingest is added.
 
 ### Integration
 
@@ -70,14 +70,14 @@ Test real boundaries:
 - Migrations.
 - Queue leases/retries/dead-letter.
 - Fake Slack event -> `Event`.
-- Fake GitHub MCP/webhook event -> `Task`.
+- Fake GitHub MCP event -> `Task`.
 - Fake task/source issue -> linked task.
 - Fake agent run -> blocked review packet.
 - Browser extension native-message contract.
 - macOS app local API contract.
 - MCP reconnect/backoff/circuit breaker.
 - orphan MCP subprocess cleanup.
-- task-session steering modes.
+- task-session `followup` and `steer` modes.
 - ownership lock conflicts.
 - hook policy decisions.
 
@@ -147,9 +147,7 @@ Keep deterministic fixtures:
 ```text
 tests/fixtures/events/slack_blog_feedback.json
 tests/fixtures/events/github_pr_ci_failed.json
-tests/fixtures/events/linear_blocked_issue.json
 tests/fixtures/events/codex_waiting_for_review.json
-tests/fixtures/events/notion_doc_changed.json
 tests/fixtures/events/mcp_server_flaky.json
 tests/fixtures/events/ownership_conflict_slack.json
 tests/fixtures/events/prompt_injection_slack_message.json
@@ -157,12 +155,10 @@ tests/fixtures/db/seed.sql
 tests/fixtures/browser/profile/
 tests/fixtures/workspaces/blog_review.json
 tests/fixtures/task_sessions/steer_followup_collect.json
-tests/fixtures/procedures/external_send_approval.json
 tests/golden/review_packets/blog_feedback_packet.json
 tests/golden/review_packets/ci_failed_packet.json
 tests/golden/review_packets/external_send_approval_packet.json
 tests/golden/router_prompts/blog_route_prompt.txt
-tests/golden/router_prompts/voice_priority_prompt.txt
 ```
 
 Fixture rules:
@@ -285,7 +281,7 @@ Orchestrator:
 
 Integrations:
 
-- Fake MCP poll/webhook verifies expected auth/signature path.
+- Fake MCP poll verifies expected config/runtime path.
 - Payload normalized.
 - Rate-limit/retry branch tested.
 - No live credentials needed for CI.

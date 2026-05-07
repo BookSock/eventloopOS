@@ -35,6 +35,7 @@ type DogfoodReviewReport = {
   queue_rollups: QueueRollupSummary[];
   restore_provider_rollups: RestoreProviderRollupSummary[];
   daily_rollups: DailyActivityRollupSummary[];
+  daily_trends: DailyActivityTrendSummary[];
   derived: {
     restore_success_rate: number | null;
     queue_clearance_rate: number | null;
@@ -86,6 +87,17 @@ type DailyActivityRollupSummary = {
   done: number;
   followups_sent: number;
   failed: number;
+};
+
+type DailyActivityTrendSummary = {
+  date: string;
+  previous_date: string;
+  events_delta: number;
+  routed_delta: number;
+  queued_delta: number;
+  done_delta: number;
+  followups_sent_delta: number;
+  failed_delta: number;
 };
 
 export function dogfoodReviewOptionsFromEnv(env: NodeJS.ProcessEnv): DogfoodReviewOptions {
@@ -147,13 +159,15 @@ function buildDogfoodReviewReport(input: {
   events: ActivityEvent[];
   fetched_activity_count: number;
 }): DogfoodReviewReport {
+  const dailyRollups = dailyActivityRollups(input.events);
   return {
     ...input,
     task_rollups: rollupBy(input.events, (event) => event.task_id),
     session_rollups: rollupBy(input.events, (event) => event.task_session_id),
     queue_rollups: queueRollups(input.events),
     restore_provider_rollups: restoreProviderRollups(input.events),
-    daily_rollups: dailyActivityRollups(input.events),
+    daily_rollups: dailyRollups,
+    daily_trends: dailyActivityTrends(dailyRollups),
     derived: {
       restore_success_rate: ratio(
         input.metrics.counters.restore_requests_done_total,
@@ -226,6 +240,17 @@ function formatTextReport(report: DogfoodReviewReport): string {
     for (const rollup of report.daily_rollups) {
       lines.push(
         `- ${rollup.date} events=${rollup.events} routed=${rollup.routed} queued=${rollup.queued} done=${rollup.done} followups_sent=${rollup.followups_sent} failed=${rollup.failed}`,
+      );
+    }
+  }
+
+  lines.push("", "Daily Trends:");
+  if (report.daily_trends.length === 0) {
+    lines.push("- none");
+  } else {
+    for (const trend of report.daily_trends) {
+      lines.push(
+        `- ${trend.date} vs ${trend.previous_date} events_delta=${formatSigned(trend.events_delta)} routed_delta=${formatSigned(trend.routed_delta)} queued_delta=${formatSigned(trend.queued_delta)} done_delta=${formatSigned(trend.done_delta)} followups_sent_delta=${formatSigned(trend.followups_sent_delta)} failed_delta=${formatSigned(trend.failed_delta)}`,
       );
     }
   }
@@ -356,6 +381,26 @@ function dailyActivityRollups(events: ActivityEvent[]): DailyActivityRollupSumma
   return [...rollups.values()].sort((left, right) => right.date.localeCompare(left.date));
 }
 
+function dailyActivityTrends(dailyRollups: DailyActivityRollupSummary[]): DailyActivityTrendSummary[] {
+  const chronological = [...dailyRollups].sort((left, right) => left.date.localeCompare(right.date));
+  const trends: DailyActivityTrendSummary[] = [];
+  for (let index = 1; index < chronological.length; index += 1) {
+    const previous = chronological[index - 1];
+    const current = chronological[index];
+    trends.push({
+      date: current.date,
+      previous_date: previous.date,
+      events_delta: current.events - previous.events,
+      routed_delta: current.routed - previous.routed,
+      queued_delta: current.queued - previous.queued,
+      done_delta: current.done - previous.done,
+      followups_sent_delta: current.followups_sent - previous.followups_sent,
+      failed_delta: current.failed - previous.failed,
+    });
+  }
+  return trends.sort((left, right) => right.date.localeCompare(left.date));
+}
+
 function appendRollupLines(lines: string[], rollups: RollupSummary[]): void {
   if (rollups.length === 0) {
     lines.push("- none");
@@ -387,6 +432,10 @@ function formatDuration(ms: number): string {
   const seconds = ms / 1_000;
   if (seconds < 60) return `${seconds.toFixed(1)}s`;
   return `${(seconds / 60).toFixed(1)}m`;
+}
+
+function formatSigned(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
 }
 
 function parsePositiveInteger(input: string | undefined, fallback: number): number {

@@ -29,7 +29,7 @@ Pain already sharp: agents create more output than user can inspect. Work gets l
 
 ## Core Loop
 
-1. Event enters from MCP/poll, Slack, GitHub, browser, agent log, optional voice transcript, or manual capture.
+1. Event enters from MCP/poll, Slack, GitHub, browser, agent log, or manual capture. Voice transcript ingress is an optional experiment, not a core MVP lane.
 2. Router links event to task, project, workspace context, agent thread.
 3. Agents keep working until judgment/approval needed.
 4. System creates review packet: evidence, risk, confidence, next decision.
@@ -53,7 +53,7 @@ Escape hatch:
 - Manual mode stops automatic workspace switching/restores.
 - Queue and background agents keep running.
 - Current windows stay where user left them unless user explicitly returns to event-loop mode.
-- Returning to event-loop mode snapshots the manual layout, then restores next queued task context.
+- Returning to event-loop mode should snapshot the manual layout, then restore next queued task context. Current implementation captures the prior layout when entering manual mode; exit-time capture is the next fix.
 - If restore confidence is low, system shows briefing/links without moving windows.
 
 ## MVP Scope
@@ -81,6 +81,7 @@ Defer:
 - Safari.
 - Calendar auto-scheduling.
 - Calendar-aware interrupt gating.
+- Always-listening voice UX.
 - Voice readback.
 - Budget dashboard.
 - Multi-device sync.

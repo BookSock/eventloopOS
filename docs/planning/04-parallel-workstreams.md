@@ -207,7 +207,7 @@ Build:
 - Normalize run state, logs, approvals, outputs.
 - Resume from user decision.
 - Task session bind/resume/status.
-- Steering modes: `steer`, `followup`, `collect`, `interrupt`.
+- Steering modes: `followup` and `steer` first. `collect` and `interrupt` are later and require explicit runtime support plus policy approval.
 - Terminal/tmux/Ghostty fallback behind audited adapter.
 
 Interfaces:
@@ -233,13 +233,13 @@ Owns:
 
 Build:
 
-- Ownership locks for Slack/GitHub/email/browser/task sessions.
+- Ownership locks for Slack/GitHub/browser/task sessions.
 - Hook evaluation engine.
 - Hook timeout/priority/audit.
-- External-send policy gate.
-- Surface-level autonomy grants.
+- External-send policy gate for draft/approval safety.
+- Surface-level autonomy grants only where needed for task-message or terminal fallback safety.
 - Evidence receipts for risky/proof-bearing actions.
-- Procedure pause/resume helpers.
+- Procedure pause/resume helpers later, after dogfood shows repeated workflows worth formalizing.
 
 Interfaces:
 
@@ -253,7 +253,7 @@ Tests:
 - Hook block/approval/timeout tests.
 - External send idempotency test.
 - Receipt chain test.
-- Procedure resume test.
+- Procedure resume test later.
 
 ## Sequence
 

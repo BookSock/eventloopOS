@@ -528,7 +528,7 @@ Rules:
 - Manual mode never closes/moves windows automatically.
 - Queue ranking and background agent loops continue.
 - New urgent work may rise in the queue, but does not steal focus in v1 unless user opts into interrupt behavior later.
-- Returning to event-loop mode records current visible layout as `manual_workspace_snapshot` so it can be restored if user exits again.
+- Returning to event-loop mode should record current visible layout as `manual_workspace_snapshot` so it can be restored if user exits again.
 - If task workspace restore has stale/missing windows, fallback is briefing overlay + open links, not aggressive window rearrangement.
 - AeroSpace backend should reserve eventloop-managed workspace names and avoid touching unmanaged workspaces in manual mode.
 
@@ -537,6 +537,7 @@ Current implementation:
 - macOS app has `Cmd-Option-Shift-M` global hotkey for manual/event-loop toggle.
 - macOS app auto-renews the selected queue lease while human reviews.
 - macOS app can ask orchestrator for workspace restore plans and skips that call in manual mode.
+- macOS app currently captures a manual workspace snapshot when entering manual mode. Product intent prefers capturing on exit from manual mode, so the next implementation patch should align code with this doc.
 - orchestrator exposes workspace status/capture/restore-plan and reports `execute_supported`.
 - orchestrator can execute restore only when `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled`, request has `confirm_execute: true`, and request has an `idempotency-key`.
 - test harness has `workspace_status_smoke` and `workspace_restore_disabled` fixture/live scenarios so agents can verify backend status and default no-execute behavior without moving windows.
@@ -590,7 +591,7 @@ Router:
 
 ## Voice Input
 
-Voice should be first-class later, but it is below queue/MCP/task-runtime dogfood for v1.
+Voice transcript ingress is optional for v1 dogfood. It should stay below queue/MCP/task-runtime work unless Jason explicitly pulls it forward.
 
 Recommended shape:
 
@@ -681,7 +682,7 @@ Backends:
 
 ## AeroSpace Position
 
-For power-user MVP, AeroSpace can help a lot.
+For power-user MVP, AeroSpace can help a lot, but it is a blessed optional backend, not the center of the product.
 
 Why:
 
@@ -704,6 +705,8 @@ Else:
 ```
 
 Do not make AeroSpace required forever.
+
+Default MVP path should still work through queue briefing, URLs, browser tabs, and manual mode even when AeroSpace is absent or disabled.
 
 Risks:
 

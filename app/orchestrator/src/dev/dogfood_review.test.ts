@@ -42,6 +42,7 @@ describe("dogfood review CLI", () => {
     assert.match(output, /Queues:\n- qit_review_1 task=task_blog_feedback session=task_session_blog events=2 done_in=20.0m: Queue item done: Launch review/);
     assert.match(output, /Restore Providers:\n- browser requested=1 done=1 failed=1 retried=0 success=0.50 reasons=browser_quote_fallback/);
     assert.match(output, /Daily Activity:\n- 2026-05-06 events=7 routed=1 queued=1 done=1 followups_sent=1 failed=1/);
+    assert.match(output, /Daily Trends:\n- none/);
     assert.match(output, /queue_item_done ok task=task_blog_feedback queue=qit_review_1: Queue item done: Launch review/);
     assert.doesNotMatch(output, /Old event before window/);
   });
@@ -126,6 +127,55 @@ describe("dogfood review CLI", () => {
       },
     ]);
     assert.equal(parsed.derived.queue_clearance_rate, 0.5);
+  });
+
+  it("prints daily trend deltas when the activity window spans multiple days", async () => {
+    let output = "";
+    const exitCode = await runDogfoodReview({
+      baseUrl: "http://orchestrator.test",
+      limit: 10,
+      format: "json",
+      since: "2026-05-05T00:00:00.000Z",
+      stdout: {
+        write(chunk: string) {
+          output += chunk;
+          return true;
+        },
+      },
+      fetchFn: async (url) => responseForUrl(String(url)),
+    });
+
+    assert.equal(exitCode, 0);
+    const parsed = JSON.parse(output) as {
+      daily_rollups: Array<{ date: string; events: number }>;
+      daily_trends: Array<{
+        date: string;
+        previous_date: string;
+        events_delta: number;
+        routed_delta: number;
+        queued_delta: number;
+        done_delta: number;
+        followups_sent_delta: number;
+        failed_delta: number;
+      }>;
+    };
+
+    assert.deepEqual(parsed.daily_rollups.map((rollup) => ({ date: rollup.date, events: rollup.events })), [
+      { date: "2026-05-06", events: 7 },
+      { date: "2026-05-05", events: 1 },
+    ]);
+    assert.deepEqual(parsed.daily_trends, [
+      {
+        date: "2026-05-06",
+        previous_date: "2026-05-05",
+        events_delta: 6,
+        routed_delta: 0,
+        queued_delta: 1,
+        done_delta: 1,
+        followups_sent_delta: 1,
+        failed_delta: 1,
+      },
+    ]);
   });
 
   it("returns non-zero when orchestrator is unavailable", async () => {

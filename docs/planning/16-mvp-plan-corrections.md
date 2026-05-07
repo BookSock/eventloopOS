@@ -170,9 +170,34 @@ Other architecture notes:
 - Route-level observability wrapper now tags responses with route name/duration headers and records low-cardinality counters for request count, status, error code, and duration.
 - Extend `/activity` filters later by task/session/status/since so after-the-fact debugging does not require dumping recent global history.
 
+## Fresh Plan Audit - 2026-05-07
+
+Stale critique:
+
+- Interruption UX is not MVP center. Keep quiet user-pull queue.
+- Calendar/Focus/notification fatigue remains deferred.
+- Voice-out remains deferred.
+- Budget dashboard remains deferred beyond model/poll cadence config.
+- Server god-file concern is mostly resolved; `server.ts` is now a thin dispatcher with route modules.
+- Metrics/observability are no longer missing; `/metrics`, `/activity`, route counters, and `dogfood:review` exist.
+
+Real gaps:
+
+- Browser extension currently uses broad `<all_urls>` host/content-script scope. Before real dogfood on private browsing, add domain allowlist gating in options/config and enforce it before capture/restore/polling.
+- MCP poll cursor/seen state is in memory. Before real Slack/GitHub polling loops become daily-driver input, persist cursor/seen state in Postgres or a local file-backed store.
+- Task followup/session history is not durable enough. Add `task_messages` persistence with idempotency key, runtime, session ID, status, text hash/length, event IDs, native turn ID, timestamps, and error summary.
+- Task runtime types are too loose. Replace `unknown`-heavy boundaries with shared `TaskSession`, `TaskMessage`, `TaskRuntimeCapabilities`, and `TaskRuntimeError` shapes for Codex and Claude.
+- Manual-mode docs say return-to-event-loop snapshots the manual layout, but current code captures on entry. Either fix exit-time capture or change docs; product intent prefers exit-time capture.
+- Operational metrics need useful gauges: queue depth by state, stale leases, restore pending/failed, followup status counts, runtime failure counts.
+- GatewayStore remains broad. Conformance tests reduce risk; split into smaller store ports later, after dogfood-critical safety/history patches.
+
 ## Next Best Work
 
-1. Add real MCP/Slack source dogfood config around Jason's installed tools.
-2. Add trend comparisons to `dogfood:review`.
-3. Real Claude+Codex composite dogfood against harmless configured sessions.
-4. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.
+1. Add browser extension domain allowlist gating before broad private-browser dogfood.
+2. Persist MCP poll cursor/seen state so Slack/GitHub polling survives restart without noisy refetch.
+3. Add real GitHub installed-tool MCP source config/wrapper, matching the `agent-slack` dogfood path.
+4. Add durable `task_messages` history for Codex/Claude followups and idempotency.
+5. Real Claude+Codex composite dogfood against harmless configured sessions.
+6. Fix manual-mode exit snapshot semantics.
+7. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
+8. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.

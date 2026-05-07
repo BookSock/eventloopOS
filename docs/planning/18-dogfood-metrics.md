@@ -102,10 +102,17 @@ Current implementation:
 - `dogfood:review` now derives queue clearance rate, task-session route rate, restore success rate, task rollups, task-session rollups, and per-queue time-to-done from local activity.
 - Task and task-session rollups count `task_followup_attempted`, `task_followup_sent`, and `task_followup_blocked` directly instead of treating every routed event as a followup.
 - `dogfood:review` includes daily activity rollups for the selected window, so longer `EVENTLOOPOS_DOGFOOD_REVIEW_SINCE` ranges can compare days.
+- `dogfood:review` now includes daily trend deltas for adjacent days inside the selected window, so agents can see whether routed/queued/done/followup/failed activity moved up or down.
 - Restore request activity records resource provider and confidence reason. Metrics include provider-specific created/done/failed/retried counters, and `dogfood:review` groups restore success/failure by provider.
 - Queue done activity records task ID, and recommended resume-agent actions also record task-session ID, so after-the-fact session history can connect queue work back to agent runtime.
 - Queue defer/ignore actions record `queue_item_deferred` / `queue_item_ignored` activity and increment `queue_items_deferred_total` / `queue_items_ignored_total`.
 - Task followup calls now emit attempted plus sent/blocked/failed activity with task session ID, idempotency key, event IDs, payload length, and origin (`event_route`, `queue_action`, or `task_session_api`).
+
+Near-term gaps:
+
+- Add gauges for queue depth by state, stale queue leases, pending/failed restore requests, task followup status counts, and runtime failure counts.
+- Add durable task-message history so `dogfood:review` can reconstruct Codex/Claude followup attempts after orchestrator restart.
+- Keep metric rows content-light: IDs, hashes, lengths, statuses, providers, and durations; raw Slack/doc content belongs in event artifacts, not metrics.
 
 ## Privacy
 
@@ -125,7 +132,7 @@ Tests needed:
 - API/DB: queue defer/ignore increments counters, records activity, hides deferred items until due, and stops ignored items from leasing.
 - Store conformance: in-memory and Postgres GatewayStore adapters share event idempotency/context search, queue lease/defer/ignore, context restore retry/done, and workspace restore receipt replay behavior.
 - CLI: `dogfood:review` filters current-day activity and fails cleanly when orchestrator is unavailable.
-- CLI: `dogfood:review` groups recent activity by task, task session, and queue item.
+- CLI: `dogfood:review` groups recent activity by task, task session, and queue item, and emits daily trend deltas when the selected window spans multiple days.
 - CLI/API: restore provider metrics and activity rollups show which restore backends are succeeding or failing.
 - API: `/activity` filters return matching in-memory and Postgres events by task session, status, and since timestamp.
 

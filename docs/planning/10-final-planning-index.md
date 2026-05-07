@@ -31,7 +31,7 @@ Clarified product stance:
 6. `07-initial-agent-tickets.md` - first 10 tickets.
 7. `08-command-contract.md` - command API for agents.
 8. `09-v0-scenarios.md` - deterministic E2E scenarios.
-9. `11-ambient-router-workspace-backends.md` - ambient router, MCP/polling, voice, AeroSpace.
+9. `11-ambient-router-workspace-backends.md` - ambient router, MCP/polling, manual mode, optional AeroSpace, optional voice ingress.
 10. `12-lessons-hermes-openclaw.md` - gateway/session/hook lessons from cloned repos.
 11. `13-broader-agent-ecosystem-lessons.md` - lessons from ZeroClaw, SwarmClaw, Letta, CrewAI, LangGraph, security papers.
 12. `16-mvp-plan-corrections.md` - clarified product stance: intake stack, not aggressive interrupt UX.
@@ -79,7 +79,7 @@ Later:
 - Safari.
 - Jira.
 - ScreenCaptureKit visual fallback.
-- Voice transcript capture.
+- Voice transcript capture as an optional experiment, below queue/MCP/task-runtime dogfood.
 - AeroSpace workspace backend.
 - Linear.
 - browser page polling.
@@ -181,10 +181,10 @@ Implemented:
 - `app/orchestrator`: `GET /mcp-sources`, `GET /mcp-sources/:id`, `POST /mcp-sources/:id/poll`, `POST /mcp-sources/:id/poll-and-route`, and `POST /mcp-sources/poll-all-and-route` expose discoverable MCP polling loops; default mode uses seeded fake sources, and `ORCHESTRATOR_MCP_SOURCES_PATH` loads real read-only local MCP source configs through the SDK runtime.
 - `app/orchestrator/src/context`: provider deeplink normalizers extract Slack channel/message IDs, GitHub owner/repo/issue/code line data, Notion page/block IDs, Google Docs document anchors, Figma file/node IDs, and generic browser fallback metadata into context resource details.
 - `app/orchestrator`: `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` calls poll-all once and prints machine-readable JSON for master-agent/scheduler loops. `poll:mcp:loop` repeats the sweep with bounded `EVENTLOOPOS_MCP_POLL_MAX_CYCLES` for test runs.
-- `app/orchestrator`: `pnpm --filter @eventloopos/orchestrator run voice:send` forwards one transcript from env/stdin into `/voice/commands`; `voice:listen` consumes line-delimited local STT streams with optional wake phrase filtering; `voice:listen-command` runs a configured local transcript command with JSON argv and pipes stdout into the same router, so whisper.cpp/MLX/local STT tools can plug in without product-specific STT code. `dev:doctor` checks configured transcript command readiness with `--help`.
+- `app/orchestrator`: optional voice transcript ingress exists for experiments. `voice:send` forwards one transcript from env/stdin into `/voice/commands`; `voice:listen` consumes line-delimited local STT streams with optional wake phrase filtering; `voice:listen-command` runs a configured local transcript command with JSON argv and pipes stdout into the same router. This is not a next-lane MVP requirement.
 - `app/orchestrator/src/mcp_sources`: fake runtime and real MCP SDK runtime with timeout, stderr capture, env allowlist, circuit breaker.
 - `app/orchestrator/bin/dev-postgres`: Docker-backed local Postgres runner for `eventloop_test`, with `up`, `down`, `url`, and `test` commands. External DB tests can also use `EVENTLOOPOS_TEST_DATABASE_URL`.
-- `app/orchestrator/src/workspace`: deterministic AeroSpace workspace adapter, status/capture/restore-plan controller, safe command planner, opt-in live AeroSpace status/capture/restore-plan smoke, and opt-in restore execution. HTTP exposes `GET /workspace/status`, `POST /workspace/capture`, `POST /workspace/restore-plan`, and disabled-by-default `POST /workspace/restore` requiring `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled`, `confirm_execute: true`, and `idempotency-key`.
+- `app/orchestrator/src/workspace`: optional AeroSpace-backed workspace proof for power-user dogfood, plus safer URL/app/tab restore paths. HTTP exposes `GET /workspace/status`, `POST /workspace/capture`, `POST /workspace/restore-plan`, and disabled-by-default `POST /workspace/restore` requiring `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled`, `confirm_execute: true`, and `idempotency-key`.
 - `app/orchestrator/src/task_sessions`: fake task-session store plus terminal adapter for tmux and Ghostty, using audited visible input and injected command execution in tests.
 - `app/browser-extension`: shared-schema `browser_tab` capture/restore, quote highlight on restore with highlight receipts, optional task/project route hints, tested runtime capture/restore message router, legacy resource normalizer, native bridge envelope/capability protocol.
 - `app/native-host`: Chrome Native Messaging stdio host, context capture JSONL sink, optional route hints (`task_hint`, `project_hint`), macOS Chrome/Chrome for Testing/Chromium manifest installer, direct live smoke that forwards browser capture into orchestrator as `store_only` context, and opt-in real Chromium native messaging smoke for extension -> native host -> orchestrator. Local opt-in Chromium smoke passed on 2026-05-06.
@@ -211,7 +211,7 @@ Known gaps:
 - MCP source registry loads local config files and can run real read-only poll tools through the SDK runtime; generic item mapping, provider deeplink normalization, poll-all route, poll-once CLI, and bounded poll-loop CLI now support user-installed MCP servers that can emit stable event-ish `items[]`.
 - Aerospace adapter has unit/API coverage, daemon status endpoint, live harness smoke, disabled-by-default execute-confirm flow, macOS confirmation UI, and opt-in live CLI smoke. Local enabled live smoke currently reports `server_unavailable` because AeroSpace.app is not running; next gap is live run with AeroSpace.app installed/running.
 - Task session control has fake, daemon-seeded dev controller, discovery/read API, terminal-backed adapter seams, Codex native thread controller seam, app-server method adapter, stdio process transport, Claude CLI resume adapter, hot-loaded Codex thread-to-task map file, HTTP task binding, and automatic task-hinted event injection; next gap is stronger task/thread association UI beyond API/config files or title markers.
-- Voice command HTTP ingress, env/stdin client, and local transcript-command runner exist for local STT/wake-word clients to submit transcripts into same router; next gap is actual microphone wake-word/STT app with real audio proof.
+- Voice command HTTP ingress, env/stdin client, and local transcript-command runner exist for local STT clients to submit transcripts into the same router; microphone/wake-word UX is deferred.
 - Postgres live tests need Docker/container runtime to execute locally.
 
 ## Open Decisions

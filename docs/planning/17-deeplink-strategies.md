@@ -17,7 +17,6 @@ High:
 - Slack permalink.
 - GitHub PR/issue/check/code permalink.
 - Figma file URL with node id.
-- Linear issue/comment URL.
 - Local file path + line/selection.
 
 Medium:
@@ -109,7 +108,7 @@ Sources:
 
 ## Linear
 
-Defer live Linear integration for Jason, but keep contract ready.
+Linear is post-MVP for Jason. Keep only generic URL metadata if a Linear URL appears in an event.
 
 Store:
 
@@ -133,7 +132,7 @@ For every web resource, store:
 
 If provider anchor fails, browser extension opens URL, scrolls near prior position, then highlights quote if found.
 
-## Next Work
+## Current Implementation
 
 Current implementation:
 
@@ -143,6 +142,6 @@ Current implementation:
 - Mac queue context rows display restore confidence and `details.confidence_reason` when available.
 - Restore created/done/failed/retried metrics are counted by provider, and `dogfood:review` groups provider success/failure from activity history.
 
-Next:
+Next, only when dogfood needs it:
 
 1. Dogfood provider anchors against real Slack/GitHub/Notion/Google Docs/Figma pages.
