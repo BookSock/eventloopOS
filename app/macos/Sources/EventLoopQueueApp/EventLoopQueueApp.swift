@@ -134,6 +134,12 @@ private struct QueueMenuView: View {
             .keyboardShortcut("m", modifiers: [.command, .option, .shift])
             .accessibilityIdentifier("queue-menu-mode-toggle")
         }
+        .task {
+            if viewModel.state == .idle {
+                await viewModel.loadQueue()
+            }
+            await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
+        }
         .task(id: viewModel.selectedTaskId) {
             await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
         }

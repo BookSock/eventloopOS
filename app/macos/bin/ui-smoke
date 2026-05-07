@@ -75,10 +75,34 @@ on menuItemNames()
         delay 0.2
         set namesList to name of menu items of menu 1
       end tell
+      key code 53
     end tell
   end tell
   return namesList
 end menuItemNames
+
+on waitForEnabledMenuItem(expectedValue)
+  repeat with attempt from 1 to 40
+    waitForMenuBarExtra()
+    tell application "System Events"
+      tell process "EventLoopQueueApp"
+        tell menu bar item 1 of menu bar 2
+          click
+          delay 0.2
+          if exists menu item expectedValue of menu 1 then
+            set itemEnabled to enabled of menu item expectedValue of menu 1
+            key code 53
+            if itemEnabled then return
+          else
+            key code 53
+          end if
+        end tell
+      end tell
+    end tell
+    delay 0.1
+  end repeat
+  error "menu item never enabled: " & expectedValue
+end waitForEnabledMenuItem
 
 on assertContains(valuesList, expectedValue)
   if valuesList does not contain expectedValue then
@@ -89,6 +113,7 @@ end assertContains
 set initialItems to menuItemNames()
 assertContains(initialItems, "Open Queue")
 assertContains(initialItems, "Enter Manual Mode")
+waitForEnabledMenuItem("Approve revised angle or ask for another pass.")
 
 tell application "System Events"
   tell process "EventLoopQueueApp"
