@@ -8,8 +8,9 @@ This is the friend-onboarding path for a fresh clone. It avoids Jason-specific c
 - Node.js 22 or newer. With `nvm`: `nvm use`
 - `pnpm` via Corepack: `corepack enable`
 - Swift toolchain from Xcode Command Line Tools
-- Optional: Docker for Postgres-backed local dogfood
-- Optional: AeroSpace for live workspace status/restore checks
+- Docker for Postgres-backed local dogfood
+- AeroSpace for workspace capture/restore:
+  `brew install --cask nikitabobko/tap/aerospace`
 - Optional: Google Chrome for browser context capture/restore
 
 ## Install
@@ -17,11 +18,13 @@ This is the friend-onboarding path for a fresh clone. It avoids Jason-specific c
 ```sh
 git clone <repo-url> eventloopOS
 cd eventloopOS
+fnm use
+corepack enable
 pnpm install
 pnpm run dev:doctor
 ```
 
-`dev:doctor` builds the orchestrator and reports which optional local features are available.
+`dev:doctor` builds the orchestrator and reports readiness. For a real trial, AeroSpace should report healthy before starting the dogfood stack. Launch AeroSpace once after installing it so the CLI can talk to the app server.
 
 ## Run the queue app
 
@@ -31,12 +34,18 @@ Start the local dogfood stack:
 pnpm run dev:dogfood
 ```
 
-This starts dev Postgres through Docker, builds the orchestrator, and launches the Mac queue app. It does not require Slack, Gmail, GitHub, Chrome, or AeroSpace. By default, workspace restore execution is disabled. Press `Ctrl-C` in the terminal to stop the stack.
+This starts dev Postgres through Docker, verifies AeroSpace, builds the orchestrator, and launches the Mac queue app. It does not require Slack, Gmail, GitHub, or Chrome. By default, workspace restore execution is disabled until a restore is explicitly confirmed. Press `Ctrl-C` in the terminal to stop the stack.
 
-Use in-memory state if Docker is unavailable or you want a throwaway run:
+Use in-memory state only for a throwaway run:
 
 ```sh
 pnpm run dev:dogfood:memory
+```
+
+Use queue/router-only mode only when hacking without workspace restore:
+
+```sh
+EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=0 pnpm run dev:dogfood:memory
 ```
 
 For a short launch smoke:

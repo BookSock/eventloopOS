@@ -18,6 +18,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 try {
+  await requireAerospace();
   const databaseUrl = usePostgres ? await startPostgres() : undefined;
   await runChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "build"]);
 
@@ -49,6 +50,23 @@ try {
   process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
   await cleanup();
   process.exitCode = 1;
+}
+
+async function requireAerospace() {
+  if (process.env.EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE === "0") {
+    return;
+  }
+
+  try {
+    await runChecked("aerospace", ["--version"], { echo: false });
+  } catch {
+    throw new Error([
+      "AeroSpace is required for eventloopOS dogfood.",
+      "Install it with: brew install --cask nikitabobko/tap/aerospace",
+      "Then launch AeroSpace and rerun pnpm run dev:dogfood.",
+      "Set EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=0 only for queue/router hacking without workspace restore.",
+    ].join("\n"));
+  }
 }
 
 async function startPostgres() {
@@ -108,7 +126,7 @@ function spawnChild(command, args, env = {}) {
   return child;
 }
 
-async function runChecked(command, args) {
+async function runChecked(command, args, options = {}) {
   return await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: process.cwd(),
@@ -119,11 +137,15 @@ async function runChecked(command, args) {
     let stderr = "";
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
-      process.stdout.write(chunk);
+      if (options.echo !== false) {
+        process.stdout.write(chunk);
+      }
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
-      process.stderr.write(chunk);
+      if (options.echo !== false) {
+        process.stderr.write(chunk);
+      }
     });
     child.on("error", reject);
     child.on("exit", (code, signal) => {

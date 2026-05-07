@@ -58,7 +58,7 @@ Personal dogfood stack:
 pnpm run dev:dogfood
 ```
 
-This starts dev Postgres, builds and runs the orchestrator with Codex app-server task sessions, uses AeroSpace in disabled-execute mode, auto-loads `config/mcp-sources.json` when present, and launches the Mac queue app against the local orchestrator. Press `Ctrl-C` in the terminal to stop the app, orchestrator, optional poll loop, and dev Postgres. Set `EVENTLOOPOS_DOGFOOD_POSTGRES=0` for empty in-memory mode. Set `EVENTLOOPOS_DOGFOOD_MCP_POLL=1` to run the MCP poll loop while dogfooding.
+This requires AeroSpace (`brew install --cask nikitabobko/tap/aerospace`), starts dev Postgres, builds and runs the orchestrator with Codex app-server task sessions, uses AeroSpace in disabled-execute mode, auto-loads `config/mcp-sources.json` when present, and launches the Mac queue app against the local orchestrator. Press `Ctrl-C` in the terminal to stop the app, orchestrator, optional poll loop, and dev Postgres. Set `EVENTLOOPOS_DOGFOOD_POSTGRES=0` for empty in-memory mode. Set `EVENTLOOPOS_DOGFOOD_MCP_POLL=1` to run the MCP poll loop while dogfooding. Set `EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=0` only for queue/router hacking without workspace restore.
 
 Fresh-clone first run without Docker:
 
