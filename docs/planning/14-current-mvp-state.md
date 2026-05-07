@@ -99,6 +99,7 @@ Strong tests now:
 - Live harness scenario for browser store-only + restore request peek/claim/done status.
 - Real Chromium Playwright extension E2E.
 - Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06.
+- `voice:listen` accepts line-delimited local STT transcript streams, optional wake phrase filtering, and forwards into `/voice/commands`.
 
 Weak tests:
 
@@ -110,4 +111,4 @@ Weak tests:
 ## Next Best Work
 
 1. Run Docker/Postgres DB tests on machine with Docker daemon and record pass/fail.
-2. Add local voice capture/wake-word adapter behind same `/voice/commands` path.
+2. Add real microphone/STT adapter feeding `voice:listen` (whisper.cpp, MLX Whisper, or macOS Speech).

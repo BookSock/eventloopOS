@@ -50,6 +50,7 @@ Use `config/mcp-sources.example.json` as the starting shape. `generic_item_to_ev
 After `pnpm --filter @eventloopos/orchestrator build`, `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` sweeps configured MCP sources once through `/mcp-sources/poll-all-and-route`. `pnpm --filter @eventloopos/orchestrator run poll:mcp:loop` repeats the sweep. Set `EVENTLOOPOS_MCP_SOURCE_IDS=slack_dm_source,generic_mcp_source` to limit a sweep, `EVENTLOOPOS_MCP_POLL_INTERVAL_MS=30000` to tune loop cadence, and `EVENTLOOPOS_MCP_POLL_MAX_CYCLES=1` for bounded test runs.
 
 Local STT tools can pipe transcripts into the router with `pnpm --filter @eventloopos/orchestrator run voice:send`. Use `EVENTLOOPOS_VOICE_TRANSCRIPT`, or pipe text on stdin. Optional hints: `EVENTLOOPOS_VOICE_PROJECT_HINT`, `EVENTLOOPOS_VOICE_TASK_HINT`, and `EVENTLOOPOS_VOICE_IDEMPOTENCY_KEY`.
+For line-delimited local STT streams, use `pnpm --filter @eventloopos/orchestrator run voice:listen`. Optional `EVENTLOOPOS_VOICE_WAKE_PHRASE=computer` filters ambient transcripts and strips the wake phrase before forwarding.
 
 Codex native thread protocol notes from the installed local CLI live in `external-resources/codex-app-server-protocol.md`.
 Set `ORCHESTRATOR_TASK_SESSIONS=codex_app_server` to expose local Codex app-server threads through `/task-sessions`; use `[task:blog feedback]` in thread titles/previews, `ORCHESTRATOR_CODEX_TASK_MAP='{"thread_id":"task_blog_feedback"}'`, or hot-loaded `ORCHESTRATOR_CODEX_TASK_MAP_PATH=config/codex-task-map.json` for task routing.
