@@ -216,14 +216,14 @@ Review outcome:
 - Metrics/observability critique is partly stale; `/metrics`, `/activity`, route counters, `dogfood:review`, `dogfood:check`, and Postgres activity persistence exist.
 - Main code gap is lineage UI: durable `task_messages`, filtered `GET /task-messages`, and `pnpm task:messages` exist, but Mac/UI flow does not yet jump from a selected queue item into that lineage.
 - Main architecture gap is runtime typing: Codex and Claude run behind the same controller shape, but `TaskSessionController` still returns `unknown` sessions/messages.
-- Main recovery gap is stale `attempted` task-message visibility after crash.
+- Main recovery gap is smaller now: stale `attempted` task-message visibility exists through `dogfood:check`, but there is still no retry/resume policy for those stale attempts.
 - Main doc gap fixed: Manual Mode snapshot is captured on return to Event Loop, matching the escape-hatch product model.
 
 Near-term implementation order:
 
-1. Add stale attempted-message dogfood check/gauge.
-2. Tighten task runtime types for Codex + Claude only.
-3. Add queue-item-centered lineage affordance in CLI or Mac UI.
+1. Tighten task runtime types for Codex + Claude only.
+2. Add queue-item-centered lineage affordance in CLI or Mac UI.
+3. Add retry/resume policy for stale attempted task messages if dogfood finds real stale attempts.
 4. Promote extra live smokes into `proof:live` when local prerequisites make sense.
 5. Keep XCUITest as later hardening unless AppleScript/live smokes miss real bugs.
 
@@ -249,8 +249,8 @@ Release guardrails:
 ## Next Best Work
 
 1. Tighten Codex + Claude task-runtime shared types.
-2. Add stale attempted-message and queue/restore/followup gauges to dogfood checks.
-3. Add queue-item-centered lineage affordance in CLI or Mac UI.
+2. Add queue-item-centered lineage affordance in CLI or Mac UI.
+3. Add queue/restore/followup gauges to dogfood checks.
 4. Decide whether `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
 5. Add app bundle/XCUITest smoke later if current AppleScript/live smokes miss UI regressions.
 6. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.

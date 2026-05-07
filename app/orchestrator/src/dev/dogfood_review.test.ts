@@ -32,6 +32,7 @@ describe("dogfood review CLI", () => {
       EVENTLOOPOS_DOGFOOD_MAX_FOLLOWUP_FAILURES: "1",
       EVENTLOOPOS_DOGFOOD_MAX_STALE_LEASES: "2",
       EVENTLOOPOS_DOGFOOD_MAX_PENDING_RESTORE_AGE_MS: "60000",
+      EVENTLOOPOS_DOGFOOD_MAX_ATTEMPTED_TASK_MESSAGE_AGE_MS: "120000",
     }), {
       baseUrl: "http://127.0.0.1:4999",
       limit: 25,
@@ -43,6 +44,7 @@ describe("dogfood review CLI", () => {
         maxFollowupFailures: 1,
         maxStaleLeases: 2,
         maxPendingRestoreAgeMs: 60000,
+        maxAttemptedTaskMessageAgeMs: 120000,
       },
     });
   });
@@ -108,6 +110,8 @@ describe("dogfood review CLI", () => {
       queue_rollups: Array<{ id: string; time_to_done_ms: number }>;
       restore_provider_rollups: Array<{ provider: string; success_rate: number }>;
       daily_rollups: Array<{ date: string; events: number; followups_sent: number; failed: number }>;
+      attempted_task_messages: Array<{ id: string }>;
+      fetched_attempted_task_message_count: number;
       derived: { queue_clearance_rate: number };
     };
     assert.equal(parsed.metrics.counters.events_ingested_total, 2);
@@ -157,6 +161,8 @@ describe("dogfood review CLI", () => {
       },
     ]);
     assert.equal(parsed.derived.queue_clearance_rate, 0.5);
+    assert.deepEqual(parsed.attempted_task_messages, []);
+    assert.equal(parsed.fetched_attempted_task_message_count, 0);
   });
 
   it("prints daily trend deltas when the activity window spans multiple days", async () => {
@@ -242,6 +248,7 @@ describe("dogfood review CLI", () => {
         maxFollowupFailures: 0,
         maxStaleLeases: 0,
         maxPendingRestoreAgeMs: 30 * 60 * 1000,
+        maxAttemptedTaskMessageAgeMs: 30 * 60 * 1000,
       },
       stdout: {
         write(chunk: string) {
@@ -264,6 +271,7 @@ describe("dogfood review CLI", () => {
       ["task_followup_failures", true],
       ["stale_queue_leases", true],
       ["pending_restore_age_ms", true],
+      ["attempted_task_message_age_ms", true],
     ]);
   });
 
@@ -280,6 +288,7 @@ describe("dogfood review CLI", () => {
         maxFollowupFailures: 0,
         maxStaleLeases: 0,
         maxPendingRestoreAgeMs: 30 * 60 * 1000,
+        maxAttemptedTaskMessageAgeMs: 30 * 60 * 1000,
       },
       stdout: {
         write(chunk: string) {
@@ -293,6 +302,48 @@ describe("dogfood review CLI", () => {
     assert.equal(exitCode, 2);
     assert.match(output, /Status: fail/);
     assert.match(output, /fail restore_success_rate: value=0.750 threshold=>=0.800/);
+  });
+
+  it("fails dogfood check when attempted task messages go stale", async () => {
+    let output = "";
+    const exitCode = await runDogfoodCheck({
+      baseUrl: "http://orchestrator.test",
+      limit: 10,
+      format: "text",
+      since: "2026-05-06T00:00:00.000Z",
+      thresholds: {
+        maxIgnoredRate: 0.1,
+        minRestoreSuccessRate: 0.7,
+        maxFollowupFailures: 0,
+        maxStaleLeases: 0,
+        maxPendingRestoreAgeMs: 30 * 60 * 1000,
+        maxAttemptedTaskMessageAgeMs: 30 * 60 * 1000,
+      },
+      stdout: {
+        write(chunk: string) {
+          output += chunk;
+          return true;
+        },
+      },
+      fetchFn: async (url) => {
+        if (String(url).includes("/task-messages?")) {
+          return jsonResponse({
+            count: 1,
+            messages: [{
+              id: "task_msg_stale",
+              task_session_id: "task_session_blog",
+              status: "attempted",
+              created_at: "2026-05-06T11:00:00.000Z",
+              updated_at: "2026-05-06T11:00:00.000Z",
+            }],
+          });
+        }
+        return responseForUrl(String(url));
+      },
+    });
+
+    assert.equal(exitCode, 2);
+    assert.match(output, /fail attempted_task_message_age_ms: value=5400000 threshold=<=1800000/);
   });
 });
 
@@ -425,6 +476,13 @@ function responseForUrl(url: string): Response {
           details: {},
         },
       ],
+    });
+  }
+
+  if (url.endsWith("/task-messages?status=attempted&limit=10")) {
+    return jsonResponse({
+      count: 0,
+      messages: [],
     });
   }
 

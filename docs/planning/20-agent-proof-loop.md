@@ -60,6 +60,7 @@ Near-term chaos tests:
 - MCP subprocess timeout without cursor commit
 - task runtime failure creates human queue fallback and no duplicate resend
 - stale task-message `attempted` state is visible in history and fails `dogfood:check` after a configured age
+- stale task-message retry/resume policy proves a crashed send can be inspected and deliberately retried or marked failed
 
 Later chaos tests:
 

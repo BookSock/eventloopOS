@@ -179,6 +179,7 @@ Strong tests now:
 - `pnpm proof:agent` runs a local proof bundle and writes `artifacts/proof-manifest.json` plus per-command stdout/stderr logs under `artifacts/proof-agent/<run-id>/`. Default commands are lint, typecheck, test, and test:e2e. `EVENTLOOPOS_PROOF_COMMANDS` lets agents smoke the manifest writer without recursive full proof.
 - `pnpm run ci` now runs `pnpm test:proof-agent` first to prove the override/manifest path with a cheap `node --version` command, then runs the full `pnpm proof:agent` bundle as the required correctness gate.
 - `pnpm dogfood:check` exits non-zero when local dogfood thresholds fail. Checks currently cover ignored queue rate, restore success, task followup failures, stale queue leases, and pending restore age.
+- `pnpm dogfood:check` also reads attempted task-message history through `/task-messages?status=attempted` and fails when a task message stays in `attempted` longer than `EVENTLOOPOS_DOGFOOD_MAX_ATTEMPTED_TASK_MESSAGE_AGE_MS`.
 - `pnpm proof:live` writes `artifacts/proof-live-manifest.json`, runs `test:e2e:live:boot` with dogfood threshold checks against the temp live orchestrator before shutdown, runs live Mac queue mutation + task handoff smokes, then runs `task:runtime-smoke`.
 - `pnpm test:e2e:macos-live-ui` starts a temp live orchestrator, launches the packaged Mac queue app against it, uses AppleScript/System Events to click `Pull Next Paper` and `Done / Next`, then asserts `/queue?state=done`, `/activity`, and `/metrics` changed. `pnpm proof:live` now includes this smoke.
 - `pnpm test:e2e:macos-live-handoff` starts a temp live orchestrator with a task-bound packet, launches the packaged Mac queue app, clicks `Pull Next Paper` and `Route to task agent`, then asserts `/queue?state=done`, `/activity`, `/metrics`, and `/task-sessions` prove the followup was sent and `task_session_blog` moved to `running`. `pnpm proof:live` includes this smoke.
@@ -205,7 +206,7 @@ Weak tests:
 ## Next Best Work
 
 1. Tighten the Codex + Claude task-runtime seam with shared typed session/message/capability/error shapes instead of `unknown` return contracts.
-2. Add dogfood gauges/checks for queue depth by state, stale `attempted` task messages, pending/failed restore requests, and followup status counts.
+2. Add dogfood gauges/checks for queue depth by state, pending/failed restore requests, followup status counts, and runtime failure counts.
 3. Add a small Mac/UI affordance or CLI wrapper that links a selected queue item to its event/task-message lineage without dumping global history.
 4. Decide whether to promote `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
 5. Add app bundle/XCUITest smoke only if the current SwiftUI render, launch, AppleScript, and live Mac handoff smokes stop catching enough UI regressions.

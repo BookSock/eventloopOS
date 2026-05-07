@@ -120,11 +120,11 @@ Current implementation:
 - Task followup calls now emit attempted plus sent/blocked/failed activity with task session ID, idempotency key, event IDs, payload length, and origin (`event_route`, `queue_action`, or `task_session_api`).
 - Durable `task_messages` now persist followup status by idempotency key across Postgres restarts. The durable record stores payload hash/length and sanitized runtime metadata, not raw followup text. Duplicate retries return the stored task-message result before runtime side effects.
 - `GET /task-messages` and `pnpm task:messages` expose that durable task-message history with filters for task session, task, queue item, event, status, and idempotency key.
-- `pnpm dogfood:check` reads the same local metrics/activity and exits non-zero when dogfood thresholds fail. Current checks cover ignored queue item rate, restore success rate, task followup failures, stale queue leases, and oldest pending restore age. Use `EVENTLOOPOS_DOGFOOD_CHECK_FORMAT=json` for agent-readable output.
+- `pnpm dogfood:check` reads the same local metrics/activity plus attempted task-message history and exits non-zero when dogfood thresholds fail. Current checks cover ignored queue item rate, restore success rate, task followup failures, stale queue leases, oldest pending restore age, and oldest `attempted` task-message age. Use `EVENTLOOPOS_DOGFOOD_CHECK_FORMAT=json` for agent-readable output.
 
 Near-term gaps:
 
-- Add gauges for queue depth by state, stale queue leases, pending/failed restore requests, task followup status counts, and runtime failure counts.
+- Add gauges for queue depth by state, pending/failed restore requests, task followup status counts, and runtime failure counts.
 - Teach `dogfood:review` to read durable task-message history directly, not only recent activity rows.
 - Wire `dogfood:check` into a real dogfood daemon run once Postgres + MCP sources are the default local workflow.
 - Keep metric rows content-light: IDs, hashes, lengths, statuses, providers, and durations; raw Slack/doc content belongs in event artifacts, not metrics.

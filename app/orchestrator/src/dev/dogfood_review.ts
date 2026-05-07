@@ -33,6 +33,7 @@ export type DogfoodCheckThresholds = {
   maxFollowupFailures: number;
   maxStaleLeases: number;
   maxPendingRestoreAgeMs: number;
+  maxAttemptedTaskMessageAgeMs: number;
 };
 
 type MetricsResponse = {
@@ -45,12 +46,27 @@ type ActivityResponse = {
   count: number;
 };
 
+type TaskMessagesResponse = {
+  messages: TaskMessageSummary[];
+  count: number;
+};
+
+type TaskMessageSummary = {
+  id: string;
+  task_session_id: string;
+  status: string;
+  created_at?: string;
+  updated_at?: string;
+};
+
 type DogfoodReviewReport = {
   generated_at: string;
   since: string;
   metrics: MetricsSnapshot;
   events: ActivityEvent[];
   fetched_activity_count: number;
+  attempted_task_messages: TaskMessageSummary[];
+  fetched_attempted_task_message_count: number;
   task_rollups: RollupSummary[];
   session_rollups: RollupSummary[];
   queue_rollups: QueueRollupSummary[];
@@ -158,6 +174,7 @@ export function dogfoodCheckOptionsFromEnv(env: NodeJS.ProcessEnv): DogfoodCheck
       maxFollowupFailures: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_FOLLOWUP_FAILURES, 0),
       maxStaleLeases: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_STALE_LEASES, 0),
       maxPendingRestoreAgeMs: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_PENDING_RESTORE_AGE_MS, 30 * 60 * 1000),
+      maxAttemptedTaskMessageAgeMs: parseNonNegativeNumber(env.EVENTLOOPOS_DOGFOOD_MAX_ATTEMPTED_TASK_MESSAGE_AGE_MS, 30 * 60 * 1000),
     },
   };
 }
@@ -203,9 +220,10 @@ async function fetchDogfoodReport(options: Pick<DogfoodReviewOptions, "baseUrl" 
   const fetchFn = options.fetchFn ?? fetch;
   const now = options.now ?? (() => new Date());
 
-  const [metrics, activity] = await Promise.all([
+  const [metrics, activity, taskMessages] = await Promise.all([
     fetchJson<MetricsResponse>(fetchFn, new URL("/metrics", options.baseUrl)),
     fetchJson<ActivityResponse>(fetchFn, new URL(`/activity?limit=${options.limit}`, options.baseUrl)),
+    fetchJson<TaskMessagesResponse>(fetchFn, new URL(`/task-messages?status=attempted&limit=${options.limit}`, options.baseUrl)),
   ]);
   const generatedAt = metrics.generated_at ?? now().toISOString();
   const since = options.since ?? startOfLocalDay(now()).toISOString();
@@ -216,6 +234,8 @@ async function fetchDogfoodReport(options: Pick<DogfoodReviewOptions, "baseUrl" 
     metrics: metrics.metrics,
     events,
     fetched_activity_count: activity.count,
+    attempted_task_messages: taskMessages.messages,
+    fetched_attempted_task_message_count: taskMessages.count,
   });
 }
 
@@ -234,6 +254,8 @@ function buildDogfoodReviewReport(input: {
   metrics: MetricsSnapshot;
   events: ActivityEvent[];
   fetched_activity_count: number;
+  attempted_task_messages: TaskMessageSummary[];
+  fetched_attempted_task_message_count: number;
 }): DogfoodReviewReport {
   const dailyRollups = dailyActivityRollups(input.events);
   return {
@@ -349,6 +371,7 @@ function formatTextReport(report: DogfoodReviewReport): string {
 function buildDogfoodCheckReport(report: DogfoodReviewReport, thresholds: DogfoodCheckThresholds): DogfoodCheckReport {
   const counters = report.metrics.counters;
   const pendingRestoreAgeMs = maxPendingRestoreAgeMs(report.events, report.generated_at);
+  const attemptedTaskMessageAgeMs = maxAttemptedTaskMessageAgeMs(report.attempted_task_messages, report.generated_at);
   const checks: DogfoodCheckResult[] = [
     maxCheck(
       "ignored_queue_item_rate",
@@ -379,6 +402,12 @@ function buildDogfoodCheckReport(report: DogfoodReviewReport, thresholds: Dogfoo
       pendingRestoreAgeMs,
       thresholds.maxPendingRestoreAgeMs,
       "oldest pending restore request age",
+    ),
+    maxCheck(
+      "attempted_task_message_age_ms",
+      attemptedTaskMessageAgeMs,
+      thresholds.maxAttemptedTaskMessageAgeMs,
+      "oldest task message still stuck in attempted status",
     ),
   ];
   return {
@@ -593,6 +622,16 @@ function maxPendingRestoreAgeMs(events: ActivityEvent[], generatedAt: string): n
   if (pending.size === 0) return null;
   const now = new Date(generatedAt).getTime();
   return Math.max(...[...pending.values()].map((occurredAt) => now - new Date(occurredAt).getTime()));
+}
+
+function maxAttemptedTaskMessageAgeMs(messages: TaskMessageSummary[], generatedAt: string): number | null {
+  const attempted = messages.filter((message) => message.status === "attempted");
+  if (attempted.length === 0) return null;
+  const now = new Date(generatedAt).getTime();
+  return Math.max(...attempted.map((message) => {
+    const timestamp = message.updated_at ?? message.created_at;
+    return timestamp ? now - new Date(timestamp).getTime() : 0;
+  }));
 }
 
 function ratio(numerator: number | undefined, denominator: number | undefined): number | null {
