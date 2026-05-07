@@ -16,6 +16,7 @@ from test_harness.scenarios import (
     MCP_POLL_ALL_ROUTE_DONE,
     MCP_POLL_ROUTE_DONE,
     MCP_SOURCE_POLL_ROUTE_DONE,
+    QUEUE_BIND_THEN_RECOMMENDED_ACTION,
     QUEUE_RECOMMENDED_ACTION,
     SEEDED_QUEUE,
     TASK_SESSION_FOLLOWUP,
@@ -30,6 +31,7 @@ from test_harness.scenarios import (
     McpPollAllRouteDoneScenario,
     McpPollRouteDoneScenario,
     McpSourcePollRouteDoneScenario,
+    QueueBindThenRecommendedActionScenario,
     QueueRecommendedActionScenario,
     SeededQueueScenario,
     TaskSessionFollowupScenario,
@@ -418,6 +420,53 @@ class QueueRecommendedActionRunnerTests(unittest.TestCase):
 
     def _run(self, artifact_dir: Path):
         runner = QueueRecommendedActionScenario(
+            loader=FixtureLoader(REPO_ROOT),
+            writer=ArtifactWriter(artifact_dir),
+            clock=FakeClock(),
+        )
+        return runner.run()
+
+
+class QueueBindThenRecommendedActionRunnerTests(unittest.TestCase):
+    def test_fixture_replay_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(Path(tmp))
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.scenario, QUEUE_BIND_THEN_RECOMMENDED_ACTION)
+        self.assertEqual(result.mode, "fixture")
+        self.assertEqual(result.details["task_session_id"], "task_session_blog")
+
+    def test_artifact_generation_captures_bind_then_handoff_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            self._run(artifact_dir)
+
+            log = json.loads((artifact_dir / "scenario-log.json").read_text(encoding="utf-8"))
+            observed = json.loads((artifact_dir / "observed.json").read_text(encoding="utf-8"))
+            summary = json.loads((artifact_dir / "summary.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(log["passed"])
+        self.assertEqual(
+            [step["name"] for step in log["steps"]],
+            [
+                "bind_task_session_wrong_task",
+                "route_event",
+                "create_queue_item_review_packet",
+                "assert_recommended_action_blocked_until_binding",
+                "bind_task_session_correct_task",
+                "execute_recommended_action",
+                "assert_queue_empty",
+            ],
+        )
+        self.assertEqual(observed["blocked_action_response"]["code"], "task_session_unmatched")
+        self.assertEqual(observed["binding"]["task_id"], "task_blog_feedback")
+        self.assertEqual(observed["action_response"]["action_result"]["task_session_id"], "task_session_blog")
+        self.assertEqual(observed["final_queue"], {"item": None})
+        self.assertEqual(summary["queue_item_id"], "qit_evt_manual_blog_bind_handoff")
+
+    def _run(self, artifact_dir: Path):
+        runner = QueueBindThenRecommendedActionScenario(
             loader=FixtureLoader(REPO_ROOT),
             writer=ArtifactWriter(artifact_dir),
             clock=FakeClock(),

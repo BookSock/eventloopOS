@@ -7,7 +7,7 @@ from typing import Any
 from .artifacts import ArtifactWriter
 from .clock import FakeClock
 from .fixtures import FixtureLoader
-from .orchestrator import OrchestratorClient
+from .orchestrator import OrchestratorClient, OrchestratorError
 
 
 SEEDED_QUEUE = "seeded_queue"
@@ -21,6 +21,7 @@ BROWSER_CONTEXT_ATTACH_TASK = "browser_context_attach_task"
 TASK_SESSION_FOLLOWUP = "task_session_followup"
 QUEUE_RECOMMENDED_ACTION = "queue_recommended_action"
 TASK_SESSION_BINDING = "task_session_binding"
+QUEUE_BIND_THEN_RECOMMENDED_ACTION = "queue_bind_then_recommended_action"
 VOICE_TASK_COMMAND = "voice_task_command"
 WORKSPACE_SNAPSHOT_CONTEXT = "workspace_snapshot_context"
 WORKSPACE_STATUS_SMOKE = "workspace_status_smoke"
@@ -37,6 +38,7 @@ SCENARIOS = (
     TASK_SESSION_FOLLOWUP,
     QUEUE_RECOMMENDED_ACTION,
     TASK_SESSION_BINDING,
+    QUEUE_BIND_THEN_RECOMMENDED_ACTION,
     VOICE_TASK_COMMAND,
     WORKSPACE_SNAPSHOT_CONTEXT,
     WORKSPACE_STATUS_SMOKE,
@@ -1986,6 +1988,202 @@ class TaskSessionBindingScenario:
         for field, value in golden["expected_binding"].items():
             if binding.get(field) != value:
                 raise ScenarioFailure(f"binding {field} mismatch: expected {value!r}, got {binding.get(field)!r}")
+
+
+class QueueBindThenRecommendedActionScenario(QueueRecommendedActionScenario):
+    def run(self) -> ScenarioResult:
+        mode = "orchestrator" if self.orchestrator_url else "fixture"
+        log: dict[str, Any] = {
+            "scenario": QUEUE_BIND_THEN_RECOMMENDED_ACTION,
+            "mode": mode,
+            "started_at": self.clock.now_iso(),
+            "steps": [],
+        }
+        try:
+            result = self._run_orchestrator(log) if self.orchestrator_url else self._run_fixture(log)
+            log["passed"] = True
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            self.writer.write_json("summary.json", result.details)
+            return result
+        except Exception as exc:
+            log["passed"] = False
+            log["error"] = str(exc)
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            raise
+
+    def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
+        event = self.loader.scenario_fixture(QUEUE_BIND_THEN_RECOMMENDED_ACTION, "manual_review_event.json")
+        golden = self.loader.golden_expectation(QUEUE_BIND_THEN_RECOMMENDED_ACTION)
+        route_decision = self._expected_route_decision(event)
+        review_packet = self._expected_review_packet(event, route_decision)
+        queue_item = self._expected_queue_item(event, review_packet)
+        task_message = self._expected_task_message(queue_item, review_packet, event)
+        action_result = self._expected_action_result(queue_item, review_packet, task_message)
+        unbound_error = self._expected_unbound_error(queue_item)
+
+        log["steps"].append({"name": "bind_task_session_wrong_task", "task_id": "task_unrelated_handoff"})
+        log["steps"].append({"name": "route_event", "route_decision_id": route_decision["id"]})
+        log["steps"].append(
+            {
+                "name": "create_queue_item_review_packet",
+                "queue_item_id": queue_item["id"],
+                "review_packet_id": review_packet["id"],
+            }
+        )
+        log["steps"].append({"name": "assert_recommended_action_blocked_until_binding", "code": unbound_error["code"]})
+        log["steps"].append({"name": "bind_task_session_correct_task", "task_id": queue_item["task_id"]})
+        log["steps"].append({"name": "execute_recommended_action", "task_message_id": task_message["id"]})
+        log["steps"].append({"name": "assert_queue_empty"})
+
+        observed = {
+            "event": event,
+            "route_decision": route_decision,
+            "review_packet": review_packet,
+            "next_queue_item": queue_item,
+            "blocked_action_response": unbound_error,
+            "binding": {
+                "ok": True,
+                "task_session_id": "task_session_blog",
+                "task_id": queue_item["task_id"],
+            },
+            "action_response": {
+                "ok": True,
+                "action_result": action_result,
+                "item": {**queue_item, "state": "done"},
+            },
+            "task_message": task_message,
+            "final_queue": {"item": None},
+        }
+        self._assert_golden(observed, golden)
+        self._assert_unbound_error(observed["blocked_action_response"], queue_item)
+        self.writer.write_json("observed.json", observed)
+        return ScenarioResult(
+            scenario=QUEUE_BIND_THEN_RECOMMENDED_ACTION,
+            mode="fixture",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": event["id"],
+                "queue_item_id": queue_item["id"],
+                "task_id": queue_item["task_id"],
+                "task_session_id": action_result["task_session_id"],
+                "task_message_id": task_message["id"],
+            },
+        )
+
+    def _run_orchestrator(self, log: dict[str, Any]) -> ScenarioResult:
+        assert self.orchestrator_url is not None
+        client = OrchestratorClient(self.orchestrator_url)
+        event = self.loader.scenario_fixture(QUEUE_BIND_THEN_RECOMMENDED_ACTION, "manual_review_event.json")
+        golden = self.loader.golden_expectation(QUEUE_BIND_THEN_RECOMMENDED_ACTION)
+        self._drain_existing_queue(client, log)
+
+        wrong_binding = client.bind_task_session("task_session_blog", {"task_id": "task_unrelated_handoff"})
+        log["steps"].append({"name": "bind_task_session_wrong_task", "task_id": wrong_binding.get("binding", {}).get("task_id")})
+
+        route_response = client.route_event(event)
+        queue_item = route_response.get("queue_item")
+        review_packet = route_response.get("review_packet")
+        route_decision = route_response.get("route_decision")
+        if not isinstance(queue_item, dict) or not isinstance(review_packet, dict) or not isinstance(route_decision, dict):
+            raise ScenarioFailure("route response missing queue action review artifacts")
+        log["steps"].append({"name": "route_event", "route_decision_id": route_decision.get("id")})
+        log["steps"].append(
+            {
+                "name": "create_queue_item_review_packet",
+                "queue_item_id": queue_item.get("id"),
+                "review_packet_id": review_packet.get("id"),
+            }
+        )
+
+        blocked_action_response = self._execute_recommended_action_expect_unbound(client, queue_item["id"])
+        log["steps"].append(
+            {
+                "name": "assert_recommended_action_blocked_until_binding",
+                "code": blocked_action_response.get("code"),
+            }
+        )
+
+        binding_response = client.bind_task_session("task_session_blog", {"task_id": queue_item["task_id"]})
+        log["steps"].append({"name": "bind_task_session_correct_task", "task_id": queue_item["task_id"]})
+
+        action_response = client.execute_recommended_action(queue_item["id"], {"actor_id": "user_jason"})
+        action_result = action_response.get("action_result")
+        task_message = action_result.get("task_message") if isinstance(action_result, dict) else None
+        if not isinstance(action_result, dict) or not isinstance(task_message, dict):
+            raise ScenarioFailure("recommended action response missing task message")
+        log["steps"].append({"name": "execute_recommended_action", "task_message_id": task_message.get("id")})
+
+        final_queue_item = client.next_queue_item()
+        log["steps"].append({"name": "assert_queue_empty"})
+        if final_queue_item is not None:
+            raise ScenarioFailure(f"expected empty queue after recommended action, got {final_queue_item!r}")
+
+        observed = {
+            "event": event,
+            "route_decision": route_decision,
+            "review_packet": review_packet,
+            "next_queue_item": queue_item,
+            "blocked_action_response": blocked_action_response,
+            "binding": binding_response.get("binding"),
+            "action_response": action_response,
+            "task_message": task_message,
+            "final_queue": {"item": None},
+        }
+        self._assert_golden(observed, golden)
+        self._assert_unbound_error(observed["blocked_action_response"], queue_item)
+        self.writer.write_json("observed.json", observed)
+        return ScenarioResult(
+            scenario=QUEUE_BIND_THEN_RECOMMENDED_ACTION,
+            mode="orchestrator",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": event["id"],
+                "queue_item_id": queue_item["id"],
+                "task_id": queue_item["task_id"],
+                "task_session_id": action_result["task_session_id"],
+                "task_message_id": task_message["id"],
+            },
+        )
+
+    @staticmethod
+    def _expected_unbound_error(queue_item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "status": 409,
+            "code": "task_session_unmatched",
+            "message": f"no task session is bound to {queue_item['task_id']}",
+        }
+
+    @staticmethod
+    def _execute_recommended_action_expect_unbound(
+        client: OrchestratorClient,
+        queue_item_id: str,
+    ) -> dict[str, Any]:
+        try:
+            client.execute_recommended_action(queue_item_id, {"actor_id": "user_jason"})
+        except OrchestratorError as exc:
+            message = str(exc)
+            if "HTTP 409" not in message or "task_session_unmatched" not in message:
+                raise ScenarioFailure(f"expected task_session_unmatched 409, got {message}") from exc
+            return {
+                "status": 409,
+                "code": "task_session_unmatched",
+                "message": message,
+            }
+        raise ScenarioFailure("recommended action should fail before task session binding")
+
+    @classmethod
+    def _assert_unbound_error(cls, error_response: dict[str, Any], queue_item: dict[str, Any]) -> None:
+        expected = cls._expected_unbound_error(queue_item)
+        if error_response.get("status") != expected["status"]:
+            raise ScenarioFailure(f"unbound action status mismatch: {error_response!r}")
+        if error_response.get("code") != expected["code"]:
+            raise ScenarioFailure(f"unbound action code mismatch: {error_response!r}")
+        if expected["message"] not in str(error_response.get("message", "")):
+            raise ScenarioFailure(f"unbound action message mismatch: {error_response!r}")
 
 
 class VoiceTaskCommandScenario:
