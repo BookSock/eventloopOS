@@ -209,6 +209,117 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.binding.session?.status, "running")
     }
 
+    func testQueueLineageEnvelopeDecodesServerShapeWithoutRawTaskText() throws {
+        let data = """
+        {
+          "lineage": {
+            "queue_item": {
+              "id": "qit_blog_feedback",
+              "task_id": "task_blog_feedback",
+              "state": "ready",
+              "priority_score": 90,
+              "created_at": "2026-05-06T12:00:00Z",
+              "updated_at": "2026-05-06T12:01:00Z"
+            },
+            "related_event_ids": ["evt_review_1"],
+            "events": [
+              {
+                "id": "evt_review_1",
+                "source": "slack",
+                "source_id": "slack:launch",
+                "idempotency_key": "idem_evt_review_1",
+                "occurred_at": "2026-05-06T12:00:00Z",
+                "received_at": "2026-05-06T12:00:01Z",
+                "actor": {"id": "u1", "type": "human"},
+                "type": "slack_message",
+                "title": "Launch feedback",
+                "summary": "Blog needs launch details.",
+                "raw_ref": {"id": "m1", "uri": "slack://m1", "media_type": "application/json"},
+                "links": [],
+                "resources": [],
+                "task_hint": "task_blog_feedback"
+              }
+            ],
+            "activity": [
+              {
+                "id": "actv_1",
+                "type": "task_followup_sent",
+                "occurred_at": "2026-05-06T12:05:00Z",
+                "actor": "agent",
+                "queue_item_id": "qit_blog_feedback",
+                "event_id": "evt_review_1",
+                "task_session_id": "task_session_blog",
+                "status": "ok",
+                "summary": "Task followup sent",
+                "details": {}
+              }
+            ],
+            "task_messages": [
+              {
+                "id": "task_msg_1",
+                "durable_id": "task_msg_durable_1",
+                "task_session_id": "task_session_blog",
+                "origin": "queue_action",
+                "status": "sent",
+                "event_ids": ["evt_review_1"],
+                "text_hash": "abc",
+                "text_length": 42
+              }
+            ],
+            "counts": {"events": 1, "activity": 1, "task_messages": 1}
+          },
+          "request_id": "req_1"
+        }
+        """.data(using: .utf8)!
+
+        let envelope = try QueueCoders.makeDecoder().decode(QueueLineageEnvelope.self, from: data)
+
+        XCTAssertEqual(envelope.lineage.queueItem?.id, "qit_blog_feedback")
+        XCTAssertEqual(envelope.lineage.queueItem?.state, "ready")
+        XCTAssertEqual(envelope.lineage.relatedEventIds, ["evt_review_1"])
+        XCTAssertEqual(envelope.lineage.events.first?.title, "Launch feedback")
+        XCTAssertEqual(envelope.lineage.activity.first?.taskSessionId, "task_session_blog")
+        XCTAssertEqual(envelope.lineage.taskMessages.first?.textLength, 42)
+        XCTAssertEqual(envelope.lineage.counts.taskMessages, 1)
+    }
+
+    func testHTTPQueueClientFetchesQueueLineage() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/queue/qit_blog_feedback/lineage?limit=10")
+            return """
+            {
+              "lineage": {
+                "queue_item": {"id": "qit_blog_feedback", "state": "ready"},
+                "related_event_ids": ["evt_review_1"],
+                "events": [],
+                "activity": [],
+                "task_messages": [
+                  {
+                    "id": "task_msg_1",
+                    "durable_id": "task_msg_durable_1",
+                    "task_session_id": "task_session_blog",
+                    "origin": "queue_action",
+                    "status": "sent",
+                    "event_ids": ["evt_review_1"],
+                    "text_hash": "abc",
+                    "text_length": 42
+                  }
+                ],
+                "counts": {"events": 1, "activity": 0, "task_messages": 1}
+              }
+            }
+            """
+        }
+
+        let lineage = try await client.fetchQueueLineage(packetId: "qit_blog_feedback", limit: 10)
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertEqual(lineage.queueItem?.id, "qit_blog_feedback")
+        XCTAssertEqual(lineage.taskMessages.first?.textHash, "abc")
+        XCTAssertEqual(lineage.counts.taskMessages, 1)
+    }
+
     func testHTTPQueueClientFetchesTaskSessions() async throws {
         let (client, recorder) = makeHTTPClient { _ in
             """

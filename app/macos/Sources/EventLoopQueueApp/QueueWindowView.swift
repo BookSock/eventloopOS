@@ -103,6 +103,7 @@ struct QueueWindowView: View {
                 taskSessions: viewModel.taskSessions,
                 selectedTaskSessions: viewModel.selectedTaskSessions,
                 taskBindingState: viewModel.taskBindingState,
+                queueLineageState: viewModel.queueLineageState,
                 canExecuteRecommendedAction: viewModel.canExecuteSelectedRecommendedAction,
                 recommendedActionBlockReason: viewModel.selectedRecommendedActionBlockReason
             ) {
@@ -136,6 +137,10 @@ struct QueueWindowView: View {
             } loadTaskSessions: {
                 Task {
                     await viewModel.loadTaskSessions()
+                }
+            } loadLineage: {
+                Task {
+                    await viewModel.loadLineageForSelectedPacket()
                 }
             } bindTaskSession: { taskSessionId in
                 Task {
@@ -236,6 +241,7 @@ private struct PacketDetail: View {
     let taskSessions: [TaskSession]
     let selectedTaskSessions: [TaskSession]
     let taskBindingState: TaskBindingState
+    let queueLineageState: QueueLineageState
     let canExecuteRecommendedAction: Bool
     let recommendedActionBlockReason: String?
     let doneAndNext: () -> Void
@@ -246,6 +252,7 @@ private struct PacketDetail: View {
     let refreshQueue: () -> Void
     let restoreContextResource: (ReviewContextResource) -> Void
     let loadTaskSessions: () -> Void
+    let loadLineage: () -> Void
     let bindTaskSession: (String) -> Void
 
     var body: some View {
@@ -304,6 +311,13 @@ private struct PacketDetail: View {
                                     bindTaskSession: bindTaskSession
                                 )
                             }
+                        }
+
+                        DetailSection(title: "Lineage", systemImage: "point.3.connected.trianglepath.dotted") {
+                            QueueLineageSection(
+                                state: queueLineageState,
+                                loadLineage: loadLineage
+                            )
                         }
 
                         if !packet.riskTags.isEmpty {
@@ -418,6 +432,75 @@ private struct PacketDetail: View {
         }
         .padding(24)
         .accessibilityIdentifier("packet-detail")
+    }
+}
+
+private struct QueueLineageSection: View {
+    let state: QueueLineageState
+    let loadLineage: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            switch state {
+            case .idle:
+                Button {
+                    loadLineage()
+                } label: {
+                    Label("Load history", systemImage: "clock.arrow.circlepath")
+                }
+                .accessibilityIdentifier("queue-lineage-load-button")
+            case .loading:
+                ProgressView("Loading history")
+                    .accessibilityIdentifier("queue-lineage-loading")
+            case let .failed(_, message):
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("queue-lineage-error")
+                    Button {
+                        loadLineage()
+                    } label: {
+                        Label("Retry", systemImage: "arrow.clockwise")
+                    }
+                }
+            case let .loaded(_, lineage):
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        PacketPill(label: "\(lineage.counts.events) events", accessibilityID: "queue-lineage-event-count")
+                        PacketPill(label: "\(lineage.counts.activity) activity", accessibilityID: "queue-lineage-activity-count")
+                        PacketPill(label: "\(lineage.counts.taskMessages) messages", accessibilityID: "queue-lineage-message-count")
+                    }
+                    if let event = lineage.events.first {
+                        Text(event.title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .accessibilityIdentifier("queue-lineage-latest-event")
+                    }
+                    if let message = lineage.taskMessages.first {
+                        Text("Latest message: \(message.status) -> \(message.taskSessionId)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("queue-lineage-latest-message")
+                    }
+                    if let activity = lineage.activity.first {
+                        Text(activity.summary)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                            .accessibilityIdentifier("queue-lineage-latest-activity")
+                    }
+                    Button {
+                        loadLineage()
+                    } label: {
+                        Label("Refresh history", systemImage: "arrow.clockwise")
+                    }
+                    .controlSize(.small)
+                }
+                .accessibilityIdentifier("queue-lineage-loaded")
+            }
+        }
     }
 }
 

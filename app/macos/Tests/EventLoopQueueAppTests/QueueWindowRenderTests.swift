@@ -82,6 +82,33 @@ final class QueueWindowRenderTests: XCTestCase {
         try writePNGArtifact(cgImage, name: "queue-window-long-packet.png")
     }
 
+    func testQueueWindowRendersLoadedLineageWithoutBlanking() async throws {
+        let packet = SeededQueue.packets[0]
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(
+                packets: [packet],
+                queueLineageResult: .success(makeLineage(queueItemId: packet.id))
+            ),
+            initialPackets: [packet]
+        )
+        await viewModel.loadLineageForSelectedPacket()
+        let view = QueueWindowView(viewModel: viewModel)
+            .frame(width: 760, height: 560)
+
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = 1
+
+        guard let cgImage = renderer.cgImage else {
+            XCTFail("QueueWindowView did not render loaded lineage")
+            return
+        }
+
+        XCTAssertEqual(cgImage.width, 760)
+        XCTAssertEqual(cgImage.height, 560)
+        XCTAssertGreaterThan(try countNonBlankPixels(in: cgImage), 1_000)
+        try writePNGArtifact(cgImage, name: "queue-window-loaded-lineage.png")
+    }
+
     private func countNonBlankPixels(in image: CGImage) throws -> Int {
         let width = image.width
         let height = image.height
@@ -135,6 +162,48 @@ final class QueueWindowRenderTests: XCTestCase {
             directory.deleteLastPathComponent()
         }
         throw RenderSmokeError.repoRootNotFound
+    }
+
+    private func makeLineage(queueItemId: String) -> QueueLineage {
+        QueueLineage(
+            queueItem: QueueLineageQueueItem(id: queueItemId, state: "ready", taskId: "task_blog_feedback", priorityScore: 90),
+            relatedEventIds: ["evt_review_1"],
+            events: [
+                QueueLineageEvent(
+                    id: "evt_review_1",
+                    source: "slack",
+                    sourceId: "slack:launch",
+                    type: "slack_message",
+                    title: "Launch feedback",
+                    summary: "Blog needs launch detail.",
+                    occurredAt: Date(timeIntervalSince1970: 1_767_096_000)
+                )
+            ],
+            activity: [
+                QueueLineageActivity(
+                    id: "actv_1",
+                    type: "task_followup_sent",
+                    occurredAt: Date(timeIntervalSince1970: 1_767_096_300),
+                    status: "ok",
+                    summary: "Task followup sent",
+                    eventId: "evt_review_1",
+                    taskSessionId: "task_session_blog"
+                )
+            ],
+            taskMessages: [
+                QueueLineageTaskMessage(
+                    id: "task_msg_1",
+                    durableId: "task_msg_durable_1",
+                    taskSessionId: "task_session_blog",
+                    origin: "queue_action",
+                    status: "sent",
+                    eventIds: ["evt_review_1"],
+                    textHash: "abc",
+                    textLength: 42
+                )
+            ],
+            counts: QueueLineageCounts(events: 1, activity: 1, taskMessages: 1)
+        )
     }
 }
 

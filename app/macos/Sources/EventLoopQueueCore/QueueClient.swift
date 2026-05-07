@@ -11,6 +11,7 @@ public protocol QueueClient: Sendable {
     func contextRestorePlan(resource: ReviewContextResource) async throws -> ContextRestorePlan
     func requestContextRestore(resource: ReviewContextResource, idempotencyKey: String) async throws -> ContextRestoreRequest
     func contextRestoreRequest(id: String) async throws -> ContextRestoreRequest
+    func fetchQueueLineage(packetId: String, limit: Int) async throws -> QueueLineage
     func fetchTaskSessions() async throws -> [TaskSession]
     func bindTaskSession(sessionId: String, taskId: String) async throws -> TaskBinding
 }
@@ -168,6 +169,17 @@ public struct HTTPQueueClient: QueueClient {
         return try decoder.decode(ContextRestoreRequestEnvelope.self, from: data).restoreRequest
     }
 
+    public func fetchQueueLineage(packetId: String, limit: Int = 100) async throws -> QueueLineage {
+        var components = URLComponents(url: baseURL.appending(path: "queue/\(packetId)/lineage"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        guard let url = components?.url else {
+            throw QueueClientError.invalidResponse
+        }
+        let (data, response) = try await session.data(from: url)
+        try validate(response: response)
+        return try decoder.decode(QueueLineageEnvelope.self, from: data).lineage
+    }
+
     public func fetchTaskSessions() async throws -> [TaskSession] {
         let url = baseURL.appending(path: "task-sessions")
         let (data, response) = try await session.data(from: url)
@@ -259,6 +271,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var contextRestoreRequestResources: [ReviewContextResource] = []
     private var contextRestoreRequestIdempotencyKeys: [String] = []
     private var contextRestoreStatusIds: [String] = []
+    private let queueLineageResult: Result<QueueLineage, Error>?
+    private var queueLineagePacketIds: [String] = []
     private var executedRecommendedActionIds: [String] = []
     private var taskSessions: [TaskSession]
     private var taskBindings: [TaskBinding] = []
@@ -312,7 +326,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
             )
         ),
         contextRestoreStatusResult: Result<ContextRestoreRequest, Error>? = nil,
-        contextRestoreStatusResults: [Result<ContextRestoreRequest, Error>] = []
+        contextRestoreStatusResults: [Result<ContextRestoreRequest, Error>] = [],
+        queueLineageResult: Result<QueueLineage, Error>? = nil
     ) {
         self.packets = packets.sorted { $0.priority > $1.priority }
         self.taskSessions = taskSessions
@@ -320,6 +335,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         self.contextRestoreRequestResult = contextRestoreRequestResult
         self.contextRestoreStatusResult = contextRestoreStatusResult ?? contextRestoreRequestResult
         self.contextRestoreStatusResults = contextRestoreStatusResults
+        self.queueLineageResult = queueLineageResult
     }
 
     public var completedPacketIds: [String] {
@@ -360,6 +376,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public var checkedContextRestoreIds: [String] {
         lock.withLock { contextRestoreStatusIds }
+    }
+
+    public var requestedQueueLineagePacketIds: [String] {
+        lock.withLock { queueLineagePacketIds }
     }
 
     public var executedRecommendedActions: [String] {
@@ -485,6 +505,24 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
                 return try contextRestoreStatusResults.removeFirst().get()
             }
             return try contextRestoreStatusResult.get()
+        }
+    }
+
+    public func fetchQueueLineage(packetId: String, limit _: Int = 100) async throws -> QueueLineage {
+        try lock.withLock {
+            queueLineagePacketIds.append(packetId)
+            if let queueLineageResult {
+                return try queueLineageResult.get()
+            }
+            guard packets.contains(where: { $0.id == packetId }) else {
+                throw QueueClientError.packetNotFound(packetId)
+            }
+            return QueueLineage(
+                relatedEventIds: [],
+                activity: [],
+                taskMessages: [],
+                counts: QueueLineageCounts(events: 0, activity: 0, taskMessages: 0)
+            )
         }
     }
 

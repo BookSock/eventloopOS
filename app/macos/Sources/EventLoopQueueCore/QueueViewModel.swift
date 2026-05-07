@@ -17,6 +17,7 @@ public final class QueueViewModel: ObservableObject {
             }
             taskBindingState = .idle
             contextRestoreState = .idle
+            queueLineageState = .idle
         }
     }
     @Published public private(set) var state: QueueState
@@ -26,6 +27,7 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var manualWorkspaceSnapshot: WorkspaceSnapshot?
     @Published public private(set) var manualWorkspaceCaptureState: ManualWorkspaceCaptureState
     @Published public private(set) var contextRestoreState: ContextRestoreState
+    @Published public private(set) var queueLineageState: QueueLineageState
     @Published public private(set) var taskSessions: [TaskSession]
     @Published public private(set) var taskBindingState: TaskBindingState
 
@@ -51,6 +53,7 @@ public final class QueueViewModel: ObservableObject {
         self.manualWorkspaceSnapshot = nil
         self.manualWorkspaceCaptureState = .idle
         self.contextRestoreState = .idle
+        self.queueLineageState = .idle
         self.taskSessions = []
         self.taskBindingState = .idle
     }
@@ -353,6 +356,27 @@ public final class QueueViewModel: ObservableObject {
         }
 
         await loadTaskSessions()
+    }
+
+    public func loadLineageForSelectedPacket(limit: Int = 100) async {
+        guard let packetId = selectedPacketID else {
+            queueLineageState = .idle
+            return
+        }
+
+        queueLineageState = .loading(packetId)
+        do {
+            let lineage = try await client.fetchQueueLineage(packetId: packetId, limit: limit)
+            guard selectedPacketID == packetId else {
+                return
+            }
+            queueLineageState = .loaded(packetId, lineage)
+        } catch {
+            guard selectedPacketID == packetId else {
+                return
+            }
+            queueLineageState = .failed(packetId, error.localizedDescription)
+        }
     }
 
     public func bindSelectedPacket(toTaskSessionId taskSessionId: String) async {
