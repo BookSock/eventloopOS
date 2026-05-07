@@ -1,0 +1,86 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+
+const port = process.env.ORCHESTRATOR_PORT ?? "4377";
+const host = process.env.ORCHESTRATOR_HOST ?? "127.0.0.1";
+const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? `http://${host}:${port}`;
+
+let server;
+
+try {
+  await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "build"]);
+  server = spawn("pnpm", ["--filter", "@eventloopos/orchestrator", "start"], {
+    env: {
+      ...process.env,
+      ORCHESTRATOR_HOST: host,
+      ORCHESTRATOR_PORT: port
+    },
+    stdio: "inherit"
+  });
+
+  await waitForHealth(orchestratorUrl, server);
+  await spawnChecked("pnpm", ["run", "test:e2e:live"], {
+    ...process.env,
+    EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl
+  });
+  await spawnChecked("pnpm", ["--filter", "@eventloopos/browser-extension", "test:e2e"]);
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  if (server && !server.killed) {
+    server.kill("SIGTERM");
+    await onceExit(server);
+  }
+}
+
+async function waitForHealth(url, child) {
+  const deadline = Date.now() + 15_000;
+  let exited = false;
+  child.once("exit", () => {
+    exited = true;
+  });
+
+  while (Date.now() < deadline) {
+    if (exited) {
+      throw new Error("orchestrator exited before health check passed");
+    }
+    try {
+      const response = await fetch(new URL("/health", url));
+      if (response.ok) {
+        return;
+      }
+    } catch {
+      // Server not ready yet.
+    }
+    await sleep(250);
+  }
+  throw new Error(`timed out waiting for orchestrator health at ${url}/health`);
+}
+
+async function spawnChecked(file, args, env = process.env) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      env,
+      stdio: "inherit"
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}`));
+    });
+  });
+}
+
+async function onceExit(child) {
+  return await new Promise((resolve) => {
+    child.once("exit", resolve);
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

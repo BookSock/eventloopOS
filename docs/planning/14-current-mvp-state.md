@@ -9,6 +9,7 @@ Repo now has working MVP spine:
 - Browser extension = Chrome tab capture, restore, config, poll loop.
 - Native host = Chrome Native Messaging bridge.
 - Test harness = repeatable agent feedback loop.
+- `pnpm run test:e2e:live:boot` boots orchestrator, runs live harness/native/browser E2E, then stops server.
 
 Main command:
 
@@ -109,5 +110,4 @@ Weak tests:
 ## Next Best Work
 
 1. Run Docker/Postgres DB tests on machine with Docker daemon and record pass/fail.
-2. Add tiny dev command that boots orchestrator + browser E2E + harness as one command.
-3. Add local voice capture/wake-word adapter behind same `/voice/commands` path.
+2. Add local voice capture/wake-word adapter behind same `/voice/commands` path.
