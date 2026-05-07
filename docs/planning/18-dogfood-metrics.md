@@ -97,6 +97,7 @@ Current implementation:
 - `dogfood:review` includes daily activity rollups for the selected window, so longer `EVENTLOOPOS_DOGFOOD_REVIEW_SINCE` ranges can compare days.
 - Restore request activity records resource provider and confidence reason. Metrics include provider-specific created/done/failed/retried counters, and `dogfood:review` groups restore success/failure by provider.
 - Queue done activity records task ID, and recommended resume-agent actions also record task-session ID, so after-the-fact session history can connect queue work back to agent runtime.
+- Queue defer/ignore actions record `queue_item_deferred` / `queue_item_ignored` activity and increment `queue_items_deferred_total` / `queue_items_ignored_total`.
 - Task followup calls now emit attempted plus sent/blocked/failed activity with task session ID, idempotency key, event IDs, payload length, and origin (`event_route`, `queue_action`, or `task_session_api`).
 
 ## Privacy
@@ -113,6 +114,7 @@ Tests needed:
 - E2E: MCP local event poll increments ingested/routed/queue counters.
 - E2E: browser restore done increments restore counters.
 - E2E: task followup success/fail increments task counters.
+- API/DB: queue defer/ignore increments counters, records activity, hides deferred items until due, and stops ignored items from leasing.
 - CLI: `dogfood:review` filters current-day activity and fails cleanly when orchestrator is unavailable.
 - CLI: `dogfood:review` groups recent activity by task, task session, and queue item.
 - CLI/API: restore provider metrics and activity rollups show which restore backends are succeeding or failing.

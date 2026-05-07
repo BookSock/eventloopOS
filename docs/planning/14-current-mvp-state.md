@@ -96,6 +96,8 @@ Done:
 - `POST /contexts/restore-requests/claim-next` leases one pending restore request.
 - `POST /contexts/restore-requests/:id/done`.
 - `GET /contexts/restore-requests/:id`.
+- `POST /queue/:id/defer` hides a queue item until `due_at`, records `queue_item_deferred`, and increments `queue_items_deferred_total`.
+- `POST /queue/:id/ignore` moves a queue item to `dead`, records `queue_item_ignored`, and increments `queue_items_ignored_total`.
 - Idempotency key support for restore request creation.
 - Restore request persistence through same in-memory/Postgres store abstraction as queue storage.
 - Expired restore request leases get reaped and reclaimed.
@@ -146,6 +148,7 @@ Strong tests now:
 - `pnpm run dogfood:review` prints a local daily-ish review from `/metrics` and `/activity`; set `EVENTLOOPOS_DOGFOOD_REVIEW_FORMAT=json` for agent-readable output. The report now includes derived rates, task rollups, task-session rollups, queue rollups, and queue time-to-done.
 - Restore activity and counters include provider-specific created/done/failed/retried data, and `dogfood:review` groups provider restore success/failure.
 - Task followups record attempted plus sent/blocked/failed activity with origin, task session ID, idempotency key, event IDs, and text length, giving a lightweight outbox-style audit trail without a separate durable outbox table.
+- Queue defer/ignore API tests and Postgres tests prove deferred items disappear from active queue until due, then requeue; ignored items stop leasing.
 - Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
 - Mac unit tests cover Manual Mode workspace capture/restore through `HTTPWorkspaceClient.capture()`, `QueueViewModel.enterManualModeAndCaptureWorkspace()`, and `QueueViewModel.confirmManualWorkspaceRestore()`.
 - `pnpm run dev:dogfood:smoke` starts orchestrator + Mac queue app in empty in-memory mode, waits for health, launches the queue app, then exits automatically after a short smoke window.

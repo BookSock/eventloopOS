@@ -90,7 +90,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           return sendSchemaError(response, context, validation.message);
         }
 
-        const items = await options.store.listQueue(validation.state);
+        const items = await options.store.listQueue(validation.state, now());
 
         return sendJson(response, 200, {
           items,
@@ -654,6 +654,98 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         });
       }
 
+      const deferMatch = context.url.pathname.match(/^\/queue\/([^/]+)\/defer$/);
+      if (request.method === "POST" && deferMatch) {
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) {
+          return sendSchemaError(response, context, parsed.message);
+        }
+        const validation = validateQueueDeferRequest(parsed.value, now());
+        if (!validation.ok) {
+          return sendSchemaError(response, context, validation.message);
+        }
+
+        const queueItemId = decodeURIComponent(deferMatch[1] ?? "");
+        const item = await options.store.deferQueueItem(queueItemId, validation.actorId, validation.dueAt, now());
+        if (!item) {
+          return sendError(response, 404, context, "not_found", `queue item ${queueItemId} was not found`);
+        }
+        await observability.incrementCounter("queue_items_deferred_total");
+        await observability.recordActivity({
+          type: "queue_item_deferred",
+          occurred_at: item.updated_at,
+          actor: "human",
+          task_id: item.task_id,
+          queue_item_id: item.id,
+          status: "ok",
+          summary: `Queue item deferred: ${item.review_packet.title}`,
+          details: {
+            review_packet_id: item.review_packet_id,
+            due_at: item.due_at,
+          },
+        });
+
+        return sendJson(response, 200, {
+          ok: true,
+          item,
+          decision: {
+            id: `dec_${queueItemId}_defer`,
+            queue_item_id: queueItemId,
+            review_packet_id: item.review_packet_id,
+            action: "defer",
+            actor_id: validation.actorId,
+            due_at: item.due_at,
+            decided_at: now().toISOString(),
+          },
+          request_id: context.requestId,
+        });
+      }
+
+      const ignoreMatch = context.url.pathname.match(/^\/queue\/([^/]+)\/ignore$/);
+      if (request.method === "POST" && ignoreMatch) {
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) {
+          return sendSchemaError(response, context, parsed.message);
+        }
+        const validation = validateQueueIgnoreRequest(parsed.value);
+        if (!validation.ok) {
+          return sendSchemaError(response, context, validation.message);
+        }
+
+        const queueItemId = decodeURIComponent(ignoreMatch[1] ?? "");
+        const item = await options.store.ignoreQueueItem(queueItemId, validation.actorId, now());
+        if (!item) {
+          return sendError(response, 404, context, "not_found", `queue item ${queueItemId} was not found`);
+        }
+        await observability.incrementCounter("queue_items_ignored_total");
+        await observability.recordActivity({
+          type: "queue_item_ignored",
+          occurred_at: item.updated_at,
+          actor: "human",
+          task_id: item.task_id,
+          queue_item_id: item.id,
+          status: "ok",
+          summary: `Queue item ignored: ${item.review_packet.title}`,
+          details: {
+            review_packet_id: item.review_packet_id,
+          },
+        });
+
+        return sendJson(response, 200, {
+          ok: true,
+          item,
+          decision: {
+            id: `dec_${queueItemId}_ignore`,
+            queue_item_id: queueItemId,
+            review_packet_id: item.review_packet_id,
+            action: "ignore",
+            actor_id: validation.actorId,
+            decided_at: now().toISOString(),
+          },
+          request_id: context.requestId,
+        });
+      }
+
       const recommendedActionMatch = context.url.pathname.match(/^\/queue\/([^/]+)\/actions\/recommended$/);
       if (request.method === "POST" && recommendedActionMatch) {
         const parsed = await readJsonBody(request);
@@ -806,6 +898,38 @@ function validateContextQuery(
       q: q?.trim(),
       limit,
     },
+  };
+}
+
+function validateQueueDeferRequest(input: unknown, now: Date): { ok: true; actorId: string; dueAt: Date } | { ok: false; message: string } {
+  if (!isRecord(input) || input.action !== "defer") {
+    return { ok: false, message: "defer request requires action=defer" };
+  }
+  const dueAtRaw = typeof input.due_at === "string" ? input.due_at : "";
+  if (!dueAtRaw) {
+    return { ok: false, message: "due_at is required" };
+  }
+  const dueAt = new Date(dueAtRaw);
+  if (Number.isNaN(dueAt.getTime())) {
+    return { ok: false, message: "due_at must be a valid ISO timestamp" };
+  }
+  if (dueAt.getTime() <= now.getTime()) {
+    return { ok: false, message: "due_at must be in the future" };
+  }
+  return {
+    ok: true,
+    actorId: typeof input.actor_id === "string" ? input.actor_id : "unknown",
+    dueAt,
+  };
+}
+
+function validateQueueIgnoreRequest(input: unknown): { ok: true; actorId: string } | { ok: false; message: string } {
+  if (!isRecord(input) || input.action !== "ignore") {
+    return { ok: false, message: "ignore request requires action=ignore" };
+  }
+  return {
+    ok: true,
+    actorId: typeof input.actor_id === "string" ? input.actor_id : "unknown",
   };
 }
 

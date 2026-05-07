@@ -616,6 +616,110 @@ export class PostgresQueueStore {
     }
   }
 
+  async deferQueueItem(queueItemId: string, actorId: string, dueAt: Date): Promise<QueueItemWithPacket | undefined> {
+    void actorId;
+    const client = await this.pool.connect();
+    const now = this.clock().toISOString();
+
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<{ id: string }>(
+        `
+          UPDATE queue_items
+          SET state = 'deferred',
+              due_at = $2::timestamptz,
+              lease_owner = NULL,
+              lease_expires_at = NULL,
+              updated_at = $3::timestamptz
+          WHERE id = $1
+          RETURNING id
+        `,
+        [queueItemId, dueAt.toISOString(), now],
+      );
+
+      if (!result.rows[0]) {
+        await client.query("COMMIT");
+        return undefined;
+      }
+
+      const item = await this.getQueueItemById(client, queueItemId);
+      await client.query("COMMIT");
+      return item;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async ignoreQueueItem(queueItemId: string, actorId: string): Promise<QueueItemWithPacket | undefined> {
+    void actorId;
+    const client = await this.pool.connect();
+    const now = this.clock().toISOString();
+
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<{ id: string }>(
+        `
+          UPDATE queue_items
+          SET state = 'dead',
+              lease_owner = NULL,
+              lease_expires_at = NULL,
+              updated_at = $2::timestamptz
+          WHERE id = $1
+          RETURNING id
+        `,
+        [queueItemId, now],
+      );
+
+      if (!result.rows[0]) {
+        await client.query("COMMIT");
+        return undefined;
+      }
+
+      const item = await this.getQueueItemById(client, queueItemId);
+      await client.query("COMMIT");
+      return item;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async reapDueDeferredItems(now = this.clock()): Promise<QueueItemWithPacket[]> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const result = await client.query<{ id: string }>(
+        `
+          UPDATE queue_items
+          SET state = 'ready',
+              updated_at = $1::timestamptz
+          WHERE state = 'deferred'
+            AND due_at IS NOT NULL
+            AND due_at <= $1::timestamptz
+          RETURNING id
+        `,
+        [now.toISOString()],
+      );
+      const items = [];
+      for (const row of result.rows) {
+        const item = await this.getQueueItemById(client, row.id);
+        if (item) items.push(item);
+      }
+      await client.query("COMMIT");
+      return items;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async renewLease(queueItemId: string, leaseOwner: string, leaseMs = this.defaultLeaseMs): Promise<QueueItemWithPacket | undefined> {
     const client = await this.pool.connect();
     const now = this.clock();

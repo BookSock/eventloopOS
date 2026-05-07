@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Action, ContextResource, EvidenceRef, QueueItem, QueueItemWithPacket, ReviewPacket } from "./contracts.js";
+import type { Action, ContextResource, EvidenceRef, QueueItem, QueueItemWithPacket, QueueState, ReviewPacket } from "./contracts.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 
 const FIXTURE_PATH = resolve(
@@ -113,9 +113,10 @@ export async function createSeededStore(fixturePath = FIXTURE_PATH): Promise<InM
   };
 }
 
-export function listQueue(store: InMemoryStore): QueueItemWithPacket[] {
+export function listQueue(store: InMemoryStore, state?: QueueState): QueueItemWithPacket[] {
+  const visibleStates = state ? [state] : ["ready", "leased"];
   return store.queue
-    .filter((item) => item.state === "ready" || item.state === "leased")
+    .filter((item) => visibleStates.includes(item.state))
     .sort((left, right) => {
       if (right.priority_score !== left.priority_score) {
         return right.priority_score - left.priority_score;
@@ -127,6 +128,7 @@ export function listQueue(store: InMemoryStore): QueueItemWithPacket[] {
 }
 
 export function nextQueueItem(store: InMemoryStore, now = new Date()): QueueItemWithPacket | undefined {
+  reapDueDeferredItems(store, now);
   return listQueue(store).find((item) => item.state === "ready" && isQueueItemDue(item, now));
 }
 
@@ -137,6 +139,7 @@ export function leaseNextQueueItem(
   leaseMs = 60_000,
 ): QueueItemWithPacket | undefined {
   reapExpiredLeases(store, now);
+  reapDueDeferredItems(store, now);
   const item = store.queue
     .filter((candidate) => candidate.state === "ready" && isQueueItemDue(candidate, now))
     .sort((left, right) => {
@@ -174,6 +177,38 @@ export function markQueueItemDone(
   return attachPacket(store, item);
 }
 
+export function deferQueueItem(
+  store: InMemoryStore,
+  queueItemId: string,
+  dueAt: Date,
+  now: Date,
+): QueueItemWithPacket | undefined {
+  const item = store.queue.find((candidate) => candidate.id === queueItemId);
+  if (!item) return undefined;
+
+  item.state = "deferred";
+  item.due_at = dueAt.toISOString();
+  item.lease_owner = undefined;
+  item.lease_expires_at = undefined;
+  item.updated_at = now.toISOString();
+  return attachPacket(store, item);
+}
+
+export function ignoreQueueItem(
+  store: InMemoryStore,
+  queueItemId: string,
+  now: Date,
+): QueueItemWithPacket | undefined {
+  const item = store.queue.find((candidate) => candidate.id === queueItemId);
+  if (!item) return undefined;
+
+  item.state = "dead";
+  item.lease_owner = undefined;
+  item.lease_expires_at = undefined;
+  item.updated_at = now.toISOString();
+  return attachPacket(store, item);
+}
+
 export function renewQueueLease(
   store: InMemoryStore,
   queueItemId: string,
@@ -198,6 +233,19 @@ export function reapExpiredLeases(store: InMemoryStore, now: Date): number {
     item.state = "ready";
     item.lease_owner = undefined;
     item.lease_expires_at = undefined;
+    item.updated_at = now.toISOString();
+    reaped += 1;
+  }
+  return reaped;
+}
+
+export function reapDueDeferredItems(store: InMemoryStore, now: Date): number {
+  let reaped = 0;
+  for (const item of store.queue) {
+    if (item.state !== "deferred" || !item.due_at) continue;
+    if (new Date(item.due_at).getTime() > now.getTime()) continue;
+
+    item.state = "ready";
     item.updated_at = now.toISOString();
     reaped += 1;
   }

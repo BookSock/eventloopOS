@@ -359,6 +359,35 @@ describe("PostgresQueueStore", () => {
     assert.equal(await store.markDone("qit_missing", "user_jason"), undefined);
   });
 
+  it("defers, requeues, and ignores queue items", async (t) => {
+    if (!store) {
+      t.skip(skipReason);
+      return;
+    }
+
+    const packet = makePacket("pkt_defer_ignore", { title: "Defer packet" });
+    await store.recordEventWithReviewPacket(
+      makeEvent("evt_defer_ignore", "idem_defer_ignore"),
+      packet,
+      makeQueueItem("qit_defer_ignore", packet.id, { priority_score: 940 }),
+    );
+
+    const deferred = await store.deferQueueItem("qit_defer_ignore", "user_jason", new Date("2026-05-06T12:05:00.000Z"));
+    assert.equal(deferred?.state, "deferred");
+    assert.equal(deferred?.due_at, "2026-05-06T12:05:00.000Z");
+    assert.equal(await store.leaseNext("worker_before_due", 1_000), undefined);
+
+    const reapedBeforeDue = await store.reapDueDeferredItems(new Date("2026-05-06T12:04:00.000Z"));
+    assert.deepEqual(reapedBeforeDue, []);
+    const reapedAfterDue = await store.reapDueDeferredItems(new Date("2026-05-06T12:06:00.000Z"));
+    assert.deepEqual(reapedAfterDue.map((item) => item.id), ["qit_defer_ignore"]);
+    assert.equal(reapedAfterDue[0]?.state, "ready");
+
+    const ignored = await store.ignoreQueueItem("qit_defer_ignore", "user_jason");
+    assert.equal(ignored?.state, "dead");
+    assert.equal(await store.leaseNext("worker_after_ignore", 1_000), undefined);
+  });
+
   it("deduplicates, leases, reclaims, and completes context restore requests", async (t) => {
     if (!store) {
       t.skip(skipReason);

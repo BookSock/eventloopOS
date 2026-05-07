@@ -6,7 +6,9 @@ import {
   getStoredEvent,
   getStoredEventByIdempotencyKey,
   getContextRestoreRequest,
+  deferQueueItem,
   ingestEventAsReviewPacket,
+  ignoreQueueItem,
   isQueueItemDue,
   claimNextContextRestoreRequest,
   createContextRestoreRequest,
@@ -20,6 +22,7 @@ import {
   peekNextContextRestoreRequest,
   recordEventRoute,
   reapExpiredLeases,
+  reapDueDeferredItems,
   retryContextRestoreRequest,
   renewQueueLease,
   type InMemoryStore,
@@ -32,11 +35,13 @@ import {
 import { eventToRecord } from "./db/postgres_queue_store.js";
 
 export type GatewayStore = {
-  listQueue(state?: QueueState): Promise<QueueItemWithPacket[]>;
+  listQueue(state?: QueueState, now?: Date): Promise<QueueItemWithPacket[]>;
   nextQueueItem(now: Date): Promise<QueueItemWithPacket | undefined>;
   leaseNextQueueItem(leaseOwner: string, now: Date, leaseMs: number): Promise<QueueItemWithPacket | undefined>;
   renewQueueLease(queueItemId: string, leaseOwner: string, now: Date, leaseMs: number): Promise<QueueItemWithPacket | undefined>;
   markQueueItemDone(queueItemId: string, actorId: string, now: Date): Promise<QueueItemWithPacket | undefined>;
+  deferQueueItem(queueItemId: string, actorId: string, dueAt: Date, now: Date): Promise<QueueItemWithPacket | undefined>;
+  ignoreQueueItem(queueItemId: string, actorId: string, now: Date): Promise<QueueItemWithPacket | undefined>;
   getReviewPacket(id: string): Promise<ReviewPacket | undefined>;
   getEvent(eventId: string): Promise<StoredEventResult | undefined>;
   getEventByIdempotencyKey(source: string, idempotencyKey: string): Promise<StoredEventResult | undefined>;
@@ -61,8 +66,9 @@ export type GatewayStore = {
 
 export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   return {
-    async listQueue(state) {
-      return listQueue(store).filter((item) => (state ? item.state === state : true));
+    async listQueue(state, now) {
+      if (now) reapDueDeferredItems(store, now);
+      return listQueue(store, state);
     },
     async nextQueueItem(now) {
       reapExpiredLeases(store, now);
@@ -76,6 +82,12 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     },
     async markQueueItemDone(queueItemId, _actorId, now) {
       return markQueueItemDone(store, queueItemId, now);
+    },
+    async deferQueueItem(queueItemId, _actorId, dueAt, now) {
+      return deferQueueItem(store, queueItemId, dueAt, now);
+    },
+    async ignoreQueueItem(queueItemId, _actorId, now) {
+      return ignoreQueueItem(store, queueItemId, now);
     },
     async getReviewPacket(id) {
       return getReviewPacket(store, id);
@@ -121,7 +133,8 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
 
 export function createPostgresGatewayStore(store: PostgresQueueStore): GatewayStore {
   return {
-    async listQueue(state) {
+    async listQueue(state, now) {
+      if (now) await store.reapDueDeferredItems(now);
       return store.listQueue(state);
     },
     async nextQueueItem(now) {
@@ -137,6 +150,12 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async markQueueItemDone(queueItemId, actorId) {
       return store.markDone(queueItemId, actorId);
+    },
+    async deferQueueItem(queueItemId, actorId, dueAt) {
+      return store.deferQueueItem(queueItemId, actorId, dueAt);
+    },
+    async ignoreQueueItem(queueItemId, actorId) {
+      return store.ignoreQueueItem(queueItemId, actorId);
     },
     async getReviewPacket(id) {
       return store.getReviewPacket(id);

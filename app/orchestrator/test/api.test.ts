@@ -276,6 +276,80 @@ describe("orchestrator gateway API", () => {
     assert.equal(nextBody.item, null);
   });
 
+  it("defers and ignores queue items with visible activity", async () => {
+    const seededStore = await createSeededStore();
+    const observability = createInMemoryObservability();
+    let currentNow = new Date("2026-05-06T12:00:00.000Z");
+    const queueServer = createGatewayServer({
+      store: createInMemoryGatewayStore(seededStore),
+      observability,
+      now: () => currentNow,
+    });
+    await new Promise<void>((resolve) => queueServer.listen(0, "127.0.0.1", resolve));
+    const address = queueServer.address() as AddressInfo;
+    const queueBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const deferResponse = await fetch(`${queueBaseUrl}/queue/qit_seed_review/defer`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "defer",
+          actor_id: "user_jason",
+          due_at: "2026-05-06T12:05:00.000Z",
+        }),
+      });
+      const deferBody = await deferResponse.json() as {
+        item: { id: string; state: string; due_at?: string };
+      };
+      assert.equal(deferResponse.status, 200);
+      assert.equal(deferBody.item.state, "deferred");
+      assert.equal(deferBody.item.due_at, "2026-05-06T12:05:00.000Z");
+
+      const deferredQueueResponse = await fetch(`${queueBaseUrl}/queue?state=deferred`);
+      const deferredQueueBody = await deferredQueueResponse.json() as { count: number };
+      assert.equal(deferredQueueBody.count, 1);
+
+      const beforeDueResponse = await fetch(`${queueBaseUrl}/queue/next`);
+      const beforeDueBody = await beforeDueResponse.json() as { item: unknown };
+      assert.equal(beforeDueBody.item, null);
+
+      currentNow = new Date("2026-05-06T12:06:00.000Z");
+      const afterDueResponse = await fetch(`${queueBaseUrl}/queue/next`);
+      const afterDueBody = await afterDueResponse.json() as {
+        item: { id: string; state: string };
+      };
+      assert.equal(afterDueBody.item.id, "qit_seed_review");
+      assert.equal(afterDueBody.item.state, "ready");
+
+      const ignoreResponse = await fetch(`${queueBaseUrl}/queue/qit_seed_review/ignore`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "ignore",
+          actor_id: "user_jason",
+        }),
+      });
+      const ignoreBody = await ignoreResponse.json() as {
+        item: { id: string; state: string };
+      };
+      assert.equal(ignoreResponse.status, 200);
+      assert.equal(ignoreBody.item.state, "dead");
+
+      const metrics = await observability.snapshot();
+      assert.equal(metrics.counters.queue_items_deferred_total, 1);
+      assert.equal(metrics.counters.queue_items_ignored_total, 1);
+      assert.deepEqual((await observability.listActivity(2)).map((event) => event.type), [
+        "queue_item_ignored",
+        "queue_item_deferred",
+      ]);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        queueServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("ingests an event and creates a review queue item idempotently", async () => {
     const event = {
       id: "evt_slack_t123_c123_456",
