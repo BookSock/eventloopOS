@@ -47,7 +47,7 @@ curl http://127.0.0.1:4377/metrics
 curl http://127.0.0.1:4377/activity?limit=20
 ```
 
-These endpoints expose in-memory counters and recent activity for the current orchestrator process. They are meant for local debugging first; durable Postgres-backed history is later work.
+These endpoints expose counters and recent activity for local debugging. In Postgres mode they persist across orchestrator restarts; in empty in-memory mode they reset with the process.
 
 Personal dogfood stack:
 

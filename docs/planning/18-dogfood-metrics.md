@@ -84,9 +84,10 @@ MVP surfaces:
 
 Current implementation:
 
-- `GET /activity?limit=...` exists as in-memory recent activity for current process.
-- `GET /metrics` exists as in-memory counters for current process.
-- Durable Postgres-backed history is not implemented yet.
+- `GET /activity?limit=...` exists as recent local activity.
+- `GET /metrics` exists as local counters.
+- Postgres mode persists `activity_events` and `metric_counters` through `0003_observability.sql`.
+- In-memory mode remains process-local for fast tests and empty local smoke runs.
 
 ## Privacy
 
@@ -98,6 +99,7 @@ Tests needed:
 
 - Unit: metrics counter records expected events.
 - API: `/metrics` returns deterministic snapshot.
+- Postgres: activity/counters survive re-creating the observability adapter against the same database.
 - E2E: MCP local event poll increments ingested/routed/queue counters.
 - E2E: browser restore done increments restore counters.
 - E2E: task followup success/fail increments task counters.

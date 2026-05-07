@@ -59,7 +59,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
 
       if (request.method === "GET" && context.url.pathname === "/metrics") {
         return sendJson(response, 200, {
-          metrics: observability.snapshot(),
+          metrics: await observability.snapshot(),
           generated_at: now().toISOString(),
           request_id: context.requestId,
         });
@@ -71,7 +71,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           return sendSchemaError(response, context, validation.message);
         }
 
-        const events = observability.listActivity(validation.limit);
+        const events = await observability.listActivity(validation.limit);
         return sendJson(response, 200, {
           events,
           count: events.length,
@@ -164,9 +164,9 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           resource: validation.resource,
           restore_plan: plan,
         }, now());
-        observability.incrementCounter("restore_requests_created_total", created.inserted ? 1 : 0);
+        await observability.incrementCounter("restore_requests_created_total", created.inserted ? 1 : 0);
         if (created.inserted) {
-          observability.recordActivity({
+          await observability.recordActivity({
             type: "context_restore_requested",
             occurred_at: created.record.created_at,
             actor: "system",
@@ -220,19 +220,6 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         if (!record) {
           return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
         }
-        observability.incrementCounter("restore_requests_done_total");
-        observability.recordActivity({
-          type: "context_restore_done",
-          occurred_at: record.updated_at,
-          actor: "system",
-          status: "ok",
-          summary: `Restore completed for ${String(record.resource.title ?? record.resource.kind)}`,
-          details: {
-            restore_request_id: record.id,
-            result: record.result,
-          },
-        });
-
         return sendJson(response, 200, {
           restore_request: presentContextRestoreRequest(record),
           request_id: context.requestId,
@@ -254,6 +241,18 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         if (!record) {
           return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
         }
+        await observability.incrementCounter("restore_requests_done_total");
+        await observability.recordActivity({
+          type: "context_restore_done",
+          occurred_at: record.updated_at,
+          actor: "system",
+          status: "ok",
+          summary: `Restore completed for ${String(record.resource.title ?? record.resource.kind)}`,
+          details: {
+            restore_request_id: record.id,
+            result: record.result,
+          },
+        });
 
         return sendJson(response, 200, {
           restore_request: presentContextRestoreRequest(record),
@@ -419,9 +418,9 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
             });
           }
         }
-        observability.incrementCounter("mcp_poll_cycles_total");
-        observability.incrementCounter("mcp_poll_errors_total", errors);
-        observability.recordActivity({
+        await observability.incrementCounter("mcp_poll_cycles_total");
+        await observability.incrementCounter("mcp_poll_errors_total", errors);
+        await observability.recordActivity({
           type: "mcp_poll_cycle",
           occurred_at: now().toISOString(),
           actor: "system",
@@ -799,8 +798,8 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         if (!item) {
           return sendError(response, 404, context, "not_found", `queue item ${queueItemId} was not found`);
         }
-        observability.incrementCounter("queue_items_done_total");
-        observability.recordActivity({
+        await observability.incrementCounter("queue_items_done_total");
+        await observability.recordActivity({
           type: "queue_item_done",
           occurred_at: item.updated_at,
           actor: "human",
@@ -858,8 +857,8 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
 
         const completed = await options.store.markQueueItemDone(queueItemId, validation.actorId, now());
         if (completed) {
-          observability.incrementCounter("queue_items_done_total");
-          observability.recordActivity({
+          await observability.incrementCounter("queue_items_done_total");
+          await observability.recordActivity({
             type: "queue_item_done",
             occurred_at: completed.updated_at,
             actor: "human",
@@ -1138,7 +1137,7 @@ async function routeEventThroughGateway(
   const injected = await injectEventIntoTaskSessionIfPossible(event, options.taskSessions, options.store, now);
   if (injected) {
     const result = await options.store.recordEventRoute(event, injected.routeDecision, now);
-    recordRoutedEventActivity(options, event, result.route_decision, {
+    await recordRoutedEventActivity(options, event, result.route_decision, {
       taskMessage: injected.taskMessage,
       queueItemId: undefined,
     });
@@ -1150,7 +1149,7 @@ async function routeEventThroughGateway(
   }
 
   const result = await options.store.ingestEventAsReviewPacket(event, now);
-  recordRoutedEventActivity(options, event, result.route_decision, {
+  await recordRoutedEventActivity(options, event, result.route_decision, {
     queueItemId: result.queue_item?.id,
   });
   return {
@@ -1161,24 +1160,24 @@ async function routeEventThroughGateway(
   };
 }
 
-function recordRoutedEventActivity(
+async function recordRoutedEventActivity(
   options: GatewayServerOptions,
   event: McpEvent,
   routeDecision: RouteDecision,
   input: { taskMessage?: unknown; queueItemId?: string | undefined },
-): void {
+): Promise<void> {
   const observability = options.observability;
   if (!observability) return;
 
-  observability.incrementCounter("events_ingested_total");
+  await observability.incrementCounter("events_ingested_total");
   if (routeDecision.action === "inject_into_agent_thread") {
-    observability.incrementCounter("events_routed_to_task_session_total");
-    observability.incrementCounter("task_followups_sent_total");
+    await observability.incrementCounter("events_routed_to_task_session_total");
+    await observability.incrementCounter("task_followups_sent_total");
   }
   if (input.queueItemId) {
-    observability.incrementCounter("queue_items_created_total");
+    await observability.incrementCounter("queue_items_created_total");
   }
-  observability.recordActivity({
+  await observability.recordActivity({
     type: "event_routed",
     occurred_at: routeDecision.created_at,
     actor: "system",

@@ -3,6 +3,7 @@ import { after, before, beforeEach, describe, it } from "node:test";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { PostgresQueueStore, type EventRecord, type NewQueueItem } from "../src/db/postgres_queue_store.js";
 import type { ReviewPacket } from "../src/contracts.js";
+import { PostgresObservability } from "../src/observability.js";
 
 const createdAt = "2026-05-06T12:00:00.000Z";
 
@@ -54,6 +55,56 @@ describe("PostgresQueueStore", () => {
     assert.deepEqual(result.rows, [
       { id: "0001_core_queue.sql" },
       { id: "0002_context_restore_requests.sql" },
+      { id: "0003_observability.sql" },
+    ]);
+  });
+
+  it("persists activity events and counters", async (t) => {
+    if (!store) {
+      t.skip(skipReason);
+      return;
+    }
+
+    const observability = new PostgresObservability(store.pool, () => "actv_db_fixture");
+    await observability.incrementCounter("events_ingested_total");
+    await observability.incrementCounter("events_ingested_total", 2);
+    await observability.recordActivity({
+      type: "event_routed",
+      occurred_at: "2026-05-06T12:00:01.000Z",
+      actor: "system",
+      event_id: "evt_observability",
+      source_id: "local_fixture",
+      status: "ok",
+      summary: "Event routed: fixture",
+      details: {
+        route_action: "ask_human_now",
+      },
+    });
+
+    const restarted = new PostgresObservability(store.pool);
+    assert.deepEqual(await restarted.snapshot(), {
+      counters: {
+        events_ingested_total: 3,
+      },
+      activity_count: 1,
+    });
+    assert.deepEqual(await restarted.listActivity(10), [
+      {
+        id: "actv_db_fixture",
+        type: "event_routed",
+        occurred_at: "2026-05-06T12:00:01.000Z",
+        actor: "system",
+        task_id: undefined,
+        queue_item_id: undefined,
+        event_id: "evt_observability",
+        task_session_id: undefined,
+        source_id: "local_fixture",
+        status: "ok",
+        summary: "Event routed: fixture",
+        details: {
+          route_action: "ask_human_now",
+        },
+      },
     ]);
   });
 
@@ -213,6 +264,8 @@ async function resetExternalTestDatabase(store: PostgresQueueStore) {
 async function clearTestData(store: PostgresQueueStore) {
   await store.pool.query(`
     TRUNCATE
+      metric_counters,
+      activity_events,
       receipts,
       route_decisions,
       queue_items,

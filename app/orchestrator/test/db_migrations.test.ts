@@ -10,6 +10,7 @@ describe("Postgres migrations", () => {
     assert.deepEqual(migrations.map((migration) => migration.id), [
       "0001_core_queue.sql",
       "0002_context_restore_requests.sql",
+      "0003_observability.sql",
     ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
@@ -22,6 +23,9 @@ describe("Postgres migrations", () => {
     assert.match(sql, /CHECK \(status IN \('pending', 'leased', 'done'\)\)/);
     assert.match(sql, /context_restore_requests_pending_idx/);
     assert.match(sql, /context_restore_requests_stale_lease_idx/);
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS metric_counters/);
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS activity_events/);
+    assert.match(sql, /activity_events_occurred_at_idx/);
     assert.match(sql, /queue_items_ready_rank_idx/);
     assert.match(sql, /queue_items_stale_lease_idx/);
   });

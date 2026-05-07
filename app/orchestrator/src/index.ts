@@ -9,6 +9,7 @@ import {
 } from "./integrations/mcp_poll/development_registry.js";
 import { McpSdkRuntime } from "./mcp_sources/runtime/sdk_runtime.js";
 import { createGatewayServer } from "./server.js";
+import { PostgresObservability, type Observability } from "./observability.js";
 import { createSeededStore } from "./store.js";
 import { CodexAppServerThreadClient } from "./task_sessions/codex_app_server_thread_client.js";
 import { createCodexAppServerStdioConnection, type CodexAppServerStdioConnection } from "./task_sessions/codex_app_server_stdio.js";
@@ -25,17 +26,18 @@ if (!config.ok) {
   process.exit(1);
 }
 
-const store = await createGatewayStore();
+const gatewayRuntime = await createGatewayRuntime();
 const taskSessionRuntime = createTaskSessionRuntime();
 const taskSessions = taskSessionRuntime?.controller;
 const mcpSources = await createMcpSourceRegistry();
 const workspace = config.value.workspace === "aerospace" ? new AerospaceWorkspaceController(execFilePromise) : undefined;
 const server = createGatewayServer({
-  store,
+  store: gatewayRuntime.store,
   taskSessions,
   mcpSources,
   workspace,
   workspaceExecuteEnabled: config.value.workspaceExecute === "enabled",
+  observability: gatewayRuntime.observability,
 });
 
 server.listen(config.value.port, config.value.host, () => {
@@ -45,18 +47,30 @@ server.listen(config.value.port, config.value.host, () => {
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     taskSessionRuntime?.close?.();
-    server.close(() => process.exit(0));
+    server.close(() => {
+      gatewayRuntime.close?.().finally(() => process.exit(0));
+    });
   });
 }
 
-async function createGatewayStore() {
+async function createGatewayRuntime(): Promise<{
+  store: ReturnType<typeof createInMemoryGatewayStore> | ReturnType<typeof createPostgresGatewayStore>;
+  observability?: Observability;
+  close?: () => Promise<void>;
+}> {
   if (config.ok && config.value.databaseUrl) {
     const postgres = new PostgresQueueStore({ connectionString: config.value.databaseUrl });
     await postgres.migrate();
-    return createPostgresGatewayStore(postgres);
+    return {
+      store: createPostgresGatewayStore(postgres),
+      observability: new PostgresObservability(postgres.pool),
+      close: () => postgres.close(),
+    };
   }
 
-  return createInMemoryGatewayStore(await createSeededStore(config.ok ? config.value.seedFixturePath : undefined));
+  return {
+    store: createInMemoryGatewayStore(await createSeededStore(config.ok ? config.value.seedFixturePath : undefined)),
+  };
 }
 
 async function createMcpSourceRegistry() {
