@@ -63,7 +63,7 @@ struct QueueWindowView: View {
                 }
             } restoreContextResource: { resource in
                 Task {
-                    await viewModel.prepareContextRestore(resource: resource)
+                    await viewModel.requestContextRestore(resource: resource)
                 }
             }
         }
@@ -363,6 +363,13 @@ private struct ContextRestoreBanner: View {
                 .background(.blue.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityIdentifier("context-restore-planned")
+        case let .requested(_, restoreRequest):
+            Text("Context restore queued: \(restoreRequest.status)")
+                .font(.caption)
+                .padding(8)
+                .background(.green.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("context-restore-requested")
         case let .failed(resource, message):
             Text("\(resource.title): \(message)")
                 .font(.caption)

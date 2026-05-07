@@ -6,6 +6,7 @@ public protocol QueueClient: Sendable {
     func renewLease(packetId: String) async throws -> QueueActionResult
     func next(after packetId: String?) async throws -> ReviewPacket?
     func contextRestorePlan(resource: ReviewContextResource) async throws -> ContextRestorePlan
+    func requestContextRestore(resource: ReviewContextResource, idempotencyKey: String) async throws -> ContextRestoreRequest
 }
 
 public enum QueueClientError: Error, Equatable, LocalizedError {
@@ -96,6 +97,22 @@ public struct HTTPQueueClient: QueueClient {
         return try decoder.decode(ContextRestorePlanEnvelope.self, from: data).restorePlan
     }
 
+    public func requestContextRestore(
+        resource: ReviewContextResource,
+        idempotencyKey: String
+    ) async throws -> ContextRestoreRequest {
+        let url = baseURL.appending(path: "contexts/restore-requests")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.httpBody = try encoder.encode(ContextRestorePlanRequest(resource: resource))
+
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(ContextRestoreRequestEnvelope.self, from: data).restoreRequest
+    }
+
     private func validate(response: URLResponse) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw QueueClientError.invalidResponse
@@ -124,11 +141,14 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private let lock = NSLock()
     private var packets: [ReviewPacket]
     private let contextRestorePlanResult: Result<ContextRestorePlan, Error>
+    private let contextRestoreRequestResult: Result<ContextRestoreRequest, Error>
     private var completedIds: [String] = []
     private var leasedIds: Set<String> = []
     private var leaseOrder: [String] = []
     private var renewedIds: [String] = []
     private var contextRestoreResources: [ReviewContextResource] = []
+    private var contextRestoreRequestResources: [ReviewContextResource] = []
+    private var contextRestoreRequestIdempotencyKeys: [String] = []
 
     public init(
         packets: [ReviewPacket] = SeededQueue.packets,
@@ -144,10 +164,35 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
                 line: nil,
                 column: nil
             )
+        ),
+        contextRestoreRequestResult: Result<ContextRestoreRequest, Error> = .success(
+            ContextRestoreRequest(
+                id: "ctx_restore_fake",
+                status: "pending",
+                resource: ReviewContextResource(
+                    id: "ctx_browser_fake",
+                    kind: "browser_tab",
+                    title: "Fake browser tab",
+                    url: "https://example.test/context",
+                    restoreConfidence: "high"
+                ),
+                restorePlan: ContextRestorePlan(
+                    kind: "browser_extension_message",
+                    sideEffect: "local",
+                    executeSupported: false,
+                    target: "eventloopOS browser extension runtime",
+                    message: nil,
+                    url: nil,
+                    path: nil,
+                    line: nil,
+                    column: nil
+                )
+            )
         )
     ) {
         self.packets = packets.sorted { $0.priority > $1.priority }
         self.contextRestorePlanResult = contextRestorePlanResult
+        self.contextRestoreRequestResult = contextRestoreRequestResult
     }
 
     public var completedPacketIds: [String] {
@@ -164,6 +209,14 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public var contextRestorePlanResources: [ReviewContextResource] {
         lock.withLock { contextRestoreResources }
+    }
+
+    public var requestedContextRestoreResources: [ReviewContextResource] {
+        lock.withLock { contextRestoreRequestResources }
+    }
+
+    public var requestedContextRestoreIdempotencyKeys: [String] {
+        lock.withLock { contextRestoreRequestIdempotencyKeys }
     }
 
     public func fetchQueue() async throws -> [ReviewPacket] {
@@ -216,6 +269,17 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         try lock.withLock {
             contextRestoreResources.append(resource)
             return try contextRestorePlanResult.get()
+        }
+    }
+
+    public func requestContextRestore(
+        resource: ReviewContextResource,
+        idempotencyKey: String
+    ) async throws -> ContextRestoreRequest {
+        try lock.withLock {
+            contextRestoreRequestResources.append(resource)
+            contextRestoreRequestIdempotencyKeys.append(idempotencyKey)
+            return try contextRestoreRequestResult.get()
         }
     }
 }

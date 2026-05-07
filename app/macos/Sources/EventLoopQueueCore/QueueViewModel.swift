@@ -237,6 +237,19 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    public func requestContextRestore(resource: ReviewContextResource) async {
+        contextRestoreState = .planning(resource)
+        do {
+            let restoreRequest = try await client.requestContextRestore(
+                resource: resource,
+                idempotencyKey: "mac_context_restore_\(resource.id)_\(UUID().uuidString)"
+            )
+            contextRestoreState = .requested(resource, restoreRequest)
+        } catch {
+            contextRestoreState = .failed(resource, error.localizedDescription)
+        }
+    }
+
     public func moveToNext() async {
         do {
             selectedPacketID = try await client.next(after: selectedPacketID)?.id

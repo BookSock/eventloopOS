@@ -292,7 +292,46 @@ public enum ContextRestoreState: Equatable, Sendable {
     case idle
     case planning(ReviewContextResource)
     case planned(ReviewContextResource, ContextRestorePlan)
+    case requested(ReviewContextResource, ContextRestoreRequest)
     case failed(ReviewContextResource, String)
+}
+
+public struct ContextRestoreRequestEnvelope: Decodable, Equatable, Sendable {
+    public let restoreRequest: ContextRestoreRequest
+
+    public init(restoreRequest: ContextRestoreRequest) {
+        self.restoreRequest = restoreRequest
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case restoreRequest = "restore_request"
+    }
+}
+
+public struct ContextRestoreRequest: Codable, Equatable, Sendable {
+    public let id: String
+    public let status: String
+    public let resource: ReviewContextResource
+    public let restorePlan: ContextRestorePlan
+
+    public init(
+        id: String,
+        status: String,
+        resource: ReviewContextResource,
+        restorePlan: ContextRestorePlan
+    ) {
+        self.id = id
+        self.status = status
+        self.resource = resource
+        self.restorePlan = restorePlan
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case status
+        case resource
+        case restorePlan = "restore_plan"
+    }
 }
 
 struct QueueItemDTO: Codable, Equatable, Sendable {

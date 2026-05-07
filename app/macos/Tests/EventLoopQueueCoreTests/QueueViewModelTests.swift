@@ -363,6 +363,43 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.contextRestoreState, .planned(resource, plan))
     }
 
+    func testRequestContextRestoreQueuesSelectedResourceForBrowserExtension() async {
+        let resource = ReviewContextResource(
+            id: "ctx_browser_123",
+            kind: "browser_tab",
+            title: "Launch doc",
+            url: "https://example.test/launch",
+            source: "chrome-extension",
+            restoreConfidence: "high"
+        )
+        let plan = ContextRestorePlan(
+            kind: "browser_extension_message",
+            sideEffect: "local",
+            executeSupported: false,
+            target: "eventloopOS browser extension runtime",
+            message: ContextRestoreMessage(type: "eventloop.restore", resource: resource),
+            url: nil,
+            path: nil,
+            line: nil,
+            column: nil
+        )
+        let restoreRequest = ContextRestoreRequest(
+            id: "ctx_restore_123",
+            status: "pending",
+            resource: resource,
+            restorePlan: plan
+        )
+        let client = FakeQueueClient(contextRestoreRequestResult: .success(restoreRequest))
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.requestContextRestore(resource: resource)
+
+        XCTAssertEqual(client.requestedContextRestoreResources, [resource])
+        XCTAssertEqual(client.requestedContextRestoreIdempotencyKeys.count, 1)
+        XCTAssertTrue(client.requestedContextRestoreIdempotencyKeys[0].hasPrefix("mac_context_restore_ctx_browser_123_"))
+        XCTAssertEqual(viewModel.contextRestoreState, .requested(resource, restoreRequest))
+    }
+
     func testPrepareContextRestoreSurfacesFailure() async {
         let resource = ReviewContextResource(
             id: "ctx_unsupported",
@@ -378,6 +415,24 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.prepareContextRestore(resource: resource)
 
         XCTAssertEqual(client.contextRestorePlanResources, [resource])
+        XCTAssertEqual(viewModel.contextRestoreState, .failed(resource, "Queue request failed with HTTP 422"))
+    }
+
+    func testRequestContextRestoreSurfacesFailure() async {
+        let resource = ReviewContextResource(
+            id: "ctx_unsupported",
+            kind: "opaque",
+            title: "Unsupported",
+            url: nil,
+            source: "test",
+            restoreConfidence: nil
+        )
+        let client = FakeQueueClient(contextRestoreRequestResult: .failure(QueueClientError.httpStatus(422)))
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.requestContextRestore(resource: resource)
+
+        XCTAssertEqual(client.requestedContextRestoreResources, [resource])
         XCTAssertEqual(viewModel.contextRestoreState, .failed(resource, "Queue request failed with HTTP 422"))
     }
 }

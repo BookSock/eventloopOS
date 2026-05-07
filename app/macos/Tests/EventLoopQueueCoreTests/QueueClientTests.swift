@@ -168,6 +168,48 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.restorePlan.message?.resource.selectorHint, "[data-context-quote]")
     }
 
+    func testContextRestoreRequestEnvelopeDecodesPendingBrowserRequest() throws {
+        let data = """
+        {
+          "restore_request": {
+            "id": "ctx_restore_123",
+            "status": "pending",
+            "resource": {
+              "id": "ctx_browser_123",
+              "kind": "browser_tab",
+              "title": "Launch doc",
+              "url": "https://example.test/launch",
+              "restore_confidence": "high"
+            },
+            "restore_plan": {
+              "kind": "browser_extension_message",
+              "side_effect": "local",
+              "execute_supported": false,
+              "target": "eventloopOS browser extension runtime",
+              "message": {
+                "type": "eventloop.restore",
+                "resource": {
+                  "id": "ctx_browser_123",
+                  "kind": "browser_tab",
+                  "title": "Launch doc",
+                  "url": "https://example.test/launch",
+                  "restore_confidence": "high"
+                }
+              }
+            }
+          }
+        }
+        """.data(using: .utf8)!
+
+        let envelope = try QueueCoders.makeDecoder().decode(ContextRestoreRequestEnvelope.self, from: data)
+
+        XCTAssertEqual(envelope.restoreRequest.id, "ctx_restore_123")
+        XCTAssertEqual(envelope.restoreRequest.status, "pending")
+        XCTAssertEqual(envelope.restoreRequest.resource.id, "ctx_browser_123")
+        XCTAssertEqual(envelope.restoreRequest.restorePlan.kind, "browser_extension_message")
+        XCTAssertEqual(envelope.restoreRequest.restorePlan.message?.type, "eventloop.restore")
+    }
+
     func testContextResourceEncodesSnakeCaseRestoreFields() throws {
         let resource = ReviewContextResource(
             id: "ctx_browser_123",
