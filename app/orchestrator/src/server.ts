@@ -85,23 +85,10 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         return sendRouteResult(response, context, queueRoute);
       }
 
-      if (request.method === "GET" && context.url.pathname === "/contexts") {
-        const validation = validateContextQuery(context.url);
-        if (!validation.ok) {
-          return sendSchemaError(response, context, validation.message);
-        }
-
-        const entries = await options.store.listContextEntries(validation.query);
-        return sendJson(response, 200, {
-          entries,
-          count: entries.length,
-          request_id: context.requestId,
-        });
-      }
-
       const contextRestoreRoute = await handleContextRestoreRoute({
         method: request.method,
         pathname: context.url.pathname,
+        url: context.url,
         readJsonBody: () => readJsonBody(request),
         store: options.store,
         observability,
@@ -234,39 +221,6 @@ function applyResponseHeaders(response: ServerResponse, context: RequestContext)
   if (context.idempotencyKey) {
     response.setHeader("idempotency-key", context.idempotencyKey);
   }
-}
-
-function validateContextQuery(
-  url: URL,
-): { ok: true; query: { source?: string; task_id?: string; q?: string; limit?: number } } | { ok: false; message: string } {
-  const source = url.searchParams.get("source") ?? undefined;
-  const taskId = url.searchParams.get("task_id") ?? undefined;
-  const q = url.searchParams.get("q") ?? undefined;
-  const limitParam = url.searchParams.get("limit");
-  const limit = limitParam ? Number(limitParam) : undefined;
-
-  if (source !== undefined && !source) {
-    return { ok: false, message: "source must be non-empty when provided" };
-  }
-  if (taskId !== undefined && !taskId) {
-    return { ok: false, message: "task_id must be non-empty when provided" };
-  }
-  if (q !== undefined && !q.trim()) {
-    return { ok: false, message: "q must be non-empty when provided" };
-  }
-  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0 || limit > 500)) {
-    return { ok: false, message: "limit must be an integer between 1 and 500" };
-  }
-
-  return {
-    ok: true,
-    query: {
-      source,
-      task_id: taskId,
-      q: q?.trim(),
-      limit,
-    },
-  };
 }
 
 async function readJsonBody(request: IncomingMessage): Promise<{ ok: true; value: unknown } | { ok: false; message: string }> {

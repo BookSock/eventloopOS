@@ -9,6 +9,7 @@ export type JsonBodyReader = () => Promise<{ ok: true; value: unknown } | { ok: 
 export async function handleContextRestoreRoute(input: {
   method: string | undefined;
   pathname: string;
+  url: URL;
   readJsonBody: JsonBodyReader;
   store: GatewayStore;
   observability: Observability;
@@ -16,6 +17,18 @@ export async function handleContextRestoreRoute(input: {
   requestId: string;
   idempotencyKey?: string;
 }): Promise<RouteResult | undefined> {
+  if (input.method === "GET" && input.pathname === "/contexts") {
+    const validation = validateContextQuery(input.url);
+    if (!validation.ok) return schemaError(validation.message);
+
+    const entries = await input.store.listContextEntries(validation.query);
+    return ok(200, {
+      entries,
+      count: entries.length,
+      request_id: input.requestId,
+    });
+  }
+
   if (input.method === "POST" && input.pathname === "/contexts/restore-plan") {
     const parsed = await input.readJsonBody();
     if (!parsed.ok) return schemaError(parsed.message);
@@ -157,6 +170,39 @@ export async function handleContextRestoreRoute(input: {
   }
 
   return undefined;
+}
+
+function validateContextQuery(
+  url: URL,
+): { ok: true; query: { source?: string; task_id?: string; q?: string; limit?: number } } | { ok: false; message: string } {
+  const source = url.searchParams.get("source") ?? undefined;
+  const taskId = url.searchParams.get("task_id") ?? undefined;
+  const q = url.searchParams.get("q") ?? undefined;
+  const limitParam = url.searchParams.get("limit");
+  const limit = limitParam ? Number(limitParam) : undefined;
+
+  if (source !== undefined && !source) {
+    return { ok: false, message: "source must be non-empty when provided" };
+  }
+  if (taskId !== undefined && !taskId) {
+    return { ok: false, message: "task_id must be non-empty when provided" };
+  }
+  if (q !== undefined && !q.trim()) {
+    return { ok: false, message: "q must be non-empty when provided" };
+  }
+  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0 || limit > 500)) {
+    return { ok: false, message: "limit must be an integer between 1 and 500" };
+  }
+
+  return {
+    ok: true,
+    query: {
+      source,
+      task_id: taskId,
+      q: q?.trim(),
+      limit,
+    },
+  };
 }
 
 async function markRestoreFinished(input: {

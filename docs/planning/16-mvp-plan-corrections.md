@@ -153,12 +153,12 @@ Current extraction:
 - `app/orchestrator/src/task_sessions/task_followup_audit.ts` owns attempted/sent/blocked/failed task-message activity.
 - `app/orchestrator/src/routes/observability.ts` owns metrics/activity route bodies.
 - `app/orchestrator/src/routes/task_sessions.ts` owns task-session list/get/followup/binding route bodies and validation.
-- `app/orchestrator/src/routes/context_restore.ts` owns restore plan, restore request create/peek/claim/get/done/failed/retry route bodies and validation.
+- `app/orchestrator/src/routes/context_restore.ts` owns context list/search plus restore plan, restore request create/peek/claim/get/done/failed/retry route bodies and validation.
 - `app/orchestrator/src/routes/queue.ts` owns queue list/next/lease/done/defer/ignore/recommended-action route bodies and validation.
 - `app/orchestrator/src/routes/workspace.ts` owns workspace status/capture/restore-plan/restore route bodies and idempotent restore receipt replay.
 - `app/orchestrator/src/routes/mcp_sources.ts` owns legacy `/mcp/poll`, MCP source list/get/poll/poll-and-route/poll-all-and-route route bodies, validation, and poll-cycle observability.
 - `app/orchestrator/src/routes/events.ts` owns event ingest/get, voice-command ingest, event routing/idempotency/fallback, and review-packet lookup route bodies.
-- `server.ts` still owns contexts and manual review routes.
+- `server.ts` still owns task-session route wiring and request-body reads.
 
 Keep doing behavior-preserving extraction first. Add tests before changing policy.
 
@@ -170,7 +170,7 @@ Other architecture notes:
 
 ## Next Best Work
 
-1. Continue behavior-preserving `server.ts` route extraction, especially contexts and manual review.
+1. Continue behavior-preserving `server.ts` route extraction, especially task-session route wiring.
 2. Add GatewayStore conformance tests for event idempotency, queue leasing/defer/ignore, context restore retry, workspace restore receipt replay, and context search.
 3. Enforce MCP read-only source contracts beyond config validation, especially runtime tool metadata checks for user-installed servers.
 4. Add real MCP/Slack source dogfood config around Jason's installed tools.
