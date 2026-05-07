@@ -169,11 +169,11 @@ Weak tests:
 - No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, temp `.app` bundle launch, and opt-in AppleScript menu/window/manual-mode interaction.
 - No real microphone wake-word proof yet; current coverage proves fixture-audio STT with `whisper-cli`, local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
 - Activity history is durable in Postgres mode and process-local in in-memory mode. The report groups by task/session/queue but does not yet compare trends across days.
-- `server.ts` is still large, but task-session injection policy, task followup audit, observability routes, task-session routes, context-restore routes, queue routes, and workspace routes have been extracted into smaller modules. It is down to roughly 1.0k lines after the workspace route split. Continue splitting MCP/events routes before much more orchestrator feature width.
+- `server.ts` is still large, but task-session injection policy, task followup audit, observability routes, task-session routes, context-restore routes, queue routes, workspace routes, and MCP source routes have been extracted into smaller modules. It is down to roughly 650 lines after the MCP route split. Continue splitting events/voice/manual-review routes before much more orchestrator feature width.
 
 ## Next Best Work
 
-1. Continue extracting `server.ts` route/policy modules without behavior change, especially MCP sources and events.
+1. Continue extracting `server.ts` route/policy modules without behavior change, especially events, voice, and manual review.
 2. Add restart/failure smoke around Postgres state, restore retry, and task followup chaos.
 3. Add trend comparisons to `dogfood:review`.
 4. Add real Slack/GitHub MCP source dogfood config for Jason's installed servers, using the local-events MCP recipe as the template.
