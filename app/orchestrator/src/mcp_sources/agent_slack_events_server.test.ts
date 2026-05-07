@@ -9,6 +9,7 @@ import {
   parseAgentSlackJsonOutput,
   searchAgentSlackMessages,
   searchOptionsFromEnv,
+  searchOptionsWithCursor,
   type AgentSlackExecFile,
 } from "./agent_slack_events_server.js";
 
@@ -55,6 +56,27 @@ describe("agent-slack MCP server", () => {
       "--before",
       "2026-05-07",
     ]);
+  });
+
+  it("uses MCP cursor as Slack after date when explicit after is absent", () => {
+    const options = searchOptionsFromEnv({
+      EVENTLOOPOS_AGENT_SLACK_QUERY: "launch blog",
+      EVENTLOOPOS_AGENT_SLACK_LIMIT: "7",
+    });
+
+    assert.deepEqual(agentSlackSearchArgs(searchOptionsWithCursor(options, "1770000000.000001")), [
+      "search",
+      "messages",
+      "launch blog",
+      "--limit",
+      "7",
+      "--max-content-chars",
+      "1200",
+      "--after",
+      "2026-02-02",
+    ]);
+    assert.equal(searchOptionsWithCursor({ ...options, after: "2026-01-01" }, "1770000000.000001").after, "2026-01-01");
+    assert.equal(searchOptionsWithCursor(options, "0").after, undefined);
   });
 
   it("maps compact agent-slack messages to Slack poll items", () => {
@@ -160,6 +182,7 @@ describe("agent-slack MCP server", () => {
       await client.connect(transport);
       const tools = await client.listTools();
       assert.deepEqual(tools.tools.map((tool) => tool.name), ["search_messages"]);
+      assert.equal((tools.tools[0]?.inputSchema.properties?.cursor as { type?: string } | undefined)?.type, "string");
     } finally {
       await client.close().catch(() => undefined);
     }

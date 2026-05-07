@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
 import type { McpPollResult } from "../integrations/mcp_poll/types.js";
 
 const execFile = promisify(nodeExecFile);
@@ -47,12 +48,15 @@ export function createAgentSlackEventsServer(options: AgentSlackServerOptions = 
     {
       title: "Search Slack messages",
       description: "Read Slack messages through local agent-slack CLI and return Slack-like eventloopOS poll items.",
+      inputSchema: {
+        cursor: z.string().optional(),
+      },
       annotations: {
         readOnlyHint: true,
       },
     },
-    async (): Promise<CallToolResult> => {
-      const result = await searchAgentSlackMessages(searchOptionsFromEnv(env), runner);
+    async (args): Promise<CallToolResult> => {
+      const result = await searchAgentSlackMessages(searchOptionsWithCursor(searchOptionsFromEnv(env), args.cursor), runner);
       return {
         structuredContent: result,
         content: [
@@ -107,6 +111,14 @@ export function searchOptionsFromEnv(env: NodeJS.ProcessEnv): AgentSlackSearchOp
   };
 }
 
+export function searchOptionsWithCursor(options: AgentSlackSearchOptions, cursor: string | undefined): AgentSlackSearchOptions {
+  if (!cursor || cursor === "0" || options.after) return options;
+  return {
+    ...options,
+    after: dateForSlackCursor(cursor),
+  };
+}
+
 export function agentSlackSearchArgs(options: AgentSlackSearchOptions): string[] {
   const args = [
     "search",
@@ -125,6 +137,12 @@ export function agentSlackSearchArgs(options: AgentSlackSearchOptions): string[]
   if (options.after) args.push("--after", options.after);
   if (options.before) args.push("--before", options.before);
   return args;
+}
+
+function dateForSlackCursor(cursor: string): string {
+  const numeric = Number(cursor);
+  if (!Number.isFinite(numeric) || numeric <= 0) return cursor;
+  return new Date(Math.trunc(numeric * 1000)).toISOString().slice(0, 10);
 }
 
 export function parseAgentSlackJsonOutput(output: string): Record<string, unknown> {

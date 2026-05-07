@@ -62,6 +62,8 @@ Optional filters:
 
 The wrapper shells out to `agent-slack search messages`, returns only Slack-like read items, and maps them through `slack_message_to_event`. It does not expose Slack send/edit/delete/draft tools to the orchestrator. Keep query/channel filters tight; broad Slack search can be noisy and may return old messages that cursor dedupe then ignores. This config allowlists `PATH`, `HOME`, `XDG_CONFIG_HOME`, and `XDG_RUNTIME_DIR` so the local `agent-slack` binary and local auth files can be found by the child MCP process.
 
+If `EVENTLOOPOS_AGENT_SLACK_AFTER` is unset, the wrapper maps the orchestrator MCP cursor to `agent-slack --after YYYY-MM-DD`. Slack timestamps are more precise than date filters, so same-day messages can be refetched; event idempotency and cursor dedupe remain the exact duplicate guard.
+
 Use `generic_item_to_event` when a local MCP server can return items shaped like:
 
 ```json
