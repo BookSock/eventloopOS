@@ -12,6 +12,7 @@ public final class QueueViewModel: ObservableObject {
 
     private let client: any QueueClient
     private let workspaceClient: any WorkspaceClient
+    private var queueRefreshTask: Task<Void, Never>?
     private var leaseRenewalTask: Task<Void, Never>?
     private var contextRestoreRefreshTask: Task<Void, Never>?
 
@@ -32,6 +33,7 @@ public final class QueueViewModel: ObservableObject {
     }
 
     deinit {
+        queueRefreshTask?.cancel()
         leaseRenewalTask?.cancel()
         contextRestoreRefreshTask?.cancel()
     }
@@ -58,14 +60,54 @@ public final class QueueViewModel: ObservableObject {
 
     public func loadQueue() async {
         state = .loading
+        await refreshQueue()
+    }
+
+    public func refreshQueue() async {
         do {
             let leasedPacketID = try await leasedSelectionID(preferredPacketID: selectedPacketID)
             packets = try await client.fetchQueue()
-            selectedPacketID = leasedPacketID ?? packets.first?.id
+            if let leasedPacketID, packets.contains(where: { $0.id == leasedPacketID }) {
+                selectedPacketID = leasedPacketID
+            } else if let selectedPacketID, packets.contains(where: { $0.id == selectedPacketID }) {
+                self.selectedPacketID = selectedPacketID
+            } else {
+                selectedPacketID = packets.first?.id
+            }
             state = .loaded
         } catch {
             state = .failed(error.localizedDescription)
         }
+    }
+
+    public func startAutomaticQueueRefresh(
+        intervalNanoseconds: UInt64 = 5_000_000_000,
+        maxRefreshes: Int? = nil
+    ) {
+        stopAutomaticQueueRefresh()
+        queueRefreshTask = Task { @MainActor [weak self] in
+            var refreshCount = 0
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: intervalNanoseconds)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else {
+                    return
+                }
+                await self?.refreshQueue()
+                refreshCount += 1
+                if let maxRefreshes, refreshCount >= maxRefreshes {
+                    return
+                }
+            }
+        }
+    }
+
+    public func stopAutomaticQueueRefresh() {
+        queueRefreshTask?.cancel()
+        queueRefreshTask = nil
     }
 
     public func select(packetId: String) {

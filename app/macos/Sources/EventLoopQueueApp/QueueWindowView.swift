@@ -63,7 +63,7 @@ struct QueueWindowView: View {
 
                     Button {
                         Task {
-                            await viewModel.loadQueue()
+                            await viewModel.refreshQueue()
                         }
                     } label: {
                         Label("Refresh", systemImage: "arrow.clockwise")
@@ -85,7 +85,7 @@ struct QueueWindowView: View {
                 }
             } refreshQueue: {
                 Task {
-                    await viewModel.loadQueue()
+                    await viewModel.refreshQueue()
                 }
             } restoreContextResource: { resource in
                 Task {
@@ -133,6 +133,7 @@ struct QueueWindowView: View {
         }
         .task {
             await viewModel.loadQueue()
+            viewModel.startAutomaticQueueRefresh()
             viewModel.startAutomaticLeaseRenewal()
             viewModel.startAutomaticContextRestoreRefresh()
         }
@@ -140,6 +141,7 @@ struct QueueWindowView: View {
             await viewModel.prepareSelectedWorkspaceRestore()
         }
         .onDisappear {
+            viewModel.stopAutomaticQueueRefresh()
             viewModel.stopAutomaticLeaseRenewal()
             viewModel.stopAutomaticContextRestoreRefresh()
         }

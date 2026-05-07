@@ -94,7 +94,7 @@ private struct QueueMenuView: View {
 
         Button("Refresh Queue") {
             Task {
-                await viewModel.loadQueue()
+                await viewModel.refreshQueue()
             }
         }
         .accessibilityIdentifier("queue-menu-refresh")

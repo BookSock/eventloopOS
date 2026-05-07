@@ -89,6 +89,23 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
     }
 
+    func testAutomaticQueueRefreshFindsNewPackets() async {
+        let client = FakeQueueClient(packets: [])
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.loadQueue()
+
+        viewModel.startAutomaticQueueRefresh(intervalNanoseconds: 1_000_000, maxRefreshes: 10)
+        client.replacePackets([SeededQueue.packets[0]])
+
+        for _ in 0..<50 where viewModel.packets.isEmpty {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        viewModel.stopAutomaticQueueRefresh()
+
+        XCTAssertEqual(viewModel.packets.map(\.id), ["packet-blog-feedback"])
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+    }
+
     func testManualModePausesWorkspaceRestoreWithoutClearingQueue() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
         await viewModel.loadQueue()

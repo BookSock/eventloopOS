@@ -238,6 +238,13 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         lock.withLock { contextRestoreStatusIds }
     }
 
+    public func replacePackets(_ nextPackets: [ReviewPacket]) {
+        lock.withLock {
+            packets = nextPackets.sorted { $0.priority > $1.priority }
+            leasedIds = leasedIds.intersection(Set(packets.map(\.id)))
+        }
+    }
+
     public func fetchQueue() async throws -> [ReviewPacket] {
         lock.withLock { packets }
     }
