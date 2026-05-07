@@ -208,12 +208,12 @@ Release guardrails:
 - Task followup history must be reconstructable after the fact: queue item -> event -> task -> runtime/session -> message status.
 - Manual Mode must be a real escape hatch: user can leave event-loop mode, do normal Mac work, then return without losing the manual layout.
 - Browser/context restore should prefer provider deeplinks and show confidence. Full per-app canvas/DOM automation remains later.
+- Local installed-tool MCP polling now has Slack (`agent-slack`) and GitHub (`gh api` notifications) wrappers for Jason dogfood.
 
 ## Next Best Work
 
-1. Add real GitHub installed-tool MCP source config/wrapper, matching the `agent-slack` dogfood path.
-2. Add durable `task_messages` history for Codex/Claude followups and idempotency.
-3. Real Claude+Codex composite dogfood against harmless configured sessions.
-4. Make Mac queue focus mode more one-paper-at-a-time: current packet dominates, queue list stays secondary.
-5. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
-6. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+1. Add durable `task_messages` history for Codex/Claude followups and idempotency.
+2. Real Claude+Codex composite dogfood against harmless configured sessions.
+3. Make Mac queue focus mode more one-paper-at-a-time: current packet dominates, queue list stays secondary.
+4. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
+5. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.

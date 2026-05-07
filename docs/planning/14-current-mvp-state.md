@@ -154,6 +154,7 @@ Strong tests now:
 - Config paths for MCP sources, Codex task maps, and seed fixtures resolve existing repo-root relative files even when package scripts run from `app/orchestrator`.
 - File-backed local events MCP server exists for dogfood. `config/mcp-sources.local-events.example.json` launches it over stdio, reads `EVENTLOOPOS_LOCAL_EVENTS_PATH`, and returns generic event-ish `items[]` for MCP poll routing.
 - Read-only `agent-slack` MCP wrapper exists for Jason dogfood. `config/mcp-sources.agent-slack.example.json` launches it over stdio, reads `EVENTLOOPOS_AGENT_SLACK_*` filters, shells out to `agent-slack search messages`, maps compact Slack search output into `slack_message_to_event` items, and accepts the orchestrator MCP cursor as an `--after YYYY-MM-DD` fallback when no explicit `EVENTLOOPOS_AGENT_SLACK_AFTER` is set. It does not expose Slack write tools. Same-day refetch is expected; idempotency/cursor dedupe owns exact duplicate suppression.
+- Read-only `gh` notifications MCP wrapper exists for Jason dogfood. `config/mcp-sources.gh-notifications.example.json` launches it over stdio, shells out to `gh api -X GET notifications` or `repos/<owner>/<repo>/notifications`, maps GitHub notification threads into `github_update_to_event` items, and uses notification `updated_at` as the MCP cursor/GitHub `since` timestamp. It does not expose GitHub write tools.
 - `GET /metrics` and `GET /activity?limit=` expose local dogfood counters and recent activity. Postgres mode persists them across orchestrator restarts; in-memory mode keeps current-process history. Current coverage records event routing, queue done, context restore request/done/failed/retry, and MCP poll cycles.
 - `pnpm run dogfood:review` prints a local daily-ish review from `/metrics` and `/activity`; set `EVENTLOOPOS_DOGFOOD_REVIEW_FORMAT=json` for agent-readable output. The report now includes derived rates, task rollups, task-session rollups, queue rollups, queue time-to-done, daily rollups, and adjacent-day trend deltas.
 - Restore activity and counters include provider-specific created/done/failed/retried data, and `dogfood:review` groups provider restore success/failure.
@@ -168,6 +169,7 @@ Strong tests now:
 - `pnpm run dev:dogfood:smoke` starts orchestrator + Mac queue app in empty in-memory mode, waits for health, launches the queue app, then exits automatically after a short smoke window.
 - Real local-events MCP dogfood proof passed again after the SDK read-only tool gate: started orchestrator with `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json` and `EVENTLOOPOS_LOCAL_EVENTS_PATH=config/local-events.example.json`, ran `poll:mcp:once`, saw 1 event routed into a human queue item.
 - Real agent-slack MCP no-content smoke passed with an impossible query and content cap: started orchestrator with `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.agent-slack.example.json`, `EVENTLOOPOS_AGENT_SLACK_QUERY='eventloopos-impossible-query-4388-no-results'`, `EVENTLOOPOS_AGENT_SLACK_LIMIT=1`, and `EVENTLOOPOS_AGENT_SLACK_MAX_CONTENT_CHARS=80`; `poll:mcp:once` returned 0 events, 0 errors, proving the wrapper starts and passes the read-only tool metadata gate without printing Slack content.
+- `gh` notifications wrapper tests prove read-only MCP tool metadata, `gh api` argv construction, cursor-to-`since`, notification-to-GitHub event item mapping, and common API URL to browser deeplink conversion without live GitHub content.
 
 Weak tests:
 
@@ -180,9 +182,8 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add a real GitHub installed-tool MCP source dogfood config/wrapper for Jason's installed tools, using the local-events and agent-slack recipes as templates.
-2. Add durable `task_messages` history for Codex/Claude followups and idempotency.
-3. Real Claude+Codex composite dogfood with harmless sessions configured together.
-4. Make the Mac queue UI more one-paper-at-a-time: current packet dominates; queue list is secondary navigation.
-5. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-6. Later: real microphone/wake-word proof and always-listening voice UX.
+1. Add durable `task_messages` history for Codex/Claude followups and idempotency.
+2. Real Claude+Codex composite dogfood with harmless sessions configured together.
+3. Make the Mac queue UI more one-paper-at-a-time: current packet dominates; queue list is secondary navigation.
+4. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+5. Later: real microphone/wake-word proof and always-listening voice UX.

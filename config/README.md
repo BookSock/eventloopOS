@@ -64,6 +64,31 @@ The wrapper shells out to `agent-slack search messages`, returns only Slack-like
 
 If `EVENTLOOPOS_AGENT_SLACK_AFTER` is unset, the wrapper maps the orchestrator MCP cursor to `agent-slack --after YYYY-MM-DD`. Slack timestamps are more precise than date filters, so same-day messages can be refetched; event idempotency and cursor dedupe remain the exact duplicate guard.
 
+For dogfood with Jason's local GitHub setup, use the read-only `gh` notifications wrapper:
+
+```sh
+pnpm --filter @eventloopos/orchestrator build
+ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.gh-notifications.example.json \
+pnpm --filter @eventloopos/orchestrator start
+```
+
+Then in another shell:
+
+```sh
+ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.gh-notifications.example.json \
+pnpm --filter @eventloopos/orchestrator run poll:mcp:once
+```
+
+Optional filters:
+
+- `EVENTLOOPOS_GH_REPO` as `owner/repo` to poll one repository's notifications.
+- `EVENTLOOPOS_GH_PARTICIPATING=false` to include broader watched notifications. Default is `true` to reduce queue noise.
+- `EVENTLOOPOS_GH_ALL=true` to include read notifications. Default is unread only.
+- `EVENTLOOPOS_GH_SINCE` / `EVENTLOOPOS_GH_BEFORE` as ISO timestamps.
+- `EVENTLOOPOS_GH_LIMIT` capped at 50.
+
+The wrapper shells out to `gh api -X GET notifications` or `gh api -X GET repos/<owner>/<repo>/notifications`, returns GitHub-like read items, and maps them through `github_update_to_event`. It does not expose GitHub write tools. If `EVENTLOOPOS_GH_SINCE` is unset, the orchestrator MCP cursor becomes the GitHub `since` timestamp, using notification `updated_at` as the cursor.
+
 Use `generic_item_to_event` when a local MCP server can return items shaped like:
 
 ```json

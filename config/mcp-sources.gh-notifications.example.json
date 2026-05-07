@@ -1,0 +1,50 @@
+{
+  "sources": [
+    {
+      "id": "gh_notifications_source",
+      "server": {
+        "name": "eventloopos-gh-notifications",
+        "command": "node",
+        "args": ["dist/src/mcp_sources/gh_notifications_server.js"],
+        "envAllowlist": [
+          "PATH",
+          "HOME",
+          "XDG_CONFIG_HOME",
+          "XDG_RUNTIME_DIR",
+          "GH_HOST",
+          "GH_TOKEN",
+          "GITHUB_TOKEN",
+          "GITHUB_ENTERPRISE_TOKEN",
+          "EVENTLOOPOS_GH_COMMAND",
+          "EVENTLOOPOS_GH_REPO",
+          "EVENTLOOPOS_GH_PARTICIPATING",
+          "EVENTLOOPOS_GH_ALL",
+          "EVENTLOOPOS_GH_SINCE",
+          "EVENTLOOPOS_GH_BEFORE",
+          "EVENTLOOPOS_GH_LIMIT",
+          "EVENTLOOPOS_GH_TIMEOUT_MS",
+          "EVENTLOOPOS_GH_MAX_BUFFER_BYTES"
+        ],
+        "stderrLogPath": "var/log/mcp/gh_notifications_source.stderr.log"
+      },
+      "poll": {
+        "tool": "list_notifications",
+        "args": {},
+        "timeoutMs": 10000
+      },
+      "cursor": {
+        "strategy": "field",
+        "field": "updated_at",
+        "initial": "0",
+        "dedupeWindow": 1000
+      },
+      "eventMapper": "github_update_to_event",
+      "riskPolicy": {
+        "readOnly": true,
+        "allowWriteTools": false,
+        "maxRiskLevel": "low",
+        "untrustedTextFields": ["body", "title"]
+      }
+    }
+  ]
+}
