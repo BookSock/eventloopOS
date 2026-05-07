@@ -5,6 +5,10 @@ struct QueueWindowView: View {
     @ObservedObject var viewModel: QueueViewModel
     @State private var workspaceRestoreCandidate: WorkspaceSnapshot?
 
+    private var sidebarSummary: QueueWindowSidebarSummary {
+        QueueWindowSidebarSummary(packets: viewModel.packets, state: viewModel.state)
+    }
+
     private var showWorkspaceRestoreConfirmation: Binding<Bool> {
         Binding {
             workspaceRestoreCandidate != nil
@@ -17,14 +21,25 @@ struct QueueWindowView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(selection: $viewModel.selectedPacketID) {
-                ForEach(viewModel.packets) { packet in
-                    QueueRow(packet: packet)
-                        .tag(packet.id)
-                        .accessibilityIdentifier("queue-row-\(packet.id)")
+            Group {
+                if sidebarSummary.showsPlaceholder {
+                    QueuePlaceholder(summary: sidebarSummary) {
+                        Task {
+                            await viewModel.loadQueue()
+                        }
+                    }
+                    .accessibilityIdentifier("queue-sidebar-placeholder")
+                } else {
+                    List(selection: $viewModel.selectedPacketID) {
+                        ForEach(viewModel.packets) { packet in
+                            QueueRow(packet: packet)
+                                .tag(packet.id)
+                                .accessibilityIdentifier("queue-row-\(packet.id)")
+                        }
+                    }
+                    .accessibilityIdentifier("queue-list")
                 }
             }
-            .accessibilityIdentifier("queue-list")
             .navigationTitle("Queue")
             .toolbar {
                 ToolbarItemGroup {
@@ -57,9 +72,20 @@ struct QueueWindowView: View {
                 }
             }
         } detail: {
-            PacketDetail(packet: viewModel.selectedPacket) {
+            PacketDetail(
+                packet: viewModel.selectedPacket,
+                placeholderSummary: QueueWindowDetailSummary(
+                    selectedPacket: viewModel.selectedPacket,
+                    packets: viewModel.packets,
+                    state: viewModel.state
+                )
+            ) {
                 Task {
                     await viewModel.doneAndNext()
+                }
+            } refreshQueue: {
+                Task {
+                    await viewModel.loadQueue()
                 }
             } restoreContextResource: { resource in
                 Task {
@@ -149,7 +175,9 @@ private struct QueueRow: View {
 
 private struct PacketDetail: View {
     let packet: ReviewPacket?
+    let placeholderSummary: QueueWindowDetailSummary
     let doneAndNext: () -> Void
+    let refreshQueue: () -> Void
     let restoreContextResource: (ReviewContextResource) -> Void
 
     var body: some View {
@@ -247,20 +275,63 @@ private struct PacketDetail: View {
                     .accessibilityIdentifier("queue-done-next-button")
                 }
             } else {
-                VStack(spacing: 10) {
-                    Image(systemName: "tray")
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
-                    Text("No queue packet")
-                        .font(.headline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                QueuePlaceholder(summary: placeholderSummary, refreshQueue: refreshQueue)
                     .accessibilityIdentifier("queue-empty-state")
             }
         }
         .padding(24)
         .accessibilityIdentifier("packet-detail")
+    }
+}
+
+private protocol QueuePlaceholderSummary {
+    var title: String { get }
+    var subtitle: String { get }
+    var systemImage: String { get }
+    var showsProgress: Bool { get }
+    var showsRetry: Bool { get }
+}
+
+extension QueueWindowSidebarSummary: QueuePlaceholderSummary {}
+extension QueueWindowDetailSummary: QueuePlaceholderSummary {}
+
+private struct QueuePlaceholder<Summary: QueuePlaceholderSummary>: View {
+    let summary: Summary
+    let refreshQueue: () -> Void
+
+    var body: some View {
+        VStack(spacing: 12) {
+            if summary.showsProgress {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityIdentifier("queue-placeholder-progress")
+            } else {
+                Image(systemName: summary.systemImage)
+                    .font(.largeTitle)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("queue-placeholder-image")
+            }
+            Text(summary.title)
+                .font(.headline)
+                .multilineTextAlignment(.center)
+                .accessibilityIdentifier("queue-placeholder-title")
+            Text(summary.subtitle)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+                .accessibilityIdentifier("queue-placeholder-subtitle")
+            if summary.showsRetry {
+                Button {
+                    refreshQueue()
+                } label: {
+                    Label("Refresh Queue", systemImage: "arrow.clockwise")
+                }
+                .accessibilityIdentifier("queue-placeholder-refresh")
+            }
+        }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

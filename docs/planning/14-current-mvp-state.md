@@ -55,6 +55,7 @@ Done:
 - Auto lease renewal.
 - Manual mode hotkey (`Cmd-Option-Shift-M`).
 - Menu bar shell with queue count, selected item, mode, restore state, open queue, refresh, done/next, and mode toggle.
+- Full window empty/loading/error placeholders with retry affordance and unit-covered presentation copy.
 - Workspace restore planning pause in manual mode.
 - Context resource restore request from queue UI.
 - Restore request status refresh.
