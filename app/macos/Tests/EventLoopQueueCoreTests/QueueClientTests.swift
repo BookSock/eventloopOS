@@ -120,6 +120,55 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.idempotencyKey, "idem_workspace_restore")
     }
 
+    func testContextRestorePlanEnvelopeDecodesBrowserExtensionMessage() throws {
+        let data = """
+        {
+          "restore_plan": {
+            "kind": "browser_extension_message",
+            "side_effect": "local",
+            "execute_supported": false,
+            "target": "eventloopOS browser extension runtime",
+            "message": {
+              "type": "eventloop.restore",
+              "resource": {
+                "id": "ctx_browser_123",
+                "kind": "browser_tab",
+                "title": "Launch doc",
+                "url": "https://example.test/launch",
+                "source": "chrome-extension",
+                "restore_confidence": "high"
+              }
+            }
+          }
+        }
+        """.data(using: .utf8)!
+
+        let envelope = try QueueCoders.makeDecoder().decode(ContextRestorePlanEnvelope.self, from: data)
+
+        XCTAssertEqual(envelope.restorePlan.kind, "browser_extension_message")
+        XCTAssertEqual(envelope.restorePlan.sideEffect, "local")
+        XCTAssertEqual(envelope.restorePlan.executeSupported, false)
+        XCTAssertEqual(envelope.restorePlan.message?.type, "eventloop.restore")
+        XCTAssertEqual(envelope.restorePlan.message?.resource.restoreConfidence, "high")
+    }
+
+    func testContextRestorePlanRequestEncodesSnakeCaseResourceFields() throws {
+        let resource = ReviewContextResource(
+            id: "ctx_browser_123",
+            kind: "browser_tab",
+            title: "Launch doc",
+            url: "https://example.test/launch",
+            source: "chrome-extension",
+            restoreConfidence: "high"
+        )
+
+        let data = try QueueCoders.makeEncoder().encode(resource)
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+
+        XCTAssertEqual(json?["restore_confidence"] as? String, "high")
+        XCTAssertNil(json?["restoreConfidence"])
+    }
+
     private func loadFixturePackets() throws -> [ReviewPacket] {
         let url = Bundle.module.url(forResource: "fake_orchestrator_queue", withExtension: "json")!
         let data = try Data(contentsOf: url)

@@ -75,6 +75,15 @@ public struct ReviewContextResource: Codable, Equatable, Identifiable, Sendable 
         self.source = source
         self.restoreConfidence = restoreConfidence
     }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case kind
+        case title
+        case url
+        case source
+        case restoreConfidence = "restore_confidence"
+    }
 }
 
 public struct ReviewEvidence: Codable, Equatable, Identifiable, Sendable {
@@ -177,6 +186,43 @@ public enum QueueState: Equatable, Sendable {
 public enum EventLoopMode: Equatable, Sendable {
     case eventLoop
     case manual
+}
+
+public struct ContextRestorePlanEnvelope: Decodable, Equatable, Sendable {
+    public let restorePlan: ContextRestorePlan
+
+    enum CodingKeys: String, CodingKey {
+        case restorePlan = "restore_plan"
+    }
+}
+
+public struct ContextRestorePlan: Codable, Equatable, Sendable {
+    public let kind: String
+    public let sideEffect: String
+    public let executeSupported: Bool
+    public let target: String?
+    public let message: ContextRestoreMessage?
+    public let url: String?
+    public let path: String?
+    public let line: Int?
+    public let column: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case sideEffect = "side_effect"
+        case executeSupported = "execute_supported"
+        case target
+        case message
+        case url
+        case path
+        case line
+        case column
+    }
+}
+
+public struct ContextRestoreMessage: Codable, Equatable, Sendable {
+    public let type: String
+    public let resource: ReviewContextResource
 }
 
 struct QueueItemDTO: Codable, Equatable, Sendable {

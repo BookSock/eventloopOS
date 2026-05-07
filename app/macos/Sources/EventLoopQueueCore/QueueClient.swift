@@ -83,6 +83,18 @@ public struct HTTPQueueClient: QueueClient {
         return try decoder.decode(QueueNextEnvelope.self, from: data).packet
     }
 
+    public func contextRestorePlan(resource: ReviewContextResource) async throws -> ContextRestorePlan {
+        let url = baseURL.appending(path: "contexts/restore-plan")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(ContextRestorePlanRequest(resource: resource))
+
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(ContextRestorePlanEnvelope.self, from: data).restorePlan
+    }
+
     private func validate(response: URLResponse) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw QueueClientError.invalidResponse
@@ -101,6 +113,10 @@ private struct LeaseNextRequest: Encodable {
         case leaseOwner = "lease_owner"
         case leaseMs = "lease_ms"
     }
+}
+
+private struct ContextRestorePlanRequest: Encodable {
+    let resource: ReviewContextResource
 }
 
 public final class FakeQueueClient: QueueClient, @unchecked Sendable {
