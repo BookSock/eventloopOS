@@ -59,6 +59,7 @@ export function routeNameForPath(method: string | undefined, pathname: string): 
     [/^\/task-sessions\/[^/]+\/followup$/, "task_session_followup"],
     [/^\/task-sessions\/[^/]+\/task-binding$/, "task_session_binding"],
     [/^\/task-messages$/, "task_messages"],
+    [/^\/task-messages\/reconcile-attempted$/, "task_messages_reconcile_attempted"],
     [/^\/events$/, "events"],
     [/^\/events\/[^/]+$/, "event_get"],
     [/^\/voice\/commands$/, "voice_commands"],

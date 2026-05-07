@@ -1881,6 +1881,98 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("reconciles stale attempted task messages as failed without raw text", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    await store.recordTaskMessageAttempt({
+      task_session_id: "task_session_blog",
+      task_id: "task_blog_feedback",
+      queue_item_id: "qit_review_1",
+      text: "Sensitive followup text should not be retained.",
+      event_ids: ["evt_review_1"],
+      idempotency_key: "idem_stale_attempt",
+      origin: "event_route",
+      occurred_at: "2026-05-06T11:00:00.000Z",
+      source_id: "slack:launch",
+    });
+    const observability = createInMemoryObservability();
+    const reconcileServer = createGatewayServer({
+      store,
+      observability,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+    });
+    await new Promise<void>((resolve) => reconcileServer.listen(0, "127.0.0.1", resolve));
+    const address = reconcileServer.address() as AddressInfo;
+    const reconcileBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${reconcileBaseUrl}/task-messages/reconcile-attempted`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "mark_failed",
+          older_than_ms: 30 * 60 * 1000,
+          limit: 10,
+        }),
+      });
+      const body = await response.json() as {
+        ok: boolean;
+        count: number;
+        scanned: number;
+        reconciled: Array<{
+          idempotency_key: string;
+          status: string;
+          text?: string;
+          text_hash: string;
+          error: string;
+        }>;
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("x-route-name"), "POST_task_messages_reconcile_attempted");
+      assert.equal(body.ok, true);
+      assert.equal(body.scanned, 1);
+      assert.equal(body.count, 1);
+      assert.equal(body.reconciled[0].idempotency_key, "idem_stale_attempt");
+      assert.equal(body.reconciled[0].status, "failed");
+      assert.equal(body.reconciled[0].text, undefined);
+      assert.match(body.reconciled[0].text_hash, /^[a-f0-9]{64}$/);
+      assert.match(body.reconciled[0].error, /original text is not stored/);
+
+      const failedMessagesResponse = await fetch(`${reconcileBaseUrl}/task-messages?status=failed&idempotency_key=idem_stale_attempt`);
+      const failedMessagesBody = await failedMessagesResponse.json() as {
+        count: number;
+        messages: Array<{ status: string; text?: string; error: string }>;
+      };
+      assert.equal(failedMessagesResponse.status, 200);
+      assert.equal(failedMessagesBody.count, 1);
+      assert.equal(failedMessagesBody.messages[0].status, "failed");
+      assert.equal(failedMessagesBody.messages[0].text, undefined);
+      assert.match(failedMessagesBody.messages[0].error, /original text is not stored/);
+
+      const activityResponse = await fetch(`${reconcileBaseUrl}/activity?status=failed&task_session_id=task_session_blog`);
+      const activityBody = await activityResponse.json() as {
+        count: number;
+        events: Array<{ type: string; details: Record<string, unknown> }>;
+      };
+      assert.equal(activityResponse.status, 200);
+      assert.equal(activityBody.count, 1);
+      assert.equal(activityBody.events[0].type, "task_followup_failed");
+      assert.equal(activityBody.events[0].details.origin, "task_message_reconcile");
+      assert.equal(activityBody.events[0].details.text_length, 47);
+
+      const badResponse = await fetch(`${reconcileBaseUrl}/task-messages/reconcile-attempted`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "retry" }),
+      });
+      assert.equal(badResponse.status, 400);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        reconcileServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("binds a task session to a task through the task-session API", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const bindings: unknown[] = [];

@@ -217,14 +217,14 @@ Review outcome:
 - Main lineage gap is reduced: durable `task_messages`, filtered `GET /task-messages`, queue-filtered `/activity`, `GET /queue/:id/lineage`, and `pnpm queue:lineage` exist. Mac UI still does not expose the joined lineage panel yet.
 - Runtime typing gap is reduced: Codex and Claude run behind shared typed session/message/capability/binding/error shapes. Fields remain tolerant because providers still carry metadata differently.
 - Dogfood observability gap is reduced: daily review/check now exposes queue depth, restore backlog, followup status counts, runtime failures, and threshold checks for backlog/failure saturation.
-- Main recovery gap is smaller now: stale `attempted` task-message visibility exists through `dogfood:check`, but there is still no retry/resume policy for those stale attempts.
+- Main recovery gap is smaller now: stale `attempted` task-message visibility exists through `dogfood:check`, and `POST /task-messages/reconcile-attempted` can mark stale attempts failed without raw text leakage. True automatic retry is intentionally deferred unless the payload-storage privacy tradeoff changes.
 - Main doc gap fixed: Manual Mode snapshot is captured on return to Event Loop, matching the escape-hatch product model.
 
 Near-term implementation order:
 
-1. Add retry/resume policy for stale attempted task messages if dogfood finds real stale attempts.
-2. Surface queue lineage inside Mac UI only if CLI/API dogfood proves useful.
-3. Add stricter runtime normalization only if dogfood shows provider-specific shape drift.
+1. Surface queue lineage inside Mac UI only if CLI/API dogfood proves useful.
+2. Add stricter runtime normalization only if dogfood shows provider-specific shape drift.
+3. Promote extra live smokes into `proof:live` when local prerequisites make sense.
 4. Promote extra live smokes into `proof:live` when local prerequisites make sense.
 5. Keep XCUITest as later hardening unless AppleScript/live smokes miss real bugs.
 
@@ -249,9 +249,9 @@ Release guardrails:
 
 ## Next Best Work
 
-1. Add retry/resume policy for stale attempted task messages if dogfood finds real stale attempts.
-2. Surface queue lineage inside Mac UI only if CLI/API dogfood proves useful.
-3. Add stricter runtime normalization only if dogfood shows provider-specific shape drift.
+1. Surface queue lineage inside Mac UI only if CLI/API dogfood proves useful.
+2. Add stricter runtime normalization only if dogfood shows provider-specific shape drift.
+3. Decide whether `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
 4. Decide whether `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
 5. Add app bundle/XCUITest smoke later if current AppleScript/live smokes miss UI regressions.
 6. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.

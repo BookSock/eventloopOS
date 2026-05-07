@@ -15,6 +15,7 @@ Each meaningful implementation agent should leave:
 - dogfood metric snapshot when changing routing, queue, restore, or task sessions
 - task-message lineage snapshot from `pnpm task:messages` when changing task followup/session routing
 - queue-item lineage snapshot from `pnpm queue:lineage -- --queue-item-id <id>` when changing queue actions, routing, or review packet creation
+- stale attempted task-message reconciliation proof when changing task followup durability/recovery
 
 ## Proof Commands
 

@@ -30,6 +30,18 @@ export async function handleTaskSessionsRoute(input: {
     });
   }
 
+  if (input.method === "POST" && input.pathname === "/task-messages/reconcile-attempted") {
+    const parsed = await input.readJsonBody();
+    if (!parsed.ok) return schemaError(parsed.message);
+    return handleReconcileAttemptedTaskMessagesRoute({
+      store: input.store,
+      observability: input.observability,
+      body: parsed.value,
+      occurredAt: input.now.toISOString(),
+      requestId: input.requestId,
+    });
+  }
+
   if (input.method === "GET" && input.pathname === "/task-sessions") {
     return handleListTaskSessionsRoute({
       taskSessions: input.taskSessions,
@@ -102,6 +114,71 @@ export async function handleListTaskMessagesRoute(input: {
       ok: true,
       messages: records.map(taskMessageRecordToApiMessage),
       count: records.length,
+      request_id: input.requestId,
+    },
+  };
+}
+
+export async function handleReconcileAttemptedTaskMessagesRoute(input: {
+  store: GatewayStore;
+  observability?: Observability;
+  body: unknown;
+  occurredAt: string;
+  requestId: string;
+}): Promise<RouteResult> {
+  const validation = validateReconcileAttemptedRequest(input.body);
+  if (!validation.ok) return schemaError(validation.message);
+
+  const attempted = await input.store.listTaskMessages({
+    status: "attempted",
+    limit: validation.limit,
+  });
+  const cutoff = new Date(input.occurredAt).getTime() - validation.olderThanMs;
+  const stale = attempted.filter((message) => new Date(message.updated_at).getTime() <= cutoff);
+  const reconciled = [];
+  for (const message of stale) {
+    const error = `stale attempted task message marked failed after ${validation.olderThanMs}ms; original text is not stored, inspect queue lineage and resend manually if needed`;
+    const finalized = await input.store.finalizeTaskMessage({
+      idempotency_key: message.idempotency_key,
+      status: "failed",
+      occurred_at: input.occurredAt,
+      error,
+    });
+    if (!finalized) continue;
+    reconciled.push(taskMessageRecordToApiMessage(finalized));
+    await input.observability?.incrementCounter("task_followups_failed_total");
+    await input.observability?.incrementCounter("task_followups_reconciled_failed_total");
+    await input.observability?.recordActivity({
+      type: "task_followup_failed",
+      occurred_at: input.occurredAt,
+      actor: "system",
+      task_id: finalized.task_id,
+      queue_item_id: finalized.queue_item_id,
+      event_id: finalized.event_ids[0],
+      task_session_id: finalized.task_session_id,
+      source_id: finalized.source_id,
+      status: "failed",
+      summary: `Task followup reconciled failed: ${finalized.task_session_id}`,
+      details: {
+        origin: "task_message_reconcile",
+        idempotency_key: finalized.idempotency_key,
+        durable_id: finalized.id,
+        text_hash: finalized.text_hash,
+        text_length: finalized.text_length,
+        error,
+      },
+    });
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      ok: true,
+      reconciled,
+      count: reconciled.length,
+      scanned: attempted.length,
+      older_than_ms: validation.olderThanMs,
       request_id: input.requestId,
     },
   };
@@ -330,6 +407,25 @@ function validateTaskMessageHistoryQuery(searchParams: URLSearchParams): {
 
 function isTaskMessageStatus(input: string): input is DurableTaskMessageStatus {
   return input === "attempted" || input === "sent" || input === "blocked" || input === "failed";
+}
+
+function validateReconcileAttemptedRequest(input: unknown): {
+  ok: true;
+  olderThanMs: number;
+  limit: number;
+} | { ok: false; message: string } {
+  if (!isRecord(input) || input.action !== "mark_failed") {
+    return { ok: false, message: "reconcile attempted request requires action=mark_failed" };
+  }
+  const olderThanMs = typeof input.older_than_ms === "number" ? input.older_than_ms : 30 * 60 * 1000;
+  if (!Number.isInteger(olderThanMs) || olderThanMs <= 0) {
+    return { ok: false, message: "older_than_ms must be a positive integer" };
+  }
+  const limit = typeof input.limit === "number" ? input.limit : 100;
+  if (!Number.isInteger(limit) || limit <= 0 || limit > 500) {
+    return { ok: false, message: "limit must be an integer between 1 and 500" };
+  }
+  return { ok: true, olderThanMs, limit };
 }
 
 function nonEmptyParam(searchParams: URLSearchParams, name: string): string | undefined {
