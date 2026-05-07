@@ -1,5 +1,9 @@
 import { execFile } from "node:child_process";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import { isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { validateMcpPollSourceConfig } from "../integrations/mcp_poll/config_schema.js";
 import { CodexAppServerThreadClient } from "../task_sessions/codex_app_server_thread_client.js";
 import { createCodexAppServerStdioConnection } from "../task_sessions/codex_app_server_stdio.js";
 import { resolveTranscriptCommandConfigFromEnv } from "../voice/stt_presets.js";
@@ -11,6 +15,7 @@ type ExecResult = {
 };
 
 type ExecFunction = (command: string, args: string[]) => Promise<ExecResult>;
+type ReadTextFile = (path: string) => Promise<string>;
 
 export type DoctorCheckName =
   | "orchestrator_health"
@@ -19,6 +24,7 @@ export type DoctorCheckName =
   | "codex_app_server"
   | "browser_e2e"
   | "mac_browser_restore_smoke"
+  | "mcp_sources_config"
   | "voice_transcript_command";
 
 export type DoctorCheck = {
@@ -47,6 +53,8 @@ export type DoctorOptions = {
   voiceTranscriptArgs?: string[];
   voiceTranscriptCommandConfigured?: boolean;
   voiceTranscriptConfigError?: string;
+  mcpSourcesPath?: string;
+  readFileFn?: ReadTextFile;
   stdout?: Pick<NodeJS.WriteStream, "write">;
   stderr?: Pick<NodeJS.WriteStream, "write">;
 };
@@ -59,6 +67,7 @@ export function doctorOptionsFromEnv(env: NodeJS.ProcessEnv): DoctorOptions {
     voiceTranscriptArgs: transcriptCommandConfig.args,
     voiceTranscriptCommandConfigured: transcriptCommandConfig.configured,
     voiceTranscriptConfigError: transcriptCommandConfig.error,
+    mcpSourcesPath: resolveMcpSourcesPathFromEnv(env),
   };
 }
 
@@ -66,12 +75,14 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   const generatedAt = (options.now ?? (() => new Date()))().toISOString();
   const execFn = options.execFn ?? execFilePromise;
   const fetchFn = options.fetchFn ?? fetch;
+  const readFileFn = options.readFileFn ?? readTextFile;
   const checks = await Promise.all([
     checkOrchestratorHealth(options.baseUrl, fetchFn),
     checkAerospaceDaemon(execFn),
     checkDockerDaemon(execFn),
     checkBrowserE2E(execFn),
     checkMacBrowserRestoreSmoke(execFn, options.platform ?? process.platform),
+    checkMcpSourcesConfig(options, readFileFn),
     checkVoiceTranscriptCommand(options, execFn),
     options.codexCheckFn ? options.codexCheckFn() : checkCodexAppServer(),
   ]);
@@ -82,6 +93,67 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     orchestrator_url: options.baseUrl,
     checks,
   };
+}
+
+async function checkMcpSourcesConfig(options: DoctorOptions, readFileFn: ReadTextFile): Promise<DoctorCheck> {
+  if (!options.mcpSourcesPath) {
+    return {
+      name: "mcp_sources_config",
+      ok: true,
+      detail: "optional MCP source config is not configured",
+      source_url: "config/README.md",
+    };
+  }
+
+  try {
+    const rawText = await readFileFn(options.mcpSourcesPath);
+    const parsed = JSON.parse(rawText) as unknown;
+    const rawConfigs = Array.isArray(parsed) ? parsed : isRecord(parsed) && Array.isArray(parsed.sources) ? parsed.sources : undefined;
+
+    if (!rawConfigs) {
+      return {
+        name: "mcp_sources_config",
+        ok: false,
+        detail: "MCP source config file must be an array or an object with sources array",
+        source_url: pathToFileURL(options.mcpSourcesPath).href,
+      };
+    }
+
+    if (rawConfigs.length === 0) {
+      return {
+        name: "mcp_sources_config",
+        ok: false,
+        detail: "MCP source config has no sources",
+        source_url: pathToFileURL(options.mcpSourcesPath).href,
+      };
+    }
+
+    for (const [index, rawConfig] of rawConfigs.entries()) {
+      const result = validateMcpPollSourceConfig(rawConfig);
+      if (!result.ok) {
+        return {
+          name: "mcp_sources_config",
+          ok: false,
+          detail: `MCP source config ${index}: ${result.issues.join(", ")}`,
+          source_url: pathToFileURL(options.mcpSourcesPath).href,
+        };
+      }
+    }
+
+    return {
+      name: "mcp_sources_config",
+      ok: true,
+      detail: `MCP source config loaded: ${rawConfigs.length} source(s)`,
+      source_url: pathToFileURL(options.mcpSourcesPath).href,
+    };
+  } catch (error) {
+    return {
+      name: "mcp_sources_config",
+      ok: false,
+      detail: errorDetail(error),
+      source_url: pathToFileURL(options.mcpSourcesPath).href,
+    };
+  }
 }
 
 async function checkVoiceTranscriptCommand(options: DoctorOptions, execFn: ExecFunction): Promise<DoctorCheck> {
@@ -310,6 +382,37 @@ async function execFilePromise(command: string, args: string[]): Promise<ExecRes
       resolve({ stdout, stderr });
     });
   });
+}
+
+async function readTextFile(path: string): Promise<string> {
+  return await readFile(path, "utf8");
+}
+
+function resolveMcpSourcesPathFromEnv(env: NodeJS.ProcessEnv): string | undefined {
+  const configuredPath = env.ORCHESTRATOR_MCP_SOURCES_PATH?.trim();
+  if (configuredPath) {
+    return resolveConfiguredPath(configuredPath);
+  }
+
+  const defaultPath = resolveExistingRelativePath("config/mcp-sources.json");
+  return defaultPath;
+}
+
+function resolveConfiguredPath(configuredPath: string): string {
+  if (isAbsolute(configuredPath)) {
+    return configuredPath;
+  }
+
+  return resolveExistingRelativePath(configuredPath) ?? configuredPath;
+}
+
+function resolveExistingRelativePath(relativePath: string): string | undefined {
+  const candidates = [
+    resolve(process.cwd(), relativePath),
+    resolve(process.cwd(), "../..", relativePath),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate));
 }
 
 function classifyCommandFailure(error: unknown): string {

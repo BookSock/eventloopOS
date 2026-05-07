@@ -31,7 +31,7 @@ This is the current reality map for agents. Pick the narrowest command that prov
 | AeroSpace backend | `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm run live:aerospace` | Live AeroSpace status/capture/restore-plan without executing moves | Requires AeroSpace.app running; passed locally with real window capture and non-executing restore plan. Add `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE_EXECUTE=1` to move one real window to scratch workspace and restore it. |
 | Voice transcript command | `pnpm run voice:listen-command` with `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` or `EVENTLOOPOS_VOICE_STT_PRESET=whisper_cpp_stream` | External line-delimited STT command can feed router; whisper.cpp stream preset builds mic command from env | Fake process path and preset construction are unit-tested; real mic/audio proof still pending. |
 | Voice fixture STT | `EVENTLOOPOS_ENABLE_VOICE_STT_SMOKE=1 EVENTLOOPOS_WHISPER_MODEL=<ggml-model> pnpm run voice:stt-smoke` | macOS `say` generates audio, `ffmpeg` converts it, real `whisper-cli` transcribes it, expected terms are checked | Requires `whisper-cpp`, `ffmpeg`, macOS `say`, and a local GGML model; passed locally with `ggml-tiny.en.bin`. |
-| Dev readiness | `pnpm run dev:doctor` | JSON readiness for orchestrator health, AeroSpace, Docker, browser E2E, Mac/browser restore smoke prerequisites, optional STT command, Codex app-server | Doctor is a readiness report, not a substitute for smoke tests. |
+| Dev readiness | `pnpm run dev:doctor` | JSON readiness for orchestrator health, AeroSpace, Docker, browser E2E, Mac/browser restore smoke prerequisites, optional MCP source config, optional STT command, Codex app-server | Doctor is a readiness report, not a substitute for smoke tests. |
 
 ## Agent Handoff Rule
 

@@ -102,6 +102,19 @@ describe("orchestrator config schema", () => {
     }
   });
 
+  it("resolves existing repo-root config paths for filtered pnpm commands", () => {
+    const result = loadConfig({
+      ORCHESTRATOR_MCP_SOURCES_PATH: "config/mcp-sources.example.json",
+      ORCHESTRATOR_CODEX_TASK_MAP_PATH: "config/codex-task-map.example.json",
+    });
+
+    assert.equal(result.ok, true);
+    if (result.ok) {
+      assert.match(result.value.mcpSourcesPath ?? "", /\/config\/mcp-sources\.example\.json$/);
+      assert.match(result.value.codexTaskMapPath ?? "", /\/config\/codex-task-map\.example\.json$/);
+    }
+  });
+
   it("allows MCP sources to be disabled", () => {
     const result = loadConfig({
       ORCHESTRATOR_MCP_SOURCES: "off",

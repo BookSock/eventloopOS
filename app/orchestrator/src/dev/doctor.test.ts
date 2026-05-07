@@ -81,6 +81,12 @@ describe("developer doctor", () => {
           source_url: "https://www.swift.org/getting-started/",
         },
         {
+          name: "mcp_sources_config",
+          ok: true,
+          detail: "optional MCP source config is not configured",
+          source_url: "config/README.md",
+        },
+        {
           name: "voice_transcript_command",
           ok: true,
           detail: "optional voice transcript command is not configured",
@@ -131,9 +137,106 @@ describe("developer doctor", () => {
       ["docker_daemon", false, "failed to connect to the docker API"],
       ["browser_e2e", true, "Playwright available: Version 1.59.1"],
       ["mac_browser_restore_smoke", true, "Swift available for mac-browser restore smoke: swift-driver version: 1.127.8 Apple Swift version 6.2.1"],
+      ["mcp_sources_config", true, "optional MCP source config is not configured"],
       ["voice_transcript_command", true, "optional voice transcript command is not configured"],
       ["codex_app_server", true, "Codex app-server responded; sampled 1 thread(s)"],
     ]);
+  });
+
+  it("checks configured MCP polling source config", async () => {
+    const report = await runDoctor({
+      baseUrl: "http://127.0.0.1:4377",
+      platform: "darwin",
+      mcpSourcesPath: "config/mcp-sources.json",
+      readFileFn: async () => JSON.stringify({
+        sources: [
+          {
+            id: "local_inbox_source",
+            server: {
+              name: "local-events-mcp",
+              command: "node",
+              args: ["scripts/local-events-mcp.js"],
+              envAllowlist: [],
+              stderrLogPath: "var/log/mcp/local_inbox_source.stderr.log",
+            },
+            poll: {
+              tool: "list_events",
+              args: {},
+              timeoutMs: 5000,
+            },
+            cursor: {
+              strategy: "hash",
+              dedupeWindow: 1000,
+            },
+            eventMapper: "generic_item_to_event",
+            riskPolicy: {
+              readOnly: true,
+              allowWriteTools: false,
+              maxRiskLevel: "low",
+              untrustedTextFields: ["title", "summary", "text"],
+            },
+          },
+        ],
+      }),
+      fetchFn: async () => response({ ok: true }, 200),
+      execFn: async (command, args) => {
+        if (command === "swift") {
+          assert.deepEqual(args, ["--version"]);
+          return { stdout: "swift-driver version: 1.127.8 Apple Swift version 6.2.1\n", stderr: "" };
+        }
+        return { stdout: command === "docker" ? "29.3.1\n" : "[]", stderr: "" };
+      },
+      codexCheckFn: async () => ({
+        name: "codex_app_server",
+        ok: true,
+        detail: "Codex app-server responded; sampled 1 thread(s)",
+      }),
+    });
+
+    const mcpConfigCheck = report.checks.find((check) => check.name === "mcp_sources_config");
+
+    assert.equal(mcpConfigCheck?.ok, true);
+    assert.equal(mcpConfigCheck?.detail, "MCP source config loaded: 1 source(s)");
+    assert.match(mcpConfigCheck?.source_url ?? "", /\/config\/mcp-sources\.json$/);
+  });
+
+  it("reports malformed MCP polling source config", async () => {
+    const report = await runDoctor({
+      baseUrl: "http://127.0.0.1:4377",
+      platform: "darwin",
+      mcpSourcesPath: "config/mcp-sources.json",
+      readFileFn: async () => JSON.stringify({ sources: [{ id: "" }] }),
+      fetchFn: async () => response({ ok: true }, 200),
+      execFn: async (command, args) => {
+        if (command === "swift") {
+          assert.deepEqual(args, ["--version"]);
+          return { stdout: "swift-driver version: 1.127.8 Apple Swift version 6.2.1\n", stderr: "" };
+        }
+        return { stdout: command === "docker" ? "29.3.1\n" : "[]", stderr: "" };
+      },
+      codexCheckFn: async () => ({
+        name: "codex_app_server",
+        ok: true,
+        detail: "Codex app-server responded; sampled 1 thread(s)",
+      }),
+    });
+
+    const mcpConfigCheck = report.checks.find((check) => check.name === "mcp_sources_config");
+
+    assert.equal(report.ok, false);
+    assert.equal(mcpConfigCheck?.ok, false);
+    assert.equal(
+      mcpConfigCheck?.detail,
+      "MCP source config 0: id must be a non-empty string, eventMapper must be one of slack_message_to_event, github_update_to_event, generic_item_to_event, server must be an object, poll must be an object, cursor must be an object, riskPolicy must be an object, cursor.field must be set when cursor.strategy is field",
+    );
+  });
+
+  it("resolves MCP source config paths from repo-root commands", () => {
+    const options = doctorOptionsFromEnv({
+      ORCHESTRATOR_MCP_SOURCES_PATH: "config/mcp-sources.example.json",
+    });
+
+    assert.match(options.mcpSourcesPath ?? "", /\/config\/mcp-sources\.example\.json$/);
   });
 
   it("checks configured local voice transcript command", async () => {

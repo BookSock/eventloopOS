@@ -9,6 +9,9 @@ cp config/mcp-sources.example.json config/mcp-sources.json
 ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.json pnpm --filter @eventloopos/orchestrator start
 ```
 
+`pnpm run dev:doctor` validates this file when `ORCHESTRATOR_MCP_SOURCES_PATH` is set or `config/mcp-sources.json` exists. Missing default config is treated as optional; malformed configured JSON fails the readiness report.
+Paths like `config/mcp-sources.json` are resolved from the repo root even when `pnpm --filter` runs the orchestrator from `app/orchestrator`.
+
 Each source is expected to call one read-only MCP tool that returns:
 
 ```json
@@ -52,6 +55,8 @@ ORCHESTRATOR_TASK_SESSIONS=codex_app_server \
 ORCHESTRATOR_CODEX_TASK_MAP_PATH=config/codex-task-map.json \
 pnpm --filter @eventloopos/orchestrator start
 ```
+
+Repo-root relative task-map paths are resolved the same way as MCP source config paths.
 
 The orchestrator reads this file on each task-session lookup. A master agent can update it while the daemon runs, then the next `/task-sessions` call sees the new binding. File entries override `ORCHESTRATOR_CODEX_TASK_MAP`; thread title/preview tags like `[task:blog feedback]` remain fallback.
 

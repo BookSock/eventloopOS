@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
+
 export type OrchestratorConfig = {
   host: string;
   port: number;
@@ -23,7 +26,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
   const portRaw = env.ORCHESTRATOR_PORT ?? String(DEFAULT_PORT);
   const port = Number(portRaw);
   const taskSessionsRaw = env.ORCHESTRATOR_TASK_SESSIONS ?? "fake";
-  const mcpSourcesPath = env.ORCHESTRATOR_MCP_SOURCES_PATH;
+  const mcpSourcesPathRaw = env.ORCHESTRATOR_MCP_SOURCES_PATH;
+  const mcpSourcesPath = resolveConfiguredPath(mcpSourcesPathRaw);
   const mcpSourcesRaw = env.ORCHESTRATOR_MCP_SOURCES ?? (mcpSourcesPath ? "config" : "seeded");
   const workspaceRaw = env.ORCHESTRATOR_WORKSPACE ?? "aerospace";
   const workspaceExecuteRaw = env.ORCHESTRATOR_WORKSPACE_EXECUTE ?? "disabled";
@@ -37,9 +41,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
     issues.push("ORCHESTRATOR_PORT must be an integer between 1 and 65535");
   }
   const codexTaskMapRaw = env.ORCHESTRATOR_CODEX_TASK_MAP;
-  const codexTaskMapPath = env.ORCHESTRATOR_CODEX_TASK_MAP_PATH;
+  const codexTaskMapPathRaw = env.ORCHESTRATOR_CODEX_TASK_MAP_PATH;
+  const codexTaskMapPath = resolveConfiguredPath(codexTaskMapPathRaw);
   const codexTaskMap = parseCodexTaskMap(codexTaskMapRaw, issues);
-  if (codexTaskMapPath !== undefined && !codexTaskMapPath.trim()) {
+  if (codexTaskMapPathRaw !== undefined && !codexTaskMapPathRaw.trim()) {
     issues.push("ORCHESTRATOR_CODEX_TASK_MAP_PATH must be non-empty when set");
   }
   if (taskSessionsRaw !== "fake" && taskSessionsRaw !== "codex_app_server" && taskSessionsRaw !== "off") {
@@ -72,7 +77,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
     value: {
       host,
       port,
-      seedFixturePath: env.ORCHESTRATOR_SEED_FIXTURE,
+      seedFixturePath: resolveConfiguredPath(env.ORCHESTRATOR_SEED_FIXTURE),
       databaseUrl: env.DATABASE_URL,
       taskSessions,
       codexTaskMap,
@@ -83,6 +88,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
       workspaceExecute,
     },
   };
+}
+
+function resolveConfiguredPath(rawPath: string | undefined): string | undefined {
+  const trimmedPath = rawPath?.trim();
+  if (!trimmedPath) return rawPath;
+  if (isAbsolute(trimmedPath)) return trimmedPath;
+
+  const candidates = [
+    resolve(process.cwd(), trimmedPath),
+    resolve(process.cwd(), "../..", trimmedPath),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? trimmedPath;
 }
 
 function parseCodexTaskMap(raw: string | undefined, issues: string[]): Record<string, string> | undefined {
