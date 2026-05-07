@@ -57,7 +57,7 @@ Near-term chaos tests:
 - duplicate workspace restore request with same idempotency key
 - MCP subprocess timeout without cursor commit
 - task runtime failure creates human queue fallback and no duplicate resend
-- stale task-message `attempted` state is visible in history
+- stale task-message `attempted` state is visible in history and fails `dogfood:check` after a configured age
 
 Later chaos tests:
 

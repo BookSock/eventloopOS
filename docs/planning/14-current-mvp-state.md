@@ -203,8 +203,10 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-2. Decide whether to promote `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
-3. Add richer after-the-fact history UI for task session/message lineage, not only API/activity logs.
-4. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.
-5. Later: real microphone/wake-word proof and always-listening voice UX.
+1. Expose after-the-fact lineage first: `GET /task-messages`, `pnpm task:messages`, and filters by task/session/event/status/idempotency, with no raw followup text in responses.
+2. Tighten the Codex + Claude task-runtime seam with shared typed session/message/capability/error shapes instead of `unknown` return contracts.
+3. Add dogfood gauges/checks for queue depth by state, stale `attempted` task messages, pending/failed restore requests, and followup status counts.
+4. Decide whether to promote `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
+5. Add app bundle/XCUITest smoke only if the current SwiftUI render, launch, AppleScript, and live Mac handoff smokes stop catching enough UI regressions.
+6. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.
+7. Later: real microphone/wake-word proof and always-listening voice UX.

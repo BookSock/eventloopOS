@@ -206,6 +206,27 @@ Real gaps:
 - Provider deeplink proof now exists as `pnpm run test:e2e:provider-deeplink`: Slack permalink, GitHub code-line permalink, and generic browser fallback travel through MCP mapping into stored event context with confidence metadata.
 - GatewayStore remains broad. Conformance tests reduce risk; split into smaller store ports later, after dogfood-critical safety/history patches.
 
+## Second Plan Audit - 2026-05-07
+
+Review outcome:
+
+- Product plan is aligned: eventloopOS is an intentional paper stack, not an ambient interruption manager.
+- Passive notification UX, calendar gates, Focus integration, voice-out, budget dashboard, multi-device sync, and enterprise controls remain deferred.
+- `server.ts` god-file critique is stale; it is now a thin route dispatcher. Keep route files from growing too much, but do not spend MVP time on churny extraction.
+- Metrics/observability critique is partly stale; `/metrics`, `/activity`, route counters, `dogfood:review`, `dogfood:check`, and Postgres activity persistence exist.
+- Main code gap is lineage: durable `task_messages` exist, but there is no filtered history API/CLI/UI for queue item -> event -> task -> runtime/session -> message reconstruction.
+- Main architecture gap is runtime typing: Codex and Claude run behind the same controller shape, but `TaskSessionController` still returns `unknown` sessions/messages.
+- Main recovery gap is stale `attempted` task-message visibility after crash.
+- Main doc gap fixed: Manual Mode snapshot is captured on return to Event Loop, matching the escape-hatch product model.
+
+Near-term implementation order:
+
+1. Add filtered task-message history query path and CLI.
+2. Add stale attempted-message dogfood check/gauge.
+3. Tighten task runtime types for Codex + Claude only.
+4. Promote extra live smokes into `proof:live` when local prerequisites make sense.
+5. Keep XCUITest as later hardening unless AppleScript/live smokes miss real bugs.
+
 Latest user steering:
 
 - Product center is the intake stack, not interruption policy.
@@ -227,7 +248,9 @@ Release guardrails:
 
 ## Next Best Work
 
-1. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-2. Decide whether `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
-3. Add richer after-the-fact history UI for task session/message lineage, not only API/activity logs.
-4. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.
+1. Add richer after-the-fact history API/CLI/UI for task session/message lineage, not only API/activity logs.
+2. Tighten Codex + Claude task-runtime shared types.
+3. Add stale attempted-message and queue/restore/followup gauges to dogfood checks.
+4. Decide whether `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
+5. Add app bundle/XCUITest smoke later if current AppleScript/live smokes miss UI regressions.
+6. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.
