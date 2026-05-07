@@ -2476,6 +2476,159 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("routes unhinted MCP-polled events into task sessions using stored context", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const messages = new Map<string, Record<string, unknown>>();
+    const mcpServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T17:00:00.000Z"),
+      mcpSources: createSeededDevelopmentMcpSourceRegistry(),
+      taskSessions: {
+        listSessions() {
+          return [
+            {
+              id: "task_session_blog",
+              task_id: "task_blog_feedback",
+              status: "idle",
+            },
+          ];
+        },
+        sendFollowupMessage(input) {
+          const existing = messages.get(input.idempotency_key);
+          if (existing) return existing;
+          const message = {
+            id: `task_msg_${messages.size + 1}`,
+            task_session_id: input.task_session_id,
+            mode: "followup",
+            text: input.text,
+            event_ids: input.event_ids,
+            idempotency_key: input.idempotency_key,
+            status: "sent",
+          };
+          messages.set(input.idempotency_key, message);
+          return message;
+        },
+      },
+    });
+    await new Promise<void>((resolve) => mcpServer.listen(0, "127.0.0.1", resolve));
+    const address = mcpServer.address() as AddressInfo;
+    const mcpBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const contextEvent = {
+        id: "evt_browser_ctx_unhinted_mcp_blog",
+        source: "browser",
+        source_id: "browser:ctx_unhinted_mcp_blog",
+        idempotency_key: "browser:ctx_unhinted_mcp_blog",
+        occurred_at: "2026-05-06T16:50:00.000Z",
+        received_at: "2026-05-06T16:50:00.000Z",
+        task_hint: "blog feedback",
+        type: "browser.context_captured",
+        title: "Browser context: Blog launch draft",
+        summary: "Blog launch draft includes launch date paragraph.",
+        raw_ref: {
+          id: "raw_browser_ctx_unhinted_mcp_blog",
+          uri: "artifact://raw/browser/ctx-unhinted-mcp-blog.json",
+          media_type: "application/json",
+        },
+        links: [],
+        resources: [
+          {
+            id: "ctx_browser_unhinted_mcp_blog",
+            kind: "browser_tab",
+            title: "Blog launch draft",
+            url: "https://example.test/blog-launch-draft",
+            source: "chrome-extension",
+            text_quote: "Launch date paragraph in blog draft.",
+            captured_at: "2026-05-06T16:50:00.000Z",
+            restore_confidence: "high",
+          },
+        ],
+      };
+      const contextResponse = await fetch(`${mcpBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ event: contextEvent }),
+      });
+      assert.equal(contextResponse.status, 202);
+
+      const response = await fetch(`${mcpBaseUrl}/mcp-sources/generic_mcp_source/poll-and-route`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          items: [
+            {
+              id: "office-priority-unhinted",
+              source: "mcp_poll",
+              type: "office.priority_hint",
+              title: "Launch date feedback",
+              summary: "Launch date feedback belongs in the blog draft before next pass.",
+              occurred_at: "2026-05-06T16:58:00Z",
+              actor: {
+                id: "actor_mcp_office",
+                type: "human",
+                name: "Office",
+              },
+              links: [
+                {
+                  label: "Blog draft",
+                  url: "https://example.test/blog-launch-draft",
+                },
+              ],
+              resources: [],
+            },
+          ],
+          nextCursor: "office-priority-unhinted",
+        }),
+      });
+      const body = await response.json() as {
+        source_id: string;
+        events_seen: number;
+        routed: Array<{
+          event: {
+            id: string;
+            task_hint?: string;
+          };
+          route_decision: {
+            action: string;
+            target_task_id: string;
+            target_task_session_id: string;
+            evidence: Array<{
+              kind: string;
+            }>;
+          };
+          task_message: {
+            task_session_id: string;
+            text: string;
+          };
+          queue_item?: unknown;
+        }>;
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(body.source_id, "generic_mcp_source");
+      assert.equal(body.events_seen, 1);
+      assert.equal(body.routed.length, 1);
+      assert.equal(body.routed[0].event.task_hint, undefined);
+      assert.equal(body.routed[0].route_decision.action, "inject_into_agent_thread");
+      assert.equal(body.routed[0].route_decision.target_task_id, "task_blog_feedback");
+      assert.equal(body.routed[0].route_decision.target_task_session_id, "task_session_blog");
+      assert.equal(body.routed[0].route_decision.evidence.some((evidence) => evidence.kind === "context_match"), true);
+      assert.equal(body.routed[0].task_message.task_session_id, "task_session_blog");
+      assert.match(body.routed[0].task_message.text, /Matched context: Browser context: Blog launch draft/);
+      assert.equal(body.routed[0].queue_item, undefined);
+      assert.equal(messages.size, 1);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        mcpServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("builds review artifacts from event once for memory and Postgres paths", () => {
     const artifacts = buildReviewArtifactsFromEvent({
       id: "evt_shared_builder",

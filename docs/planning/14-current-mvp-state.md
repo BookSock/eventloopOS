@@ -82,6 +82,7 @@ Done:
 - Passive browser context can be `store_only`, no human queue noise.
 - Task-hinted events can route into task session.
 - Unhinted Slack/voice/MCP/GitHub-style ambient events can infer a target task from stored task-bound context and inject into an existing task session. If no clear context match exists, event still queues human review.
+- `poll-and-route` for generic MCP sources uses the same ambient inference path, so user-installed MCP servers can emit event-ish items without `task_hint` and still reach the right task session when stored context is clear.
 - `GET /contexts` ranked search.
 - `POST /contexts/restore-plan`.
 - `POST /contexts/restore-requests`.
@@ -120,6 +121,7 @@ Strong tests now:
 - `queue_bind_then_recommended_action` proves the end-to-end dogfood path where agent handoff blocks before task-session binding, succeeds after binding, sends a task followup, and drains the queue.
 - Orchestrator API regression tests prove duplicate/retried events return the stored route before task-session side effects; a duplicate event that already queued human review cannot later inject into an agent thread after a task session appears.
 - Orchestrator API tests and live harness scenario `ambient_context_route` prove browser-captured task context can later route an unhinted Slack/voice-style event into `task_session_blog` with `context_match` evidence and no human queue item.
+- Orchestrator API tests prove a generic MCP `poll-and-route` item with no `task_hint` can route into `task_session_blog` using stored browser context and sends matched-context summary text to the task session.
 - macOS menu/window surfaces show why a recommended agent handoff is blocked, so disabled action buttons are auditable instead of silent.
 - Opt-in invasive AeroSpace smoke passed locally with `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 EVENTLOOPOS_ENABLE_LIVE_AEROSPACE_EXECUTE=1 pnpm run live:aerospace`; latest run saw 42 windows, planned 42 restore commands, moved window `23173` from workspace `1` to `eventloop-smoke`, and restored it to `1`.
 - Opt-in macOS UI automation smoke passed locally with `EVENTLOOPOS_ENABLE_MACOS_UI_SMOKE=1 pnpm run test:e2e:macos-ui`; it opens the menu bar extra, executes `Restore Queue Workspace` and verifies the restore receipt, opens the queue window, executes `Skip / Next Item` and verifies selection changed, toggles Manual Mode, verifies the manual workspace capture banner/menu summary, executes `Restore Manual Workspace`, verifies the restore receipt appears in the menu, and toggles back to Event Loop.

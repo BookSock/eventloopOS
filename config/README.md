@@ -33,7 +33,6 @@ Use `generic_item_to_event` when a local MCP server can return items shaped like
       "summary": "Blog post should mention launch in two weeks.",
       "occurred_at": "2026-05-06T17:03:00Z",
       "project_hint": "pagerfree",
-      "task_hint": "blog feedback",
       "links": [{ "label": "Source", "url": "eventloop://voice/1" }],
       "resources": []
     }
@@ -41,7 +40,7 @@ Use `generic_item_to_event` when a local MCP server can return items shaped like
 }
 ```
 
-`id`, `source_id`, or `url` must exist so the queue can dedupe. `actor`, `links`, `resources`, and `raw_ref` are optional. Keep `riskPolicy.readOnly: true` and `allowWriteTools: false` for MVP polling sources.
+`id`, `source_id`, or `url` must exist so the queue can dedupe. `actor`, `links`, `resources`, `raw_ref`, `project_hint`, and `task_hint` are optional. If `task_hint` is absent, the ambient router can still inject the event into a running task session when stored task-bound browser/Slack/GitHub context is a clear match. Keep `riskPolicy.readOnly: true` and `allowWriteTools: false` for MVP polling sources.
 
 ## Codex Task Map
 
