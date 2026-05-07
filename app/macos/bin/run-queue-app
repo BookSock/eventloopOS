@@ -1,0 +1,104 @@
+#!/usr/bin/env node
+import {
+  buildPackagedQueueAppBundle,
+  openQueueApp,
+  terminateProcessByExecutablePath,
+  waitForExit,
+} from "./smoke-app-bundle.mjs";
+
+if (process.platform !== "darwin") {
+  console.error("EventLoopQueueApp requires macOS");
+  process.exit(1);
+}
+
+const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377";
+const smokeMs = parseOptionalPositiveInteger(process.env.EVENTLOOPOS_QUEUE_APP_RUN_SMOKE_MS);
+
+let bundle;
+let child;
+let cleaningUp = false;
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, async () => {
+    if (bundle) {
+      await cleanup(bundle, child);
+    }
+    process.exit(0);
+  });
+}
+
+try {
+  bundle = await buildPackagedQueueAppBundle();
+  child = openQueueApp(bundle.appBundle, {
+    appArgs: ["--orchestrator-url", orchestratorUrl],
+    env: {
+      EVENTLOOP_ORCHESTRATOR_URL: orchestratorUrl,
+    },
+  });
+  forwardOutput(child);
+  console.log(`EventLoopQueueApp launched against ${orchestratorUrl}`);
+  if (smokeMs !== undefined) {
+    await waitForSmokeWindow(smokeMs, child);
+    await cleanup(bundle, child);
+    console.log("EventLoopQueueApp run smoke passed");
+    process.exitCode = 0;
+  } else {
+    const code = await waitForAppExit(child);
+    await bundle.cleanup();
+    process.exitCode = code ?? 0;
+  }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  if (bundle) {
+    await cleanup(bundle, child);
+  }
+  process.exitCode = 1;
+}
+
+function forwardOutput(runningChild) {
+  runningChild.stdout.on("data", (chunk) => process.stdout.write(chunk));
+  runningChild.stderr.on("data", (chunk) => process.stderr.write(chunk));
+}
+
+async function waitForAppExit(runningChild) {
+  return await new Promise((resolve, reject) => {
+    runningChild.on("error", reject);
+    runningChild.on("exit", (code) => resolve(code));
+  });
+}
+
+async function waitForSmokeWindow(ms, runningChild) {
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    runningChild.on("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    runningChild.on("exit", (code, signal) => {
+      clearTimeout(timer);
+      reject(new Error(`EventLoopQueueApp exited before smoke window: ${signal ?? code}`));
+    });
+  });
+}
+
+async function cleanup(runningBundle, runningChild) {
+  if (cleaningUp) return;
+  cleaningUp = true;
+  try {
+    if (runningChild && runningChild.exitCode === null) {
+      await terminateProcessByExecutablePath(runningBundle.executablePath);
+      await waitForExit(runningChild, 3_000);
+    }
+  } catch {
+    runningChild?.kill("SIGKILL");
+  } finally {
+    await runningBundle.cleanup();
+    cleaningUp = false;
+  }
+}
+
+function parseOptionalPositiveInteger(value) {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}

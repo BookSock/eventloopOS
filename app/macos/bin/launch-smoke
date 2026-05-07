@@ -27,7 +27,12 @@ try {
 }
 
 async function assertAppBundleStaysAlive(appBundle, executablePath) {
-  const child = openQueueApp(appBundle);
+  const child = openQueueApp(appBundle, {
+    appArgs: ["--test-mode"],
+    env: {
+      EVENTLOOP_QUEUE_TEST_MODE: "1",
+    },
+  });
   let output = "";
   child.stdout.on("data", (chunk) => {
     output += chunk.toString();

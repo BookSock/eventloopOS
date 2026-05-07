@@ -40,6 +40,14 @@ Live proof covers seeded queue, MCP source discovery, MCP poll-and-route, Slack-
 
 Run `pnpm run dev:doctor` to build the orchestrator and get machine-readable readiness for local live checks: orchestrator health, AeroSpace daemon, Docker daemon, browser Playwright extension E2E readiness, optional voice transcript command readiness, and Codex app-server.
 
+Personal dogfood stack:
+
+```sh
+pnpm run dev:dogfood
+```
+
+This starts dev Postgres, builds and runs the orchestrator with Codex app-server task sessions, uses AeroSpace in disabled-execute mode, auto-loads `config/mcp-sources.json` when present, and launches the Mac queue app against the local orchestrator. Press `Ctrl-C` in the terminal to stop the app, orchestrator, optional poll loop, and dev Postgres. Set `EVENTLOOPOS_DOGFOOD_POSTGRES=0` for in-memory mode. Set `EVENTLOOPOS_DOGFOOD_MCP_POLL=1` to run the MCP poll loop while dogfooding.
+
 Workspace restore execution is disabled by default. Set `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled` and call `POST /workspace/restore` with `confirm_execute: true` plus an `idempotency-key` header to execute an AeroSpace restore plan.
 
 Set `DATABASE_URL` to run the orchestrator with Postgres-backed queue and context restore request storage.

@@ -19,7 +19,12 @@ if (process.env.EVENTLOOPOS_ENABLE_MACOS_UI_SMOKE !== "1") {
 
 try {
   const bundle = await buildPackagedQueueAppBundle();
-  const child = openQueueApp(bundle.appBundle);
+  const child = openQueueApp(bundle.appBundle, {
+    appArgs: ["--test-mode"],
+    env: {
+      EVENTLOOP_QUEUE_TEST_MODE: "1",
+    },
+  });
   let output = "";
   child.stdout.on("data", (chunk) => {
     output += chunk.toString();

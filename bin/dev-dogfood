@@ -1,0 +1,173 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+
+const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377";
+const usePostgres = process.env.EVENTLOOPOS_DOGFOOD_POSTGRES !== "0";
+const smokeMs = parseOptionalPositiveInteger(process.env.EVENTLOOPOS_DOGFOOD_SMOKE_MS);
+const children = [];
+let startedPostgres = false;
+let cleaningUp = false;
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.once(signal, async () => {
+    await cleanup();
+    process.exit(0);
+  });
+}
+
+try {
+  const databaseUrl = usePostgres ? await startPostgres() : undefined;
+  await runChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "build"]);
+
+  const orchestrator = spawnChild("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "start"], {
+    DATABASE_URL: databaseUrl,
+    ORCHESTRATOR_TASK_SESSIONS: process.env.ORCHESTRATOR_TASK_SESSIONS ?? "codex_app_server",
+    ORCHESTRATOR_CODEX_TASK_MAP_PATH: process.env.ORCHESTRATOR_CODEX_TASK_MAP_PATH ?? "config/codex-task-map.json",
+    ORCHESTRATOR_MCP_SOURCES: process.env.ORCHESTRATOR_MCP_SOURCES ?? defaultMcpSourcesMode(),
+    ORCHESTRATOR_MCP_SOURCES_PATH: process.env.ORCHESTRATOR_MCP_SOURCES_PATH ?? defaultMcpSourcesPath(),
+    ORCHESTRATOR_WORKSPACE: process.env.ORCHESTRATOR_WORKSPACE ?? "aerospace",
+    ORCHESTRATOR_WORKSPACE_EXECUTE: process.env.ORCHESTRATOR_WORKSPACE_EXECUTE ?? "disabled",
+  });
+  await waitForHealth(orchestratorUrl, 15_000);
+
+  maybeStartPollLoop();
+
+  const app = spawnChild("pnpm", ["run", "run:queue-app"], {
+    EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl,
+    EVENTLOOPOS_QUEUE_APP_RUN_SMOKE_MS: smokeMs === undefined ? undefined : String(smokeMs),
+  });
+
+  process.stdout.write(`eventloopOS dogfood stack ready at ${orchestratorUrl}\n`);
+  process.stdout.write("Queue app is running. Ctrl-C here stops app, orchestrator, poll loop, and dev Postgres.\n");
+  const appCode = await waitForExit(app);
+  await cleanup();
+  process.exitCode = appCode ?? 0;
+} catch (error) {
+  process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+  await cleanup();
+  process.exitCode = 1;
+}
+
+async function startPostgres() {
+  const result = await runChecked("pnpm", ["run", "dev:postgres:up"]);
+  startedPostgres = true;
+  const url = result.stdout.trim().split(/\r?\n/).at(-1);
+  if (!url?.startsWith("postgres://")) {
+    throw new Error(`dev Postgres did not return a postgres URL: ${result.stdout}`);
+  }
+  return url;
+}
+
+function maybeStartPollLoop() {
+  if (process.env.EVENTLOOPOS_DOGFOOD_MCP_POLL !== "1") {
+    return undefined;
+  }
+  return spawnChild("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "poll:mcp:loop"], {
+    EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl,
+    EVENTLOOPOS_MCP_POLL_INTERVAL_MS: process.env.EVENTLOOPOS_MCP_POLL_INTERVAL_MS ?? "30000",
+    EVENTLOOPOS_MCP_SOURCE_IDS: process.env.EVENTLOOPOS_MCP_SOURCE_IDS,
+  });
+}
+
+function defaultMcpSourcesMode() {
+  return existsSync("config/mcp-sources.json") ? "config" : "off";
+}
+
+function defaultMcpSourcesPath() {
+  return existsSync("config/mcp-sources.json") ? "config/mcp-sources.json" : undefined;
+}
+
+async function waitForHealth(baseUrl, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  const healthUrl = new URL("/health", baseUrl);
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(healthUrl);
+      if (response.ok) return;
+    } catch {
+      // keep waiting
+    }
+    await sleep(100);
+  }
+  throw new Error(`orchestrator did not become healthy at ${healthUrl}`);
+}
+
+function spawnChild(command, args, env = {}) {
+  const child = spawn(command, args, {
+    cwd: process.cwd(),
+    env: removeUndefined({ ...process.env, ...env }),
+    stdio: "inherit",
+  });
+  children.push(child);
+  child.on("error", (error) => {
+    process.stderr.write(`${command} ${args.join(" ")} failed: ${error.message}\n`);
+  });
+  return child;
+}
+
+async function runChecked(command, args) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+      process.stdout.write(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+      process.stderr.write(chunk);
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(`${command} ${args.join(" ")} exited with ${signal ?? code}`));
+    });
+  });
+}
+
+async function waitForExit(child) {
+  return await new Promise((resolve) => {
+    child.on("exit", (code) => resolve(code));
+  });
+}
+
+async function cleanup() {
+  if (cleaningUp) return;
+  cleaningUp = true;
+  for (const child of children.toReversed()) {
+    if (child.exitCode === null) {
+      child.kill("SIGTERM");
+    }
+  }
+  await Promise.all(children.map((child) => child.exitCode === null ? waitForExit(child) : undefined));
+  if (startedPostgres) {
+    await runChecked("pnpm", ["run", "dev:postgres:down"]).catch((error) => {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+    });
+    startedPostgres = false;
+  }
+  cleaningUp = false;
+}
+
+function removeUndefined(input) {
+  return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
+}
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseOptionalPositiveInteger(value) {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}

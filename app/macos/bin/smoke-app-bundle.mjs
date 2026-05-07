@@ -18,12 +18,13 @@ export async function buildPackagedQueueAppBundle() {
   };
 }
 
-export function openQueueApp(appBundle) {
-  return spawn("open", ["-n", "-W", appBundle, "--args", "--test-mode"], {
+export function openQueueApp(appBundle, options = {}) {
+  const appArgs = options.appArgs ?? ["--test-mode"];
+  return spawn("open", ["-n", "-W", appBundle, "--args", ...appArgs], {
     cwd: process.cwd(),
     env: {
       ...process.env,
-      EVENTLOOP_QUEUE_TEST_MODE: "1",
+      ...options.env,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

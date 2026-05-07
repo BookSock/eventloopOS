@@ -13,6 +13,7 @@
     "test:e2e:macos": "pnpm --filter @eventloopos/macos --if-present test:e2e",
     "test:e2e:macos-launch": "pnpm --filter @eventloopos/macos run test:e2e:launch",
     "test:e2e:macos-ui": "pnpm --filter @eventloopos/macos run test:e2e:ui",
+    "run:queue-app": "pnpm --filter @eventloopos/macos run run:queue-app",
     "test:e2e:native-browser": "pnpm --filter @eventloopos/browser-extension run test:e2e:native-browser",
     "test:e2e:native-browser-real-orchestrator": "pnpm --filter @eventloopos/browser-extension run test:e2e:native-browser-real-orchestrator",
     "test:e2e:mac-browser-restore": "pnpm --filter @eventloopos/browser-extension run test:e2e:mac-browser-restore",
@@ -26,6 +27,7 @@
     "dev:postgres:up": "pnpm --filter @eventloopos/orchestrator run dev:postgres up",
     "dev:postgres:down": "pnpm --filter @eventloopos/orchestrator run dev:postgres down",
     "dev:postgres:url": "pnpm --filter @eventloopos/orchestrator run dev:postgres url",
+    "dev:dogfood": "bin/dev-dogfood",
     "live:aerospace": "pnpm --filter @eventloopos/orchestrator run live:aerospace",
     "voice:listen-command": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run voice:listen-command",
     "voice:stt-smoke": "pnpm --filter @eventloopos/orchestrator run voice:stt-smoke",
@@ -35,7 +37,7 @@
     "fixtures:seed": "pnpm --filter @eventloopos/test-harness --if-present fixtures:seed",
     "packets:golden": "pnpm --filter @eventloopos/test-harness --if-present packets:golden",
     "lint": "pnpm -r --if-present lint",
-    "typecheck": "node --check bin/live-smoke && pnpm -r --if-present typecheck",
+    "typecheck": "node --check bin/live-smoke && node --check bin/dev-dogfood && pnpm -r --if-present typecheck",
     "ci": "pnpm lint && pnpm typecheck && pnpm test && pnpm test:e2e"
   },
   "devDependencies": {
