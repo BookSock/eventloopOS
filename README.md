@@ -81,6 +81,14 @@ pnpm run task:bind -- --session codex_thread_abc --task "blog feedback"
 
 `task:bind` accepts either a full `--task-id task_blog_feedback` or a human hint via `--task "blog feedback"`, then writes through the orchestrator binding API.
 
+To let a running agent put itself back into the human intake stack:
+
+```sh
+pnpm run agent:run -- --id run_blog_review_1 --provider codex --task "blog feedback" --thread <thread-id> --status waiting_approval --summary "Approve launch paragraph before send." --risk-tag external_send --evidence-url https://docs.example.test/blog
+```
+
+This calls `POST /agent-runs`; `waiting_approval` or `blocked` creates one review paper, while later `running`, `completed`, `failed`, or `cancelled` clears stale ready paper state.
+
 Workspace restore execution is disabled by default. Set `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled` and call `POST /workspace/restore` with `confirm_execute: true` plus an `idempotency-key` header to execute an AeroSpace restore plan.
 
 Set `DATABASE_URL` to run the orchestrator with Postgres-backed queue and context restore request storage.
