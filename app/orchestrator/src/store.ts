@@ -126,8 +126,8 @@ export function listQueue(store: InMemoryStore): QueueItemWithPacket[] {
     .map((item) => attachPacket(store, item));
 }
 
-export function nextQueueItem(store: InMemoryStore): QueueItemWithPacket | undefined {
-  return listQueue(store).find((item) => item.state === "ready");
+export function nextQueueItem(store: InMemoryStore, now = new Date()): QueueItemWithPacket | undefined {
+  return listQueue(store).find((item) => item.state === "ready" && isQueueItemDue(item, now));
 }
 
 export function leaseNextQueueItem(
@@ -138,7 +138,7 @@ export function leaseNextQueueItem(
 ): QueueItemWithPacket | undefined {
   reapExpiredLeases(store, now);
   const item = store.queue
-    .filter((candidate) => candidate.state === "ready")
+    .filter((candidate) => candidate.state === "ready" && isQueueItemDue(candidate, now))
     .sort((left, right) => {
       if (right.priority_score !== left.priority_score) {
         return right.priority_score - left.priority_score;
@@ -153,6 +153,10 @@ export function leaseNextQueueItem(
   item.lease_expires_at = new Date(now.getTime() + leaseMs).toISOString();
   item.updated_at = now.toISOString();
   return attachPacket(store, item);
+}
+
+export function isQueueItemDue(item: { due_at?: string }, now: Date): boolean {
+  return !item.due_at || new Date(item.due_at).getTime() <= now.getTime();
 }
 
 export function markQueueItemDone(

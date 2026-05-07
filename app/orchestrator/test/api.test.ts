@@ -98,6 +98,44 @@ describe("orchestrator gateway API", () => {
     assert.equal(body.item.review_packet_id, "pkt_seed_review");
   });
 
+  it("does not return or lease queue items before due_at", async () => {
+    const seededStore = await createSeededStore();
+    seededStore.queue[0].due_at = "2026-05-06T12:05:00.000Z";
+    const store = createInMemoryGatewayStore(seededStore);
+    const dueServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+    });
+    await new Promise<void>((resolve) => dueServer.listen(0, "127.0.0.1", resolve));
+    const address = dueServer.address() as AddressInfo;
+    const dueBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const nextResponse = await fetch(`${dueBaseUrl}/queue/next`);
+      const nextBody = await nextResponse.json() as { item: unknown };
+      assert.equal(nextResponse.status, 200);
+      assert.equal(nextBody.item, null);
+
+      const leaseResponse = await fetch(`${dueBaseUrl}/queue/lease-next`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          lease_owner: "mac_queue_app",
+          lease_ms: 30_000,
+        }),
+      });
+      const leaseBody = await leaseResponse.json() as { item: unknown };
+      assert.equal(leaseResponse.status, 200);
+      assert.equal(leaseBody.item, null);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        dueServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("leases next queue item and hides it from unleased next until done", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const leaseServer = createGatewayServer({

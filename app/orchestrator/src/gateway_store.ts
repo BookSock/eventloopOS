@@ -7,6 +7,7 @@ import {
   getStoredEventByIdempotencyKey,
   getContextRestoreRequest,
   ingestEventAsReviewPacket,
+  isQueueItemDue,
   claimNextContextRestoreRequest,
   createContextRestoreRequest,
   leaseNextQueueItem,
@@ -61,7 +62,7 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     },
     async nextQueueItem(now) {
       reapExpiredLeases(store, now);
-      return nextQueueItem(store);
+      return nextQueueItem(store, now);
     },
     async leaseNextQueueItem(leaseOwner, now, leaseMs) {
       return leaseNextQueueItem(store, leaseOwner, now, leaseMs);
@@ -116,7 +117,7 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     async nextQueueItem(now) {
       await store.reapStaleLeases(now);
       const items = await store.listQueue("ready");
-      return items[0];
+      return items.find((item) => isQueueItemDue(item, now));
     },
     async leaseNextQueueItem(leaseOwner, _now, leaseMs) {
       return store.leaseNext(leaseOwner, leaseMs);
