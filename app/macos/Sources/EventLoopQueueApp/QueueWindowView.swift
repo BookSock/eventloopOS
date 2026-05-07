@@ -61,12 +61,17 @@ struct QueueWindowView: View {
                 Task {
                     await viewModel.doneAndNext()
                 }
+            } restoreContextResource: { resource in
+                Task {
+                    await viewModel.prepareContextRestore(resource: resource)
+                }
             }
         }
         .overlay(alignment: .bottomLeading) {
             VStack(alignment: .leading, spacing: 8) {
                 StatusBanner(state: viewModel.state)
                 WorkspaceRestoreBanner(state: viewModel.workspaceRestoreState)
+                ContextRestoreBanner(state: viewModel.contextRestoreState)
             }
                 .padding(12)
         }
@@ -139,6 +144,7 @@ private struct QueueRow: View {
 private struct PacketDetail: View {
     let packet: ReviewPacket?
     let doneAndNext: () -> Void
+    let restoreContextResource: (ReviewContextResource) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -186,7 +192,10 @@ private struct PacketDetail: View {
                                             title: resource.title,
                                             subtitle: resource.url ?? resource.kind,
                                             badge: resource.restoreConfidence ?? resource.source ?? resource.kind,
-                                            url: resource.url
+                                            url: resource.url,
+                                            restoreAction: {
+                                                restoreContextResource(resource)
+                                            }
                                         )
                                     }
                                 }
@@ -207,7 +216,8 @@ private struct PacketDetail: View {
                                             title: evidence.title,
                                             subtitle: evidence.url ?? evidence.kind,
                                             badge: evidence.kind,
-                                            url: evidence.url
+                                            url: evidence.url,
+                                            restoreAction: nil
                                         )
                                     }
                                 }
@@ -289,6 +299,7 @@ private struct ResourceRow: View {
     let subtitle: String
     let badge: String
     let url: String?
+    let restoreAction: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -307,6 +318,17 @@ private struct ResourceRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
+            if let restoreAction {
+                Button {
+                    restoreAction()
+                } label: {
+                    Image(systemName: "scope")
+                        .imageScale(.medium)
+                }
+                .buttonStyle(.borderless)
+                .help("Prepare context restore")
+                .accessibilityIdentifier("resource-restore-plan-button")
+            }
             if let url, let destination = URL(string: url) {
                 Link(destination: destination) {
                     Image(systemName: "arrow.up.right.square")
@@ -317,6 +339,51 @@ private struct ResourceRow: View {
                 .accessibilityIdentifier("resource-open-link")
             }
         }
+    }
+}
+
+private struct ContextRestoreBanner: View {
+    let state: ContextRestoreState
+
+    var body: some View {
+        switch state {
+        case .idle:
+            EmptyView()
+        case let .planning(resource):
+            Text("Context plan: \(resource.title)")
+                .font(.caption)
+                .padding(8)
+                .background(.secondary.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("context-restore-planning")
+        case let .planned(_, plan):
+            Text("Context plan: \(planSummary(plan))")
+                .font(.caption)
+                .padding(8)
+                .background(.blue.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("context-restore-planned")
+        case let .failed(resource, message):
+            Text("\(resource.title): \(message)")
+                .font(.caption)
+                .padding(8)
+                .background(.red.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("context-restore-failed")
+        }
+    }
+
+    private func planSummary(_ plan: ContextRestorePlan) -> String {
+        if let target = plan.target {
+            return target
+        }
+        if let url = plan.url {
+            return url
+        }
+        if let path = plan.path {
+            return path
+        }
+        return plan.kind
     }
 }
 

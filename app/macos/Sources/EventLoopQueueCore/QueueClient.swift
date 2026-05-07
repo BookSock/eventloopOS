@@ -5,6 +5,7 @@ public protocol QueueClient: Sendable {
     func complete(packetId: String) async throws -> QueueActionResult
     func renewLease(packetId: String) async throws -> QueueActionResult
     func next(after packetId: String?) async throws -> ReviewPacket?
+    func contextRestorePlan(resource: ReviewContextResource) async throws -> ContextRestorePlan
 }
 
 public enum QueueClientError: Error, Equatable, LocalizedError {
@@ -122,13 +123,31 @@ private struct ContextRestorePlanRequest: Encodable {
 public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private let lock = NSLock()
     private var packets: [ReviewPacket]
+    private let contextRestorePlanResult: Result<ContextRestorePlan, Error>
     private var completedIds: [String] = []
     private var leasedIds: Set<String> = []
     private var leaseOrder: [String] = []
     private var renewedIds: [String] = []
+    private var contextRestoreResources: [ReviewContextResource] = []
 
-    public init(packets: [ReviewPacket] = SeededQueue.packets) {
+    public init(
+        packets: [ReviewPacket] = SeededQueue.packets,
+        contextRestorePlanResult: Result<ContextRestorePlan, Error> = .success(
+            ContextRestorePlan(
+                kind: "open_url",
+                sideEffect: "local",
+                executeSupported: false,
+                target: nil,
+                message: nil,
+                url: "https://example.test/context",
+                path: nil,
+                line: nil,
+                column: nil
+            )
+        )
+    ) {
         self.packets = packets.sorted { $0.priority > $1.priority }
+        self.contextRestorePlanResult = contextRestorePlanResult
     }
 
     public var completedPacketIds: [String] {
@@ -141,6 +160,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public var renewedPacketIds: [String] {
         lock.withLock { renewedIds }
+    }
+
+    public var contextRestorePlanResources: [ReviewContextResource] {
+        lock.withLock { contextRestoreResources }
     }
 
     public func fetchQueue() async throws -> [ReviewPacket] {
@@ -186,6 +209,13 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
             leasedIds.insert(packet.id)
             leaseOrder.append(packet.id)
             return packet
+        }
+    }
+
+    public func contextRestorePlan(resource: ReviewContextResource) async throws -> ContextRestorePlan {
+        try lock.withLock {
+            contextRestoreResources.append(resource)
+            return try contextRestorePlanResult.get()
         }
     }
 }

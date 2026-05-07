@@ -8,6 +8,7 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var mode: EventLoopMode
     @Published public private(set) var shouldRestoreWorkspace: Bool
     @Published public private(set) var workspaceRestoreState: WorkspaceRestoreState
+    @Published public private(set) var contextRestoreState: ContextRestoreState
 
     private let client: any QueueClient
     private let workspaceClient: any WorkspaceClient
@@ -26,6 +27,7 @@ public final class QueueViewModel: ObservableObject {
         self.mode = .eventLoop
         self.shouldRestoreWorkspace = true
         self.workspaceRestoreState = .idle
+        self.contextRestoreState = .idle
     }
 
     deinit {
@@ -223,6 +225,16 @@ public final class QueueViewModel: ObservableObject {
         }
 
         await confirmWorkspaceRestore(snapshot: snapshot)
+    }
+
+    public func prepareContextRestore(resource: ReviewContextResource) async {
+        contextRestoreState = .planning(resource)
+        do {
+            let plan = try await client.contextRestorePlan(resource: resource)
+            contextRestoreState = .planned(resource, plan)
+        } catch {
+            contextRestoreState = .failed(resource, error.localizedDescription)
+        }
     }
 
     public func moveToNext() async {

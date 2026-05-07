@@ -333,4 +333,51 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.workspaceRestoreState, .skippedManualMode)
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys, [])
     }
+
+    func testPrepareContextRestorePlansSelectedResource() async {
+        let resource = ReviewContextResource(
+            id: "ctx_browser_123",
+            kind: "browser_tab",
+            title: "Launch doc",
+            url: "https://example.test/launch",
+            source: "chrome-extension",
+            restoreConfidence: "high"
+        )
+        let plan = ContextRestorePlan(
+            kind: "browser_extension_message",
+            sideEffect: "local",
+            executeSupported: false,
+            target: "eventloopOS browser extension runtime",
+            message: ContextRestoreMessage(type: "eventloop.restore", resource: resource),
+            url: nil,
+            path: nil,
+            line: nil,
+            column: nil
+        )
+        let client = FakeQueueClient(contextRestorePlanResult: .success(plan))
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.prepareContextRestore(resource: resource)
+
+        XCTAssertEqual(client.contextRestorePlanResources, [resource])
+        XCTAssertEqual(viewModel.contextRestoreState, .planned(resource, plan))
+    }
+
+    func testPrepareContextRestoreSurfacesFailure() async {
+        let resource = ReviewContextResource(
+            id: "ctx_unsupported",
+            kind: "opaque",
+            title: "Unsupported",
+            url: nil,
+            source: "test",
+            restoreConfidence: nil
+        )
+        let client = FakeQueueClient(contextRestorePlanResult: .failure(QueueClientError.httpStatus(422)))
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.prepareContextRestore(resource: resource)
+
+        XCTAssertEqual(client.contextRestorePlanResources, [resource])
+        XCTAssertEqual(viewModel.contextRestoreState, .failed(resource, "Queue request failed with HTTP 422"))
+    }
 }

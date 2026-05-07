@@ -191,6 +191,10 @@ public enum EventLoopMode: Equatable, Sendable {
 public struct ContextRestorePlanEnvelope: Decodable, Equatable, Sendable {
     public let restorePlan: ContextRestorePlan
 
+    public init(restorePlan: ContextRestorePlan) {
+        self.restorePlan = restorePlan
+    }
+
     enum CodingKeys: String, CodingKey {
         case restorePlan = "restore_plan"
     }
@@ -206,6 +210,28 @@ public struct ContextRestorePlan: Codable, Equatable, Sendable {
     public let path: String?
     public let line: Int?
     public let column: Int?
+
+    public init(
+        kind: String,
+        sideEffect: String,
+        executeSupported: Bool,
+        target: String?,
+        message: ContextRestoreMessage?,
+        url: String?,
+        path: String?,
+        line: Int?,
+        column: Int?
+    ) {
+        self.kind = kind
+        self.sideEffect = sideEffect
+        self.executeSupported = executeSupported
+        self.target = target
+        self.message = message
+        self.url = url
+        self.path = path
+        self.line = line
+        self.column = column
+    }
 
     enum CodingKeys: String, CodingKey {
         case kind
@@ -223,6 +249,18 @@ public struct ContextRestorePlan: Codable, Equatable, Sendable {
 public struct ContextRestoreMessage: Codable, Equatable, Sendable {
     public let type: String
     public let resource: ReviewContextResource
+
+    public init(type: String, resource: ReviewContextResource) {
+        self.type = type
+        self.resource = resource
+    }
+}
+
+public enum ContextRestoreState: Equatable, Sendable {
+    case idle
+    case planning(ReviewContextResource)
+    case planned(ReviewContextResource, ContextRestorePlan)
+    case failed(ReviewContextResource, String)
 }
 
 struct QueueItemDTO: Codable, Equatable, Sendable {
