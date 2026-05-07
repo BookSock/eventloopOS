@@ -15,11 +15,12 @@ import {
   handleTaskFollowupRoute,
 } from "./routes/task_sessions.js";
 import type { RouteResult } from "./routes/types.js";
+import { handleWorkspaceRoute } from "./routes/workspace.js";
 import { injectEventIntoTaskSessionIfPossible } from "./routing/task_session_injection.js";
 import type { RouteDecision } from "./store.js";
 import { sendTaskFollowupWithActivity } from "./task_sessions/task_followup_audit.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
-import { parseRestoreExecuteRequest, parseRestorePlanRequest, type WorkspaceController } from "./workspace/controller.js";
+import type { WorkspaceController } from "./workspace/controller.js";
 
 export type GatewayServerOptions = {
   store: GatewayStore;
@@ -121,103 +122,19 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         return sendRouteResult(response, context, contextRestoreRoute);
       }
 
-      if (request.method === "GET" && context.url.pathname === "/workspace/status") {
-        if (!options.workspace) {
-          return sendError(response, 501, context, "workspace_unavailable", "workspace controller is not configured");
-        }
-
-        return sendJson(response, 200, {
-          status: await options.workspace.status(),
-          execute_supported: options.workspaceExecuteEnabled === true,
-          request_id: context.requestId,
-        });
-      }
-
-      if (request.method === "POST" && context.url.pathname === "/workspace/capture") {
-        if (!options.workspace) {
-          return sendError(response, 501, context, "workspace_unavailable", "workspace controller is not configured");
-        }
-
-        return sendJson(response, 200, {
-          snapshot: await options.workspace.capture(),
-          request_id: context.requestId,
-        });
-      }
-
-      if (request.method === "POST" && context.url.pathname === "/workspace/restore-plan") {
-        if (!options.workspace) {
-          return sendError(response, 501, context, "workspace_unavailable", "workspace controller is not configured");
-        }
-
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-
-        try {
-          const requestBody = parseRestorePlanRequest(parsed.value);
-          const plan = await options.workspace.planRestore(requestBody.snapshot, requestBody.currentWindows);
-          return sendJson(response, 200, {
-            plan,
-            execute_supported: options.workspaceExecuteEnabled === true,
-            request_id: context.requestId,
-          });
-        } catch (error) {
-          return sendSchemaError(response, context, error instanceof Error ? error.message : String(error));
-        }
-      }
-
-      if (request.method === "POST" && context.url.pathname === "/workspace/restore") {
-        if (!options.workspace) {
-          return sendError(response, 501, context, "workspace_unavailable", "workspace controller is not configured");
-        }
-        if (options.workspaceExecuteEnabled !== true || !options.workspace.executeRestorePlan) {
-          return sendError(response, 403, context, "workspace_execute_disabled", "workspace restore execution is disabled");
-        }
-        if (!context.idempotencyKey) {
-          return sendError(response, 400, context, "missing_idempotency_key", "workspace restore requires idempotency-key header");
-        }
-
-        const existingReceipt = await options.store.getWorkspaceRestoreReceipt(context.idempotencyKey);
-        if (existingReceipt) {
-          return sendJson(response, 200, {
-            ok: true,
-            plan: existingReceipt.plan,
-            receipt: existingReceipt.receipt,
-            execute_supported: true,
-            idempotency_key: context.idempotencyKey,
-            idempotency_replayed: true,
-            request_id: context.requestId,
-          });
-        }
-
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-
-        try {
-          const requestBody = parseRestoreExecuteRequest(parsed.value);
-          const plan = await options.workspace.planRestore(requestBody.snapshot, requestBody.currentWindows);
-          const receipt = await options.workspace.executeRestorePlan(plan);
-          await options.store.recordWorkspaceRestoreReceipt({
-            idempotencyKey: context.idempotencyKey,
-            plan,
-            receipt,
-            now: now(),
-          });
-          return sendJson(response, 200, {
-            ok: true,
-            plan,
-            receipt,
-            execute_supported: true,
-            idempotency_key: context.idempotencyKey,
-            idempotency_replayed: false,
-            request_id: context.requestId,
-          });
-        } catch (error) {
-          return sendSchemaError(response, context, error instanceof Error ? error.message : String(error));
-        }
+      const workspaceRoute = await handleWorkspaceRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        readJsonBody: () => readJsonBody(request),
+        store: options.store,
+        workspace: options.workspace,
+        workspaceExecuteEnabled: options.workspaceExecuteEnabled,
+        now: now(),
+        requestId: context.requestId,
+        idempotencyKey: context.idempotencyKey,
+      });
+      if (workspaceRoute) {
+        return sendRouteResult(response, context, workspaceRoute);
       }
 
       if (request.method === "GET" && context.url.pathname === "/mcp-sources") {

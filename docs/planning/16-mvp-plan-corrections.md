@@ -155,7 +155,8 @@ Current extraction:
 - `app/orchestrator/src/routes/task_sessions.ts` owns task-session list/get/followup/binding route bodies and validation.
 - `app/orchestrator/src/routes/context_restore.ts` owns restore plan, restore request create/peek/claim/get/done/failed/retry route bodies and validation.
 - `app/orchestrator/src/routes/queue.ts` owns queue list/next/lease/done/defer/ignore/recommended-action route bodies and validation.
-- `server.ts` still owns many HTTP routes, MCP poll routes, events, voice, manual review, and workspace routes.
+- `app/orchestrator/src/routes/workspace.ts` owns workspace status/capture/restore-plan/restore route bodies and idempotent restore receipt replay.
+- `server.ts` still owns many HTTP routes, MCP poll routes, events, voice, and manual review routes.
 
 Keep doing behavior-preserving extraction first. Add tests before changing policy.
 
@@ -167,7 +168,7 @@ Other architecture notes:
 
 ## Next Best Work
 
-1. Continue behavior-preserving `server.ts` route extraction, especially MCP sources, events, and workspace.
+1. Continue behavior-preserving `server.ts` route extraction, especially MCP sources and events.
 2. Add GatewayStore conformance tests for event idempotency, queue leasing/defer/ignore, context restore retry, workspace restore receipt replay, and context search.
 3. Enforce MCP read-only source contracts beyond metadata, especially for user-installed servers.
 4. Add real MCP/Slack source dogfood config around Jason's installed tools.
