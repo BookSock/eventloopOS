@@ -93,6 +93,7 @@ Done:
 - Doctor checks orchestrator health, AeroSpace, Docker, browser Playwright readiness, Mac/browser restore smoke Swift readiness, optional voice transcript command readiness, and Codex app-server.
 - `pnpm --filter @eventloopos/orchestrator run live:aerospace` builds and emits a machine-readable skip by default. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1`, it checks live AeroSpace status/capture/restore-plan without executing workspace moves.
 - `voice:listen-command` runs a configured local STT command and pipes line-delimited transcripts into the same wake-phrase voice router. Command args are JSON argv, not shell-parsed strings.
+- `voice:listen-command` also supports `EVENTLOOPOS_VOICE_STT_PRESET=whisper_cpp_stream` so local whisper.cpp microphone capture can be configured with env vars (`EVENTLOOPOS_WHISPER_MODEL`, optional step/length/keep/thread/capture/language settings) instead of manual JSON argv.
 
 Gap:
 
@@ -112,7 +113,7 @@ Strong tests now:
 - Mac client + browser restore smoke exists as `pnpm run test:e2e:mac-browser-restore`; it starts a real orchestrator, has Swift `HTTPQueueClient` create a restore request, and proves the Chromium extension claims/completes it.
 - Full live boot smoke can reuse one running orchestrator for harness scenarios, Mac client live smoke, browser extension E2E, and installed Chromium extension/native host capture with `pnpm run test:e2e:live:full`.
 - `voice:listen` accepts line-delimited local STT transcript streams, optional wake phrase filtering, and forwards into `/voice/commands`.
-- `voice:listen-command` lets whisper.cpp stream, MLX Whisper wrappers, or other local STT tools feed the same router while staying unit-testable through an injected process.
+- `voice:listen-command` lets whisper.cpp stream, MLX Whisper wrappers, or other local STT tools feed the same router while staying unit-testable through an injected process. The whisper.cpp stream preset is unit-covered and doctor-checked.
 - `dev:doctor` reports whether `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` is configured and can launch with `--help`; unconfigured voice command is treated as optional/pass.
 - Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
 
@@ -122,7 +123,7 @@ Weak tests:
 - AeroSpace live restore needs installed/running AeroSpace.
 - AeroSpace live smoke exists, but `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm --filter @eventloopos/orchestrator run live:aerospace` currently reports `server_unavailable` because AeroSpace.app is not running.
 - No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, and temp `.app` bundle launch, but not one combined installed Mac UI interaction flow.
-- No real microphone wake-word/STT test yet; current coverage proves the local transcript command pipe and router contract with fake process output.
+- No real microphone wake-word/STT audio proof yet; current coverage proves the local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
 
 ## Next Best Work
 

@@ -1,10 +1,12 @@
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { listenVoiceCommands, voiceListenOptionsFromEnv, type VoiceListenOptions, type VoiceTranscriptStream } from "./listen_voice_commands.js";
+import { resolveTranscriptCommandConfigFromEnv } from "./stt_presets.js";
 
 export type TranscriptCommandOptions = Omit<VoiceListenOptions, "stdin"> & {
   command?: string;
   args?: string[];
+  configError?: string;
   spawnFn?: TranscriptCommandSpawn;
 };
 
@@ -18,18 +20,24 @@ export type TranscriptCommandSpawn = (
 };
 
 export function transcriptCommandOptionsFromEnv(env: NodeJS.ProcessEnv): TranscriptCommandOptions {
+  const commandConfig = resolveTranscriptCommandConfigFromEnv(env);
   return {
     ...voiceListenOptionsFromEnv(env),
-    command: env.EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND,
-    args: parseArgsJson(env.EVENTLOOPOS_VOICE_TRANSCRIPT_ARGS_JSON),
+    command: commandConfig.command,
+    args: commandConfig.args,
+    configError: commandConfig.error,
   };
 }
 
 export async function listenTranscriptCommand(options: TranscriptCommandOptions): Promise<number> {
   const stdout = options.stdout ?? process.stdout;
   const stderr = options.stderr ?? process.stderr;
+  if (options.configError) {
+    stderr.write(`${options.configError}\n`);
+    return 1;
+  }
   if (!options.command) {
-    stderr.write("EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND is required\n");
+    stderr.write("EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND or EVENTLOOPOS_VOICE_STT_PRESET is required\n");
     return 1;
   }
 
@@ -44,15 +52,6 @@ export async function listenTranscriptCommand(options: TranscriptCommandOptions)
 
   if (listenExit !== 0) return listenExit;
   return processExit === 0 ? 0 : 1;
-}
-
-function parseArgsJson(value: string | undefined): string[] {
-  if (!value) return [];
-  const parsed = JSON.parse(value) as unknown;
-  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
-    throw new Error("EVENTLOOPOS_VOICE_TRANSCRIPT_ARGS_JSON must be a JSON array of strings");
-  }
-  return parsed;
 }
 
 function spawnTranscriptCommand(command: string, args: string[]) {

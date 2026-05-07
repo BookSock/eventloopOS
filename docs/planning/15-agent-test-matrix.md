@@ -25,7 +25,7 @@ This is the current reality map for agents. Pick the narrowest command that prov
 | macOS client + live orchestrator | `pnpm run test:e2e:live:boot` | Booted orchestrator plus Mac `HTTPQueueClient` context restore request round-trip | Also runs live harness/native/browser smoke. |
 | Full local installed smoke | `pnpm run test:e2e:live:full` | One booted orchestrator reused by harness scenarios, Mac client smoke, browser E2E, and installed Chromium extension/native host capture | Best local daily-driver verifier. |
 | AeroSpace backend | `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm run live:aerospace` | Live AeroSpace status/capture/restore-plan without executing moves | Currently reports `server_unavailable` if AeroSpace.app is not running. |
-| Voice transcript command | `pnpm run voice:listen-command` with `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` | External line-delimited STT command can feed router | Fake process path is unit-tested; real mic/STT still pending. |
+| Voice transcript command | `pnpm run voice:listen-command` with `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` or `EVENTLOOPOS_VOICE_STT_PRESET=whisper_cpp_stream` | External line-delimited STT command can feed router; whisper.cpp stream preset builds mic command from env | Fake process path and preset construction are unit-tested; real mic/audio proof still pending. |
 | Dev readiness | `pnpm run dev:doctor` | JSON readiness for orchestrator health, AeroSpace, Docker, browser E2E, Mac/browser restore smoke prerequisites, optional STT command, Codex app-server | Doctor is a readiness report, not a substitute for smoke tests. |
 
 ## Agent Handoff Rule
@@ -48,5 +48,5 @@ Do not claim a subsystem works from `make ci` alone when the subsystem requires 
 - Real XCUITest interaction is not scaffolded. Current Mac UI proof is SwiftUI render smoke, temp `.app` launch smoke, and HTTP client live smoke.
 - Real AeroSpace live proof needs AeroSpace.app running.
 - Docker Postgres proof needs Docker daemon. Native Postgres proof is available and passed locally.
-- Real microphone/STT proof is not implemented. Transcript command pipe is test-covered with fake process output.
+- Real microphone/STT audio proof is not implemented. Transcript command pipe and whisper.cpp stream command construction are test-covered with fake process output.
 - Full installed Mac app UI flow still needs XCUITest interaction proof.

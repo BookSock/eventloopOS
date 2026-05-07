@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { runDoctor, runDoctorCli } from "./doctor.js";
+import { doctorOptionsFromEnv, runDoctor, runDoctorCli } from "./doctor.js";
 
 describe("developer doctor", () => {
   it("reports all live backend checks as machine-readable JSON", async () => {
@@ -166,6 +166,93 @@ describe("developer doctor", () => {
     assert.equal(voiceCheck?.ok, true);
     assert.equal(voiceCheck?.detail, "voice transcript command launched with --help");
     assert.deepEqual(voiceCheck?.command, ["whisper-stream", "--model", "ggml-base.en.bin", "--help"]);
+  });
+
+  it("checks whisper.cpp stream preset readiness", async () => {
+    const options = doctorOptionsFromEnv({
+      EVENTLOOPOS_VOICE_STT_PRESET: "whisper_cpp_stream",
+      EVENTLOOPOS_WHISPER_MODEL: "models/ggml-base.en.bin",
+      EVENTLOOPOS_WHISPER_THREADS: "4",
+    });
+    const report = await runDoctor({
+      ...options,
+      baseUrl: "http://127.0.0.1:4377",
+      platform: "darwin",
+      fetchFn: async () => response({ ok: true }, 200),
+      execFn: async (command, args) => {
+        if (command === "whisper-stream") {
+          assert.deepEqual(args, [
+            "-m",
+            "models/ggml-base.en.bin",
+            "--step",
+            "500",
+            "--length",
+            "5000",
+            "--keep",
+            "200",
+            "-t",
+            "4",
+            "--help",
+          ]);
+          return { stdout: "usage: whisper-stream\n", stderr: "" };
+        }
+        if (command === "swift") {
+          return { stdout: "swift-driver version: 1.127.8 Apple Swift version 6.2.1\n", stderr: "" };
+        }
+        return { stdout: command === "docker" ? "29.3.1\n" : "[]", stderr: "" };
+      },
+      codexCheckFn: async () => ({
+        name: "codex_app_server",
+        ok: true,
+        detail: "Codex app-server responded; sampled 1 thread(s)",
+      }),
+    });
+
+    const voiceCheck = report.checks.find((check) => check.name === "voice_transcript_command");
+
+    assert.equal(voiceCheck?.ok, true);
+    assert.deepEqual(voiceCheck?.command, [
+      "whisper-stream",
+      "-m",
+      "models/ggml-base.en.bin",
+      "--step",
+      "500",
+      "--length",
+      "5000",
+      "--keep",
+      "200",
+      "-t",
+      "4",
+      "--help",
+    ]);
+  });
+
+  it("reports invalid whisper.cpp stream preset without launching a command", async () => {
+    const options = doctorOptionsFromEnv({
+      EVENTLOOPOS_VOICE_STT_PRESET: "whisper_cpp_stream",
+    });
+    const report = await runDoctor({
+      ...options,
+      baseUrl: "http://127.0.0.1:4377",
+      platform: "darwin",
+      fetchFn: async () => response({ ok: true }, 200),
+      execFn: async (command) => {
+        if (command === "swift") {
+          return { stdout: "swift-driver version: 1.127.8 Apple Swift version 6.2.1\n", stderr: "" };
+        }
+        return { stdout: command === "docker" ? "29.3.1\n" : "[]", stderr: "" };
+      },
+      codexCheckFn: async () => ({
+        name: "codex_app_server",
+        ok: true,
+        detail: "Codex app-server responded; sampled 1 thread(s)",
+      }),
+    });
+
+    const voiceCheck = report.checks.find((check) => check.name === "voice_transcript_command");
+
+    assert.equal(voiceCheck?.ok, false);
+    assert.equal(voiceCheck?.detail, "EVENTLOOPOS_WHISPER_MODEL is required for whisper_cpp_stream preset");
   });
 
   it("prints JSON and exits non-zero when any check fails", async () => {

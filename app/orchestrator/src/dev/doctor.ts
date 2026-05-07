@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { CodexAppServerThreadClient } from "../task_sessions/codex_app_server_thread_client.js";
 import { createCodexAppServerStdioConnection } from "../task_sessions/codex_app_server_stdio.js";
+import { resolveTranscriptCommandConfigFromEnv } from "../voice/stt_presets.js";
 
 type ExecResult = {
   stdout: string;
@@ -44,16 +45,19 @@ export type DoctorOptions = {
   voiceTranscriptCommand?: string;
   voiceTranscriptArgs?: string[];
   voiceTranscriptCommandConfigured?: boolean;
+  voiceTranscriptConfigError?: string;
   stdout?: Pick<NodeJS.WriteStream, "write">;
   stderr?: Pick<NodeJS.WriteStream, "write">;
 };
 
 export function doctorOptionsFromEnv(env: NodeJS.ProcessEnv): DoctorOptions {
+  const transcriptCommandConfig = resolveTranscriptCommandConfigFromEnv(env);
   return {
     baseUrl: env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377",
-    voiceTranscriptCommand: env.EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND,
-    voiceTranscriptArgs: parseOptionalStringArrayJson(env.EVENTLOOPOS_VOICE_TRANSCRIPT_ARGS_JSON),
-    voiceTranscriptCommandConfigured: env.EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND !== undefined,
+    voiceTranscriptCommand: transcriptCommandConfig.command,
+    voiceTranscriptArgs: transcriptCommandConfig.args,
+    voiceTranscriptCommandConfigured: transcriptCommandConfig.configured,
+    voiceTranscriptConfigError: transcriptCommandConfig.error,
   };
 }
 
@@ -80,6 +84,15 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
 }
 
 async function checkVoiceTranscriptCommand(options: DoctorOptions, execFn: ExecFunction): Promise<DoctorCheck> {
+  if (options.voiceTranscriptConfigError) {
+    return {
+      name: "voice_transcript_command",
+      ok: false,
+      detail: options.voiceTranscriptConfigError,
+      source_url: "https://github.com/ggml-org/whisper.cpp/blob/master/examples/stream/stream.cpp",
+    };
+  }
+
   if (!options.voiceTranscriptCommandConfigured && !options.voiceTranscriptCommand) {
     return {
       name: "voice_transcript_command",
@@ -316,15 +329,6 @@ function classifyCommandFailure(error: unknown): string {
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function parseOptionalStringArrayJson(value: string | undefined): string[] | undefined {
-  if (!value) return undefined;
-  const parsed = JSON.parse(value) as unknown;
-  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
-    throw new Error("EVENTLOOPOS_VOICE_TRANSCRIPT_ARGS_JSON must be a JSON array of strings");
-  }
-  return parsed;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -17,6 +17,47 @@ describe("voice transcript command", () => {
     assert.equal(options.wakePhrase, "computer");
   });
 
+  it("builds whisper.cpp stream command from preset environment", () => {
+    const options = transcriptCommandOptionsFromEnv({
+      EVENTLOOPOS_VOICE_STT_PRESET: "whisper_cpp_stream",
+      EVENTLOOPOS_WHISPER_MODEL: "models/ggml-base.en.bin",
+      EVENTLOOPOS_WHISPER_THREADS: "4",
+      EVENTLOOPOS_VOICE_WAKE_PHRASE: "computer",
+    });
+
+    assert.equal(options.command, "whisper-stream");
+    assert.deepEqual(options.args, [
+      "-m",
+      "models/ggml-base.en.bin",
+      "--step",
+      "500",
+      "--length",
+      "5000",
+      "--keep",
+      "200",
+      "-t",
+      "4",
+    ]);
+    assert.equal(options.wakePhrase, "computer");
+  });
+
+  it("returns non-zero for invalid preset config", async () => {
+    const errors: string[] = [];
+    const exitCode = await listenTranscriptCommand({
+      baseUrl: "http://127.0.0.1:4377",
+      configError: "EVENTLOOPOS_WHISPER_MODEL is required for whisper_cpp_stream preset",
+      stderr: {
+        write(chunk: string) {
+          errors.push(chunk);
+          return true;
+        },
+      },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.deepEqual(errors, ["EVENTLOOPOS_WHISPER_MODEL is required for whisper_cpp_stream preset\n"]);
+  });
+
   it("pipes command stdout into the existing voice router", async () => {
     const requestedBodies: unknown[] = [];
     const spawned: Array<{ command: string; args: string[] }> = [];
