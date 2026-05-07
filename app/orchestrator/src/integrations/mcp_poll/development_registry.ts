@@ -72,6 +72,41 @@ export class DevelopmentMcpSourceRegistry {
     };
   }
 
+  async previewSource(sourceId: string, input: unknown, receivedAt: string): Promise<McpSourcePollOutput | undefined> {
+    const config = this.configs.get(sourceId);
+    if (!config) return undefined;
+
+    const state = createMcpPollerState(config);
+    if (this.cursorStateStore) {
+      hydrateCursorState(state.cursor, await this.cursorStateStore.getMcpPollState(sourceId));
+    } else {
+      const currentState = this.states.get(sourceId);
+      if (currentState) {
+        hydrateCursorState(state.cursor, {
+          source_id: sourceId,
+          cursor: currentState.cursor.cursor,
+          seen: Array.from(currentState.cursor.seen),
+          updated_at: receivedAt,
+        });
+      }
+    }
+
+    const runner = this.runner ?? createFixtureRunner(input);
+    const result = await pollMcpSource({
+      config,
+      state,
+      runner,
+      receivedAt,
+    });
+
+    return {
+      events: result.events,
+      cursor: result.cursor,
+      duplicates_ignored: result.duplicatesIgnored,
+      state: result.state,
+    };
+  }
+
   async commitPollState(sourceId: string, state: McpCursorState, now: Date): Promise<void> {
     await this.cursorStateStore?.saveMcpPollState(sourceId, state, now);
   }

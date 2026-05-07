@@ -8,6 +8,7 @@ export type McpSourceRegistry = {
   listSources: () => Promise<unknown[]> | unknown[];
   getSource?: (sourceId: string) => Promise<unknown | undefined> | unknown | undefined;
   pollSource: (sourceId: string, input: unknown, receivedAt: string) => Promise<McpSourcePollOutput | undefined> | McpSourcePollOutput | undefined;
+  previewSource?: (sourceId: string, input: unknown, receivedAt: string) => Promise<McpSourcePollOutput | undefined> | McpSourcePollOutput | undefined;
   commitPollState?: (sourceId: string, state: McpCursorState, now: Date) => Promise<void> | void;
 };
 
@@ -186,6 +187,36 @@ export async function handleMcpSourcesRoute(input: {
     }
   }
 
+  const previewMcpSourceMatch = input.pathname.match(/^\/mcp-sources\/([^/]+)\/preview$/);
+  if (input.method === "POST" && previewMcpSourceMatch) {
+    if (!input.mcpSources) {
+      return error(501, "mcp_sources_unavailable", "MCP source registry is not configured");
+    }
+
+    const parsed = await input.readJsonBody();
+    if (!parsed.ok) return schemaError(parsed.message);
+
+    const sourceId = decodeURIComponent(previewMcpSourceMatch[1] ?? "");
+    try {
+      if (!input.mcpSources.previewSource) {
+        return error(501, "mcp_sources_preview_unavailable", "MCP source preview is not configured");
+      }
+      const result = await input.mcpSources.previewSource(sourceId, parsed.value, input.now.toISOString());
+      if (!result) return error(404, "not_found", `MCP source ${sourceId} was not found`);
+
+      return ok(200, {
+        source_id: sourceId,
+        events_seen: result.events.length,
+        duplicates_ignored: result.duplicates_ignored,
+        cursor: result.cursor,
+        preview: result.events.map(summarizeMcpEventForPreview),
+        request_id: input.requestId,
+      });
+    } catch (caught) {
+      return schemaError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }
+
   const pollAndRouteMcpSourceMatch = input.pathname.match(/^\/mcp-sources\/([^/]+)\/poll-and-route$/);
   if (input.method === "POST" && pollAndRouteMcpSourceMatch) {
     if (!input.mcpSources) {
@@ -220,6 +251,35 @@ export async function handleMcpSourcesRoute(input: {
   }
 
   return undefined;
+}
+
+function summarizeMcpEventForPreview(event: McpEvent): Record<string, unknown> {
+  const firstLink = event.links[0]?.url;
+  return {
+    id: event.id,
+    source: event.source,
+    source_id: event.source_id,
+    type: event.type,
+    occurred_at: event.occurred_at,
+    actor: {
+      id: event.actor.id,
+      type: event.actor.type,
+      name: event.actor.name,
+    },
+    project_hint: event.project_hint,
+    task_hint: event.task_hint,
+    links: event.links.length,
+    resources: event.resources.length,
+    first_link_host: firstLink ? hostForUrl(firstLink) : undefined,
+  };
+}
+
+function hostForUrl(input: string): string | undefined {
+  try {
+    return new URL(input).host || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function commitPollState(

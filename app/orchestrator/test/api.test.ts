@@ -3599,6 +3599,88 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("previews an MCP source without routing or advancing poll cursor", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const mcpServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T17:01:00.000Z"),
+      mcpSources: createSeededDevelopmentMcpSourceRegistry(),
+    });
+    await new Promise<void>((resolve) => mcpServer.listen(0, "127.0.0.1", resolve));
+    const address = mcpServer.address() as AddressInfo;
+    const mcpBaseUrl = `http://127.0.0.1:${address.port}`;
+    const payload = {
+      items: [
+        {
+          team_id: "T123",
+          channel_id: "C123",
+          ts: "456.010",
+          thread_ts: "456.010",
+          user_id: "U123",
+          user_name: "Malis",
+          text: "Preview should not burn this Slack item.",
+          occurred_at: "2026-05-06T17:00:00Z",
+          permalink: "https://slack.example.com/archives/C123/p456010",
+          project_hint: "pagerfree",
+          task_hint: "blog feedback",
+        },
+      ],
+      nextCursor: "456.010",
+    };
+
+    try {
+      const previewResponse = await fetch(`${mcpBaseUrl}/mcp-sources/slack_dm_source/preview`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const previewBody = await previewResponse.json() as {
+        source_id: string;
+        events_seen: number;
+        duplicates_ignored: number;
+        preview: Array<{
+          source: string;
+          type: string;
+          task_hint: string;
+          first_link_host: string;
+          title?: string;
+          summary?: string;
+        }>;
+      };
+      assert.equal(previewResponse.status, 200);
+      assert.equal(previewBody.source_id, "slack_dm_source");
+      assert.equal(previewBody.events_seen, 1);
+      assert.equal(previewBody.duplicates_ignored, 0);
+      assert.equal(previewBody.preview[0].source, "slack");
+      assert.equal(previewBody.preview[0].type, "slack.message");
+      assert.equal(previewBody.preview[0].task_hint, "blog feedback");
+      assert.equal(previewBody.preview[0].first_link_host, "slack.example.com");
+      assert.equal(previewBody.preview[0].title, undefined);
+      assert.equal(previewBody.preview[0].summary, undefined);
+
+      const pollResponse = await fetch(`${mcpBaseUrl}/mcp-sources/slack_dm_source/poll`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(payload),
+      });
+      const pollBody = await pollResponse.json() as {
+        events: Array<{ id: string }>;
+        duplicates_ignored: number;
+      };
+      assert.equal(pollResponse.status, 200);
+      assert.equal(pollBody.events.length, 1);
+      assert.equal(pollBody.duplicates_ignored, 0);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        mcpServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("polls a configured MCP source and routes events into the human queue", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const mcpServer = createGatewayServer({
