@@ -163,6 +163,7 @@ Implemented:
 - `app/orchestrator`: `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` calls poll-all once and prints machine-readable JSON for master-agent/scheduler loops. `poll:mcp:loop` repeats the sweep with bounded `EVENTLOOPOS_MCP_POLL_MAX_CYCLES` for test runs.
 - `app/orchestrator`: `pnpm --filter @eventloopos/orchestrator run voice:send` forwards transcripts from env/stdin into `/voice/commands`, so local STT/wake-word tools can plug into the router without product-specific STT code.
 - `app/orchestrator/src/mcp_sources`: fake runtime and real MCP SDK runtime with timeout, stderr capture, env allowlist, circuit breaker.
+- `app/orchestrator/bin/dev-postgres`: Docker-backed local Postgres runner for `eventloop_test`, with `up`, `down`, `url`, and `test` commands. External DB tests can also use `EVENTLOOPOS_TEST_DATABASE_URL`.
 - `app/orchestrator/src/workspace`: deterministic AeroSpace workspace adapter, status/capture/restore-plan controller, safe command planner, and opt-in restore execution. HTTP exposes `GET /workspace/status`, `POST /workspace/capture`, `POST /workspace/restore-plan`, and disabled-by-default `POST /workspace/restore` requiring `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled`, `confirm_execute: true`, and `idempotency-key`.
 - `app/orchestrator/src/task_sessions`: fake task-session store plus terminal adapter for tmux and Ghostty, using audited visible input and injected command execution in tests.
 - `app/browser-extension`: shared-schema `browser_tab` capture/restore, optional task/project route hints, tested runtime capture/restore message router, legacy resource normalizer, native bridge envelope/capability protocol.
@@ -182,6 +183,7 @@ Known gaps:
 
 - Persistent Postgres HTTP mode exists behind `DATABASE_URL`; needs full live local proof once Docker/Postgres runtime available.
 - Context restore requests now share in-memory/Postgres persistence with claim leases; live Postgres proof still depends on Docker/container runtime.
+- Docker Postgres runner exists; needs pass on a machine with Docker daemon.
 - macOS UI needs menu bar polish and stronger empty/error/loading states.
 - macOS UI has manual-mode toggle state, global hotkey wiring, automatic lease renewal, packet decision/risk/context/evidence detail, open links for context/evidence resources, restore-plan pause gate, selected restore planning, and confirmation UI for invoking workspace restore execution; next gap is wiring macOS/orchestrator context action to browser-extension-backed restore/highlight for individual context resources.
 - Native host forwards context/event data to orchestrator when `EVENTLOOPOS_ORCHESTRATOR_URL` is set; ranked context search exists; opt-in installed Chromium smoke exists and passed; next gap is task attachment UI around captured browser resources and optional real Google Chrome profile smoke.

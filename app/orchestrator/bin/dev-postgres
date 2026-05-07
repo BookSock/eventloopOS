@@ -1,0 +1,138 @@
+#!/usr/bin/env node
+import { execFile, spawn } from "node:child_process";
+import pg from "pg";
+
+const { Client } = pg;
+
+const command = process.argv[2] ?? "url";
+const containerName = process.env.EVENTLOOPOS_POSTGRES_CONTAINER ?? "eventloopos-postgres";
+const image = process.env.EVENTLOOPOS_POSTGRES_IMAGE ?? "postgres:16-alpine";
+const port = process.env.EVENTLOOPOS_POSTGRES_PORT ?? "55432";
+const databaseUrl = process.env.EVENTLOOPOS_TEST_DATABASE_URL
+  ?? `postgres://eventloop:eventloop@127.0.0.1:${port}/eventloop_test`;
+
+try {
+  switch (command) {
+    case "up":
+      await up();
+      console.log(databaseUrl);
+      break;
+    case "down":
+      await down();
+      break;
+    case "url":
+      console.log(databaseUrl);
+      break;
+    case "test":
+      await up();
+      await runDbTests();
+      break;
+    default:
+      console.error("usage: eventloop-dev-postgres up|down|url|test");
+      process.exit(2);
+  }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(1);
+}
+
+async function up() {
+  if (await containerIsRunning()) {
+    await waitForPostgres();
+    return;
+  }
+
+  await execFileChecked("docker", [
+    "run",
+    "-d",
+    "--rm",
+    "--name",
+    containerName,
+    "-e",
+    "POSTGRES_USER=eventloop",
+    "-e",
+    "POSTGRES_PASSWORD=eventloop",
+    "-e",
+    "POSTGRES_DB=eventloop_test",
+    "-p",
+    `127.0.0.1:${port}:5432`,
+    image
+  ]);
+  await waitForPostgres();
+}
+
+async function down() {
+  await execFileQuiet("docker", ["rm", "-f", containerName]);
+}
+
+async function containerIsRunning() {
+  const result = await execFileQuiet("docker", ["inspect", "-f", "{{.State.Running}}", containerName]);
+  return result.stdout.trim() === "true";
+}
+
+async function waitForPostgres() {
+  const deadline = Date.now() + 30_000;
+  let lastError;
+  while (Date.now() < deadline) {
+    const client = new Client({ connectionString: databaseUrl });
+    try {
+      await client.connect();
+      await client.query("SELECT 1");
+      await client.end();
+      return;
+    } catch (error) {
+      lastError = error;
+      await client.end().catch(() => {});
+      await sleep(500);
+    }
+  }
+  throw lastError ?? new Error("timed out waiting for Postgres");
+}
+
+async function runDbTests() {
+  await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "test:db"], {
+    ...process.env,
+    EVENTLOOPOS_TEST_DATABASE_URL: databaseUrl
+  });
+}
+
+async function execFileChecked(file, args) {
+  return await new Promise((resolve, reject) => {
+    execFile(file, args, { encoding: "utf8" }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(`${file} ${args.join(" ")} failed: ${stderr || error.message}`));
+        return;
+      }
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+async function execFileQuiet(file, args) {
+  return await new Promise((resolve) => {
+    execFile(file, args, { encoding: "utf8" }, (_error, stdout, stderr) => {
+      resolve({ stdout, stderr });
+    });
+  });
+}
+
+async function spawnChecked(file, args, env) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      env,
+      stdio: "inherit"
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}`));
+    });
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

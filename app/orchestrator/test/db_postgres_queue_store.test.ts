@@ -10,15 +10,20 @@ describe("PostgresQueueStore", () => {
   let container: StartedPostgreSqlContainer | undefined;
   let store: PostgresQueueStore | undefined;
   let skipReason: string | undefined;
+  const externalDatabaseUrl = process.env.EVENTLOOPOS_TEST_DATABASE_URL;
 
   before(async () => {
     try {
-      container = await new PostgreSqlContainer("postgres:16-alpine").start();
+      container = externalDatabaseUrl ? undefined : await new PostgreSqlContainer("postgres:16-alpine").start();
       store = new PostgresQueueStore({
-        connectionString: container.getConnectionUri(),
+        connectionString: externalDatabaseUrl ?? container!.getConnectionUri(),
         clock: () => new Date(createdAt),
         defaultLeaseMs: 60_000,
       });
+      if (externalDatabaseUrl) {
+        assertSafeExternalTestDatabaseUrl(externalDatabaseUrl);
+        await resetExternalTestDatabase(store);
+      }
       await store.migrate();
     } catch (error) {
       skipReason = `live Postgres skipped: ${error instanceof Error ? error.message : String(error)}`;
@@ -194,6 +199,19 @@ describe("PostgresQueueStore", () => {
     assert.equal(await store.claimNextContextRestoreRequest("browser_c", 1_000), undefined);
   });
 });
+
+async function resetExternalTestDatabase(store: PostgresQueueStore) {
+  await store.pool.query("DROP SCHEMA IF EXISTS public CASCADE");
+  await store.pool.query("CREATE SCHEMA public");
+}
+
+function assertSafeExternalTestDatabaseUrl(databaseUrl: string) {
+  const parsed = new URL(databaseUrl);
+  const databaseName = parsed.pathname.replace(/^\//, "");
+  if (databaseName !== "eventloop_test" && process.env.EVENTLOOPOS_ALLOW_DATABASE_RESET !== "1") {
+    throw new Error("EVENTLOOPOS_TEST_DATABASE_URL must point to database eventloop_test or set EVENTLOOPOS_ALLOW_DATABASE_RESET=1");
+  }
+}
 
 function makeEvent(id: string, idempotencyKey: string): EventRecord {
   return {

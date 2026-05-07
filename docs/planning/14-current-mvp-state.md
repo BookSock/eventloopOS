@@ -87,6 +87,7 @@ Gap:
 
 - Postgres restore-request live test skips locally when Docker/container runtime is absent.
 - Browser extension has one fixed lease owner; installed multi-profile behavior still needs live proof.
+- Docker Postgres dev runner exists (`pnpm --filter @eventloopos/orchestrator run test:db:docker`) but has not passed here because local Docker daemon is absent.
 
 ## Testing Loop
 
@@ -107,6 +108,6 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add local Docker/Postgres runner so live Postgres restore-request tests stop skipping.
+1. Run Docker/Postgres DB tests on machine with Docker daemon and record pass/fail.
 2. Add tiny dev command that boots orchestrator + browser E2E + harness as one command.
 3. Add local voice capture/wake-word adapter behind same `/voice/commands` path.

@@ -31,6 +31,13 @@ Run `pnpm --filter @eventloopos/orchestrator run dev:doctor` after build to get 
 Workspace restore execution is disabled by default. Set `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled` and call `POST /workspace/restore` with `confirm_execute: true` plus an `idempotency-key` header to execute an AeroSpace restore plan.
 
 Set `DATABASE_URL` to run the orchestrator with Postgres-backed queue and context restore request storage.
+For local Postgres-backed tests with Docker:
+
+```sh
+pnpm --filter @eventloopos/orchestrator run dev:postgres up
+pnpm --filter @eventloopos/orchestrator run test:db:docker
+pnpm --filter @eventloopos/orchestrator run dev:postgres down
+```
 
 Set `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.json` to load read-only MCP poll sources from local config instead of seeded fake sources.
 Use `config/mcp-sources.example.json` as the starting shape. `generic_item_to_event` supports user-installed MCP servers that can return stable event-ish `items[]`.
