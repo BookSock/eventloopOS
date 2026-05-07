@@ -24,7 +24,7 @@ This is the current reality map for agents. Pick the narrowest command that prov
 | macOS app launch | `pnpm run test:e2e:macos-launch` | Builds `EventLoopQueueApp`, launches it in test mode, verifies it stays alive, and terminates it | Smoke only; no UI interaction assertions. |
 | macOS client + live orchestrator | `pnpm run test:e2e:live:boot` | Booted orchestrator plus Mac `HTTPQueueClient` context restore request round-trip | Also runs live harness/native/browser smoke. |
 | Full local installed smoke | `pnpm run test:e2e:live:full` | One booted orchestrator reused by harness scenarios, Mac client smoke, browser E2E, and installed Chromium extension/native host capture | Best local daily-driver verifier. |
-| AeroSpace backend | `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm run live:aerospace` | Live AeroSpace status/capture/restore-plan without executing moves | Requires AeroSpace.app running; passed locally with real window capture and non-executing restore plan. |
+| AeroSpace backend | `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm run live:aerospace` | Live AeroSpace status/capture/restore-plan without executing moves | Requires AeroSpace.app running; passed locally with real window capture and non-executing restore plan. Add `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE_EXECUTE=1` to move one real window to scratch workspace and restore it. |
 | Voice transcript command | `pnpm run voice:listen-command` with `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` or `EVENTLOOPOS_VOICE_STT_PRESET=whisper_cpp_stream` | External line-delimited STT command can feed router; whisper.cpp stream preset builds mic command from env | Fake process path and preset construction are unit-tested; real mic/audio proof still pending. |
 | Dev readiness | `pnpm run dev:doctor` | JSON readiness for orchestrator health, AeroSpace, Docker, browser E2E, Mac/browser restore smoke prerequisites, optional STT command, Codex app-server | Doctor is a readiness report, not a substitute for smoke tests. |
 
@@ -46,7 +46,7 @@ Do not claim a subsystem works from `make ci` alone when the subsystem requires 
 ## Known Weak Spots
 
 - Real XCUITest interaction is not scaffolded. Current Mac UI proof is SwiftUI render smoke, temp `.app` launch smoke, and HTTP client live smoke.
-- Real AeroSpace live proof needs AeroSpace.app running. Current smoke proves capture and plan, not execution of window moves.
+- Real AeroSpace live proof needs AeroSpace.app running. Opt-in execute smoke proves one real window move/restore, not full multi-window layout reconstruction under every edge case.
 - Docker Postgres proof needs Docker daemon. Native Postgres proof is available and passed locally.
 - Real microphone/STT audio proof is not implemented. Transcript command pipe and whisper.cpp stream command construction are test-covered with fake process output.
 - Full installed Mac app UI flow still needs XCUITest interaction proof.

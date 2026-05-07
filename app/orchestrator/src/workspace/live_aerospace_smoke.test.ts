@@ -57,4 +57,99 @@ describe("live AeroSpace smoke", () => {
       restore_plan_skip_count: 0,
     });
   });
+
+  it("optionally proves restore execution by moving a window to a scratch workspace and back", async () => {
+    const calls: Array<{ command: string; args: string[] }> = [];
+    const windows = [
+      { "window-id": 8, "app-name": "Ghostty", "window-title": "codex", workspace: "eventloop-dev" },
+      { "window-id": 9, "app-name": "Chrome", "window-title": "docs", workspace: "eventloop-web" },
+    ];
+    const exec: ExecFunction = async (command, args) => {
+      calls.push({ command, args });
+      if (args[0] === "list-windows") {
+        return { stdout: JSON.stringify(windows) };
+      }
+      if (args[0] === "move-node-to-workspace") {
+        const windowId = Number(args[2]);
+        const workspace = args[3] ?? "";
+        const window = windows.find((item) => item["window-id"] === windowId);
+        if (!window) throw new Error(`missing fake window ${windowId}`);
+        window.workspace = workspace;
+        return { stdout: "" };
+      }
+      if (args[0] === "workspace" || args[0] === "focus") {
+        return { stdout: "" };
+      }
+      throw new Error(`unexpected command ${command} ${args.join(" ")}`);
+    };
+
+    const result = await runLiveAerospaceSmoke({
+      enabled: true,
+      executeRestore: true,
+      scratchWorkspace: "eventloop-smoke",
+      exec,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.skipped, false);
+    if (result.ok && !result.skipped) {
+      assert.equal(result.execution_proof?.target_window_id, 8);
+      assert.equal(result.execution_proof?.original_workspace, "eventloop-dev");
+      assert.equal(result.execution_proof?.disturbed_workspace, "eventloop-smoke");
+      assert.equal(result.execution_proof?.restored_workspace, "eventloop-dev");
+      assert.equal(result.execution_proof?.disturb_command_count, 3);
+      assert.equal(result.execution_proof?.restore_command_count, 4);
+    }
+    assert.equal(windows[0]?.workspace, "eventloop-dev");
+    assert.deepEqual(
+      calls.filter((call) => call.args[0] === "move-node-to-workspace").map((call) => call.args),
+      [
+        ["move-node-to-workspace", "--window-id", "8", "eventloop-smoke"],
+        ["move-node-to-workspace", "--window-id", "8", "eventloop-dev"],
+        ["move-node-to-workspace", "--window-id", "9", "eventloop-web"],
+      ],
+    );
+  });
+
+  it("uses a fallback scratch workspace when target is already in the requested scratch workspace", async () => {
+    const windows = [{ "window-id": 8, "app-name": "Ghostty", "window-title": "codex", workspace: "eventloop-smoke" }];
+    const exec: ExecFunction = async (_command, args) => {
+      if (args[0] === "list-windows") {
+        return { stdout: JSON.stringify(windows) };
+      }
+      if (args[0] === "move-node-to-workspace") {
+        windows[0]!.workspace = args[3] ?? "";
+        return { stdout: "" };
+      }
+      return { stdout: "" };
+    };
+
+    const result = await runLiveAerospaceSmoke({
+      enabled: true,
+      executeRestore: true,
+      scratchWorkspace: "eventloop-smoke",
+      exec,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.skipped, false);
+    if (result.ok && !result.skipped) {
+      assert.equal(result.execution_proof?.scratch_workspace, "eventloop-smoke-2");
+      assert.equal(result.execution_proof?.restored_workspace, "eventloop-smoke");
+    }
+  });
+
+  it("fails cleanly when restore execution is requested with no windows", async () => {
+    const exec: ExecFunction = async (_command, args) => {
+      if (args[0] === "list-windows") {
+        return { stdout: "[]" };
+      }
+      throw new Error(`unexpected command ${args.join(" ")}`);
+    };
+
+    await assert.rejects(
+      () => runLiveAerospaceSmoke({ enabled: true, executeRestore: true, exec }),
+      /no AeroSpace windows available for restore execution proof/,
+    );
+  });
 });
