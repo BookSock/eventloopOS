@@ -32,7 +32,7 @@ pnpm run test:e2e:live:boot
 
 Live proof covers seeded queue, MCP source discovery, MCP poll-and-route, Slack-specific and generic MCP source poll -> route -> done, poll-all MCP sweep -> route -> done, Slack/MCP task-hinted events injecting into an existing task session without creating a human queue item, voice transcript -> task-session followup routing, passive browser context `store_only`, ranked browser context search, context restore-plan generation, leased browser restore-request claim/done flow, ranked task-attached browser context search, task-session discovery + idempotent followup, task-session binding, native-host forwarding, browser runtime capture/restore messages, workspace status/capture/restore-plan contracts, workspace snapshot context through the queue API, workspace status/restore-disabled smoke in the live harness, and macOS manual-mode queue state with `Cmd-Option-Shift-M` global hotkey wiring. The macOS view model auto-renews queue leases, auto-refreshes context restore-request status, plans selected workspace restores, shows packet decision/risk/context/evidence detail with open links, and skips workspace restore planning while manual mode is active.
 
-Run `pnpm --filter @eventloopos/orchestrator run dev:doctor` after build to get machine-readable readiness for local live checks: orchestrator health, AeroSpace daemon, Docker daemon, browser Playwright extension E2E readiness, and Codex app-server.
+Run `pnpm run dev:doctor` to build the orchestrator and get machine-readable readiness for local live checks: orchestrator health, AeroSpace daemon, Docker daemon, browser Playwright extension E2E readiness, optional voice transcript command readiness, and Codex app-server.
 
 Workspace restore execution is disabled by default. Set `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled` and call `POST /workspace/restore` with `confirm_execute: true` plus an `idempotency-key` header to execute an AeroSpace restore plan.
 
@@ -40,9 +40,9 @@ Set `DATABASE_URL` to run the orchestrator with Postgres-backed queue and contex
 For local Postgres-backed tests with Docker:
 
 ```sh
-pnpm --filter @eventloopos/orchestrator run dev:postgres up
-pnpm --filter @eventloopos/orchestrator run test:db:docker
-pnpm --filter @eventloopos/orchestrator run dev:postgres down
+pnpm run dev:postgres -- up
+pnpm run test:db:docker
+pnpm run dev:postgres -- down
 ```
 
 Set `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.json` to load read-only MCP poll sources from local config instead of seeded fake sources.
@@ -51,6 +51,13 @@ After `pnpm --filter @eventloopos/orchestrator build`, `pnpm --filter @eventloop
 
 Local STT tools can pipe transcripts into the router with `pnpm --filter @eventloopos/orchestrator run voice:send`. Use `EVENTLOOPOS_VOICE_TRANSCRIPT`, or pipe text on stdin. Optional hints: `EVENTLOOPOS_VOICE_PROJECT_HINT`, `EVENTLOOPOS_VOICE_TASK_HINT`, and `EVENTLOOPOS_VOICE_IDEMPOTENCY_KEY`.
 For line-delimited local STT streams, use `pnpm --filter @eventloopos/orchestrator run voice:listen`. Optional `EVENTLOOPOS_VOICE_WAKE_PHRASE=computer` filters ambient transcripts and strips the wake phrase before forwarding.
+For a local STT command that prints line-delimited transcripts, use `pnpm run voice:listen-command` with `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` and optional `EVENTLOOPOS_VOICE_TRANSCRIPT_ARGS_JSON='["--arg","value"]'`. This launches the command with argv, pipes stdout into the wake-phrase router, and is checked by `pnpm run dev:doctor` when configured.
+
+To check live AeroSpace status/capture/restore-plan without moving windows:
+
+```sh
+EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm run live:aerospace
+```
 
 Codex native thread protocol notes from the installed local CLI live in `external-resources/codex-app-server-protocol.md`.
 Set `ORCHESTRATOR_TASK_SESSIONS=codex_app_server` to expose local Codex app-server threads through `/task-sessions`; use `[task:blog feedback]` in thread titles/previews, `ORCHESTRATOR_CODEX_TASK_MAP='{"thread_id":"task_blog_feedback"}'`, or hot-loaded `ORCHESTRATOR_CODEX_TASK_MAP_PATH=config/codex-task-map.json` for task routing.

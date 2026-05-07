@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-integration test-e2e test-e2e-browser test-e2e-macos test-e2e-live test-contracts test-architecture test-mcp-stability fixtures-seed packets-golden lint typecheck ci install
+.PHONY: test test-unit test-integration test-e2e test-e2e-browser test-e2e-macos test-e2e-live test-e2e-live-boot test-db-docker dev-doctor dev-postgres live-aerospace voice-listen-command test-contracts test-architecture test-mcp-stability fixtures-seed packets-golden lint typecheck ci install
 
 PNPM ?= pnpm
 
@@ -25,6 +25,24 @@ test-e2e-macos:
 
 test-e2e-live:
 	$(PNPM) test:e2e:live
+
+test-e2e-live-boot:
+	$(PNPM) test:e2e:live:boot
+
+test-db-docker:
+	$(PNPM) test:db:docker
+
+dev-doctor:
+	$(PNPM) dev:doctor
+
+dev-postgres:
+	$(PNPM) dev:postgres
+
+live-aerospace:
+	$(PNPM) live:aerospace
+
+voice-listen-command:
+	$(PNPM) voice:listen-command
 
 test-contracts:
 	$(PNPM) test:contracts
