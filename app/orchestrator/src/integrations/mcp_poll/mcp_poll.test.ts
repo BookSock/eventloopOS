@@ -67,6 +67,13 @@ describe("MCP poll ingestion", () => {
           workspace_id: "T123",
           channel_id: "C123",
           thread_ts: "456.000",
+          details: {
+            provider: "slack",
+            team_id: "T123",
+            channel_id: "C123",
+            thread_ts: "456.000",
+            confidence_reason: "slack_permalink",
+          },
         },
       ],
     });
@@ -126,6 +133,143 @@ describe("MCP poll ingestion", () => {
       },
     ]);
     assert.equal(result.events[0].resources[0].kind, "voice_note");
+  });
+
+  it("checks configured MCP poll tool metadata once before polling", async () => {
+    const config = await readConfig("../../tests/fixtures/mcp/source-slack.json");
+    const fixture = await readMcpPollFixture(join(process.cwd(), "../../tests/fixtures/events/mcp-slack-github-poll.json"));
+    const state = createMcpPollerState(config);
+    let listToolsCalls = 0;
+    let callToolCalls = 0;
+
+    const first = await pollMcpSource({
+      config,
+      state,
+      runner: {
+        async listTools() {
+          listToolsCalls += 1;
+          return [
+            {
+              name: "search_messages",
+              annotations: {
+                readOnlyHint: true,
+              },
+            },
+          ];
+        },
+        async callTool() {
+          callToolCalls += 1;
+          return fixture;
+        },
+      },
+      receivedAt: "2026-05-06T17:00:00Z",
+    });
+    const second = await pollMcpSource({
+      config,
+      state,
+      runner: {
+        async listTools() {
+          listToolsCalls += 1;
+          return [
+            {
+              name: "search_messages",
+              annotations: {
+                readOnlyHint: true,
+              },
+            },
+          ];
+        },
+        async callTool() {
+          callToolCalls += 1;
+          return fixture;
+        },
+      },
+      receivedAt: "2026-05-06T17:01:00Z",
+    });
+
+    assert.equal(listToolsCalls, 1);
+    assert.equal(callToolCalls, 2);
+    assert.equal(first.events.length, 1);
+    assert.equal(second.events.length, 0);
+  });
+
+  it("blocks MCP polling when configured tool is missing or not read-only", async () => {
+    const config = await readConfig("../../tests/fixtures/mcp/source-slack.json");
+    let callToolCalls = 0;
+
+    await assert.rejects(
+      () => pollMcpSource({
+        config,
+        state: createMcpPollerState(config),
+        runner: {
+          async listTools() {
+            return [
+              {
+                name: "post_message",
+                annotations: {
+                  readOnlyHint: false,
+                },
+              },
+            ];
+          },
+          async callTool() {
+            callToolCalls += 1;
+            return { items: [] };
+          },
+        },
+        receivedAt: "2026-05-06T17:00:00Z",
+      }),
+      /MCP poll tool search_messages is not advertised by source slack_dm_source/,
+    );
+
+    await assert.rejects(
+      () => pollMcpSource({
+        config,
+        state: createMcpPollerState(config),
+        runner: {
+          async listTools() {
+            return [
+              {
+                name: "search_messages",
+                annotations: {
+                  readOnlyHint: false,
+                },
+              },
+            ];
+          },
+          async callTool() {
+            callToolCalls += 1;
+            return { items: [] };
+          },
+        },
+        receivedAt: "2026-05-06T17:00:00Z",
+      }),
+      /MCP poll tool search_messages for source slack_dm_source must advertise annotations.readOnlyHint=true/,
+    );
+
+    await assert.rejects(
+      () => pollMcpSource({
+        config,
+        state: createMcpPollerState(config),
+        runner: {
+          async listTools() {
+            return [
+              {
+                name: "search_messages",
+              },
+            ];
+          },
+          async callTool() {
+            callToolCalls += 1;
+            return { items: [] };
+          },
+        },
+        receivedAt: "2026-05-06T17:00:00Z",
+      }),
+      /MCP poll tool search_messages for source slack_dm_source must advertise annotations.readOnlyHint=true/,
+    );
+
+    assert.equal(callToolCalls, 0);
   });
 
   it("lists seeded development MCP sources and polls by source id", async () => {

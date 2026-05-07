@@ -117,7 +117,7 @@ Do now:
 - Keep `server.ts` shrinking before adding much more width.
 - Keep metrics/history concrete and local.
 - Keep deep-link restore confidence visible by provider.
-- Keep MCP sources read-only/draft-first by default. MVP config validation now rejects sources that set `readOnly=false`, `allowWriteTools=true`, or `maxRiskLevel` above `low`.
+- Keep MCP sources read-only/draft-first by default. MVP config validation rejects sources that set `readOnly=false`, `allowWriteTools=true`, or `maxRiskLevel` above `low`, and SDK-backed polling now checks `tools/list` before first poll to require the configured poll tool to advertise `annotations.readOnlyHint=true`.
 - Keep keystroke/terminal path behind explicit grants.
 - Keep tests tied to real feedback loops: fixture E2E, live boot, real Chromium extension, opt-in AeroSpace, opt-in Mac UI smoke.
 
@@ -172,8 +172,7 @@ Other architecture notes:
 
 ## Next Best Work
 
-1. Enforce MCP read-only source contracts beyond config validation, especially runtime tool metadata checks for user-installed servers.
-2. Add real MCP/Slack source dogfood config around Jason's installed tools.
-3. Add trend comparisons to `dogfood:review`.
-4. Real Claude+Codex composite dogfood against harmless configured sessions.
-5. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.
+1. Add real MCP/Slack source dogfood config around Jason's installed tools.
+2. Add trend comparisons to `dogfood:review`.
+3. Real Claude+Codex composite dogfood against harmless configured sessions.
+4. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.
