@@ -92,6 +92,28 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
     await assertEventually(async () => {
       assert.equal(await page.evaluate(() => Math.round(window.scrollY)), 720);
     });
+
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const pollConfig = await sendRuntimeMessageFromTab(serviceWorker, url, {
+      type: "eventloop.setConfig",
+      config: { orchestratorUrl: server.origin }
+    });
+    assert.deepEqual(pollConfig, { orchestratorUrl: server.origin });
+
+    await serviceWorker.evaluate(async () => {
+      await chrome.alarms.create("eventloop.restoreRequests.poll", { when: Date.now() + 100 });
+    });
+    const pollDoneBody = await assertEventually(async () => {
+      const body = server.restoreDoneBody();
+      assert.ok(body);
+      return body;
+    }, { timeoutMs: 5_000 });
+    assert.equal(pollDoneBody.result.ok, true);
+    assert.equal(pollDoneBody.result.url, url);
+    assert.equal(pollDoneBody.result.restoredScroll, true);
+    await assertEventually(async () => {
+      assert.equal(await page.evaluate(() => Math.round(window.scrollY)), 840);
+    });
   } finally {
     await context?.close();
     await rm(userDataDir, { recursive: true, force: true });
@@ -100,8 +122,30 @@ test("MV3 extension captures and restores browser page context in Chromium", asy
 });
 
 async function startFixtureServer() {
-  const server = createServer((request, response) => {
+  let restoreDoneBody = null;
+  const pendingRestoreRequest = {
+    id: "ctx_restore_e2e",
+    status: "pending",
+    restore_plan: {
+      kind: "browser_extension_message",
+      message: {
+        type: "eventloop.restore",
+        resource: {
+          id: "browser_tab:e2e_poll",
+          kind: "browser_tab",
+          title: "Launch brief",
+          url: null,
+          restore_confidence: "high",
+          scroll_y: 840,
+          text_quote: "Launch date moved up. Human review needed."
+        }
+      }
+    }
+  };
+
+  const server = createServer(async (request, response) => {
     if (request.url === "/launch") {
+      pendingRestoreRequest.restore_plan.message.resource.url = `http://${request.headers.host}/launch`;
       response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       response.end(`<!doctype html>
         <html>
@@ -123,6 +167,25 @@ async function startFixtureServer() {
       return;
     }
 
+    if (request.method === "GET" && request.url === "/contexts/restore-requests/next") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ restore_request: restoreDoneBody ? null : pendingRestoreRequest }));
+      return;
+    }
+
+    if (request.method === "POST" && request.url === "/contexts/restore-requests/ctx_restore_e2e/done") {
+      restoreDoneBody = JSON.parse(await readRequestBody(request));
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        restore_request: {
+          ...pendingRestoreRequest,
+          status: "done",
+          result: restoreDoneBody.result
+        }
+      }));
+      return;
+    }
+
     response.writeHead(404, { "content-type": "text/plain" });
     response.end("not found");
   });
@@ -135,8 +198,17 @@ async function startFixtureServer() {
   const address = server.address();
   return {
     origin: `http://127.0.0.1:${address.port}`,
+    restoreDoneBody: () => restoreDoneBody,
     close: () => new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())))
   };
+}
+
+async function readRequestBody(request) {
+  const chunks = [];
+  for await (const chunk of request) {
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 async function sendRuntimeMessageFromTab(serviceWorker, targetUrl, message) {
