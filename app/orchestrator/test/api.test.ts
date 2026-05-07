@@ -545,6 +545,40 @@ describe("orchestrator gateway API", () => {
         "https://example.test/launch",
       );
 
+      const claimRestoreRequestResponse = await fetch(`${routeBaseUrl}/contexts/restore-requests/claim-next`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ lease_owner: "browser_extension_test", lease_ms: 60_000 }),
+      });
+      const claimRestoreRequestBody = await claimRestoreRequestResponse.json() as {
+        restore_request: {
+          id: string;
+          status: string;
+          lease_owner: string;
+          lease_expires_at: string;
+        };
+      };
+      assert.equal(claimRestoreRequestResponse.status, 200);
+      assert.equal(claimRestoreRequestBody.restore_request.id, restoreRequestBody.restore_request.id);
+      assert.equal(claimRestoreRequestBody.restore_request.status, "leased");
+      assert.equal(claimRestoreRequestBody.restore_request.lease_owner, "browser_extension_test");
+      assert.equal(typeof claimRestoreRequestBody.restore_request.lease_expires_at, "string");
+
+      const duplicateClaimRestoreRequestResponse = await fetch(`${routeBaseUrl}/contexts/restore-requests/claim-next`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ lease_owner: "browser_extension_other", lease_ms: 60_000 }),
+      });
+      const duplicateClaimRestoreRequestBody = await duplicateClaimRestoreRequestResponse.json() as {
+        restore_request: unknown;
+      };
+      assert.equal(duplicateClaimRestoreRequestResponse.status, 200);
+      assert.equal(duplicateClaimRestoreRequestBody.restore_request, null);
+
       const doneRestoreRequestResponse = await fetch(
         `${routeBaseUrl}/contexts/restore-requests/${restoreRequestBody.restore_request.id}/done`,
         {

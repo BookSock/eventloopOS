@@ -34,7 +34,7 @@ Done:
 - Runtime messages can get/set config.
 - Restore poller reads URL at poll time, not hardcoded forever.
 - Chrome alarm wakes poller.
-- Poller calls `/contexts/restore-requests/next`.
+- Poller claims work through `/contexts/restore-requests/claim-next`.
 - Poller restores browser tab/scroll.
 - Poller POSTs `/contexts/restore-requests/:id/done`.
 - Playwright E2E loads unpacked MV3 extension in Chromium and proves capture, options save, runtime restore, alarm poll restore, and done ACK.
@@ -74,17 +74,19 @@ Done:
 - `GET /contexts` ranked search.
 - `POST /contexts/restore-plan`.
 - `POST /contexts/restore-requests`.
-- `GET /contexts/restore-requests/next`.
+- `GET /contexts/restore-requests/next` as read-only peek.
+- `POST /contexts/restore-requests/claim-next` leases one pending restore request.
 - `POST /contexts/restore-requests/:id/done`.
 - `GET /contexts/restore-requests/:id`.
 - Idempotency key support for restore request creation.
+- Restore request persistence through same in-memory/Postgres store abstraction as queue storage.
+- Expired restore request leases get reaped and reclaimed.
 - Doctor checks orchestrator health, AeroSpace, Docker, browser Playwright readiness, Codex app-server.
 
 Gap:
 
-- Restore requests still in memory.
-- No claim/lease on restore request poll; one browser extension assumed.
-- Postgres queue exists, but restore request persistence not done.
+- Postgres restore-request live test skips locally when Docker/container runtime is absent.
+- Browser extension has one fixed lease owner; installed multi-profile behavior still needs live proof.
 
 ## Testing Loop
 
@@ -92,7 +94,7 @@ Strong tests now:
 
 - Unit tests for contracts, routing, MCP polling, task sessions, workspace, browser extension, native host, Mac view model.
 - Fixture E2E for agent loops.
-- Live harness scenario for browser store-only + restore request status.
+- Live harness scenario for browser store-only + restore request peek/claim/done status.
 - Real Chromium Playwright extension E2E.
 
 Weak tests:
@@ -104,9 +106,8 @@ Weak tests:
 
 ## Next Best Work
 
-1. Persist context restore requests in Postgres/in-memory store abstraction.
-2. Add restore request claim/lease so duplicate extensions cannot process same pending item.
-3. Add Mac auto-refresh for requested restore status.
-4. Add installed Chrome/native-host live smoke with real extension ID.
-5. Add tiny dev command that boots orchestrator + browser E2E + harness as one command.
-6. Add local voice capture/wake-word adapter behind same `/voice/commands` path.
+1. Add Mac auto-refresh for requested restore status.
+2. Add installed Chrome/native-host live smoke with real extension ID.
+3. Add local Docker/Postgres runner so live Postgres restore-request tests stop skipping.
+4. Add tiny dev command that boots orchestrator + browser E2E + harness as one command.
+5. Add local voice capture/wake-word adapter behind same `/voice/commands` path.

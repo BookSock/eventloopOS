@@ -41,7 +41,10 @@ describe("PostgresQueueStore", () => {
     }
 
     const result = await store.pool.query("SELECT id FROM schema_migrations ORDER BY id");
-    assert.deepEqual(result.rows, [{ id: "0001_core_queue.sql" }]);
+    assert.deepEqual(result.rows, [
+      { id: "0001_core_queue.sql" },
+      { id: "0002_context_restore_requests.sql" },
+    ]);
   });
 
   it("deduplicates events by source and idempotency key", async (t) => {
@@ -140,6 +143,56 @@ describe("PostgresQueueStore", () => {
     assert.equal(await store.leaseNext("worker_after_done", 1_000), undefined);
     assert.equal(await store.markDone("qit_missing", "user_jason"), undefined);
   });
+
+  it("deduplicates, leases, reclaims, and completes context restore requests", async (t) => {
+    if (!store) {
+      t.skip(skipReason);
+      return;
+    }
+
+    const request = makeContextRestoreRequest("ctx_restore_db", "idem_ctx_restore_db");
+    const first = await store.createContextRestoreRequest(request, new Date(createdAt));
+    const second = await store.createContextRestoreRequest(
+      makeContextRestoreRequest("ctx_restore_db_retry", "idem_ctx_restore_db"),
+      new Date(createdAt),
+    );
+
+    assert.equal(first.inserted, true);
+    assert.equal(first.record.status, "pending");
+    assert.equal(second.inserted, false);
+    assert.equal(second.record.id, first.record.id);
+
+    const peeked = await store.peekNextContextRestoreRequest(new Date(createdAt));
+    assert.equal(peeked?.id, first.record.id);
+    assert.equal(peeked?.status, "pending");
+
+    const leased = await store.claimNextContextRestoreRequest("browser_a", 1_000);
+    assert.equal(leased?.id, first.record.id);
+    assert.equal(leased?.status, "leased");
+    assert.equal(leased?.lease_owner, "browser_a");
+    assert.equal(await store.claimNextContextRestoreRequest("browser_b", 1_000), undefined);
+
+    const reapedBeforeExpiry = await store.reapExpiredContextRestoreRequestLeases(new Date("2026-05-06T12:00:00.500Z"));
+    assert.deepEqual(reapedBeforeExpiry.map((record) => record.id), []);
+
+    const reapedAfterExpiry = await store.reapExpiredContextRestoreRequestLeases(new Date("2026-05-06T12:00:01.001Z"));
+    assert.deepEqual(reapedAfterExpiry.map((record) => record.id), [first.record.id]);
+    assert.equal(reapedAfterExpiry[0].status, "pending");
+
+    const leasedAgain = await store.claimNextContextRestoreRequest("browser_b", 1_000);
+    assert.equal(leasedAgain?.id, first.record.id);
+    assert.equal(leasedAgain?.lease_owner, "browser_b");
+
+    const done = await store.markContextRestoreRequestDone(
+      first.record.id,
+      { ok: true, tabId: 7, restoredScroll: true },
+      new Date("2026-05-06T12:00:02.000Z"),
+    );
+    assert.equal(done?.status, "done");
+    assert.equal(done?.lease_owner, undefined);
+    assert.deepEqual(done?.result, { ok: true, tabId: 7, restoredScroll: true });
+    assert.equal(await store.claimNextContextRestoreRequest("browser_c", 1_000), undefined);
+  });
 });
 
 function makeEvent(id: string, idempotencyKey: string): EventRecord {
@@ -201,5 +254,35 @@ function makeQueueItem(id: string, reviewPacketId: string, overrides: Partial<Ne
     priority_score: 100,
     priority_reasons: ["db_test"],
     ...overrides,
+  };
+}
+
+function makeContextRestoreRequest(id: string, idempotencyKey: string) {
+  return {
+    id,
+    idempotency_key: idempotencyKey,
+    resource: {
+      id: `ctx_browser_${id}`,
+      kind: "browser_tab",
+      title: "Launch doc",
+      url: "https://example.test/launch",
+      restore_confidence: "high",
+    },
+    restore_plan: {
+      kind: "browser_extension_message",
+      side_effect: "local",
+      execute_supported: false,
+      target: "eventloopOS browser extension runtime",
+      message: {
+        type: "eventloop.restore",
+        resource: {
+          id: `ctx_browser_${id}`,
+          kind: "browser_tab",
+          title: "Launch doc",
+          url: "https://example.test/launch",
+          restore_confidence: "high",
+        },
+      },
+    },
   };
 }

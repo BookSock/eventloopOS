@@ -17,11 +17,16 @@ test("restore request poller restores pending browser request and acknowledges r
   const calls = [];
   const fetchImpl = async (url, init = {}) => {
     calls.push({ url, init });
-    if (url.endsWith("/contexts/restore-requests/next")) {
+    if (url.endsWith("/contexts/restore-requests/claim-next")) {
+      assert.equal(init.method, "POST");
+      assert.deepEqual(JSON.parse(init.body), {
+        lease_owner: "eventloop-browser-extension",
+        lease_ms: 60000
+      });
       return jsonResponse({
         restore_request: {
           id: "ctx_restore_123",
-          status: "pending",
+          status: "leased",
           restore_plan: {
             kind: "browser_extension_message",
             message: {
@@ -96,11 +101,11 @@ test("restore request poller acknowledges unsupported pending request as failed"
       }
     },
     fetchImpl: async (url, init = {}) => {
-      if (url.endsWith("/contexts/restore-requests/next")) {
+      if (url.endsWith("/contexts/restore-requests/claim-next")) {
         return jsonResponse({
           restore_request: {
             id: "ctx_restore_bad",
-            status: "pending",
+            status: "leased",
             restore_plan: { kind: "browser_extension_message", message: { type: "eventloop.unknown" } }
           }
         });
@@ -143,7 +148,7 @@ test("restore request poller reads orchestrator URL at poll time", async () => {
   });
 
   assert.deepEqual(await poller.pollOnce(), { ok: true, restored: false });
-  assert.deepEqual(requestedUrls, ["http://127.0.0.1:9999/contexts/restore-requests/next"]);
+  assert.deepEqual(requestedUrls, ["http://127.0.0.1:9999/contexts/restore-requests/claim-next"]);
 });
 
 test("ensureRestorePollAlarm creates missing MV3 alarm", async () => {

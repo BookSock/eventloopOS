@@ -1133,10 +1133,22 @@ class BrowserContextStoreOnlyScenario:
             raise ScenarioFailure(f"context restore request response missing restore_request: {restore_request_response!r}")
         log["steps"].append({"name": "context_restore_request", "restore_request_id": restore_request.get("id")})
 
-        polled_restore_request = client.next_context_restore_request()
+        peeked_restore_request = client.next_context_restore_request()
+        if not isinstance(peeked_restore_request, dict) or peeked_restore_request.get("id") != restore_request.get("id"):
+            raise ScenarioFailure(f"context restore peek mismatch: {peeked_restore_request!r}")
+        log["steps"].append({"name": "context_restore_peek", "restore_request_id": restore_request.get("id")})
+
+        polled_restore_request = client.claim_next_context_restore_request()
         if not isinstance(polled_restore_request, dict) or polled_restore_request.get("id") != restore_request.get("id"):
-            raise ScenarioFailure(f"context restore poll mismatch: {polled_restore_request!r}")
-        log["steps"].append({"name": "context_restore_poll", "restore_request_id": restore_request.get("id")})
+            raise ScenarioFailure(f"context restore claim mismatch: {polled_restore_request!r}")
+        if polled_restore_request.get("status") != "leased":
+            raise ScenarioFailure(f"context restore claim did not lease request: {polled_restore_request!r}")
+        log["steps"].append({"name": "context_restore_claim", "restore_request_id": restore_request.get("id")})
+
+        duplicate_claim = client.claim_next_context_restore_request(lease_owner="test_harness_other_browser")
+        if duplicate_claim is not None:
+            raise ScenarioFailure(f"expected no duplicate restore claim while leased, got {duplicate_claim!r}")
+        log["steps"].append({"name": "assert_no_duplicate_context_restore_claim"})
 
         restore_result = self._restore_result_for_resource(matched_context["resource"])
         done_response = client.mark_context_restore_done(restore_request["id"], restore_result)

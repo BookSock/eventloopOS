@@ -7,7 +7,10 @@ describe("Postgres migrations", () => {
     const migrations = await loadMigrations();
     const sql = migrations.map((migration) => migration.sql).join("\n");
 
-    assert.deepEqual(migrations.map((migration) => migration.id), ["0001_core_queue.sql"]);
+    assert.deepEqual(migrations.map((migration) => migration.id), [
+      "0001_core_queue.sql",
+      "0002_context_restore_requests.sql",
+    ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS review_packets/);
@@ -15,6 +18,10 @@ describe("Postgres migrations", () => {
     assert.match(sql, /CHECK \(state IN \('ready', 'leased', 'deferred', 'done', 'dead'\)\)/);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS route_decisions/);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS receipts/);
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS context_restore_requests/);
+    assert.match(sql, /CHECK \(status IN \('pending', 'leased', 'done'\)\)/);
+    assert.match(sql, /context_restore_requests_pending_idx/);
+    assert.match(sql, /context_restore_requests_stale_lease_idx/);
     assert.match(sql, /queue_items_ready_rank_idx/);
     assert.match(sql, /queue_items_stale_lease_idx/);
   });

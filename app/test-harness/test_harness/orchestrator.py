@@ -76,6 +76,21 @@ class OrchestratorClient:
         restore_request = payload.get("restore_request")
         return restore_request if isinstance(restore_request, dict) else None
 
+    def claim_next_context_restore_request(
+        self,
+        lease_owner: str = "test_harness_browser",
+        lease_ms: int = 60000,
+    ) -> dict[str, Any] | None:
+        payload = self._request(
+            "POST",
+            "/contexts/restore-requests/claim-next",
+            {"lease_owner": lease_owner, "lease_ms": lease_ms},
+        )
+        if not isinstance(payload, dict):
+            return None
+        restore_request = payload.get("restore_request")
+        return restore_request if isinstance(restore_request, dict) else None
+
     def mark_context_restore_done(self, restore_request_id: str, result: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", f"/contexts/restore-requests/{restore_request_id}/done", {"result": result}) or {}
 

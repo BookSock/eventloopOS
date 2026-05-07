@@ -4,7 +4,7 @@ import { queueStates, type ApiErrorBody, type QueueState } from "./contracts.js"
 import type { GatewayStore } from "./gateway_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import type { McpSourcePollOutput } from "./integrations/mcp_poll/development_registry.js";
-import type { RouteDecision } from "./store.js";
+import type { ContextRestoreRequestRecord, RouteDecision } from "./store.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
 import { parseRestoreExecuteRequest, parseRestorePlanRequest, type WorkspaceController } from "./workspace/controller.js";
 
@@ -29,21 +29,8 @@ type RequestContext = {
   url: URL;
 };
 
-type ContextRestoreRequestRecord = {
-  id: string;
-  status: "pending" | "done";
-  created_at: string;
-  updated_at: string;
-  idempotency_key?: string;
-  resource: Record<string, unknown>;
-  restore_plan: Record<string, unknown>;
-  result?: unknown;
-};
-
 export function createGatewayServer(options: GatewayServerOptions): Server {
   const now = options.now ?? (() => new Date());
-  const contextRestoreRequests = new Map<string, ContextRestoreRequestRecord>();
-  const contextRestoreRequestIdsByIdempotencyKey = new Map<string, string>();
 
   return createServer(async (request, response) => {
     const context = buildContext(request);
@@ -138,42 +125,41 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           );
         }
 
-        if (context.idempotencyKey) {
-          const existingId = contextRestoreRequestIdsByIdempotencyKey.get(context.idempotencyKey);
-          if (existingId) {
-            const existing = contextRestoreRequests.get(existingId);
-            if (existing) {
-              return sendJson(response, 200, {
-                restore_request: presentContextRestoreRequest(existing),
-                request_id: context.requestId,
-              });
-            }
-          }
-        }
-
-        const createdAt = now().toISOString();
-        const record: ContextRestoreRequestRecord = {
+        const created = await options.store.createContextRestoreRequest({
           id: `ctx_restore_${randomUUID()}`,
-          status: "pending",
-          created_at: createdAt,
-          updated_at: createdAt,
           idempotency_key: context.idempotencyKey,
           resource: validation.resource,
           restore_plan: plan,
-        };
-        contextRestoreRequests.set(record.id, record);
-        if (context.idempotencyKey) {
-          contextRestoreRequestIdsByIdempotencyKey.set(context.idempotencyKey, record.id);
-        }
+        }, now());
 
-        return sendJson(response, 202, {
-          restore_request: presentContextRestoreRequest(record),
+        return sendJson(response, created.inserted ? 202 : 200, {
+          restore_request: presentContextRestoreRequest(created.record),
           request_id: context.requestId,
         });
       }
 
       if (request.method === "GET" && context.url.pathname === "/contexts/restore-requests/next") {
-        const nextRequest = Array.from(contextRestoreRequests.values()).find((record) => record.status === "pending");
+        const nextRequest = await options.store.peekNextContextRestoreRequest(now());
+        return sendJson(response, 200, {
+          restore_request: nextRequest ? presentContextRestoreRequest(nextRequest) : null,
+          request_id: context.requestId,
+        });
+      }
+
+      if (request.method === "POST" && context.url.pathname === "/contexts/restore-requests/claim-next") {
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) {
+          return sendSchemaError(response, context, parsed.message);
+        }
+        const claimRequest = parseContextRestoreClaimRequest(parsed.value);
+        if (!claimRequest.ok) {
+          return sendSchemaError(response, context, claimRequest.message);
+        }
+        const nextRequest = await options.store.claimNextContextRestoreRequest(
+          claimRequest.leaseOwner,
+          now(),
+          claimRequest.leaseMs,
+        );
         return sendJson(response, 200, {
           restore_request: nextRequest ? presentContextRestoreRequest(nextRequest) : null,
           request_id: context.requestId,
@@ -183,7 +169,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
       const restoreGetMatch = context.url.pathname.match(/^\/contexts\/restore-requests\/([^/]+)$/);
       if (request.method === "GET" && restoreGetMatch) {
         const restoreRequestId = decodeURIComponent(restoreGetMatch[1]);
-        const record = contextRestoreRequests.get(restoreRequestId);
+        const record = await options.store.getContextRestoreRequest(restoreRequestId);
         if (!record) {
           return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
         }
@@ -197,17 +183,18 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
       const restoreDoneMatch = context.url.pathname.match(/^\/contexts\/restore-requests\/([^/]+)\/done$/);
       if (request.method === "POST" && restoreDoneMatch) {
         const restoreRequestId = decodeURIComponent(restoreDoneMatch[1]);
-        const record = contextRestoreRequests.get(restoreRequestId);
-        if (!record) {
-          return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
-        }
         const parsed = await readJsonBody(request);
         if (!parsed.ok) {
           return sendSchemaError(response, context, parsed.message);
         }
-        record.status = "done";
-        record.updated_at = now().toISOString();
-        record.result = isRecord(parsed.value) && "result" in parsed.value ? parsed.value.result : parsed.value;
+        const record = await options.store.markContextRestoreRequestDone(
+          restoreRequestId,
+          isRecord(parsed.value) && "result" in parsed.value ? parsed.value.result : parsed.value,
+          now(),
+        );
+        if (!record) {
+          return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
+        }
 
         return sendJson(response, 200, {
           restore_request: presentContextRestoreRequest(record),
@@ -869,6 +856,26 @@ function validateContextRestorePlanRequest(
   return { ok: true, resource };
 }
 
+function parseContextRestoreClaimRequest(
+  input: unknown,
+): { ok: true; leaseOwner: string; leaseMs: number } | { ok: false; message: string } {
+  if (!isRecord(input)) {
+    return { ok: false, message: "context restore claim request must be an object" };
+  }
+  const leaseOwner = typeof input.lease_owner === "string" ? input.lease_owner.trim() : "";
+  if (!leaseOwner) {
+    return { ok: false, message: "lease_owner is required" };
+  }
+  const leaseMs = typeof input.lease_ms === "number" && Number.isInteger(input.lease_ms)
+    ? input.lease_ms
+    : 60_000;
+  if (leaseMs <= 0 || leaseMs > 30 * 60_000) {
+    return { ok: false, message: "lease_ms must be between 1 and 1800000" };
+  }
+
+  return { ok: true, leaseOwner, leaseMs };
+}
+
 function buildContextRestorePlan(resource: Record<string, unknown>): Record<string, unknown> | undefined {
   const url = typeof resource.url === "string" && resource.url ? resource.url : undefined;
   if (resource.kind === "browser_tab" && url) {
@@ -918,6 +925,8 @@ function presentContextRestoreRequest(record: ContextRestoreRequestRecord): Reco
     resource: record.resource,
     restore_plan: record.restore_plan,
     result: record.result,
+    lease_owner: record.lease_owner,
+    lease_expires_at: record.lease_expires_at,
   };
 }
 

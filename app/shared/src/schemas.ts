@@ -246,13 +246,15 @@ export type ContextRestorePlan = z.infer<typeof ContextRestorePlanSchema>;
 export const ContextRestoreRequestSchema = z
   .object({
     id,
-    status: z.enum(["pending", "done"]),
+    status: z.enum(["pending", "leased", "done"]),
     created_at: isoDateTime.optional(),
     updated_at: isoDateTime.optional(),
     idempotency_key: z.string().optional(),
     resource: ContextResourceSchema,
     restore_plan: ContextRestorePlanSchema,
-    result: unknownRecord.optional()
+    result: unknownRecord.optional(),
+    lease_owner: z.string().optional(),
+    lease_expires_at: isoDateTime.optional()
   })
   .strict();
 export type ContextRestoreRequest = z.infer<typeof ContextRestoreRequestSchema>;

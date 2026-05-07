@@ -21,6 +21,7 @@ import {
   taskIdForHint,
   type ContextEntry,
   type ContextQuery,
+  type ContextRestoreRequestRecord,
   type RouteDecision,
   type StoredEventResult,
 } from "../store.js";
@@ -299,6 +300,183 @@ export class PostgresQueueStore {
     }
 
     return rankContextEntries(entries, query).slice(0, limit);
+  }
+
+  async createContextRestoreRequest(
+    request: Omit<ContextRestoreRequestRecord, "status" | "created_at" | "updated_at">,
+    now: Date,
+  ): Promise<{ record: ContextRestoreRequestRecord; inserted: boolean }> {
+    const result = await this.pool.query(
+      `
+        INSERT INTO context_restore_requests (
+          id,
+          status,
+          idempotency_key,
+          resource,
+          restore_plan,
+          result,
+          lease_owner,
+          lease_expires_at,
+          created_at,
+          updated_at
+        )
+        VALUES ($1, 'pending', $2, $3::jsonb, $4::jsonb, $5::jsonb, $6, $7::timestamptz, $8::timestamptz, $8::timestamptz)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        RETURNING *
+      `,
+      [
+        request.id,
+        request.idempotency_key ?? null,
+        JSON.stringify(request.resource),
+        JSON.stringify(request.restore_plan),
+        jsonOrNull(request.result),
+        request.lease_owner ?? null,
+        request.lease_expires_at ?? null,
+        now.toISOString(),
+      ],
+    );
+
+    if (result.rows[0]) {
+      return { record: rowToContextRestoreRequestRecord(result.rows[0]), inserted: true };
+    }
+
+    if (!request.idempotency_key) {
+      const existing = await this.getContextRestoreRequest(request.id);
+      if (existing) {
+        return { record: existing, inserted: false };
+      }
+      throw new Error(`context restore request ${request.id} was not found after conflict`);
+    }
+
+    const existingByIdempotency = await this.pool.query(
+      "SELECT * FROM context_restore_requests WHERE idempotency_key = $1",
+      [request.idempotency_key],
+    );
+    if (!existingByIdempotency.rows[0]) {
+      throw new Error(`context restore request ${request.idempotency_key} was not found after conflict`);
+    }
+
+    return { record: rowToContextRestoreRequestRecord(existingByIdempotency.rows[0]), inserted: false };
+  }
+
+  async peekNextContextRestoreRequest(now = this.clock()): Promise<ContextRestoreRequestRecord | undefined> {
+    await this.reapExpiredContextRestoreRequestLeases(now);
+    const result = await this.pool.query(
+      `
+        SELECT *
+        FROM context_restore_requests
+        WHERE status = 'pending'
+        ORDER BY created_at ASC, id ASC
+        LIMIT 1
+      `,
+    );
+
+    return result.rows[0] ? rowToContextRestoreRequestRecord(result.rows[0]) : undefined;
+  }
+
+  async claimNextContextRestoreRequest(
+    leaseOwner: string,
+    leaseMs = this.defaultLeaseMs,
+  ): Promise<ContextRestoreRequestRecord | undefined> {
+    const client = await this.pool.connect();
+    const now = this.clock();
+    const leaseExpiresAt = new Date(now.getTime() + leaseMs);
+
+    try {
+      await client.query("BEGIN");
+      await this.reapExpiredContextRestoreRequestLeasesWithClient(client, now);
+      const result = await client.query(
+        `
+          WITH next_request AS (
+            SELECT id
+            FROM context_restore_requests
+            WHERE status = 'pending'
+            ORDER BY created_at ASC, id ASC
+            LIMIT 1
+            FOR UPDATE SKIP LOCKED
+          )
+          UPDATE context_restore_requests r
+          SET status = 'leased',
+              lease_owner = $2,
+              lease_expires_at = $3::timestamptz,
+              updated_at = $1::timestamptz
+          FROM next_request
+          WHERE r.id = next_request.id
+          RETURNING r.*
+        `,
+        [now.toISOString(), leaseOwner, leaseExpiresAt.toISOString()],
+      );
+      await client.query("COMMIT");
+      return result.rows[0] ? rowToContextRestoreRequestRecord(result.rows[0]) : undefined;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getContextRestoreRequest(id: string): Promise<ContextRestoreRequestRecord | undefined> {
+    const result = await this.pool.query("SELECT * FROM context_restore_requests WHERE id = $1", [id]);
+    return result.rows[0] ? rowToContextRestoreRequestRecord(result.rows[0]) : undefined;
+  }
+
+  async markContextRestoreRequestDone(
+    id: string,
+    resultValue: unknown,
+    now: Date,
+  ): Promise<ContextRestoreRequestRecord | undefined> {
+    const result = await this.pool.query(
+      `
+        UPDATE context_restore_requests
+        SET status = 'done',
+            result = $2::jsonb,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            updated_at = $3::timestamptz
+        WHERE id = $1
+        RETURNING *
+      `,
+      [id, JSON.stringify(resultValue), now.toISOString()],
+    );
+
+    return result.rows[0] ? rowToContextRestoreRequestRecord(result.rows[0]) : undefined;
+  }
+
+  async reapExpiredContextRestoreRequestLeases(now = this.clock()): Promise<ContextRestoreRequestRecord[]> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const rows = await this.reapExpiredContextRestoreRequestLeasesWithClient(client, now);
+      await client.query("COMMIT");
+      return rows;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  private async reapExpiredContextRestoreRequestLeasesWithClient(
+    client: PoolClient,
+    now: Date,
+  ): Promise<ContextRestoreRequestRecord[]> {
+    const result = await client.query(
+      `
+        UPDATE context_restore_requests
+        SET status = 'pending',
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            updated_at = $1::timestamptz
+        WHERE status = 'leased'
+          AND lease_expires_at <= $1::timestamptz
+        RETURNING *
+      `,
+      [now.toISOString()],
+    );
+
+    return result.rows.map(rowToContextRestoreRequestRecord);
   }
 
   async leaseNext(owner: string, leaseMs = this.defaultLeaseMs): Promise<QueueItemWithPacket | undefined> {
@@ -735,6 +913,21 @@ function rowToRouteDecision(row: QueryResultRow): RouteDecision {
     confidence: row.confidence,
     evidence: row.evidence,
     created_at: requiredDateToIso(row.created_at),
+  };
+}
+
+function rowToContextRestoreRequestRecord(row: QueryResultRow): ContextRestoreRequestRecord {
+  return {
+    id: row.id,
+    status: row.status,
+    created_at: requiredDateToIso(row.created_at),
+    updated_at: requiredDateToIso(row.updated_at),
+    idempotency_key: row.idempotency_key ?? undefined,
+    resource: row.resource,
+    restore_plan: row.restore_plan,
+    result: row.result ?? undefined,
+    lease_owner: row.lease_owner ?? undefined,
+    lease_expires_at: dateToIso(row.lease_expires_at),
   };
 }
 

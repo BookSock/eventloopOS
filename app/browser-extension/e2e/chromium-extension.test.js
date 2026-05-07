@@ -167,7 +167,11 @@ async function startFixtureServer() {
       return;
     }
 
-    if (request.method === "GET" && request.url === "/contexts/restore-requests/next") {
+    if (request.method === "POST" && request.url === "/contexts/restore-requests/claim-next") {
+      const claimBody = JSON.parse(await readRequestBody(request));
+      assert.equal(claimBody.lease_owner, "eventloop-browser-extension");
+      pendingRestoreRequest.status = "leased";
+      pendingRestoreRequest.lease_owner = claimBody.lease_owner;
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ restore_request: restoreDoneBody ? null : pendingRestoreRequest }));
       return;

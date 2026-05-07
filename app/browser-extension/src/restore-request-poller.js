@@ -1,6 +1,7 @@
 import { DEFAULT_ORCHESTRATOR_URL } from "./extension-config.js";
 
 export const RESTORE_REQUEST_ALARM = "eventloop.restoreRequests.poll";
+export const RESTORE_REQUEST_LEASE_OWNER = "eventloop-browser-extension";
 
 export function createRestoreRequestPoller({
   controller,
@@ -18,7 +19,16 @@ export function createRestoreRequestPoller({
   async function pollOnce() {
     const nextOrchestratorUrl = getOrchestratorUrl ? await getOrchestratorUrl() : orchestratorUrl;
     const baseUrl = nextOrchestratorUrl.replace(/\/+$/, "");
-    const next = await fetchJson(fetchImpl, `${baseUrl}/contexts/restore-requests/next`);
+    const next = await fetchJson(fetchImpl, `${baseUrl}/contexts/restore-requests/claim-next`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        lease_owner: RESTORE_REQUEST_LEASE_OWNER,
+        lease_ms: 60_000
+      })
+    });
     const restoreRequest = next.restore_request;
     if (!restoreRequest) {
       return { ok: true, restored: false };

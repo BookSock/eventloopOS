@@ -4,18 +4,24 @@ import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import {
   getReviewPacket,
   getStoredEvent,
+  getContextRestoreRequest,
   ingestEventAsReviewPacket,
+  claimNextContextRestoreRequest,
+  createContextRestoreRequest,
   leaseNextQueueItem,
   listContextEntries,
   listQueue,
+  markContextRestoreRequestDone,
   markQueueItemDone,
   nextQueueItem,
+  peekNextContextRestoreRequest,
   recordEventRoute,
   reapExpiredLeases,
   renewQueueLease,
   type InMemoryStore,
   type ContextEntry,
   type ContextQuery,
+  type ContextRestoreRequestRecord,
   type RouteDecision,
   type StoredEventResult,
 } from "./store.js";
@@ -30,6 +36,18 @@ export type GatewayStore = {
   getReviewPacket(id: string): Promise<ReviewPacket | undefined>;
   getEvent(eventId: string): Promise<StoredEventResult | undefined>;
   listContextEntries(query?: ContextQuery): Promise<ContextEntry[]>;
+  createContextRestoreRequest(
+    request: Omit<ContextRestoreRequestRecord, "status" | "created_at" | "updated_at">,
+    now: Date,
+  ): Promise<{ record: ContextRestoreRequestRecord; inserted: boolean }>;
+  claimNextContextRestoreRequest(
+    leaseOwner: string,
+    now: Date,
+    leaseMs: number,
+  ): Promise<ContextRestoreRequestRecord | undefined>;
+  peekNextContextRestoreRequest(now: Date): Promise<ContextRestoreRequestRecord | undefined>;
+  getContextRestoreRequest(id: string): Promise<ContextRestoreRequestRecord | undefined>;
+  markContextRestoreRequestDone(id: string, result: unknown, now: Date): Promise<ContextRestoreRequestRecord | undefined>;
   ingestEventAsReviewPacket(event: McpEvent, now: Date): Promise<StoredEventResult>;
   recordEventRoute(event: McpEvent, routeDecision: RouteDecision, now: Date): Promise<StoredEventResult>;
 };
@@ -60,6 +78,21 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     },
     async listContextEntries(query) {
       return listContextEntries(store, query);
+    },
+    async createContextRestoreRequest(request, now) {
+      return createContextRestoreRequest(store, request, now);
+    },
+    async claimNextContextRestoreRequest(leaseOwner, now, leaseMs) {
+      return claimNextContextRestoreRequest(store, leaseOwner, now, leaseMs);
+    },
+    async peekNextContextRestoreRequest(now) {
+      return peekNextContextRestoreRequest(store, now);
+    },
+    async getContextRestoreRequest(id) {
+      return getContextRestoreRequest(store, id);
+    },
+    async markContextRestoreRequestDone(id, result, now) {
+      return markContextRestoreRequestDone(store, id, result, now);
     },
     async ingestEventAsReviewPacket(event, now) {
       return ingestEventAsReviewPacket(store, event, now);
@@ -97,6 +130,21 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async listContextEntries(query) {
       return store.listContextEntries(query);
+    },
+    async createContextRestoreRequest(request, now) {
+      return store.createContextRestoreRequest(request, now);
+    },
+    async claimNextContextRestoreRequest(leaseOwner, _now, leaseMs) {
+      return store.claimNextContextRestoreRequest(leaseOwner, leaseMs);
+    },
+    async peekNextContextRestoreRequest(now) {
+      return store.peekNextContextRestoreRequest(now);
+    },
+    async getContextRestoreRequest(id) {
+      return store.getContextRestoreRequest(id);
+    },
+    async markContextRestoreRequestDone(id, result, now) {
+      return store.markContextRestoreRequestDone(id, result, now);
     },
     async ingestEventAsReviewPacket(event) {
       const result = await store.recordEventAsReviewPacket(event);
