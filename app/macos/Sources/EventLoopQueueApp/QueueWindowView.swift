@@ -101,6 +101,10 @@ struct QueueWindowView: View {
                 Task {
                     await viewModel.executeRecommendedActionAndNext()
                 }
+            } moveToNext: {
+                Task {
+                    await viewModel.moveToNext()
+                }
             } refreshQueue: {
                 Task {
                     await viewModel.refreshQueue()
@@ -214,6 +218,7 @@ private struct PacketDetail: View {
     let canExecuteRecommendedAction: Bool
     let doneAndNext: () -> Void
     let executeRecommendedAction: () -> Void
+    let moveToNext: () -> Void
     let refreshQueue: () -> Void
     let restoreContextResource: (ReviewContextResource) -> Void
     let loadTaskSessions: () -> Void
@@ -328,6 +333,14 @@ private struct PacketDetail: View {
                         .disabled(!canExecuteRecommendedAction)
                         .accessibilityIdentifier("queue-execute-recommended-action-button")
                     }
+                    Button {
+                        moveToNext()
+                    } label: {
+                        Label("Skip / Next", systemImage: "arrow.right.circle")
+                    }
+                    .controlSize(.large)
+                    .accessibilityIdentifier("queue-skip-next-button")
+
                     Button {
                         doneAndNext()
                     } label: {

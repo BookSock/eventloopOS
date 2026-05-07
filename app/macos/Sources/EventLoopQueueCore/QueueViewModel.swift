@@ -504,7 +504,9 @@ public final class QueueViewModel: ObservableObject {
 
     public func moveToNext() async {
         do {
-            selectedPacketID = try await client.next(after: selectedPacketID)?.id
+            if let nextPacket = try await client.next(after: selectedPacketID) {
+                selectedPacketID = nextPacket.id
+            }
         } catch {
             state = .failed(error.localizedDescription)
         }

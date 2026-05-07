@@ -51,6 +51,15 @@ struct EventLoopQueueApp: App {
                 .keyboardShortcut(.return, modifiers: [.command])
                 .accessibilityIdentifier("queue-command-done-next")
 
+                Button("Skip / Next Item") {
+                    Task {
+                        await viewModel.moveToNext()
+                    }
+                }
+                .keyboardShortcut(.return, modifiers: [.command, .option])
+                .disabled(!viewModel.hasPackets)
+                .accessibilityIdentifier("queue-command-skip-next")
+
                 Button(viewModel.isManualMode ? "Return to Event Loop" : "Enter Manual Mode") {
                     Task {
                         await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
@@ -145,6 +154,15 @@ private struct QueueMenuView: View {
             }
             .keyboardShortcut(.return, modifiers: [.command])
             .accessibilityIdentifier("queue-menu-done-next")
+
+            Button("Skip / Next Item") {
+                Task {
+                    await viewModel.moveToNext()
+                }
+            }
+            .keyboardShortcut(.return, modifiers: [.command, .option])
+            .disabled(!viewModel.hasPackets)
+            .accessibilityIdentifier("queue-menu-skip-next")
 
             Button(viewModel.isManualMode ? "Return to Event Loop" : "Enter Manual Mode") {
                 Task {

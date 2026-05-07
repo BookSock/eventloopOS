@@ -58,7 +58,7 @@ Done:
 - Done/next.
 - Auto lease renewal.
 - Manual mode hotkey (`Cmd-Option-Shift-M`).
-- Menu bar shell with queue count, selected item, mode, restore state, open queue, refresh, done/next, and mode toggle.
+- Menu bar shell with queue count, selected item, mode, restore state, open queue, refresh, done/next, skip/next, and mode toggle.
 - Full window empty/loading/error placeholders with retry affordance and unit-covered presentation copy.
 - Render smoke test for real SwiftUI `QueueWindowView` using seeded queue data and nonblank image pixel check.
 - Launch smoke test builds `EventLoopQueueApp`, packages a temporary `.app` bundle, starts it in test mode through Launch Services, verifies it stays alive, then terminates it.
@@ -119,7 +119,7 @@ Strong tests now:
 - `queue_bind_then_recommended_action` proves the end-to-end dogfood path where agent handoff blocks before task-session binding, succeeds after binding, sends a task followup, and drains the queue.
 - Orchestrator API regression tests prove duplicate/retried events return the stored route before task-session side effects; a duplicate event that already queued human review cannot later inject into an agent thread after a task session appears.
 - Opt-in invasive AeroSpace smoke passed locally with `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 EVENTLOOPOS_ENABLE_LIVE_AEROSPACE_EXECUTE=1 pnpm run live:aerospace`; it moved window `282477` from workspace `1` to `eventloop-smoke` and restored it to `1`.
-- Opt-in macOS UI automation smoke passed locally with `EVENTLOOPOS_ENABLE_MACOS_UI_SMOKE=1 pnpm run test:e2e:macos-ui`; it opens the menu bar extra, opens the queue window, toggles Manual Mode, verifies the manual workspace capture banner/menu summary, executes `Restore Manual Workspace`, verifies the restore receipt appears in the menu, and toggles back to Event Loop.
+- Opt-in macOS UI automation smoke passed locally with `EVENTLOOPOS_ENABLE_MACOS_UI_SMOKE=1 pnpm run test:e2e:macos-ui`; it opens the menu bar extra, opens the queue window, executes `Skip / Next Item` and verifies selection changed, toggles Manual Mode, verifies the manual workspace capture banner/menu summary, executes `Restore Manual Workspace`, verifies the restore receipt appears in the menu, and toggles back to Event Loop.
 - `voice:listen` accepts line-delimited local STT transcript streams, optional wake phrase filtering, and forwards into `/voice/commands`.
 - `voice:listen-command` lets whisper.cpp stream, MLX Whisper wrappers, or other local STT tools feed the same router while staying unit-testable through an injected process. The whisper.cpp stream preset is unit-covered and doctor-checked.
 - Opt-in fixture-audio STT smoke passed locally with `EVENTLOOPOS_ENABLE_VOICE_STT_SMOKE=1 EVENTLOOPOS_WHISPER_MODEL=external-resources/models/whisper/ggml-tiny.en.bin pnpm run voice:stt-smoke`; transcript was `computer blog post priority changed.`
