@@ -1,0 +1,146 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+
+const host = process.env.ORCHESTRATOR_HOST ?? "127.0.0.1";
+const port = process.env.EVENTLOOPOS_AGENT_RUN_CLI_SMOKE_PORT ?? "4390";
+const baseUrl = `http://${host}:${port}`;
+const runId = "run_cli_smoke";
+const queueItemId = "qit_run_cli_smoke_agent_waiting";
+
+let server;
+
+try {
+  await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "build"]);
+  server = spawn("pnpm", ["--filter", "@eventloopos/orchestrator", "start"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      ORCHESTRATOR_HOST: host,
+      ORCHESTRATOR_PORT: port,
+      ORCHESTRATOR_TASK_SESSIONS: "off",
+      ORCHESTRATOR_MCP_SOURCES: "off",
+      ORCHESTRATOR_WORKSPACE: "off",
+    },
+    stdio: "inherit",
+  });
+  await waitForHealth(server);
+
+  await spawnChecked("pnpm", [
+    "run",
+    "agent:run",
+    "--",
+    "--id",
+    runId,
+    "--provider",
+    "fake",
+    "--task",
+    "blog feedback",
+    "--thread",
+    "thread_cli_smoke",
+    "--status",
+    "waiting_approval",
+    "--summary",
+    "CLI smoke needs human approval.",
+    "--risk-tag",
+    "external_send",
+    "--evidence-title",
+    "CLI smoke evidence",
+    "--evidence-url",
+    "https://docs.example.test/cli-smoke",
+  ], {
+    ...process.env,
+    EVENTLOOPOS_ORCHESTRATOR_URL: baseUrl,
+  });
+
+  await spawnChecked("pnpm", ["run", "agent:run:get", "--", "--id", runId], {
+    ...process.env,
+    EVENTLOOPOS_ORCHESTRATOR_URL: baseUrl,
+  });
+
+  const [agentRun, queue] = await Promise.all([
+    fetchJson(`/agent-runs/${runId}`),
+    fetchJson("/queue"),
+  ]);
+  const item = queue.items?.find((candidate) => candidate.id === queueItemId);
+  if (agentRun.agent_run?.status !== "waiting_approval") {
+    throw new Error(`expected waiting agent run, got ${JSON.stringify(agentRun.agent_run)}`);
+  }
+  if (!item) {
+    throw new Error(`expected queue item ${queueItemId}, got ${JSON.stringify(queue)}`);
+  }
+  if (item.review_packet?.agent_run_id !== runId || item.review_packet?.risk_level !== "high") {
+    throw new Error(`unexpected queue item packet: ${JSON.stringify(item.review_packet)}`);
+  }
+
+  console.log(JSON.stringify({
+    ok: true,
+    base_url: baseUrl,
+    agent_run_id: runId,
+    queue_item_id: item.id,
+    risk_level: item.review_packet.risk_level,
+  }, null, 2));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  if (server && server.exitCode === null) {
+    server.kill("SIGTERM");
+    await waitForExit(server);
+  }
+}
+
+async function fetchJson(path) {
+  const response = await fetch(new URL(path, baseUrl));
+  const body = await response.json();
+  if (!response.ok) {
+    throw new Error(`${path} failed: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+async function waitForHealth(child) {
+  const deadline = Date.now() + 15_000;
+  let exited = false;
+  child.once("exit", () => {
+    exited = true;
+  });
+  while (Date.now() < deadline) {
+    if (exited) throw new Error("orchestrator exited before health check passed");
+    try {
+      const response = await fetch(new URL("/health", baseUrl));
+      if (response.ok) return;
+    } catch {
+      // keep waiting
+    }
+    await sleep(100);
+  }
+  throw new Error(`timed out waiting for orchestrator health at ${baseUrl}`);
+}
+
+async function spawnChecked(file, args, env = process.env) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      cwd: process.cwd(),
+      env,
+      stdio: "inherit",
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}`));
+    });
+  });
+}
+
+async function waitForExit(child) {
+  return await new Promise((resolve) => {
+    child.once("exit", resolve);
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
