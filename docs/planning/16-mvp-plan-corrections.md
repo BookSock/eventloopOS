@@ -191,6 +191,7 @@ Real gaps:
 - Operational metrics need useful gauges: queue depth by state, stale leases, restore pending/failed, followup status counts, runtime failure counts.
 - Agent proof handoff now has `pnpm proof:agent`: manifest, per-command logs, git metadata, redacted env summary, and CI smoke coverage.
 - Dogfood thresholds now have `pnpm dogfood:check`: ignored queue rate, restore success rate, task followup failures, stale leases, and pending restore age.
+- Mac queue UI now makes current paper more dominant by narrowing the stack column and enlarging the selected packet header.
 - GatewayStore remains broad. Conformance tests reduce risk; split into smaller store ports later, after dogfood-critical safety/history patches.
 
 Latest user steering:
@@ -215,7 +216,7 @@ Release guardrails:
 ## Next Best Work
 
 1. Real Claude+Codex composite dogfood against harmless configured sessions.
-2. Make Mac queue focus mode more one-paper-at-a-time: current packet dominates, queue list stays secondary.
-3. Wire dogfood threshold checks into a real local Postgres + MCP source dogfood session.
+2. Wire dogfood threshold checks into a real local Postgres + MCP source dogfood session.
+3. Add deeper Mac one-paper UI proof with screenshot artifacts and long-content layout assertions.
 4. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
 5. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.

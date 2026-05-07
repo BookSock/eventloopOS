@@ -41,6 +41,7 @@ struct QueueWindowView: View {
                 }
             }
             .navigationTitle("Queue")
+            .navigationSplitViewColumnWidth(min: 180, ideal: 220, max: 260)
             .toolbar {
                 ToolbarItemGroup {
                     Button {
@@ -84,6 +85,7 @@ struct QueueWindowView: View {
         } detail: {
             PacketDetail(
                 packet: viewModel.selectedPacket,
+                queueCount: viewModel.packets.count,
                 placeholderSummary: QueueWindowDetailSummary(
                     selectedPacket: viewModel.selectedPacket,
                     packets: viewModel.packets,
@@ -220,6 +222,7 @@ private struct QueueRow: View {
 
 private struct PacketDetail: View {
     let packet: ReviewPacket?
+    let queueCount: Int
     let placeholderSummary: QueueWindowDetailSummary
     let taskSessions: [TaskSession]
     let selectedTaskSessions: [TaskSession]
@@ -240,11 +243,25 @@ private struct PacketDetail: View {
         VStack(alignment: .leading, spacing: 18) {
             if let packet {
                 VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 12) {
+                        Label("\(queueCount) in stack", systemImage: "tray.full")
+                            .font(.callout.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("packet-stack-count")
+                        Text(packet.source)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .accessibilityIdentifier("packet-source-inline")
+                        Spacer()
+                    }
                     Text(packet.title)
-                        .font(.title2.weight(.semibold))
+                        .font(.largeTitle.weight(.semibold))
+                        .lineLimit(3)
                         .accessibilityIdentifier("packet-title")
                     Text(packet.summary)
-                        .font(.body)
+                        .font(.title3)
+                        .foregroundStyle(.primary)
                         .accessibilityIdentifier("packet-summary")
                     HStack(spacing: 8) {
                         PacketPill(label: "P\(packet.priority)", accessibilityID: "packet-priority")

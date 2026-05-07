@@ -78,6 +78,7 @@ Done:
 - Context restore requests support failed status and retry back to pending. Browser extension marks unsupported/failed restores through `/failed`; `/retry` requeues for another claim.
 - Live Mac client + Chromium extension restore smoke exists: Mac `HTTPQueueClient` creates a real orchestrator restore request, Chromium extension claims it, restores the tab/scroll, and Mac-readable restore request status becomes `done`.
 - Queue window, menu bar, and command menu expose `Defer 1 Hour` and `Ignore Item` actions. Defer calls `POST /queue/:id/defer` with a future `due_at`, ignore calls `POST /queue/:id/ignore`, and both advance to the next leased item after the action succeeds.
+- Queue detail now pushes the one-paper model harder: sidebar/stack column is constrained narrower, selected packet title is larger, and the detail header shows stack count/source above the current paper.
 
 Gap:
 
@@ -188,7 +189,7 @@ Weak tests:
 ## Next Best Work
 
 1. Real Claude+Codex composite dogfood with harmless sessions configured together.
-2. Make the Mac queue UI more one-paper-at-a-time: current packet dominates; queue list is secondary navigation.
-3. Wire `dogfood:check` into a real local Postgres + MCP dogfood run once those sources are active.
-4. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+2. Wire `dogfood:check` into a real local Postgres + MCP dogfood run once those sources are active.
+3. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+4. Add deeper one-paper UI proof with screenshot artifacts and long-content layout assertions.
 5. Later: real microphone/wake-word proof and always-listening voice UX.
