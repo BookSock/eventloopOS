@@ -13,7 +13,7 @@ import type { McpSourcePollOutput } from "./integrations/mcp_poll/development_re
 import { createInMemoryObservability, type Observability } from "./observability.js";
 import { injectEventIntoTaskSessionIfPossible } from "./routing/task_session_injection.js";
 import type { ContextRestoreRequestRecord, RouteDecision } from "./store.js";
-import type { TaskSessionController } from "./task_sessions/types.js";
+import type { TaskSessionController, TaskFollowupInput } from "./task_sessions/types.js";
 import { parseRestoreExecuteRequest, parseRestorePlanRequest, type WorkspaceController } from "./workspace/controller.js";
 
 export type GatewayServerOptions = {
@@ -653,11 +653,14 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         }
 
         const taskSessionId = decodeURIComponent(taskFollowupMatch[1] ?? "");
-        const message = await options.taskSessions.sendFollowupMessage({
+        const message = await sendTaskFollowupWithActivity(serverOptions, {
           task_session_id: taskSessionId,
           text: validation.text,
           event_ids: validation.eventIds,
           idempotency_key: validation.idempotencyKey,
+        }, {
+          origin: "task_session_api",
+          occurredAt: now().toISOString(),
         });
 
         return sendJson(response, 202, {
@@ -1212,7 +1215,18 @@ async function routeEventThroughGateway(
     };
   }
 
-  const injected = await injectEventIntoTaskSessionIfPossible(event, options.taskSessions, options.store, now);
+  const injected = await injectEventIntoTaskSessionIfPossible(
+    event,
+    options.taskSessions,
+    options.store,
+    now,
+    (input) => sendTaskFollowupWithActivity(options, input, {
+      origin: "event_route",
+      occurredAt: now.toISOString(),
+      eventId: event.id,
+      sourceId: event.source_id,
+    }),
+  );
   if (injected) {
     const result = await options.store.recordEventRoute(event, injected.routeDecision, now);
     await recordRoutedEventActivity(options, event, result.route_decision, {
@@ -1250,7 +1264,6 @@ async function recordRoutedEventActivity(
   await observability.incrementCounter("events_ingested_total");
   if (routeDecision.action === "inject_into_agent_thread") {
     await observability.incrementCounter("events_routed_to_task_session_total");
-    await observability.incrementCounter("task_followups_sent_total");
   }
   if (input.queueItemId) {
     await observability.incrementCounter("queue_items_created_total");
@@ -1274,6 +1287,89 @@ async function recordRoutedEventActivity(
       task_message: input.taskMessage,
     },
   });
+}
+
+async function sendTaskFollowupWithActivity(
+  options: GatewayServerOptions,
+  input: TaskFollowupInput,
+  meta: {
+    origin: string;
+    occurredAt: string;
+    taskId?: string;
+    queueItemId?: string;
+    eventId?: string;
+    sourceId?: string;
+  },
+): Promise<unknown> {
+  if (!options.taskSessions) {
+    throw new Error("task session controller is not configured");
+  }
+
+  const observability = options.observability;
+  const details = {
+    origin: meta.origin,
+    idempotency_key: input.idempotency_key,
+    text_length: input.text.length,
+    event_count: input.event_ids.length,
+  };
+
+  await observability?.incrementCounter("task_followups_attempted_total");
+  await observability?.recordActivity({
+    type: "task_followup_attempted",
+    occurred_at: meta.occurredAt,
+    actor: "system",
+    task_id: meta.taskId,
+    queue_item_id: meta.queueItemId,
+    event_id: meta.eventId ?? input.event_ids[0],
+    task_session_id: input.task_session_id,
+    source_id: meta.sourceId,
+    status: "ok",
+    summary: `Task followup attempted: ${input.task_session_id}`,
+    details,
+  });
+
+  try {
+    const message = await options.taskSessions.sendFollowupMessage(input);
+    const blocked = isRecord(message) && message.status === "blocked";
+    await observability?.incrementCounter(blocked ? "task_followups_blocked_total" : "task_followups_sent_total");
+    await observability?.recordActivity({
+      type: blocked ? "task_followup_blocked" : "task_followup_sent",
+      occurred_at: meta.occurredAt,
+      actor: "system",
+      task_id: meta.taskId,
+      queue_item_id: meta.queueItemId,
+      event_id: meta.eventId ?? input.event_ids[0],
+      task_session_id: input.task_session_id,
+      source_id: meta.sourceId,
+      status: blocked ? "blocked" : "ok",
+      summary: `${blocked ? "Task followup blocked" : "Task followup sent"}: ${input.task_session_id}`,
+      details: {
+        ...details,
+        message,
+      },
+    });
+    return message;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await observability?.incrementCounter("task_followups_failed_total");
+    await observability?.recordActivity({
+      type: "task_followup_failed",
+      occurred_at: meta.occurredAt,
+      actor: "system",
+      task_id: meta.taskId,
+      queue_item_id: meta.queueItemId,
+      event_id: meta.eventId ?? input.event_ids[0],
+      task_session_id: input.task_session_id,
+      source_id: meta.sourceId,
+      status: "failed",
+      summary: `Task followup failed: ${input.task_session_id}`,
+      details: {
+        ...details,
+        error: message,
+      },
+    });
+    throw error;
+  }
 }
 
 function validateVoiceCommandRequest(
@@ -1398,11 +1494,17 @@ async function executeQueueAction(
 
   const eventId = typeof action.payload.event_id === "string" ? action.payload.event_id : undefined;
   const eventResult = eventId ? await options.store.getEvent(eventId) : undefined;
-  const taskMessage = await options.taskSessions.sendFollowupMessage({
+  const taskMessage = await sendTaskFollowupWithActivity(options, {
     task_session_id: session.id,
     text: taskActionFollowupText(item, eventResult?.event),
     event_ids: eventId ? [eventId] : [],
     idempotency_key: `queue_action_${item.id}_${action.id}`,
+  }, {
+    origin: "queue_action",
+    occurredAt: options.now ? options.now().toISOString() : new Date().toISOString(),
+    queueItemId: item.id,
+    taskId,
+    eventId,
   });
 
   if (isRecord(taskMessage) && taskMessage.status === "blocked") {

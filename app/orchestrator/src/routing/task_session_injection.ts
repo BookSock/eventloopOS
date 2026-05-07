@@ -3,13 +3,16 @@ import type { GatewayStore } from "../gateway_store.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import type { ContextEntry, RouteDecision } from "../store.js";
 import { taskIdForHint } from "../store.js";
-import type { TaskSessionController } from "../task_sessions/types.js";
+import type { TaskFollowupInput, TaskSessionController } from "../task_sessions/types.js";
+
+export type TaskFollowupSender = (input: TaskFollowupInput) => Promise<unknown> | unknown;
 
 export async function injectEventIntoTaskSessionIfPossible(
   event: McpEvent,
   taskSessions: TaskSessionController | undefined,
   store: GatewayStore,
   now: Date,
+  sendFollowupMessage?: TaskFollowupSender,
 ): Promise<{ routeDecision: RouteDecision; taskMessage: unknown } | undefined> {
   if (!taskSessions?.listSessions) return undefined;
   if (!shouldTryTaskSessionInjection(event)) return undefined;
@@ -33,7 +36,8 @@ export async function injectEventIntoTaskSessionIfPossible(
     created_at: now.toISOString(),
   };
 
-  const taskMessage = await taskSessions.sendFollowupMessage({
+  const sender = sendFollowupMessage ?? ((input: TaskFollowupInput) => taskSessions.sendFollowupMessage(input));
+  const taskMessage = await sender({
     task_session_id: taskSessionId,
     text: taskFollowupTextForEvent(event, matchedContext),
     event_ids: [event.id],

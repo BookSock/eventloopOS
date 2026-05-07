@@ -1307,9 +1307,11 @@ describe("orchestrator gateway API", () => {
 
   it("sends idempotent followup into configured task session controller", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
+    const observability = createInMemoryObservability();
     const messages = new Map<string, Record<string, unknown>>();
     const taskServer = createGatewayServer({
       store,
+      observability,
       now: () => new Date("2026-05-06T12:00:00.000Z"),
       taskSessions: {
         listSessions() {
@@ -1426,6 +1428,97 @@ describe("orchestrator gateway API", () => {
       assert.equal(duplicateResponse.status, 202);
       assert.equal(duplicateBody.message.id, "task_msg_1");
       assert.equal(messages.size, 1);
+
+      const metricsResponse = await fetch(`${taskBaseUrl}/metrics`);
+      const metricsBody = await metricsResponse.json() as {
+        metrics: {
+          counters: Record<string, number>;
+          activity_count: number;
+        };
+      };
+      assert.equal(metricsBody.metrics.counters.task_followups_attempted_total, 2);
+      assert.equal(metricsBody.metrics.counters.task_followups_sent_total, 2);
+      assert.equal(metricsBody.metrics.activity_count, 4);
+
+      const activityResponse = await fetch(`${taskBaseUrl}/activity?limit=4`);
+      const activityBody = await activityResponse.json() as {
+        events: Array<{
+          type: string;
+          task_session_id?: string;
+          status?: string;
+          details: Record<string, unknown>;
+        }>;
+      };
+      assert.deepEqual(activityBody.events.map((event) => event.type), [
+        "task_followup_sent",
+        "task_followup_attempted",
+        "task_followup_sent",
+        "task_followup_attempted",
+      ]);
+      assert.equal(activityBody.events[0].task_session_id, "task_session_blog");
+      assert.equal(activityBody.events[0].details.idempotency_key, "idem_task_followup_1");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("records failed task followups for after-the-fact debugging", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const observability = createInMemoryObservability();
+    const taskServer = createGatewayServer({
+      store,
+      observability,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      taskSessions: {
+        sendFollowupMessage() {
+          throw new Error("task runtime offline");
+        },
+      },
+    });
+    await new Promise<void>((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+    const address = taskServer.address() as AddressInfo;
+    const taskBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${taskBaseUrl}/task-sessions/task_session_missing/followup`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_task_followup_failed",
+        },
+        body: JSON.stringify({
+          text: "Try to resume.",
+          event_ids: ["evt_failed_followup"],
+        }),
+      });
+      assert.equal(response.status, 500);
+
+      const metricsResponse = await fetch(`${taskBaseUrl}/metrics`);
+      const metricsBody = await metricsResponse.json() as {
+        metrics: {
+          counters: Record<string, number>;
+        };
+      };
+      assert.equal(metricsBody.metrics.counters.task_followups_attempted_total, 1);
+      assert.equal(metricsBody.metrics.counters.task_followups_failed_total, 1);
+
+      const activityResponse = await fetch(`${taskBaseUrl}/activity?limit=2`);
+      const activityBody = await activityResponse.json() as {
+        events: Array<{
+          type: string;
+          status?: string;
+          summary: string;
+          details: Record<string, unknown>;
+        }>;
+      };
+      assert.deepEqual(activityBody.events.map((event) => event.type), [
+        "task_followup_failed",
+        "task_followup_attempted",
+      ]);
+      assert.equal(activityBody.events[0].status, "failed");
+      assert.equal(activityBody.events[0].details.error, "task runtime offline");
     } finally {
       await new Promise<void>((resolve, reject) => {
         taskServer.close((error) => (error ? reject(error) : resolve()));

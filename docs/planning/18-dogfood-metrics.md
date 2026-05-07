@@ -23,6 +23,8 @@ Track locally:
 - `queue_items_deferred_total`
 - `queue_items_ignored_total`
 - `task_followups_sent_total`
+- `task_followups_attempted_total`
+- `task_followups_blocked_total`
 - `task_followups_failed_total`
 - `restore_requests_created_total`
 - `restore_requests_done_total`
@@ -51,6 +53,7 @@ Every important action should produce one local activity event:
 - context restore requested
 - context restore done/failed
 - task followup sent/failed/blocked
+- task followup attempted before runtime call
 - task binding changed
 - MCP poll source succeeded/failed
 
@@ -92,6 +95,7 @@ Current implementation:
 - `dogfood:review` now derives queue clearance rate, task-session route rate, restore success rate, task rollups, task-session rollups, and per-queue time-to-done from local activity.
 - Restore request activity records resource provider and confidence reason. Metrics include provider-specific created/done/failed/retried counters, and `dogfood:review` groups restore success/failure by provider.
 - Queue done activity records task ID, and recommended resume-agent actions also record task-session ID, so after-the-fact session history can connect queue work back to agent runtime.
+- Task followup calls now emit attempted plus sent/blocked/failed activity with task session ID, idempotency key, event IDs, payload length, and origin (`event_route`, `queue_action`, or `task_session_api`).
 
 ## Privacy
 
