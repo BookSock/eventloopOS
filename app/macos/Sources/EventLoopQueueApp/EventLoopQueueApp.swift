@@ -58,6 +58,14 @@ struct EventLoopQueueApp: App {
                 }
                 .keyboardShortcut("m", modifiers: [.command, .option, .shift])
                 .accessibilityIdentifier("queue-command-mode-toggle")
+
+                Button("Restore Manual Workspace") {
+                    Task {
+                        await viewModel.confirmManualWorkspaceRestore()
+                    }
+                }
+                .disabled(!viewModel.canRestoreManualWorkspace)
+                .accessibilityIdentifier("queue-command-restore-manual-workspace")
             }
         }
     }
@@ -139,6 +147,14 @@ private struct QueueMenuView: View {
             }
             .keyboardShortcut("m", modifiers: [.command, .option, .shift])
             .accessibilityIdentifier("queue-menu-mode-toggle")
+
+            Button("Restore Manual Workspace") {
+                Task {
+                    await viewModel.confirmManualWorkspaceRestore()
+                }
+            }
+            .disabled(!viewModel.canRestoreManualWorkspace)
+            .accessibilityIdentifier("queue-menu-restore-manual-workspace")
         }
         .task {
             if viewModel.state == .idle {

@@ -106,7 +106,7 @@ EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm run live:aerospace
 Codex native thread protocol notes from the installed local CLI live in `external-resources/codex-app-server-protocol.md`.
 Set `ORCHESTRATOR_TASK_SESSIONS=codex_app_server` to expose local Codex app-server threads through `/task-sessions`; use `[task:blog feedback]` in thread titles/previews, `ORCHESTRATOR_CODEX_TASK_MAP='{"thread_id":"task_blog_feedback"}'`, or hot-loaded `ORCHESTRATOR_CODEX_TASK_MAP_PATH=config/codex-task-map.json` for task routing.
 With `ORCHESTRATOR_CODEX_TASK_MAP_PATH` configured, `PUT /task-sessions/:id/task-binding` writes the map file atomically so agents can bind existing Codex threads to tasks through the orchestrator API.
-The Mac queue app shows task-session binding controls on review packets with `task_id`, auto-loads available sessions for the selected task, lets a human bind an existing Codex thread, then enables the recommended agent handoff from the same queue context. Entering Manual Mode pauses automated workspace restore and captures the current AeroSpace workspace snapshot so normal-computer context is visible in the UI instead of disappearing silently.
+The Mac queue app shows task-session binding controls on review packets with `task_id`, auto-loads available sessions for the selected task, lets a human bind an existing Codex thread, then enables the recommended agent handoff from the same queue context. Entering Manual Mode pauses automated workspace restore and captures the current AeroSpace workspace snapshot so normal-computer context is visible in the UI instead of disappearing silently. `Restore Manual Workspace` moves back to that saved normal-computer snapshot and keeps Event Loop automation paused.
 
 Chrome native host install:
 

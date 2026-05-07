@@ -356,6 +356,59 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
     }
 
+    func testRestoreManualWorkspaceUsesSavedSnapshotAndKeepsManualMode() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "manual-workspace")
+            ],
+            activeWorkspace: "manual-workspace"
+        )
+        let receipt = WorkspaceRestoreReceipt(
+            commands: [
+                WorkspaceExecutedCommand(command: "aerospace", args: ["workspace", "manual-workspace"], stdout: "ok")
+            ],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: snapshot,
+            restoreEnvelope: WorkspaceRestoreExecutionEnvelope(
+                ok: true,
+                plan: WorkspaceRestorePlan(commands: [], skipped: []),
+                receipt: receipt,
+                executeSupported: true,
+                idempotencyKey: "idem_fake"
+            )
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+
+        await viewModel.enterManualModeAndCaptureWorkspace()
+        viewModel.returnToEventLoopMode()
+        await viewModel.confirmManualWorkspaceRestore()
+
+        XCTAssertEqual(viewModel.mode, .manual)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [snapshot])
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+        XCTAssertTrue(workspaceClient.restoreIdempotencyKeys[0].hasPrefix("mac_manual_workspace_restore_"))
+    }
+
+    func testRestoreManualWorkspaceRequiresSavedSnapshot() async {
+        let workspaceClient = FakeWorkspaceClient()
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+
+        await viewModel.confirmManualWorkspaceRestore()
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .failed("No manual workspace snapshot saved"))
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [])
+    }
+
     func testReturningToEventLoopModePlansSelectedWorkspaceRestore() async {
         let snapshot = WorkspaceSnapshot(
             windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],

@@ -301,6 +301,7 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
     private let restoreEnvelope: WorkspaceRestoreExecutionEnvelope
     private var captureCount = 0
     private var requestedSnapshots: [WorkspaceSnapshot] = []
+    private var restoreSnapshots: [WorkspaceSnapshot] = []
     private var restoreKeys: [String] = []
 
     public init(
@@ -335,6 +336,10 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
         lock.withLock { requestedSnapshots }
     }
 
+    public var workspaceRestoreSnapshots: [WorkspaceSnapshot] {
+        lock.withLock { restoreSnapshots }
+    }
+
     public var restoreIdempotencyKeys: [String] {
         lock.withLock { restoreKeys }
     }
@@ -363,6 +368,7 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
         idempotencyKey: String
     ) async throws -> WorkspaceRestoreExecutionEnvelope {
         lock.withLock {
+            restoreSnapshots.append(snapshot)
             restoreKeys.append(idempotencyKey)
         }
         return restoreEnvelope

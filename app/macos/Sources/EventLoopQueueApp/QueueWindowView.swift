@@ -63,6 +63,16 @@ struct QueueWindowView: View {
 
                     Button {
                         Task {
+                            await viewModel.confirmManualWorkspaceRestore()
+                        }
+                    } label: {
+                        Label("Restore Manual Workspace", systemImage: "arrow.uturn.backward.square")
+                    }
+                    .disabled(!viewModel.canRestoreManualWorkspace)
+                    .accessibilityIdentifier("queue-restore-manual-workspace-button")
+
+                    Button {
+                        Task {
                             await viewModel.refreshQueue()
                         }
                     } label: {

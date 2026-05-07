@@ -140,6 +140,7 @@ delay 0.5
 set manualItems to menuItemNames()
 assertContains(manualItems, "Return to Event Loop")
 assertContains(manualItems, "Manual workspace saved: 0 windows")
+assertContains(manualItems, "Restore Manual Workspace")
 
 tell application "System Events"
   tell process "EventLoopQueueApp"
@@ -156,7 +157,7 @@ return queueWindowName
   const result = await spawnChecked("osascript", ["-e", script]);
   return {
     window_name: result.stdout.trim(),
-    mode_toggle_proof: "menu item changed Enter Manual Mode -> Return to Event Loop -> Enter Manual Mode",
+    mode_toggle_proof: "menu item changed Enter Manual Mode -> Return to Event Loop -> Enter Manual Mode; Restore Manual Workspace available after capture",
   };
 }
 

@@ -103,6 +103,10 @@ public final class QueueViewModel: ObservableObject {
         shouldRestoreWorkspace && selectedWorkspaceSnapshot != nil
     }
 
+    public var canRestoreManualWorkspace: Bool {
+        manualWorkspaceSnapshot != nil
+    }
+
     public var hasPackets: Bool {
         !packets.isEmpty
     }
@@ -422,6 +426,26 @@ public final class QueueViewModel: ObservableObject {
         }
 
         await confirmWorkspaceRestore(snapshot: snapshot)
+    }
+
+    public func confirmManualWorkspaceRestore() async {
+        guard let snapshot = manualWorkspaceSnapshot else {
+            workspaceRestoreState = .failed("No manual workspace snapshot saved")
+            return
+        }
+
+        do {
+            let response = try await workspaceClient.restore(
+                snapshot: snapshot,
+                currentWindows: nil,
+                idempotencyKey: "mac_manual_workspace_restore_\(UUID().uuidString)"
+            )
+            mode = .manual
+            shouldRestoreWorkspace = false
+            workspaceRestoreState = .executed(response.receipt)
+        } catch {
+            workspaceRestoreState = .failed(error.localizedDescription)
+        }
     }
 
     public func prepareContextRestore(resource: ReviewContextResource) async {
