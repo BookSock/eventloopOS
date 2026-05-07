@@ -17,6 +17,7 @@
     "test": "pnpm run build && node --test dist/test/**/*.test.js dist/src/**/*.test.js src/agents/codex/*.test.mjs src/task_sessions/*.test.mjs",
     "test:db": "pnpm run build && node --test dist/test/db*.test.js",
     "test:db:docker": "bin/dev-postgres test",
+    "test:db:native": "bin/dev-postgres native-test",
     "typecheck": "tsc -p tsconfig.json --noEmit && node --check bin/dev-postgres"
   },
   "devDependencies": {

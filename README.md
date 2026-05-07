@@ -45,6 +45,12 @@ pnpm run test:db:docker
 pnpm run dev:postgres -- down
 ```
 
+If Docker is unavailable but local Postgres binaries are installed, run a temporary native Postgres cluster instead. This creates a throwaway cluster under the system temp directory, runs DB tests, stops Postgres, and deletes the temp data:
+
+```sh
+pnpm run test:db:native
+```
+
 Set `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.json` to load read-only MCP poll sources from local config instead of seeded fake sources.
 Use `config/mcp-sources.example.json` as the starting shape. `generic_item_to_event` supports user-installed MCP servers that can return stable event-ish `items[]`.
 After `pnpm --filter @eventloopos/orchestrator build`, `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` sweeps configured MCP sources once through `/mcp-sources/poll-all-and-route`. `pnpm --filter @eventloopos/orchestrator run poll:mcp:loop` repeats the sweep. Set `EVENTLOOPOS_MCP_SOURCE_IDS=slack_dm_source,generic_mcp_source` to limit a sweep, `EVENTLOOPOS_MCP_POLL_INTERVAL_MS=30000` to tune loop cadence, and `EVENTLOOPOS_MCP_POLL_MAX_CYCLES=1` for bounded test runs.

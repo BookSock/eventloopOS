@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { after, before, describe, it } from "node:test";
+import { after, before, beforeEach, describe, it } from "node:test";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { PostgresQueueStore, type EventRecord, type NewQueueItem } from "../src/db/postgres_queue_store.js";
 import type { ReviewPacket } from "../src/contracts.js";
@@ -37,6 +37,11 @@ describe("PostgresQueueStore", () => {
   after(async () => {
     await store?.close();
     await container?.stop();
+  });
+
+  beforeEach(async () => {
+    if (!store) return;
+    await clearTestData(store);
   });
 
   it("applies migrations to empty Postgres", async (t) => {
@@ -203,6 +208,19 @@ describe("PostgresQueueStore", () => {
 async function resetExternalTestDatabase(store: PostgresQueueStore) {
   await store.pool.query("DROP SCHEMA IF EXISTS public CASCADE");
   await store.pool.query("CREATE SCHEMA public");
+}
+
+async function clearTestData(store: PostgresQueueStore) {
+  await store.pool.query(`
+    TRUNCATE
+      receipts,
+      route_decisions,
+      queue_items,
+      review_packets,
+      events,
+      context_restore_requests
+    RESTART IDENTITY CASCADE
+  `);
 }
 
 function assertSafeExternalTestDatabaseUrl(databaseUrl: string) {

@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import { execFile, spawn } from "node:child_process";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import net from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import pg from "pg";
 
 const { Client } = pg;
@@ -27,8 +31,11 @@ try {
       await up();
       await runDbTests();
       break;
+    case "native-test":
+      await runNativeDbTests();
+      break;
     default:
-      console.error("usage: eventloop-dev-postgres up|down|url|test");
+      console.error("usage: eventloop-dev-postgres up|down|url|test|native-test");
       process.exit(2);
   }
 } catch (error) {
@@ -93,6 +100,123 @@ async function runDbTests() {
   await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "test:db"], {
     ...process.env,
     EVENTLOOPOS_TEST_DATABASE_URL: databaseUrl
+  });
+}
+
+async function runNativeDbTests() {
+  const binDir = process.env.EVENTLOOPOS_POSTGRES_BIN_DIR;
+  const initdb = await resolvePostgresBinary("initdb", binDir);
+  const pgCtl = await resolvePostgresBinary("pg_ctl", binDir);
+  const psql = await resolvePostgresBinary("psql", binDir);
+  const nativePort = await freePort();
+  const nativeUser = process.env.EVENTLOOPOS_POSTGRES_USER ?? process.env.USER ?? "postgres";
+  const nativeDatabaseUrl = `postgres://${encodeURIComponent(nativeUser)}@127.0.0.1:${nativePort}/eventloop_test`;
+  const tempDir = await mkdtemp(path.join(tmpdir(), "eventloopos-postgres-"));
+  const dataDir = path.join(tempDir, "data");
+  const socketDir = path.join(tempDir, "socket");
+  let started = false;
+
+  try {
+    await mkdir(socketDir, { recursive: true });
+    await execFileChecked(initdb, [
+      "-D",
+      dataDir,
+      "--username",
+      nativeUser,
+      "--auth=trust",
+      "--no-instructions"
+    ]);
+    await execFileChecked(pgCtl, [
+      "-D",
+      dataDir,
+      "-l",
+      path.join(tempDir, "postgres.log"),
+      "-o",
+      `-p ${nativePort} -k ${socketDir} -c listen_addresses=127.0.0.1`,
+      "-w",
+      "start"
+    ]);
+    started = true;
+    await waitForDatabase(`postgres://${encodeURIComponent(nativeUser)}@127.0.0.1:${nativePort}/postgres`);
+    await execFileChecked(psql, [
+      "-h",
+      "127.0.0.1",
+      "-p",
+      String(nativePort),
+      "-U",
+      nativeUser,
+      "-d",
+      "postgres",
+      "-v",
+      "ON_ERROR_STOP=1",
+      "-c",
+      "CREATE DATABASE eventloop_test"
+    ]);
+    await waitForDatabase(nativeDatabaseUrl);
+    await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "test:db"], {
+      ...process.env,
+      EVENTLOOPOS_TEST_DATABASE_URL: nativeDatabaseUrl
+    });
+  } finally {
+    if (started) {
+      await execFileQuiet(pgCtl, ["-D", dataDir, "-m", "fast", "-w", "stop"]);
+    }
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function waitForDatabase(connectionString) {
+  const deadline = Date.now() + 30_000;
+  let lastError;
+  while (Date.now() < deadline) {
+    const client = new Client({ connectionString });
+    try {
+      await client.connect();
+      await client.query("SELECT 1");
+      await client.end();
+      return;
+    } catch (error) {
+      lastError = error;
+      await client.end().catch(() => {});
+      await sleep(500);
+    }
+  }
+  throw lastError ?? new Error("timed out waiting for Postgres");
+}
+
+async function resolvePostgresBinary(name, binDir) {
+  const candidates = [
+    binDir ? path.join(binDir, name) : undefined,
+    name,
+    `/opt/homebrew/opt/postgresql@17/bin/${name}`,
+    `/opt/homebrew/opt/postgresql@16/bin/${name}`,
+    `/usr/local/opt/postgresql@17/bin/${name}`,
+    `/usr/local/opt/postgresql@16/bin/${name}`
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const result = await execFileQuiet(candidate, ["--version"]);
+    if (result.stdout || result.stderr) {
+      return candidate;
+    }
+  }
+  throw new Error(`could not find ${name}; set EVENTLOOPOS_POSTGRES_BIN_DIR`);
+}
+
+async function freePort() {
+  return await new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.on("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      server.close(() => {
+        if (!address || typeof address === "string") {
+          reject(new Error("could not allocate local port"));
+          return;
+        }
+        resolve(address.port);
+      });
+    });
   });
 }
 

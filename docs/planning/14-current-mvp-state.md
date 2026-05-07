@@ -84,15 +84,15 @@ Done:
 - Idempotency key support for restore request creation.
 - Restore request persistence through same in-memory/Postgres store abstraction as queue storage.
 - Expired restore request leases get reaped and reclaimed.
+- Native Postgres test runner creates a throwaway local cluster, runs live DB tests, stops server, and deletes temp data when Docker daemon is unavailable.
 - Doctor checks orchestrator health, AeroSpace, Docker, browser Playwright readiness, optional voice transcript command readiness, and Codex app-server.
 - `pnpm --filter @eventloopos/orchestrator run live:aerospace` builds and emits a machine-readable skip by default. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1`, it checks live AeroSpace status/capture/restore-plan without executing workspace moves.
 - `voice:listen-command` runs a configured local STT command and pipes line-delimited transcripts into the same wake-phrase voice router. Command args are JSON argv, not shell-parsed strings.
 
 Gap:
 
-- Postgres restore-request live test skips locally when Docker/container runtime is absent.
 - Browser extension has one fixed lease owner; installed multi-profile behavior still needs live proof.
-- Docker Postgres dev runner exists (`pnpm --filter @eventloopos/orchestrator run test:db:docker`) but has not passed here because local Docker daemon is absent.
+- Docker Postgres dev runner exists (`pnpm --filter @eventloopos/orchestrator run test:db:docker`) but has not passed here because local Docker daemon is absent. Native runner passed locally with `pnpm run test:db:native`.
 
 ## Testing Loop
 
@@ -110,7 +110,7 @@ Strong tests now:
 
 Weak tests:
 
-- Postgres live tests skip when Docker absent.
+- Docker-backed Postgres live tests skip when Docker absent, but native Postgres live tests pass on this machine.
 - AeroSpace live restore needs installed/running AeroSpace.
 - AeroSpace live smoke exists, but `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm --filter @eventloopos/orchestrator run live:aerospace` currently reports `server_unavailable` because AeroSpace.app is not running.
 - No full installed extension + native host + Mac app manual UI flow; current live coverage proves Mac client/orchestrator API round-trip but not rendered app interaction.
@@ -119,4 +119,5 @@ Weak tests:
 ## Next Best Work
 
 1. Run Docker/Postgres DB tests on machine with Docker daemon and record pass/fail.
-2. Add real microphone/STT adapter feeding `voice:listen` (whisper.cpp, MLX Whisper, or macOS Speech).
+2. Add installed extension + native host + Mac app rendered UI smoke.
+3. Add real microphone/STT adapter feeding `voice:listen` (whisper.cpp, MLX Whisper, or macOS Speech).

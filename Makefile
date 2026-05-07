@@ -1,4 +1,4 @@
-.PHONY: test test-unit test-integration test-e2e test-e2e-browser test-e2e-macos test-e2e-live test-e2e-live-boot test-db-docker dev-doctor dev-postgres live-aerospace voice-listen-command test-contracts test-architecture test-mcp-stability fixtures-seed packets-golden lint typecheck ci install
+.PHONY: test test-unit test-integration test-e2e test-e2e-browser test-e2e-macos test-e2e-live test-e2e-live-boot test-db-docker test-db-native dev-doctor dev-postgres live-aerospace voice-listen-command test-contracts test-architecture test-mcp-stability fixtures-seed packets-golden lint typecheck ci install
 
 PNPM ?= pnpm
 
@@ -31,6 +31,9 @@ test-e2e-live-boot:
 
 test-db-docker:
 	$(PNPM) test:db:docker
+
+test-db-native:
+	$(PNPM) test:db:native
 
 dev-doctor:
 	$(PNPM) dev:doctor
