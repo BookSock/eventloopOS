@@ -186,6 +186,7 @@ Strong tests now:
 - Router-created review packets now use human-block-specific decision copy: task-matched packets ask for approval before sending an update back to the task agent, while unmatched packets say there is no confident task match.
 - Router decisions now tag human-queue creation with `human_queue_reason`: `human_blocked`, `ambiguous`, or `risky`. This keeps queue creation aligned to the intake-stack model instead of generic “ask human” routing.
 - Real local Postgres + local-events MCP dogfood proof passed: started Docker Postgres, ran orchestrator with `DATABASE_URL`, `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json`, and `EVENTLOOPOS_LOCAL_EVENTS_PATH=config/local-events.example.json`, ran `poll:mcp:once`, saw one ambiguous human-queue packet, then `dogfood:check` passed. After orchestrator restart, `/queue`, `/activity`, and `/metrics` still showed the routed item and counters from Postgres.
+- `pnpm run test:e2e:postgres-mcp-dogfood` now automates that proof: Docker Postgres up/down, local-events MCP poll, dogfood threshold check, orchestrator restart, persisted queue/activity/metrics assertions.
 - Opt-in AppleScript UI smoke now proves the Pull Next Paper menu item exists and that Manual Mode captures workspace only on return to Event Loop, then Restore Manual Workspace returns the user to manual mode.
 
 Weak tests:
@@ -202,5 +203,5 @@ Weak tests:
 1. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
 2. Add safe real Claude followup smoke against an explicitly supplied disposable Claude session.
 3. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
-4. Decide whether to promote local Postgres + MCP dogfood proof into `proof:live` as an opt-in lane or keep it as an operator-run proof.
+4. Decide whether to promote `test:e2e:postgres-mcp-dogfood` into `proof:live` by default when Docker is available.
 5. Later: real microphone/wake-word proof and always-listening voice UX.

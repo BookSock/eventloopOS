@@ -1,0 +1,249 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+
+const host = process.env.ORCHESTRATOR_HOST ?? "127.0.0.1";
+const port = process.env.ORCHESTRATOR_PORT ?? "4387";
+const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? `http://${host}:${port}`;
+const mcpSourcesPath = process.env.ORCHESTRATOR_MCP_SOURCES_PATH ?? "config/mcp-sources.local-events.example.json";
+const localEventsPath = process.env.EVENTLOOPOS_LOCAL_EVENTS_PATH ?? "config/local-events.example.json";
+const expectedQueueItemId = "qit_evt_local_events_local_events_source_office_priority_1";
+const expectedEventId = "evt_local_events_local_events_source_office_priority_1";
+
+let server;
+let startedPostgres = false;
+
+try {
+  const databaseUrl = await startPostgres();
+  await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "build"]);
+  server = await startOrchestrator(databaseUrl);
+
+  const pollResult = await pollLocalMcpSource();
+  assertPollResult(pollResult);
+
+  await spawnChecked("pnpm", ["dogfood:check"], {
+    ...process.env,
+    EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl,
+    EVENTLOOPOS_DOGFOOD_CHECK_FORMAT: "json",
+  });
+
+  await stopOrchestrator();
+  server = await startOrchestrator(databaseUrl);
+
+  const queueProof = await queuePersistenceProof();
+  const activityProof = await activityPersistenceProof();
+  const metricsProof = await metricsPersistenceProof();
+
+  console.log(JSON.stringify({
+    ok: true,
+    base_url: orchestratorUrl,
+    database_url: redactDatabaseUrl(databaseUrl),
+    mcp_source: "local_events_source",
+    routed_count: pollResult.routed_count,
+    queue_item_id: queueProof.queue_item_id,
+    human_queue_reason: pollResult.polled?.[0]?.routed?.[0]?.route_decision?.human_queue_reason,
+    activity_count: activityProof.count,
+    queue_items_created_total: metricsProof.queue_items_created_total,
+    events_ingested_total: metricsProof.events_ingested_total,
+  }, null, 2));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  await stopOrchestrator();
+  if (startedPostgres && process.env.EVENTLOOPOS_KEEP_DEV_POSTGRES !== "1") {
+    await spawnChecked("pnpm", ["run", "dev:postgres:down"]).catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+    });
+  }
+}
+
+async function startPostgres() {
+  const result = await spawnCapture("pnpm", ["run", "dev:postgres:up"]);
+  startedPostgres = true;
+  const url = result.stdout.trim().split(/\r?\n/).findLast((line) => line.startsWith("postgres://"));
+  if (!url) {
+    throw new Error(`dev Postgres did not print a postgres URL: ${result.stdout}`);
+  }
+  return url;
+}
+
+async function startOrchestrator(databaseUrl) {
+  const child = spawn("pnpm", ["--filter", "@eventloopos/orchestrator", "start"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      DATABASE_URL: databaseUrl,
+      ORCHESTRATOR_HOST: host,
+      ORCHESTRATOR_PORT: port,
+      ORCHESTRATOR_TASK_SESSIONS: "off",
+      ORCHESTRATOR_WORKSPACE: "off",
+      ORCHESTRATOR_MCP_SOURCES_PATH: mcpSourcesPath,
+      EVENTLOOPOS_LOCAL_EVENTS_PATH: localEventsPath,
+    },
+    stdio: "inherit",
+  });
+  await waitForHealth(child);
+  return child;
+}
+
+async function stopOrchestrator() {
+  if (!server || server.exitCode !== null) return;
+  server.kill("SIGTERM");
+  await waitForExit(server);
+  server = undefined;
+}
+
+async function pollLocalMcpSource() {
+  const response = await fetch(new URL("/mcp-sources/poll-all-and-route", orchestratorUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ source_ids: ["local_events_source"] }),
+  });
+  const body = await response.json();
+  if (!response.ok) {
+    throw new Error(`MCP poll failed: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+function assertPollResult(body) {
+  if (body.ok !== true || body.errors !== 0 || body.routed_count < 1) {
+    throw new Error(`unexpected MCP poll result: ${JSON.stringify(body)}`);
+  }
+  const routed = body.polled?.[0]?.routed?.[0];
+  if (!routed) {
+    throw new Error(`MCP poll did not route an event: ${JSON.stringify(body)}`);
+  }
+  if (routed.event?.id !== expectedEventId) {
+    throw new Error(`expected event ${expectedEventId}, got ${routed.event?.id}`);
+  }
+  if (routed.route_decision?.human_queue_reason !== "ambiguous") {
+    throw new Error(`expected ambiguous human_queue_reason, got ${routed.route_decision?.human_queue_reason}`);
+  }
+  if (routed.queue_item?.id !== expectedQueueItemId) {
+    throw new Error(`expected queue item ${expectedQueueItemId}, got ${routed.queue_item?.id}`);
+  }
+}
+
+async function queuePersistenceProof() {
+  const body = await fetchJson("/queue");
+  const item = body.items?.find((candidate) => candidate.id === expectedQueueItemId);
+  if (!item) {
+    throw new Error(`queue item ${expectedQueueItemId} missing after restart`);
+  }
+  return {
+    queue_item_id: item.id,
+  };
+}
+
+async function activityPersistenceProof() {
+  const body = await fetchJson("/activity?limit=20");
+  const event = body.events?.find((candidate) =>
+    candidate.type === "event_routed"
+    && candidate.event_id === expectedEventId
+    && candidate.queue_item_id === expectedQueueItemId
+    && candidate.details?.human_queue_reason === "ambiguous"
+  );
+  if (!event) {
+    throw new Error(`event_routed activity for ${expectedEventId} missing after restart`);
+  }
+  return {
+    count: body.count,
+  };
+}
+
+async function metricsPersistenceProof() {
+  const body = await fetchJson("/metrics");
+  const counters = body.metrics?.counters ?? {};
+  if (counters.queue_items_created_total !== 1 || counters.events_ingested_total !== 1) {
+    throw new Error(`unexpected persisted metrics after restart: ${JSON.stringify(counters)}`);
+  }
+  return {
+    queue_items_created_total: counters.queue_items_created_total,
+    events_ingested_total: counters.events_ingested_total,
+  };
+}
+
+async function fetchJson(path) {
+  const response = await fetch(new URL(path, orchestratorUrl));
+  const body = await response.json();
+  if (!response.ok) {
+    throw new Error(`${path} failed: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+async function waitForHealth(child) {
+  const deadline = Date.now() + 15_000;
+  let exited = false;
+  child.once("exit", () => {
+    exited = true;
+  });
+  while (Date.now() < deadline) {
+    if (exited) throw new Error("orchestrator exited before health check passed");
+    try {
+      const response = await fetch(new URL("/health", orchestratorUrl));
+      if (response.ok) return;
+    } catch {
+      // keep waiting
+    }
+    await sleep(100);
+  }
+  throw new Error(`timed out waiting for orchestrator health at ${orchestratorUrl}`);
+}
+
+async function spawnChecked(file, args, env = process.env) {
+  await spawnCapture(file, args, env, "inherit");
+}
+
+async function spawnCapture(file, args, env = process.env, stdio = "pipe") {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      cwd: process.cwd(),
+      env,
+      stdio: stdio === "inherit" ? "inherit" : ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    if (child.stdout) {
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+        process.stdout.write(chunk);
+      });
+    }
+    if (child.stderr) {
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+        process.stderr.write(chunk);
+      });
+    }
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}`));
+    });
+  });
+}
+
+async function waitForExit(child) {
+  return await new Promise((resolve) => {
+    child.once("exit", resolve);
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function redactDatabaseUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) parsed.password = "[redacted]";
+    return parsed.toString();
+  } catch {
+    return "[invalid]";
+  }
+}
