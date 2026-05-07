@@ -48,6 +48,56 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
     }
 
+    func testSelectionChangeClearsTaskBindingStatus() async {
+        let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
+        await viewModel.loadQueue()
+        await viewModel.loadTaskSessions()
+
+        XCTAssertEqual(viewModel.taskBindingState, .loaded)
+
+        viewModel.select(packetId: "packet-ci-failed")
+
+        XCTAssertEqual(viewModel.taskBindingState, .idle)
+    }
+
+    func testSelectionChangeClearsContextRestoreStatus() async {
+        let resource = ReviewContextResource(
+            id: "ctx_browser_123",
+            kind: "browser_tab",
+            title: "Launch doc",
+            url: "https://example.test/launch",
+            source: "chrome-extension",
+            restoreConfidence: "high"
+        )
+        let plan = ContextRestorePlan(
+            kind: "browser_extension_message",
+            sideEffect: "local",
+            executeSupported: false,
+            target: "eventloopOS browser extension runtime",
+            message: ContextRestoreMessage(type: "eventloop.restore", resource: resource),
+            url: nil,
+            path: nil,
+            line: nil,
+            column: nil
+        )
+        let restoreRequest = ContextRestoreRequest(
+            id: "ctx_restore_123",
+            status: "pending",
+            resource: resource,
+            restorePlan: plan
+        )
+        let client = FakeQueueClient(packets: SeededQueue.packets, contextRestoreRequestResult: .success(restoreRequest))
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.loadQueue()
+        await viewModel.requestContextRestore(resource: resource)
+
+        XCTAssertEqual(viewModel.contextRestoreState, .requested(resource, restoreRequest))
+
+        viewModel.select(packetId: "packet-ci-failed")
+
+        XCTAssertEqual(viewModel.contextRestoreState, .idle)
+    }
+
     func testDoneAndNextCompletesSelectedPacketAndAdvances() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)

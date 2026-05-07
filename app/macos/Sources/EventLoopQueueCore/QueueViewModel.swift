@@ -10,7 +10,15 @@ public enum ManualWorkspaceCaptureState: Equatable, Sendable {
 @MainActor
 public final class QueueViewModel: ObservableObject {
     @Published public private(set) var packets: [ReviewPacket]
-    @Published public var selectedPacketID: String?
+    @Published public var selectedPacketID: String? {
+        didSet {
+            guard oldValue != selectedPacketID else {
+                return
+            }
+            taskBindingState = .idle
+            contextRestoreState = .idle
+        }
+    }
     @Published public private(set) var state: QueueState
     @Published public private(set) var mode: EventLoopMode
     @Published public private(set) var shouldRestoreWorkspace: Bool
