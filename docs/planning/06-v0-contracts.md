@@ -175,9 +175,10 @@ type TaskSession = {
 
 Rules:
 
-- structured app-server/native thread beats terminal paste.
-- terminal send is fallback and must be audited.
-- no send without stable task/session match.
+- Structured app-server/native thread beats terminal paste.
+- Terminal send is fallback and must be audited.
+- No send without stable task/session match.
+- MVP prefers `followup` and `steer`. `interrupt` means active preemption and requires explicit capability + policy approval.
 
 ### TaskMessage
 
@@ -197,9 +198,10 @@ type TaskMessage = {
 
 Rules:
 
-- new info routes through task message, not raw terminal text.
-- mode records why message was delivered now/later.
-- failed send can create review packet.
+- New info routes through task message, not raw terminal text.
+- Mode records why message was delivered now/later.
+- `interrupt` mode is not default MVP behavior. It is reserved for explicit user-approved preemption.
+- Failed send can create review packet.
 
 ### ReviewPacket
 

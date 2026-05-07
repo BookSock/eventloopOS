@@ -9,6 +9,7 @@ Repo now has working MVP spine:
 - Browser extension = Chrome tab capture, restore, config, poll loop.
 - Native host = Chrome Native Messaging bridge.
 - Test harness = repeatable agent feedback loop.
+- Planning stance = intentional intake stack, not aggressive interruption product.
 - `pnpm run test:e2e:live:boot` boots orchestrator, runs live harness/native/browser E2E, then stops server.
 - Boot live smoke also runs Mac `HTTPQueueClient` against the live orchestrator and proves context restore request create/read round-trip.
 - `pnpm run test:e2e:live:full` runs the same booted-orchestrator smoke plus installed Chromium extension/native host capture against that same orchestrator.
@@ -131,9 +132,11 @@ Strong tests now:
 - `dev:doctor` reports whether `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` is configured and can launch with `--help`; unconfigured voice command is treated as optional/pass.
 - `dev:doctor` reports whether `ORCHESTRATOR_MCP_SOURCES_PATH` or `config/mcp-sources.json` contains valid MCP polling sources; missing default config is treated as optional/pass.
 - Config paths for MCP sources, Codex task maps, and seed fixtures resolve existing repo-root relative files even when package scripts run from `app/orchestrator`.
+- File-backed local events MCP server exists for dogfood. `config/mcp-sources.local-events.example.json` launches it over stdio, reads `EVENTLOOPOS_LOCAL_EVENTS_PATH`, and returns generic event-ish `items[]` for MCP poll routing.
 - Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
 - Mac unit tests cover Manual Mode workspace capture/restore through `HTTPWorkspaceClient.capture()`, `QueueViewModel.enterManualModeAndCaptureWorkspace()`, and `QueueViewModel.confirmManualWorkspaceRestore()`.
 - `pnpm run dev:dogfood:smoke` starts orchestrator + Mac queue app in empty in-memory mode, waits for health, launches the queue app, then exits automatically after a short smoke window.
+- Real local-events MCP dogfood proof passed: started orchestrator with `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json` and `EVENTLOOPOS_LOCAL_EVENTS_PATH=config/local-events.example.json`, ran `poll:mcp:once`, saw 1 event routed into a human queue item.
 
 Weak tests:
 
@@ -141,9 +144,13 @@ Weak tests:
 - AeroSpace live restore needs installed/running AeroSpace. Local live smoke proves capture, planning, and opt-in one-window restore execution; it does not prove full multi-window layout reconstruction under every app/window edge case.
 - No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, temp `.app` bundle launch, and opt-in AppleScript menu/window/manual-mode interaction.
 - No real microphone wake-word proof yet; current coverage proves fixture-audio STT with `whisper-cli`, local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
+- Local activity history and metrics are not implemented yet. Current event/route/queue data exists, but no first-class `GET /activity`, `GET /metrics`, or daily dogfood review.
+- `server.ts` is still a large mixed route/policy file; split route modules before much more orchestrator feature width.
 
 ## Next Best Work
 
-1. Add real MCP source dogfood recipe for Jason's Slack/GitHub-like local servers and prove an unhinted polled event routes through `ambient_context_route` behavior.
-2. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-3. Later: real microphone/wake-word proof and always-listening voice UX.
+1. Add durable activity history and local metrics snapshot.
+2. Extract `server.ts` route/policy modules without behavior change.
+3. Add real Slack/GitHub MCP source dogfood config for Jason's installed servers, using the local-events MCP recipe as the template.
+4. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+5. Later: real microphone/wake-word proof and always-listening voice UX.

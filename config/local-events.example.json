@@ -1,0 +1,21 @@
+{
+  "items": [
+    {
+      "id": "office-priority-1",
+      "source": "local_events",
+      "type": "voice.priority_hint",
+      "title": "Blog priority changed",
+      "summary": "Blog post should mention launch in two weeks.",
+      "occurred_at": "2026-05-06T17:03:00.000Z",
+      "project_hint": "eventloopos",
+      "links": [
+        {
+          "label": "Local event",
+          "url": "eventloop://local-events/office-priority-1"
+        }
+      ],
+      "resources": []
+    }
+  ],
+  "nextCursor": "office-priority-1"
+}

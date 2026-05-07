@@ -38,7 +38,7 @@ Exit:
 
 ## Phase 2: MCP/Poll Event Ingestion
 
-Goal: route live work signals into agent threads before human interrupt.
+Goal: route live work signals into agent threads before human queue item.
 
 Deliver:
 
@@ -55,7 +55,7 @@ Exit:
 
 ## Phase 3: Agent Review Loop
 
-Goal: make agent work interrupt only when human judgment needed.
+Goal: make agent work queue human only when human judgment needed.
 
 Deliver:
 
@@ -80,8 +80,9 @@ Goal: link events + agent runs to durable task state.
 Deliver:
 
 - Task mapping between Markdown/Notion/GitHub issue, Slack thread, GitHub PR, agent run.
-- Priority controls from local task metadata + voice/user commands.
+- Priority controls from local task metadata, UI, config, and optional voice transcript commands.
 - Queue filters by project/task.
+- Activity history and basic dogfood metrics.
 
 Exit:
 
@@ -98,6 +99,7 @@ Deliver:
 - Rate limit handling.
 - Permission onboarding.
 - Audit log.
+- Local metrics snapshot.
 - Local settings.
 - Packaged Mac build.
 

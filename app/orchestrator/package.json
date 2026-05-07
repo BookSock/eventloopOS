@@ -8,6 +8,7 @@
     "dev:doctor": "node dist/src/dev/doctor.js",
     "dev:postgres": "bin/dev-postgres",
     "live:aerospace": "pnpm run build && node dist/src/workspace/live_aerospace_smoke.js",
+    "mcp:local-events": "node dist/src/mcp_sources/local_events_server.js",
     "poll:mcp:loop": "node dist/src/mcp_sources/poll_loop.js",
     "poll:mcp:once": "node dist/src/mcp_sources/poll_once.js",
     "queue:add": "pnpm run build && node dist/src/manual/send_manual_review.js",

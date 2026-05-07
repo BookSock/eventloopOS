@@ -23,6 +23,17 @@ Each source is expected to call one read-only MCP tool that returns:
 
 The current MVP mappers support Slack-like message items, GitHub-like update items, and generic event-ish items.
 
+For dogfood without an external service, use the file-backed local events server:
+
+```sh
+cp config/local-events.example.json var/local-events.json
+EVENTLOOPOS_LOCAL_EVENTS_PATH=var/local-events.json \
+ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json \
+pnpm run dev:dogfood
+```
+
+The `local_events_source` config launches `app/orchestrator/dist/src/mcp_sources/local_events_server.js` over stdio and reads `EVENTLOOPOS_LOCAL_EVENTS_PATH`. It is read-only: edit the JSON file yourself, then run `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` or enable the dogfood poll loop.
+
 Use `generic_item_to_event` when a local MCP server can return items shaped like:
 
 ```json

@@ -6,13 +6,13 @@ Date: May 6, 2026.
 
 Agents cheap. Parallel work easy. Bottleneck moves from execution to human attention.
 
-Product = attention scheduler for computer work. It keeps background work moving, detects human-blocked moments, ranks them, restores exact context, gets fast decision.
+Product = intentional intake stack for computer work. It keeps background work moving, detects human-blocked moments, ranks them, restores exact context, gets fast decision.
 
 Position:
 
 > Superhuman for agent review, with Mac workspace restore.
 
-Not AI assistant. Not generic automation builder. Not window manager. Wedge = review queue for high-output users running many AI/coding/workflow agents.
+Not AI assistant. Not generic automation builder. Not window manager. Not notification product. Wedge = quiet review queue for high-output users running many AI/coding/workflow agents.
 
 ## Target User
 
@@ -29,7 +29,7 @@ Pain already sharp: agents create more output than user can inspect. Work gets l
 
 ## Core Loop
 
-1. Event enters from MCP/poll, Slack, GitHub, browser, agent log, voice, or manual capture.
+1. Event enters from MCP/poll, Slack, GitHub, browser, agent log, optional voice transcript, or manual capture.
 2. Router links event to task, project, workspace context, agent thread.
 3. Agents keep working until judgment/approval needed.
 4. System creates review packet: evidence, risk, confidence, next decision.
@@ -38,6 +38,14 @@ Pain already sharp: agents create more output than user can inspect. Work gets l
 7. System opens/focuses context: Slack thread, PR, doc, terminal, agent thread, browser tab.
 8. User approves, rejects, edits, defers, or marks done.
 9. System resumes agents, advances to next queue item.
+
+UX model:
+
+- User chooses to enter event-loop mode for focused work.
+- Queue is like incoming papers on a desk.
+- Only one paper is active at a time.
+- Background agents reshuffle intake by priority.
+- System does not aggressively interrupt normal computer use in MVP.
 
 Escape hatch:
 
@@ -60,6 +68,7 @@ Build:
 - Codex adapter first, Claude adapter second.
 - Workspace restore that opens/focuses URLs, apps, files, tabs, terminals.
 - Manual-mode escape hatch so user can leave event loop and use computer normally.
+- Local activity history and dogfood metrics so user can inspect what happened.
 
 Defer:
 
@@ -71,6 +80,10 @@ Defer:
 - Linear.
 - Safari.
 - Calendar auto-scheduling.
+- Calendar-aware interrupt gating.
+- Voice readback.
+- Budget dashboard.
+- Multi-device sync.
 - Enterprise admin/security surface.
 
 ## Success Criteria

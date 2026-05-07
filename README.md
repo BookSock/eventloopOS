@@ -92,6 +92,17 @@ Set `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.json` to load read-only MC
 Use `config/mcp-sources.example.json` as the starting shape. `generic_item_to_event` supports user-installed MCP servers that can return stable event-ish `items[]`.
 After `pnpm --filter @eventloopos/orchestrator build`, `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` sweeps configured MCP sources once through `/mcp-sources/poll-all-and-route`. `pnpm --filter @eventloopos/orchestrator run poll:mcp:loop` repeats the sweep. Set `EVENTLOOPOS_MCP_SOURCE_IDS=slack_dm_source,generic_mcp_source` to limit a sweep, `EVENTLOOPOS_MCP_POLL_INTERVAL_MS=30000` to tune loop cadence, and `EVENTLOOPOS_MCP_POLL_MAX_CYCLES=1` for bounded test runs.
 
+For local dogfood without Slack/GitHub setup, copy `config/local-events.example.json` to a private file and run the file-backed MCP server through the local-events source config:
+
+```sh
+cp config/local-events.example.json var/local-events.json
+EVENTLOOPOS_LOCAL_EVENTS_PATH=var/local-events.json \
+ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json \
+pnpm run dev:dogfood
+```
+
+Then edit `var/local-events.json` and run `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` to turn those local items into routed events. This is useful for testing the master-agent polling loop before giving real external integrations access.
+
 Local STT tools can pipe transcripts into the router with `pnpm --filter @eventloopos/orchestrator run voice:send`. Use `EVENTLOOPOS_VOICE_TRANSCRIPT`, or pipe text on stdin. Optional hints: `EVENTLOOPOS_VOICE_PROJECT_HINT`, `EVENTLOOPOS_VOICE_TASK_HINT`, and `EVENTLOOPOS_VOICE_IDEMPOTENCY_KEY`.
 For line-delimited local STT streams, use `pnpm --filter @eventloopos/orchestrator run voice:listen`. Optional `EVENTLOOPOS_VOICE_WAKE_PHRASE=computer` filters ambient transcripts and strips the wake phrase before forwarding.
 For a local STT command that prints line-delimited transcripts, use `pnpm run voice:listen-command` with `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` and optional `EVENTLOOPOS_VOICE_TRANSCRIPT_ARGS_JSON='["--arg","value"]'`. This launches the command with argv, pipes stdout into the wake-phrase router, and is checked by `pnpm run dev:doctor` when configured.

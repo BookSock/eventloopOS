@@ -14,6 +14,13 @@ Superhuman for agent review, with Mac workspace restore.
 
 Do not build broad OS replacement first. Build review queue + context restore + agent resume loop.
 
+Clarified product stance:
+
+- MVP is quiet intake stack, not notification/interruption product.
+- User intentionally enters event-loop mode.
+- Background agents keep working and only queue human-blocked work.
+- Calendar/Focus-mode gating, voice-out, budget dashboard, and multi-device sync are deferred.
+
 ## Read Order
 
 1. `00-mvp-brief.md` - product thesis + scope.
@@ -27,7 +34,10 @@ Do not build broad OS replacement first. Build review queue + context restore + 
 9. `11-ambient-router-workspace-backends.md` - ambient router, MCP/polling, voice, AeroSpace.
 10. `12-lessons-hermes-openclaw.md` - gateway/session/hook lessons from cloned repos.
 11. `13-broader-agent-ecosystem-lessons.md` - lessons from ZeroClaw, SwarmClaw, Letta, CrewAI, LangGraph, security papers.
-12. `15-agent-test-matrix.md` - current command matrix mapping subsystem changes to concrete proof.
+12. `16-mvp-plan-corrections.md` - clarified product stance: intake stack, not aggressive interrupt UX.
+13. `17-deeplink-strategies.md` - provider IDs + URL + browser fallback restore plan.
+14. `18-dogfood-metrics.md` - local history/metrics plan.
+15. `15-agent-test-matrix.md` - current command matrix mapping subsystem changes to concrete proof.
 
 Supporting:
 
@@ -69,10 +79,14 @@ Later:
 - Safari.
 - Jira.
 - ScreenCaptureKit visual fallback.
-- Voice command capture.
+- Voice transcript capture.
 - AeroSpace workspace backend.
 - Linear.
 - browser page polling.
+- Calendar-aware interrupt policy.
+- Voice readback.
+- Budget dashboard.
+- Multi-device sync.
 
 ## Testing Decision
 
@@ -148,6 +162,8 @@ Current implementation choices checked against primary docs:
 - Postgres integration tests should prefer Testcontainers when Docker is available; otherwise keep deterministic unit/SQL tests so CI can stay green without live services.
 - Chrome extension to local app bridge should use Chrome Native Messaging, with an explicit envelope, request ID, idempotency key, capability list, and structured error response. Chrome starts a host process for `sendNativeMessage`, treats the first host message as the response, and uses length-prefixed JSON over stdio.
 - AeroSpace should be the first workspace backend for power users. Its workspace model exists because native macOS Spaces lack public APIs for reliable create/delete/reorder/switch/move automation.
+- Deeplink restore should start with provider IDs, stable URLs, browser quote/scroll fallback, and restore confidence tiers. Do not build per-app DOM hacks before dogfood proves need.
+- Claude Code should be second runtime after Codex, using structured/headless/session APIs before terminal fallback.
 
 ## Current Implementation Status
 

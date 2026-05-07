@@ -10,6 +10,7 @@ This is the current reality map for agents. Pick the narrowest command that prov
 | Command/script wiring | `pnpm run typecheck` | `make ci` | Node syntax checks, Swift build, package tests |
 | Current MVP live spine | `pnpm run test:e2e:live:boot` | `pnpm run test:e2e:live:full` | Orchestrator boot, live scenarios, native/browser/Mac smoke |
 | Dogfood stack launch | `pnpm run dev:dogfood:smoke` | `pnpm run dev:dogfood` | Orchestrator + Mac queue app startup path |
+| Planning/scope docs | `rg "intake stack|aggressive interruption|dogfood metrics|deeplink" docs/planning` | docs review | Confirms agents read current scope before adding calendar/notification/voice-out work |
 
 ## Subsystem Proofs
 
@@ -18,6 +19,7 @@ This is the current reality map for agents. Pick the narrowest command that prov
 | Orchestrator API + router | `pnpm --filter @eventloopos/orchestrator test` | Event routing, queue lease/done, task sessions, MCP polling, workspace API, voice command path | Docker-backed DB tests skip without container runtime. |
 | Ambient context routing | `app/test-harness/bin/run-scenario ambient_context_route --orchestrator-url http://127.0.0.1:4377` | Stored task-bound browser context lets an unhinted Slack-style event inject into the matching task session without queueing human review | Included in `pnpm run test:e2e:live:boot`. |
 | MCP ambient context routing | `app/test-harness/bin/run-scenario mcp_ambient_context_route --orchestrator-url http://127.0.0.1:4377` | Generic MCP poll item with no `task_hint` routes through stored task context into the matching task session | Included in `pnpm run test:e2e:live:boot`. |
+| Local events MCP dogfood | `EVENTLOOPOS_LOCAL_EVENTS_PATH=config/local-events.example.json ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json pnpm --filter @eventloopos/orchestrator start`, then `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` | File-backed local MCP server is launched over stdio, polled by orchestrator, and routed into queue/task path | Passed locally; stop the orchestrator after the probe. |
 | Postgres queue store | `pnpm run test:db:docker` or `pnpm run test:db:native` | Migrations, idempotent events, queue leases, stale lease reap, context restore request persistence against real Postgres | Docker path uses temp container; native path uses temp local cluster and deletes it. Both passed locally. |
 | Browser extension | `pnpm run test:e2e:browser` | MV3 extension capture/restore in Chromium via Playwright persistent context, including distinct restore-request lease owners across two Chromium profiles | No real native host unless opt-in smoke is used. |
 | Installed native browser bridge | `pnpm run test:e2e:native-browser` | Installed Chromium native messaging manifest, real extension `chrome.runtime.sendNativeMessage`, native host forwarding to fixture server | Mutates and restores temporary native messaging manifests. |
