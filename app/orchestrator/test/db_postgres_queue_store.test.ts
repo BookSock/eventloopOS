@@ -63,7 +63,43 @@ describe("PostgresQueueStore", () => {
       { id: "0002_context_restore_requests.sql" },
       { id: "0003_observability.sql" },
       { id: "0004_context_restore_failures.sql" },
+      { id: "0005_mcp_poll_states.sql" },
     ]);
+  });
+
+  it("persists MCP poll cursor state", async (t) => {
+    if (!store) {
+      t.skip(skipReason);
+      return;
+    }
+
+    const first = await store.saveMcpPollState(
+      "slack_dm_source",
+      {
+        cursor: "456.000",
+        seen: new Set(["slack_dm_source:123.000", "slack_dm_source:456.000"]),
+      },
+      new Date("2026-05-06T12:00:00.000Z"),
+    );
+    const second = await store.saveMcpPollState(
+      "slack_dm_source",
+      {
+        cursor: "789.000",
+        seen: new Set(["slack_dm_source:456.000", "slack_dm_source:789.000"]),
+      },
+      new Date("2026-05-06T12:01:00.000Z"),
+    );
+    const fetched = await store.getMcpPollState("slack_dm_source");
+
+    assert.equal(first.cursor, "456.000");
+    assert.deepEqual(first.seen, ["slack_dm_source:123.000", "slack_dm_source:456.000"]);
+    assert.deepEqual(second, {
+      source_id: "slack_dm_source",
+      cursor: "789.000",
+      seen: ["slack_dm_source:456.000", "slack_dm_source:789.000"],
+      updated_at: "2026-05-06T12:01:00.000Z",
+    });
+    assert.deepEqual(fetched, second);
   });
 
   it("persists activity events and counters", async (t) => {
@@ -601,6 +637,7 @@ async function clearTestData(store: PostgresQueueStore) {
   await store.pool.query(`
     TRUNCATE
       metric_counters,
+      mcp_poll_states,
       activity_events,
       receipts,
       route_decisions,

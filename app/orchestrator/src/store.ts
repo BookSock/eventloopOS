@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Action, ContextResource, EvidenceRef, QueueItem, QueueItemWithPacket, QueueState, ReviewPacket } from "./contracts.js";
+import type { McpPollStateSnapshot } from "./integrations/mcp_poll/persistent_cursor_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import type { WorkspaceRestoreReceiptRecord } from "./workspace/restore_receipts.js";
 
@@ -20,6 +21,7 @@ export type InMemoryStore = {
   contextRestoreRequests: Map<string, ContextRestoreRequestRecord>;
   contextRestoreRequestIdsByIdempotencyKey: Map<string, string>;
   workspaceRestoreReceipts?: Map<string, WorkspaceRestoreReceiptRecord>;
+  mcpPollStates?: Map<string, McpPollStateSnapshot>;
 };
 
 export type RouteDecision = {

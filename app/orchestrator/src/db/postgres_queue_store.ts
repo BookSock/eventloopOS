@@ -12,6 +12,8 @@ import type {
   RiskLevel,
 } from "../contracts.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
+import type { McpCursorState } from "../integrations/mcp_poll/types.js";
+import type { McpPollStateSnapshot } from "../integrations/mcp_poll/persistent_cursor_store.js";
 import type { RestoreExecutionReceipt, RestorePlan } from "../workspace/aerospace.js";
 import type { WorkspaceRestoreReceiptRecord } from "../workspace/restore_receipts.js";
 import {
@@ -112,6 +114,45 @@ export class PostgresQueueStore {
     );
     const row = result.rows[0];
     return row ? rowToWorkspaceRestoreReceipt(row) : undefined;
+  }
+
+  async getMcpPollState(sourceId: string): Promise<McpPollStateSnapshot | undefined> {
+    const result = await this.pool.query(
+      `
+        SELECT source_id, cursor, seen, updated_at
+        FROM mcp_poll_states
+        WHERE source_id = $1
+      `,
+      [sourceId],
+    );
+    const row = result.rows[0];
+    return row ? rowToMcpPollStateSnapshot(row) : undefined;
+  }
+
+  async saveMcpPollState(sourceId: string, state: McpCursorState, now: Date): Promise<McpPollStateSnapshot> {
+    const result = await this.pool.query(
+      `
+        INSERT INTO mcp_poll_states (
+          source_id,
+          cursor,
+          seen,
+          created_at,
+          updated_at
+        )
+        VALUES ($1, $2, $3::jsonb, $4::timestamptz, $4::timestamptz)
+        ON CONFLICT (source_id) DO UPDATE SET
+          cursor = EXCLUDED.cursor,
+          seen = EXCLUDED.seen,
+          updated_at = EXCLUDED.updated_at
+        RETURNING source_id, cursor, seen, updated_at
+      `,
+      [sourceId, state.cursor ?? null, JSON.stringify(Array.from(state.seen)), now.toISOString()],
+    );
+    return rowToMcpPollStateSnapshot(result.rows[0]);
+  }
+
+  async clearMcpPollState(sourceId: string): Promise<void> {
+    await this.pool.query("DELETE FROM mcp_poll_states WHERE source_id = $1", [sourceId]);
   }
 
   async recordWorkspaceRestoreReceipt(input: {
@@ -1151,6 +1192,15 @@ function rowToWorkspaceRestoreReceipt(row: QueryResultRow): WorkspaceRestoreRece
     plan: details.plan as RestorePlan,
     receipt: details.receipt as RestoreExecutionReceipt,
     created_at: requiredDateToIso(row.created_at),
+  };
+}
+
+function rowToMcpPollStateSnapshot(row: QueryResultRow): McpPollStateSnapshot {
+  return {
+    source_id: row.source_id,
+    cursor: row.cursor ?? undefined,
+    seen: Array.isArray(row.seen) ? row.seen.filter((item): item is string => typeof item === "string") : [],
+    updated_at: requiredDateToIso(row.updated_at),
   };
 }
 

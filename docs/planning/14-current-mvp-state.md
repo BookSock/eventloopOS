@@ -150,6 +150,7 @@ Strong tests now:
 - Opt-in fixture-audio STT smoke passed locally with `EVENTLOOPOS_ENABLE_VOICE_STT_SMOKE=1 EVENTLOOPOS_WHISPER_MODEL=external-resources/models/whisper/ggml-tiny.en.bin pnpm run voice:stt-smoke`; transcript was `computer blog post priority changed.`
 - `dev:doctor` reports whether `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` is configured and can launch with `--help`; unconfigured voice command is treated as optional/pass.
 - `dev:doctor` reports whether `ORCHESTRATOR_MCP_SOURCES_PATH` or `config/mcp-sources.json` contains valid MCP polling sources; missing default config is treated as optional/pass. MVP MCP source config validation now rejects write-enabled/high-risk polling sources (`readOnly` must be true, `allowWriteTools` false, `maxRiskLevel` low), and SDK-backed polling checks the server-advertised poll tool before first call and requires `annotations.readOnlyHint=true`.
+- MCP poll cursor/seen state persists through the gateway store. Config-backed real MCP sources hydrate state before polling and commit staged cursor state only after poll results successfully route, so a route failure does not skip events on retry. Postgres mode stores state in `mcp_poll_states`; in-memory mode has matching conformance coverage.
 - Config paths for MCP sources, Codex task maps, and seed fixtures resolve existing repo-root relative files even when package scripts run from `app/orchestrator`.
 - File-backed local events MCP server exists for dogfood. `config/mcp-sources.local-events.example.json` launches it over stdio, reads `EVENTLOOPOS_LOCAL_EVENTS_PATH`, and returns generic event-ish `items[]` for MCP poll routing.
 - Read-only `agent-slack` MCP wrapper exists for Jason dogfood. `config/mcp-sources.agent-slack.example.json` launches it over stdio, reads `EVENTLOOPOS_AGENT_SLACK_*` filters, shells out to `agent-slack search messages`, maps compact Slack search output into `slack_message_to_event` items, and accepts the orchestrator MCP cursor as an `--after YYYY-MM-DD` fallback when no explicit `EVENTLOOPOS_AGENT_SLACK_AFTER` is set. It does not expose Slack write tools. Same-day refetch is expected; idempotency/cursor dedupe owns exact duplicate suppression.
@@ -179,10 +180,9 @@ Weak tests:
 
 ## Next Best Work
 
-1. Persist MCP poll cursor/seen state so Slack/GitHub polling survives orchestrator restart without noisy refetch.
-2. Add a real GitHub installed-tool MCP source dogfood config/wrapper for Jason's installed tools, using the local-events and agent-slack recipes as templates.
-3. Add durable `task_messages` history for Codex/Claude followups and idempotency.
-4. Real Claude+Codex composite dogfood with harmless sessions configured together.
-5. Fix manual-mode exit snapshot semantics.
-6. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-7. Later: real microphone/wake-word proof and always-listening voice UX.
+1. Add a real GitHub installed-tool MCP source dogfood config/wrapper for Jason's installed tools, using the local-events and agent-slack recipes as templates.
+2. Add durable `task_messages` history for Codex/Claude followups and idempotency.
+3. Real Claude+Codex composite dogfood with harmless sessions configured together.
+4. Fix manual-mode exit snapshot semantics.
+5. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+6. Later: real microphone/wake-word proof and always-listening voice UX.

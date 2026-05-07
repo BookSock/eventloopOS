@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { validateMcpPollSourceConfig } from "./config_schema.js";
-import { createSeededDevelopmentMcpSourceRegistry } from "./development_registry.js";
-import { readMcpSourceConfigs } from "./development_registry.js";
+import { createSeededDevelopmentMcpSourceRegistry, DevelopmentMcpSourceRegistry, readMcpSourceConfigs } from "./development_registry.js";
 import { readMcpPollFixture } from "./fixture_parser.js";
 import { createMcpPollerState, pollMcpSource } from "./poller.js";
-import type { McpPollSourceConfig } from "./types.js";
+import type { McpCursorState, McpPollSourceConfig } from "./types.js";
+import type { McpPollStateSnapshot } from "./persistent_cursor_store.js";
 
 describe("MCP poll ingestion", () => {
   it("validates source config and maps Slack fixture to Event objects", async () => {
@@ -290,6 +290,42 @@ describe("MCP poll ingestion", () => {
     assert.equal(duplicateResult?.events.length, 0);
     assert.equal(duplicateResult?.duplicates_ignored, 2);
     assert.equal(await registry.pollSource("missing_source", fixture, "2026-05-06T17:00:00Z"), undefined);
+  });
+
+  it("hydrates and commits MCP cursor state across registry restarts", async () => {
+    const config = await readConfig("../../tests/fixtures/mcp/source-slack.json");
+    const fixture = await readMcpPollFixture(join(process.cwd(), "../../tests/fixtures/events/mcp-slack-github-poll.json"));
+    const durableStates = new Map<string, McpPollStateSnapshot>();
+    const stateStore = {
+      async getMcpPollState(sourceId: string) {
+        return durableStates.get(sourceId);
+      },
+      async saveMcpPollState(sourceId: string, state: McpCursorState, now: Date) {
+        const snapshot = {
+          source_id: sourceId,
+          cursor: state.cursor,
+          seen: Array.from(state.seen),
+          updated_at: now.toISOString(),
+        };
+        durableStates.set(sourceId, snapshot);
+        return snapshot;
+      },
+    };
+    const runner = { callTool: async () => fixture };
+    const firstRegistry = new DevelopmentMcpSourceRegistry([config], runner, stateStore);
+
+    const first = await firstRegistry.pollSource("slack_dm_source", {}, "2026-05-06T17:00:00Z");
+    assert.equal(first?.events.length, 1);
+    assert.equal(first?.cursor, "456.000");
+    if (!first?.state) throw new Error("expected staged MCP state");
+    await firstRegistry.commitPollState("slack_dm_source", first.state, new Date("2026-05-06T17:00:01Z"));
+
+    const afterRestartRegistry = new DevelopmentMcpSourceRegistry([config], runner, stateStore);
+    const afterRestart = await afterRestartRegistry.pollSource("slack_dm_source", {}, "2026-05-06T17:01:00Z");
+
+    assert.equal(afterRestart?.events.length, 0);
+    assert.equal(afterRestart?.duplicates_ignored, 2);
+    assert.equal(afterRestart?.cursor, "456.000");
   });
 
   it("validates documented MCP source config example", async () => {

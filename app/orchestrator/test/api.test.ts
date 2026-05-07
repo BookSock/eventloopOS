@@ -3788,6 +3788,7 @@ describe("orchestrator gateway API", () => {
 
   it("continues poll-all routing when one MCP source fails", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
+    const committedStates: Array<{ sourceId: string; cursor?: string; seen: string[] }> = [];
     const mcpServer = createGatewayServer({
       store,
       now: () => new Date("2026-05-06T17:05:00.000Z"),
@@ -3828,7 +3829,18 @@ describe("orchestrator gateway API", () => {
               },
             ],
             duplicates_ignored: 0,
+            state: {
+              cursor: "item-1",
+              seen: new Set(["working:item:1"]),
+            },
           };
+        },
+        commitPollState(sourceId, state) {
+          committedStates.push({
+            sourceId,
+            cursor: state.cursor,
+            seen: Array.from(state.seen),
+          });
         },
       },
     });
@@ -3873,6 +3885,13 @@ describe("orchestrator gateway API", () => {
       assert.equal(body.polled[0].error, "broken MCP source timed out");
       assert.equal(body.polled[1].source_id, "working_source");
       assert.equal(body.polled[1].routed?.[0]?.event.id, "evt_poll_all_working");
+      assert.deepEqual(committedStates, [
+        {
+          sourceId: "working_source",
+          cursor: "item-1",
+          seen: ["working:item:1"],
+        },
+      ]);
     } finally {
       await new Promise<void>((resolve, reject) => {
         mcpServer.close((error) => (error ? reject(error) : resolve()));

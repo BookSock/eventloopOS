@@ -2,7 +2,8 @@ import { readFile } from "node:fs/promises";
 import { parseMcpPollFixture } from "./fixture_parser.js";
 import { validateMcpPollSourceConfig } from "./config_schema.js";
 import { createMcpPollerState, pollMcpSource, type McpPollerState, type McpToolRunner } from "./poller.js";
-import type { McpEvent, McpPollSourceConfig } from "./types.js";
+import { hydrateCursorState, type McpCursorStateStore } from "./persistent_cursor_store.js";
+import type { McpCursorState, McpEvent, McpPollSourceConfig } from "./types.js";
 
 export type McpSourceSummary = {
   id: string;
@@ -18,13 +19,17 @@ export type McpSourcePollOutput = {
   events: McpEvent[];
   cursor?: string;
   duplicates_ignored: number;
+  state?: McpCursorState;
 };
 
 export class DevelopmentMcpSourceRegistry {
   private readonly configs = new Map<string, McpPollSourceConfig>();
   private readonly states = new Map<string, McpPollerState>();
-
-  constructor(configs: McpPollSourceConfig[], private readonly runner?: McpToolRunner) {
+  constructor(
+    configs: McpPollSourceConfig[],
+    private readonly runner?: McpToolRunner,
+    private readonly cursorStateStore?: McpCursorStateStore,
+  ) {
     for (const config of configs) {
       this.configs.set(config.id, config);
       this.states.set(config.id, createMcpPollerState(config));
@@ -47,6 +52,10 @@ export class DevelopmentMcpSourceRegistry {
     const state = this.states.get(sourceId);
     if (!config || !state) return undefined;
 
+    if (this.cursorStateStore) {
+      hydrateCursorState(state.cursor, await this.cursorStateStore.getMcpPollState(sourceId));
+    }
+
     const runner = this.runner ?? createFixtureRunner(input);
     const result = await pollMcpSource({
       config,
@@ -59,7 +68,12 @@ export class DevelopmentMcpSourceRegistry {
       events: result.events,
       cursor: result.cursor,
       duplicates_ignored: result.duplicatesIgnored,
+      state: result.state,
     };
+  }
+
+  async commitPollState(sourceId: string, state: McpCursorState, now: Date): Promise<void> {
+    await this.cursorStateStore?.saveMcpPollState(sourceId, state, now);
   }
 }
 

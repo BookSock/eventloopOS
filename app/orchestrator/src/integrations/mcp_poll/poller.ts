@@ -24,7 +24,7 @@ export async function pollMcpSource(params: {
   runner: McpToolRunner;
   state: McpPollerState;
   receivedAt: string;
-}): Promise<{ events: McpEvent[]; cursor?: string; duplicatesIgnored: number }> {
+}): Promise<{ events: McpEvent[]; cursor?: string; duplicatesIgnored: number; state: McpCursorState }> {
   await assertConfiguredPollToolIsReadOnly(params.config, params.runner, params.state);
 
   const result = await params.runner.callTool(params.config, {
@@ -51,6 +51,14 @@ export async function pollMcpSource(params: {
     events,
     cursor: params.state.cursor.cursor,
     duplicatesIgnored,
+    state: cloneCursorState(params.state.cursor),
+  };
+}
+
+function cloneCursorState(state: McpCursorState): McpCursorState {
+  return {
+    cursor: state.cursor,
+    seen: new Set(state.seen),
   };
 }
 

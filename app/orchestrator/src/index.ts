@@ -82,7 +82,7 @@ async function createMcpSourceRegistry() {
 
   if (config.value.mcpSources === "config") {
     const configs = await readMcpSourceConfigs(config.value.mcpSourcesPath ?? "");
-    return new DevelopmentMcpSourceRegistry(configs, new McpSdkRuntime());
+    return new DevelopmentMcpSourceRegistry(configs, new McpSdkRuntime(), gatewayRuntime.store);
   }
 
   return createSeededDevelopmentMcpSourceRegistry();

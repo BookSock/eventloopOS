@@ -184,7 +184,7 @@ Stale critique:
 Real gaps:
 
 - Browser extension now has app-level allowed-origin gating and no manifest-level all-page content-script injection. Remaining gap: Chrome `host_permissions` is still `<all_urls>` for programmatic injection; optional host permission UX can come later if this permission warning blocks dogfood.
-- MCP poll cursor/seen state is in memory. Before real Slack/GitHub polling loops become daily-driver input, persist cursor/seen state in Postgres or a local file-backed store.
+- MCP poll cursor/seen state now persists through the gateway store and commits only after successful routing. Use Postgres mode for real Slack/GitHub dogfood if restart-proof cursor state matters.
 - Task followup/session history is not durable enough. Add `task_messages` persistence with idempotency key, runtime, session ID, status, text hash/length, event IDs, native turn ID, timestamps, and error summary.
 - Task runtime types are too loose. Replace `unknown`-heavy boundaries with shared `TaskSession`, `TaskMessage`, `TaskRuntimeCapabilities`, and `TaskRuntimeError` shapes for Codex and Claude.
 - Manual-mode docs say return-to-event-loop snapshots the manual layout, but current code captures on entry. Either fix exit-time capture or change docs; product intent prefers exit-time capture.
@@ -193,10 +193,9 @@ Real gaps:
 
 ## Next Best Work
 
-1. Persist MCP poll cursor/seen state so Slack/GitHub polling survives restart without noisy refetch.
-2. Add real GitHub installed-tool MCP source config/wrapper, matching the `agent-slack` dogfood path.
-3. Add durable `task_messages` history for Codex/Claude followups and idempotency.
-4. Real Claude+Codex composite dogfood against harmless configured sessions.
-5. Fix manual-mode exit snapshot semantics.
-6. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
-7. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+1. Add real GitHub installed-tool MCP source config/wrapper, matching the `agent-slack` dogfood path.
+2. Add durable `task_messages` history for Codex/Claude followups and idempotency.
+3. Real Claude+Codex composite dogfood against harmless configured sessions.
+4. Fix manual-mode exit snapshot semantics.
+5. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
+6. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.

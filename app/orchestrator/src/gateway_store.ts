@@ -2,7 +2,8 @@ import type { QueueItemWithPacket, QueueState, ReviewPacket } from "./contracts.
 import type { PostgresQueueStore } from "./db/postgres_queue_store.js";
 import type { RestoreExecutionReceipt, RestorePlan } from "./workspace/aerospace.js";
 import type { WorkspaceRestoreReceiptRecord } from "./workspace/restore_receipts.js";
-import type { McpEvent } from "./integrations/mcp_poll/types.js";
+import type { McpCursorState, McpEvent } from "./integrations/mcp_poll/types.js";
+import type { McpPollStateSnapshot } from "./integrations/mcp_poll/persistent_cursor_store.js";
 import {
   getReviewPacket,
   getStoredEvent,
@@ -71,11 +72,15 @@ export type GatewayStore = {
     receipt: RestoreExecutionReceipt;
     now: Date;
   }): Promise<WorkspaceRestoreReceiptRecord>;
+  getMcpPollState(sourceId: string): Promise<McpPollStateSnapshot | undefined>;
+  saveMcpPollState(sourceId: string, state: McpCursorState, now: Date): Promise<McpPollStateSnapshot>;
 };
 
 export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   const workspaceRestoreReceipts = store.workspaceRestoreReceipts ?? new Map<string, WorkspaceRestoreReceiptRecord>();
+  const mcpPollStates = store.mcpPollStates ?? new Map<string, McpPollStateSnapshot>();
   store.workspaceRestoreReceipts = workspaceRestoreReceipts;
+  store.mcpPollStates = mcpPollStates;
 
   return {
     async listQueue(state, now) {
@@ -156,6 +161,19 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
       };
       workspaceRestoreReceipts.set(input.idempotencyKey, record);
       return record;
+    },
+    async getMcpPollState(sourceId) {
+      return mcpPollStates.get(sourceId);
+    },
+    async saveMcpPollState(sourceId, state, now) {
+      const snapshot = {
+        source_id: sourceId,
+        cursor: state.cursor,
+        seen: Array.from(state.seen),
+        updated_at: now.toISOString(),
+      };
+      mcpPollStates.set(sourceId, snapshot);
+      return snapshot;
     },
   };
 }
@@ -248,6 +266,12 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async recordWorkspaceRestoreReceipt(input) {
       return store.recordWorkspaceRestoreReceipt(input);
+    },
+    async getMcpPollState(sourceId) {
+      return store.getMcpPollState(sourceId);
+    },
+    async saveMcpPollState(sourceId, state, now) {
+      return store.saveMcpPollState(sourceId, state, now);
     },
   };
 }

@@ -1,5 +1,5 @@
 import type { McpSourcePollOutput } from "../integrations/mcp_poll/development_registry.js";
-import type { McpEvent } from "../integrations/mcp_poll/types.js";
+import type { McpCursorState, McpEvent } from "../integrations/mcp_poll/types.js";
 import type { Observability } from "../observability.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
@@ -8,6 +8,7 @@ export type McpSourceRegistry = {
   listSources: () => Promise<unknown[]> | unknown[];
   getSource?: (sourceId: string) => Promise<unknown | undefined> | unknown | undefined;
   pollSource: (sourceId: string, input: unknown, receivedAt: string) => Promise<McpSourcePollOutput | undefined> | McpSourcePollOutput | undefined;
+  commitPollState?: (sourceId: string, state: McpCursorState, now: Date) => Promise<void> | void;
 };
 
 export type McpEventRouter = (event: McpEvent, now: Date) => Promise<unknown>;
@@ -90,6 +91,7 @@ export async function handleMcpSourcesRoute(input: {
         for (const event of pollResult.events) {
           routed.push(await input.routeEvent(event, input.now));
         }
+        await commitPollState(input.mcpSources, sourceId, pollResult.state, input.now);
 
         eventsSeen += pollResult.events.length;
         routedCount += routed.length;
@@ -170,6 +172,7 @@ export async function handleMcpSourcesRoute(input: {
     try {
       const result = await input.mcpSources.pollSource(sourceId, parsed.value, input.now.toISOString());
       if (!result) return error(404, "not_found", `MCP source ${sourceId} was not found`);
+      await commitPollState(input.mcpSources, sourceId, result.state, input.now);
 
       return ok(200, {
         source_id: sourceId,
@@ -201,6 +204,7 @@ export async function handleMcpSourcesRoute(input: {
       for (const event of pollResult.events) {
         routed.push(await input.routeEvent(event, input.now));
       }
+      await commitPollState(input.mcpSources, sourceId, pollResult.state, input.now);
 
       return ok(200, {
         source_id: sourceId,
@@ -216,6 +220,17 @@ export async function handleMcpSourcesRoute(input: {
   }
 
   return undefined;
+}
+
+async function commitPollState(
+  mcpSources: McpSourceRegistry,
+  sourceId: string,
+  state: McpCursorState | undefined,
+  now: Date,
+): Promise<void> {
+  if (state) {
+    await mcpSources.commitPollState?.(sourceId, state, now);
+  }
 }
 
 export function validateMcpPollRequest(
