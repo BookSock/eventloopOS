@@ -1,0 +1,48 @@
+{
+  "sources": [
+    {
+      "id": "agent_slack_search_source",
+      "server": {
+        "name": "eventloopos-agent-slack",
+        "command": "node",
+        "args": ["dist/src/mcp_sources/agent_slack_events_server.js"],
+        "envAllowlist": [
+          "PATH",
+          "HOME",
+          "XDG_CONFIG_HOME",
+          "XDG_RUNTIME_DIR",
+          "EVENTLOOPOS_AGENT_SLACK_COMMAND",
+          "EVENTLOOPOS_AGENT_SLACK_QUERY",
+          "EVENTLOOPOS_AGENT_SLACK_WORKSPACE",
+          "EVENTLOOPOS_AGENT_SLACK_CHANNELS",
+          "EVENTLOOPOS_AGENT_SLACK_USER",
+          "EVENTLOOPOS_AGENT_SLACK_AFTER",
+          "EVENTLOOPOS_AGENT_SLACK_BEFORE",
+          "EVENTLOOPOS_AGENT_SLACK_LIMIT",
+          "EVENTLOOPOS_AGENT_SLACK_MAX_CONTENT_CHARS",
+          "EVENTLOOPOS_AGENT_SLACK_TIMEOUT_MS",
+          "EVENTLOOPOS_AGENT_SLACK_MAX_BUFFER_BYTES"
+        ],
+        "stderrLogPath": "var/log/mcp/agent_slack_search_source.stderr.log"
+      },
+      "poll": {
+        "tool": "search_messages",
+        "args": {},
+        "timeoutMs": 10000
+      },
+      "cursor": {
+        "strategy": "field",
+        "field": "ts",
+        "initial": "0",
+        "dedupeWindow": 1000
+      },
+      "eventMapper": "slack_message_to_event",
+      "riskPolicy": {
+        "readOnly": true,
+        "allowWriteTools": false,
+        "maxRiskLevel": "low",
+        "untrustedTextFields": ["text"]
+      }
+    }
+  ]
+}

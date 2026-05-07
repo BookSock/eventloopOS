@@ -34,6 +34,34 @@ pnpm run dev:dogfood
 
 The `local_events_source` config launches `app/orchestrator/dist/src/mcp_sources/local_events_server.js` over stdio and reads `EVENTLOOPOS_LOCAL_EVENTS_PATH`. It is read-only: edit the JSON file yourself, then run `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` or enable the dogfood poll loop.
 
+For dogfood with Jason's local Slack setup, use the read-only `agent-slack` wrapper:
+
+```sh
+pnpm --filter @eventloopos/orchestrator build
+EVENTLOOPOS_AGENT_SLACK_QUERY='blog OR launch' \
+ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.agent-slack.example.json \
+pnpm --filter @eventloopos/orchestrator start
+```
+
+Then in another shell:
+
+```sh
+EVENTLOOPOS_AGENT_SLACK_QUERY='blog OR launch' \
+ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.agent-slack.example.json \
+pnpm --filter @eventloopos/orchestrator run poll:mcp:once
+```
+
+Optional filters:
+
+- `EVENTLOOPOS_AGENT_SLACK_WORKSPACE`
+- `EVENTLOOPOS_AGENT_SLACK_CHANNELS` as comma-separated channel IDs/names.
+- `EVENTLOOPOS_AGENT_SLACK_USER`
+- `EVENTLOOPOS_AGENT_SLACK_AFTER` / `EVENTLOOPOS_AGENT_SLACK_BEFORE` as dates.
+- `EVENTLOOPOS_AGENT_SLACK_LIMIT`
+- `EVENTLOOPOS_AGENT_SLACK_MAX_CONTENT_CHARS`
+
+The wrapper shells out to `agent-slack search messages`, returns only Slack-like read items, and maps them through `slack_message_to_event`. It does not expose Slack send/edit/delete/draft tools to the orchestrator. Keep query/channel filters tight; broad Slack search can be noisy and may return old messages that cursor dedupe then ignores. This config allowlists `PATH`, `HOME`, `XDG_CONFIG_HOME`, and `XDG_RUNTIME_DIR` so the local `agent-slack` binary and local auth files can be found by the child MCP process.
+
 Use `generic_item_to_event` when a local MCP server can return items shaped like:
 
 ```json
