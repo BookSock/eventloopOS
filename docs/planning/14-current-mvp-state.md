@@ -84,6 +84,7 @@ Done:
 - Restore request persistence through same in-memory/Postgres store abstraction as queue storage.
 - Expired restore request leases get reaped and reclaimed.
 - Doctor checks orchestrator health, AeroSpace, Docker, browser Playwright readiness, Codex app-server.
+- `pnpm --filter @eventloopos/orchestrator run live:aerospace` builds and emits a machine-readable skip by default. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1`, it checks live AeroSpace status/capture/restore-plan without executing workspace moves.
 
 Gap:
 
@@ -106,6 +107,7 @@ Weak tests:
 
 - Postgres live tests skip when Docker absent.
 - AeroSpace live restore needs installed/running AeroSpace.
+- AeroSpace live smoke exists, but `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm --filter @eventloopos/orchestrator run live:aerospace` currently reports `server_unavailable` because AeroSpace.app is not running.
 - No full installed extension + native host + Mac app manual UI flow.
 - No local voice wake-word/STT test.
 
