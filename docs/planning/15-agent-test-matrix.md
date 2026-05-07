@@ -22,6 +22,7 @@ This is the current reality map for agents. Pick the narrowest command that prov
 | Mac client + browser restore | `pnpm run test:e2e:mac-browser-restore` | Swift `HTTPQueueClient` creates a real restore request, Chromium extension claims it, restores the tab/scroll, and marks request done | Uses unpacked Chromium extension, not app bundle/XCUITest. |
 | macOS queue UI render + launch | `pnpm run test:e2e:macos` | Real SwiftUI `QueueWindowView` renders seeded queue data to nonblank image, then built temp `.app` launches in test mode and stays alive | No XCUITest interaction yet. |
 | macOS app launch | `pnpm run test:e2e:macos-launch` | Builds `EventLoopQueueApp`, launches it in test mode, verifies it stays alive, and terminates it | Smoke only; no UI interaction assertions. |
+| macOS app UI interaction | `EVENTLOOPOS_ENABLE_MACOS_UI_SMOKE=1 pnpm run test:e2e:macos-ui` | Builds temp `.app`, opens menu bar extra, opens queue window, toggles Manual Mode, toggles back to Event Loop, then terminates exact bundle process | Requires macOS Accessibility permission for `osascript`/System Events; not default CI. |
 | macOS client + live orchestrator | `pnpm run test:e2e:live:boot` | Booted orchestrator plus Mac `HTTPQueueClient` context restore request round-trip | Also runs live harness/native/browser smoke. |
 | Full local installed smoke | `pnpm run test:e2e:live:full` | One booted orchestrator reused by harness scenarios, Mac client smoke, browser E2E, and installed Chromium extension/native host capture | Best local daily-driver verifier. |
 | AeroSpace backend | `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm run live:aerospace` | Live AeroSpace status/capture/restore-plan without executing moves | Requires AeroSpace.app running; passed locally with real window capture and non-executing restore plan. Add `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE_EXECUTE=1` to move one real window to scratch workspace and restore it. |
@@ -45,7 +46,7 @@ Do not claim a subsystem works from `make ci` alone when the subsystem requires 
 
 ## Known Weak Spots
 
-- Real XCUITest interaction is not scaffolded. Current Mac UI proof is SwiftUI render smoke, temp `.app` launch smoke, and HTTP client live smoke.
+- Real XCUITest interaction is not scaffolded. Current Mac UI proof is SwiftUI render smoke, temp `.app` launch smoke, opt-in AppleScript menu/window/manual-mode smoke, and HTTP client live smoke.
 - Real AeroSpace live proof needs AeroSpace.app running. Opt-in execute smoke proves one real window move/restore, not full multi-window layout reconstruction under every edge case.
 - Docker Postgres proof needs Docker daemon. Native Postgres proof is available and passed locally.
 - Real microphone/STT audio proof is not implemented. Transcript command pipe and whisper.cpp stream command construction are test-covered with fake process output.

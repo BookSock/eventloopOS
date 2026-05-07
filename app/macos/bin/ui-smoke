@@ -1,0 +1,155 @@
+#!/usr/bin/env node
+import {
+  buildPackagedQueueAppBundle,
+  openQueueApp,
+  spawnChecked,
+  terminateProcessByExecutablePath,
+  waitForExit,
+} from "./smoke-app-bundle.mjs";
+
+if (process.platform !== "darwin") {
+  console.log("macOS queue UI smoke skipped: requires darwin");
+  process.exit(0);
+}
+
+if (process.env.EVENTLOOPOS_ENABLE_MACOS_UI_SMOKE !== "1") {
+  console.log("macOS queue UI smoke skipped: set EVENTLOOPOS_ENABLE_MACOS_UI_SMOKE=1");
+  process.exit(0);
+}
+
+try {
+  const bundle = await buildPackagedQueueAppBundle();
+  const child = openQueueApp(bundle.appBundle);
+  let output = "";
+  child.stdout.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+
+  try {
+    await waitForProcess(bundle.executablePath, 8_000);
+    const proof = await runUiProof();
+    await terminateProcessByExecutablePath(bundle.executablePath);
+    await waitForExit(child, 3_000);
+    console.log(JSON.stringify({ ok: true, ...proof }, null, 2));
+  } catch (error) {
+    await tryTerminate(bundle.executablePath, child);
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\n${output}`);
+  } finally {
+    await bundle.cleanup();
+  }
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+}
+
+async function runUiProof() {
+  const script = `
+on waitForMenuBarExtra()
+  repeat with attempt from 1 to 80
+    tell application "System Events"
+      if exists process "EventLoopQueueApp" then
+        tell process "EventLoopQueueApp"
+          if (count of menu bars) is greater than or equal to 2 then return
+        end tell
+      end if
+    end tell
+    delay 0.1
+  end repeat
+  error "EventLoopQueueApp menu bar extra did not appear"
+end waitForMenuBarExtra
+
+on menuItemNames()
+  waitForMenuBarExtra()
+  tell application "System Events"
+    tell process "EventLoopQueueApp"
+      tell menu bar item 1 of menu bar 2
+        click
+        delay 0.2
+        set namesList to name of menu items of menu 1
+      end tell
+    end tell
+  end tell
+  return namesList
+end menuItemNames
+
+on assertContains(valuesList, expectedValue)
+  if valuesList does not contain expectedValue then
+    error "missing menu item: " & expectedValue & " in " & (valuesList as string)
+  end if
+end assertContains
+
+set initialItems to menuItemNames()
+assertContains(initialItems, "Open Queue")
+assertContains(initialItems, "Enter Manual Mode")
+
+tell application "System Events"
+  tell process "EventLoopQueueApp"
+    click menu item "Open Queue" of menu 1 of menu bar item 1 of menu bar 2
+  end tell
+end tell
+delay 0.8
+
+tell application "System Events"
+  tell process "EventLoopQueueApp"
+    if (count of windows) is 0 then error "queue window did not open"
+    set queueWindowName to name of window 1
+  end tell
+end tell
+
+set reopenItems to menuItemNames()
+assertContains(reopenItems, "Enter Manual Mode")
+tell application "System Events"
+  tell process "EventLoopQueueApp"
+    click menu item "Enter Manual Mode" of menu 1 of menu bar item 1 of menu bar 2
+  end tell
+end tell
+delay 0.5
+set manualItems to menuItemNames()
+assertContains(manualItems, "Return to Event Loop")
+
+tell application "System Events"
+  tell process "EventLoopQueueApp"
+    click menu item "Return to Event Loop" of menu 1 of menu bar item 1 of menu bar 2
+  end tell
+end tell
+delay 0.5
+set finalItems to menuItemNames()
+assertContains(finalItems, "Enter Manual Mode")
+
+return queueWindowName
+`;
+
+  const result = await spawnChecked("osascript", ["-e", script]);
+  return {
+    window_name: result.stdout.trim(),
+    mode_toggle_proof: "menu item changed Enter Manual Mode -> Return to Event Loop -> Enter Manual Mode",
+  };
+}
+
+async function waitForProcess(executablePath, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ps = await spawnChecked("ps", ["-axo", "command="]);
+    if (ps.stdout.includes(executablePath)) {
+      return;
+    }
+    await sleep(100);
+  }
+  throw new Error(`EventLoopQueueApp process did not appear for ${executablePath}`);
+}
+
+async function tryTerminate(executablePath, child) {
+  try {
+    await terminateProcessByExecutablePath(executablePath);
+    await waitForExit(child, 3_000);
+  } catch {
+    child.kill("SIGKILL");
+  }
+}
+
+async function sleep(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}

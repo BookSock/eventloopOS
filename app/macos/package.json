@@ -7,6 +7,7 @@
     "test": "swift test",
     "test:e2e": "swift test --filter QueueWindowRenderTests && bin/launch-smoke",
     "test:e2e:launch": "bin/launch-smoke",
-    "typecheck": "swift build"
+    "test:e2e:ui": "bin/ui-smoke",
+    "typecheck": "node --check bin/launch-smoke && node --check bin/ui-smoke && node --check bin/smoke-app-bundle.mjs && swift build"
   }
 }

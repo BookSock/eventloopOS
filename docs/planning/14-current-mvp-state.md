@@ -113,6 +113,7 @@ Strong tests now:
 - Mac client + browser restore smoke exists as `pnpm run test:e2e:mac-browser-restore`; it starts a real orchestrator, has Swift `HTTPQueueClient` create a restore request, and proves the Chromium extension claims/completes it.
 - Full live boot smoke can reuse one running orchestrator for harness scenarios, Mac client live smoke, browser extension E2E, and installed Chromium extension/native host capture with `pnpm run test:e2e:live:full`.
 - Opt-in invasive AeroSpace smoke passed locally with `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 EVENTLOOPOS_ENABLE_LIVE_AEROSPACE_EXECUTE=1 pnpm run live:aerospace`; it moved window `282477` from workspace `1` to `eventloop-smoke` and restored it to `1`.
+- Opt-in macOS UI automation smoke passed locally with `EVENTLOOPOS_ENABLE_MACOS_UI_SMOKE=1 pnpm run test:e2e:macos-ui`; it opens the menu bar extra, opens the queue window, toggles Manual Mode, and toggles back to Event Loop.
 - `voice:listen` accepts line-delimited local STT transcript streams, optional wake phrase filtering, and forwards into `/voice/commands`.
 - `voice:listen-command` lets whisper.cpp stream, MLX Whisper wrappers, or other local STT tools feed the same router while staying unit-testable through an injected process. The whisper.cpp stream preset is unit-covered and doctor-checked.
 - `dev:doctor` reports whether `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` is configured and can launch with `--help`; unconfigured voice command is treated as optional/pass.
@@ -122,11 +123,11 @@ Weak tests:
 
 - Docker-backed Postgres live tests skip when Docker absent, but native Postgres live tests pass on this machine.
 - AeroSpace live restore needs installed/running AeroSpace. Local live smoke proves capture, planning, and opt-in one-window restore execution; it does not prove full multi-window layout reconstruction under every app/window edge case.
-- No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, and temp `.app` bundle launch, but not one combined installed Mac UI interaction flow.
+- No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, temp `.app` bundle launch, and opt-in AppleScript menu/window/manual-mode interaction.
 - No real microphone wake-word/STT audio proof yet; current coverage proves the local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
 
 ## Next Best Work
 
 1. Run Docker/Postgres DB tests on machine with Docker daemon and record pass/fail.
-2. Add app bundle/XCUITest smoke for installed Mac UI flow.
+2. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
 3. Add real microphone/STT adapter feeding `voice:listen` (whisper.cpp, MLX Whisper, or macOS Speech).
