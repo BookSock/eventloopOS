@@ -54,6 +54,7 @@ Done:
 - Done/next.
 - Auto lease renewal.
 - Manual mode hotkey (`Cmd-Option-Shift-M`).
+- Menu bar shell with queue count, selected item, mode, restore state, open queue, refresh, done/next, and mode toggle.
 - Workspace restore planning pause in manual mode.
 - Context resource restore request from queue UI.
 - Restore request status refresh.
@@ -62,7 +63,6 @@ Done:
 
 Gap:
 
-- No polished menu bar app shell yet.
 - No real installed Chrome extension + Mac app combined live UI test yet.
 
 ## Orchestrator Loop
