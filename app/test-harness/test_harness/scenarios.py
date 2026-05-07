@@ -19,6 +19,7 @@ BROWSER_CONTEXT_STORE_ONLY = "browser_context_store_only"
 BROWSER_CONTEXT_RANKED_SEARCH = "browser_context_ranked_search"
 BROWSER_CONTEXT_ATTACH_TASK = "browser_context_attach_task"
 TASK_SESSION_FOLLOWUP = "task_session_followup"
+QUEUE_RECOMMENDED_ACTION = "queue_recommended_action"
 TASK_SESSION_BINDING = "task_session_binding"
 VOICE_TASK_COMMAND = "voice_task_command"
 WORKSPACE_SNAPSHOT_CONTEXT = "workspace_snapshot_context"
@@ -34,6 +35,7 @@ SCENARIOS = (
     BROWSER_CONTEXT_RANKED_SEARCH,
     BROWSER_CONTEXT_ATTACH_TASK,
     TASK_SESSION_FOLLOWUP,
+    QUEUE_RECOMMENDED_ACTION,
     TASK_SESSION_BINDING,
     VOICE_TASK_COMMAND,
     WORKSPACE_SNAPSHOT_CONTEXT,
@@ -1593,6 +1595,303 @@ class TaskSessionFollowupScenario:
                 raise ScenarioFailure(f"message {field} mismatch: expected {value!r}, got {message.get(field)!r}")
         if duplicate.get("id") != message.get("id"):
             raise ScenarioFailure("duplicate followup must return same task message id")
+
+
+class QueueRecommendedActionScenario:
+    def __init__(
+        self,
+        loader: FixtureLoader,
+        writer: ArtifactWriter,
+        clock: FakeClock,
+        orchestrator_url: str | None = None,
+    ) -> None:
+        self.loader = loader
+        self.writer = writer
+        self.clock = clock
+        self.orchestrator_url = orchestrator_url
+
+    def run(self) -> ScenarioResult:
+        mode = "orchestrator" if self.orchestrator_url else "fixture"
+        log: dict[str, Any] = {
+            "scenario": QUEUE_RECOMMENDED_ACTION,
+            "mode": mode,
+            "started_at": self.clock.now_iso(),
+            "steps": [],
+        }
+        try:
+            result = self._run_orchestrator(log) if self.orchestrator_url else self._run_fixture(log)
+            log["passed"] = True
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            self.writer.write_json("summary.json", result.details)
+            return result
+        except Exception as exc:
+            log["passed"] = False
+            log["error"] = str(exc)
+            log["finished_at"] = self.clock.now_iso()
+            self.writer.write_json("scenario-log.json", log)
+            raise
+
+    def _run_fixture(self, log: dict[str, Any]) -> ScenarioResult:
+        event = self.loader.scenario_fixture(QUEUE_RECOMMENDED_ACTION, "manual_review_event.json")
+        golden = self.loader.golden_expectation(QUEUE_RECOMMENDED_ACTION)
+        route_decision = self._expected_route_decision(event)
+        review_packet = self._expected_review_packet(event, route_decision)
+        queue_item = self._expected_queue_item(event, review_packet)
+        task_message = self._expected_task_message(queue_item, review_packet, event)
+        action_result = self._expected_action_result(queue_item, review_packet, task_message)
+
+        log["steps"].append({"name": "route_event", "route_decision_id": route_decision["id"]})
+        log["steps"].append(
+            {
+                "name": "create_queue_item_review_packet",
+                "queue_item_id": queue_item["id"],
+                "review_packet_id": review_packet["id"],
+            }
+        )
+        log["steps"].append({"name": "execute_recommended_action", "task_message_id": task_message["id"]})
+        log["steps"].append({"name": "assert_queue_empty"})
+
+        observed = {
+            "event": event,
+            "route_decision": route_decision,
+            "review_packet": review_packet,
+            "next_queue_item": queue_item,
+            "action_response": {
+                "ok": True,
+                "action_result": action_result,
+                "item": {**queue_item, "state": "done"},
+            },
+            "task_message": task_message,
+            "final_queue": {"item": None},
+        }
+        self._assert_golden(observed, golden)
+        self.writer.write_json("observed.json", observed)
+        return ScenarioResult(
+            scenario=QUEUE_RECOMMENDED_ACTION,
+            mode="fixture",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": event["id"],
+                "queue_item_id": queue_item["id"],
+                "review_packet_id": review_packet["id"],
+                "task_session_id": action_result["task_session_id"],
+                "task_message_id": task_message["id"],
+            },
+        )
+
+    def _run_orchestrator(self, log: dict[str, Any]) -> ScenarioResult:
+        assert self.orchestrator_url is not None
+        client = OrchestratorClient(self.orchestrator_url)
+        event = self.loader.scenario_fixture(QUEUE_RECOMMENDED_ACTION, "manual_review_event.json")
+        golden = self.loader.golden_expectation(QUEUE_RECOMMENDED_ACTION)
+        self._drain_existing_queue(client, log)
+
+        route_response = client.route_event(event)
+        queue_item = route_response.get("queue_item")
+        review_packet = route_response.get("review_packet")
+        route_decision = route_response.get("route_decision")
+        if not isinstance(queue_item, dict) or not isinstance(review_packet, dict) or not isinstance(route_decision, dict):
+            raise ScenarioFailure("route response missing queue action review artifacts")
+        log["steps"].append({"name": "route_event", "route_decision_id": route_decision.get("id")})
+        log["steps"].append(
+            {
+                "name": "create_queue_item_review_packet",
+                "queue_item_id": queue_item.get("id"),
+                "review_packet_id": review_packet.get("id"),
+            }
+        )
+
+        action_response = client.execute_recommended_action(queue_item["id"], {"actor_id": "user_jason"})
+        action_result = action_response.get("action_result")
+        task_message = action_result.get("task_message") if isinstance(action_result, dict) else None
+        if not isinstance(action_result, dict) or not isinstance(task_message, dict):
+            raise ScenarioFailure("recommended action response missing task message")
+        log["steps"].append({"name": "execute_recommended_action", "task_message_id": task_message.get("id")})
+
+        final_queue_item = client.next_queue_item()
+        log["steps"].append({"name": "assert_queue_empty"})
+        if final_queue_item is not None:
+            raise ScenarioFailure(f"expected empty queue after recommended action, got {final_queue_item!r}")
+
+        observed = {
+            "event": event,
+            "route_decision": route_decision,
+            "review_packet": review_packet,
+            "next_queue_item": queue_item,
+            "action_response": action_response,
+            "task_message": task_message,
+            "final_queue": {"item": None},
+        }
+        self._assert_golden(observed, golden)
+        self.writer.write_json("observed.json", observed)
+        return ScenarioResult(
+            scenario=QUEUE_RECOMMENDED_ACTION,
+            mode="orchestrator",
+            passed=True,
+            artifact_dir=self.writer.root,
+            details={
+                "event_id": event["id"],
+                "queue_item_id": queue_item["id"],
+                "review_packet_id": review_packet["id"],
+                "task_session_id": action_result["task_session_id"],
+                "task_message_id": task_message["id"],
+            },
+        )
+
+    def _expected_route_decision(self, event: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": f"rte_{self._stable_id(event['id'])}",
+            "event_id": event["id"],
+            "action": "ask_human_now",
+            "target_task_id": f"task_{self._stable_id(event['task_hint'])}",
+            "confidence": "medium",
+        }
+
+    def _expected_review_packet(self, event: dict[str, Any], route_decision: dict[str, Any]) -> dict[str, Any]:
+        stable_event_id = self._stable_id(event["id"])
+        return {
+            "id": f"pkt_{stable_event_id}",
+            "task_id": route_decision["target_task_id"],
+            "title": f"Review {event['title']}",
+            "summary": event["summary"],
+            "risk_level": "medium",
+            "confidence": "medium",
+            "recommended_action": {
+                "id": f"act_{stable_event_id}_review",
+                "type": "resume_agent",
+                "label": "Route to task agent",
+                "payload": {
+                    "event_id": event["id"],
+                    "task_hint": event["task_hint"],
+                    "project_hint": event["project_hint"],
+                    "route_decision_id": route_decision["id"],
+                },
+            },
+        }
+
+    def _expected_queue_item(
+        self,
+        event: dict[str, Any],
+        review_packet: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "id": f"qit_{self._stable_id(event['id'])}",
+            "review_packet_id": review_packet["id"],
+            "task_id": review_packet["task_id"],
+            "state": "ready",
+            "priority_score": 800,
+            "priority_reasons": ["new_background_event", "manual_event", "task_hint_present"],
+        }
+
+    def _expected_task_message(
+        self,
+        queue_item: dict[str, Any],
+        review_packet: dict[str, Any],
+        event: dict[str, Any],
+    ) -> dict[str, Any]:
+        idempotency_key = f"queue_action_{queue_item['id']}_{review_packet['recommended_action']['id']}"
+        return {
+            "id": f"task_msg_{self._stable_id(idempotency_key)}",
+            "task_session_id": "task_session_blog",
+            "mode": "followup",
+            "text": "\n".join(
+                [
+                    "Human approved this queue item. Continue work with this context.",
+                    f"Queue item: {queue_item['id']}",
+                    f"Packet: {review_packet['title']}",
+                    f"Summary: {review_packet['summary']}",
+                    "Decision: Decide whether to route this new event into a task agent now.",
+                    f"Source event: {event['source']} {event['id']}",
+                    f"Raw ref: {event['raw_ref']['uri']}",
+                ]
+            ),
+            "event_ids": [event["id"]],
+            "idempotency_key": idempotency_key,
+            "status": "sent",
+        }
+
+    @staticmethod
+    def _expected_action_result(
+        queue_item: dict[str, Any],
+        review_packet: dict[str, Any],
+        task_message: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "type": "resume_agent",
+            "queue_item_id": queue_item["id"],
+            "review_packet_id": review_packet["id"],
+            "task_id": queue_item["task_id"],
+            "task_session_id": "task_session_blog",
+            "task_message": task_message,
+        }
+
+    def _assert_golden(self, observed: dict[str, Any], golden: dict[str, Any]) -> None:
+        for name, observed_key, golden_key in (
+            ("event", "event", "expected_event"),
+            ("route decision", "route_decision", "expected_route_decision"),
+            ("review packet", "review_packet", "expected_review_packet"),
+            ("queue item", "next_queue_item", "expected_queue_item"),
+        ):
+            actual = observed[observed_key]
+            expected = golden[golden_key]
+            for field, value in expected.items():
+                if actual.get(field) != value:
+                    raise ScenarioFailure(f"{name} {field} mismatch: expected {value!r}, got {actual.get(field)!r}")
+
+        review_packet = observed["review_packet"]
+        recommended_action = review_packet.get("recommended_action")
+        if not isinstance(recommended_action, dict) or recommended_action.get("type") != "resume_agent":
+            raise ScenarioFailure("review packet recommended action must be resume_agent")
+        for field, value in golden["expected_recommended_action"].items():
+            if recommended_action.get(field) != value:
+                raise ScenarioFailure(
+                    f"recommended action {field} mismatch: expected {value!r}, got {recommended_action.get(field)!r}"
+                )
+
+        action_result = observed["action_response"].get("action_result")
+        if not isinstance(action_result, dict):
+            raise ScenarioFailure("action response missing action_result")
+        for field, value in golden["expected_action_result"].items():
+            if action_result.get(field) != value:
+                raise ScenarioFailure(f"action result {field} mismatch: expected {value!r}, got {action_result.get(field)!r}")
+
+        task_message = observed["task_message"]
+        for field, value in golden["expected_task_message"].items():
+            if task_message.get(field) != value:
+                raise ScenarioFailure(f"task message {field} mismatch: expected {value!r}, got {task_message.get(field)!r}")
+        if "Human approved this queue item" not in task_message.get("text", ""):
+            raise ScenarioFailure("task message text must include human approval context")
+        if observed["final_queue"] != {"item": None}:
+            raise ScenarioFailure(f"expected final empty queue, got {observed['final_queue']!r}")
+
+    def _drain_existing_queue(self, client: OrchestratorClient, log: dict[str, Any]) -> None:
+        drained = 0
+        for _ in range(10):
+            item = client.next_queue_item()
+            if item is None:
+                break
+            client.mark_done(
+                item["id"],
+                {
+                    "action": "done",
+                    "actor_id": "test_harness",
+                    "queue_item_id": item["id"],
+                    "review_packet_id": item["review_packet_id"],
+                },
+            )
+            drained += 1
+        if drained:
+            log["steps"].append({"name": "drain_existing_queue", "count": drained})
+        if drained == 10:
+            raise ScenarioFailure("existing queue drain hit safety limit")
+
+    @staticmethod
+    def _stable_id(value: str) -> str:
+        normalized = "".join(character.lower() if character.isalnum() else "_" for character in value)
+        collapsed = "_".join(part for part in normalized.split("_") if part)
+        return collapsed or "unknown"
 
 
 class TaskSessionBindingScenario:

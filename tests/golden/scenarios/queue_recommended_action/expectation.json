@@ -1,0 +1,59 @@
+{
+  "expected_event": {
+    "id": "evt_manual_blog_human_queue_action",
+    "source": "manual",
+    "source_id": "manual:blog-human-queue-action",
+    "idempotency_key": "manual:blog-human-queue-action",
+    "type": "manual.review_requested",
+    "title": "Blog launch review needs approval"
+  },
+  "expected_route_decision": {
+    "id": "rte_evt_manual_blog_human_queue_action",
+    "event_id": "evt_manual_blog_human_queue_action",
+    "action": "ask_human_now",
+    "target_task_id": "task_blog_feedback",
+    "confidence": "medium"
+  },
+  "expected_review_packet": {
+    "id": "pkt_evt_manual_blog_human_queue_action",
+    "task_id": "task_blog_feedback",
+    "title": "Review Blog launch review needs approval",
+    "summary": "Approve routing the launch detail into the blog feedback agent thread.",
+    "risk_level": "medium",
+    "confidence": "medium"
+  },
+  "expected_queue_item": {
+    "id": "qit_evt_manual_blog_human_queue_action",
+    "review_packet_id": "pkt_evt_manual_blog_human_queue_action",
+    "task_id": "task_blog_feedback",
+    "state": "ready",
+    "priority_score": 800,
+    "priority_reasons": [
+      "new_background_event",
+      "manual_event",
+      "task_hint_present"
+    ]
+  },
+  "expected_recommended_action": {
+    "id": "act_evt_manual_blog_human_queue_action_review",
+    "type": "resume_agent",
+    "label": "Route to task agent"
+  },
+  "expected_action_result": {
+    "type": "resume_agent",
+    "queue_item_id": "qit_evt_manual_blog_human_queue_action",
+    "review_packet_id": "pkt_evt_manual_blog_human_queue_action",
+    "task_id": "task_blog_feedback",
+    "task_session_id": "task_session_blog"
+  },
+  "expected_task_message": {
+    "id": "task_msg_queue_action_qit_evt_manual_blog_human_queue_action_act_evt_manual_blog_human_queue_action_review",
+    "task_session_id": "task_session_blog",
+    "mode": "followup",
+    "event_ids": [
+      "evt_manual_blog_human_queue_action"
+    ],
+    "idempotency_key": "queue_action_qit_evt_manual_blog_human_queue_action_act_evt_manual_blog_human_queue_action_review",
+    "status": "sent"
+  }
+}

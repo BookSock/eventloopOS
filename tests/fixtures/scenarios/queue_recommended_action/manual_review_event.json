@@ -1,0 +1,40 @@
+{
+  "id": "evt_manual_blog_human_queue_action",
+  "source": "manual",
+  "source_id": "manual:blog-human-queue-action",
+  "idempotency_key": "manual:blog-human-queue-action",
+  "occurred_at": "2026-05-06T18:10:00Z",
+  "received_at": "2026-01-15T09:30:00Z",
+  "actor": {
+    "id": "user_jason",
+    "type": "human",
+    "name": "Jason"
+  },
+  "project_hint": "pagerfree",
+  "task_hint": "blog feedback",
+  "type": "manual.review_requested",
+  "title": "Blog launch review needs approval",
+  "summary": "Approve routing the launch detail into the blog feedback agent thread.",
+  "raw_ref": {
+    "id": "raw_manual_blog_human_queue_action",
+    "uri": "manual://reviews/blog-human-queue-action",
+    "media_type": "application/json"
+  },
+  "links": [
+    {
+      "label": "Blog draft",
+      "url": "file:///tmp/eventloopos/blog-draft.md"
+    }
+  ],
+  "resources": [
+    {
+      "id": "ctx_manual_blog_human_queue_action",
+      "kind": "document",
+      "title": "Blog draft",
+      "url": "file:///tmp/eventloopos/blog-draft.md",
+      "source": "manual",
+      "captured_at": "2026-05-06T18:10:00Z",
+      "restore_confidence": "medium"
+    }
+  ]
+}

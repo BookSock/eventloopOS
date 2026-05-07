@@ -16,6 +16,7 @@ from test_harness.scenarios import (
     MCP_POLL_ALL_ROUTE_DONE,
     MCP_POLL_ROUTE_DONE,
     MCP_SOURCE_POLL_ROUTE_DONE,
+    QUEUE_RECOMMENDED_ACTION,
     SEEDED_QUEUE,
     TASK_SESSION_FOLLOWUP,
     VOICE_TASK_COMMAND,
@@ -29,6 +30,7 @@ from test_harness.scenarios import (
     McpPollAllRouteDoneScenario,
     McpPollRouteDoneScenario,
     McpSourcePollRouteDoneScenario,
+    QueueRecommendedActionScenario,
     SeededQueueScenario,
     TaskSessionFollowupScenario,
     VoiceTaskCommandScenario,
@@ -363,6 +365,59 @@ class TaskSessionFollowupRunnerTests(unittest.TestCase):
 
     def _run(self, artifact_dir: Path):
         runner = TaskSessionFollowupScenario(
+            loader=FixtureLoader(REPO_ROOT),
+            writer=ArtifactWriter(artifact_dir),
+            clock=FakeClock(),
+        )
+        return runner.run()
+
+
+class QueueRecommendedActionRunnerTests(unittest.TestCase):
+    def test_fixture_replay_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            result = self._run(Path(tmp))
+
+        self.assertTrue(result.passed)
+        self.assertEqual(result.scenario, QUEUE_RECOMMENDED_ACTION)
+        self.assertEqual(result.mode, "fixture")
+        self.assertEqual(result.details["task_session_id"], "task_session_blog")
+
+    def test_artifact_generation_captures_human_approval_handoff(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            artifact_dir = Path(tmp)
+            self._run(artifact_dir)
+
+            log = json.loads((artifact_dir / "scenario-log.json").read_text(encoding="utf-8"))
+            observed = json.loads((artifact_dir / "observed.json").read_text(encoding="utf-8"))
+            summary = json.loads((artifact_dir / "summary.json").read_text(encoding="utf-8"))
+
+        self.assertTrue(log["passed"])
+        self.assertEqual(
+            [step["name"] for step in log["steps"]],
+            [
+                "route_event",
+                "create_queue_item_review_packet",
+                "execute_recommended_action",
+                "assert_queue_empty",
+            ],
+        )
+        self.assertEqual(observed["review_packet"]["recommended_action"]["type"], "resume_agent")
+        self.assertEqual(observed["task_message"]["task_session_id"], "task_session_blog")
+        self.assertIn("Human approved this queue item", observed["task_message"]["text"])
+        self.assertEqual(observed["final_queue"], {"item": None})
+        self.assertEqual(summary["queue_item_id"], "qit_evt_manual_blog_human_queue_action")
+
+    def test_runner_self_test_contract(self) -> None:
+        loader = FixtureLoader(REPO_ROOT)
+        event = loader.scenario_fixture(QUEUE_RECOMMENDED_ACTION, "manual_review_event.json")
+        golden = loader.golden_expectation(QUEUE_RECOMMENDED_ACTION)
+
+        self.assertEqual(event["type"], "manual.review_requested")
+        self.assertEqual(golden["expected_recommended_action"]["type"], "resume_agent")
+        self.assertEqual(golden["expected_task_message"]["task_session_id"], "task_session_blog")
+
+    def _run(self, artifact_dir: Path):
+        runner = QueueRecommendedActionScenario(
             loader=FixtureLoader(REPO_ROOT),
             writer=ArtifactWriter(artifact_dir),
             clock=FakeClock(),

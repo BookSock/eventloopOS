@@ -27,6 +27,9 @@ class OrchestratorClient:
     def mark_done(self, queue_item_id: str, decision: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", f"/queue/{queue_item_id}/done", decision)
 
+    def execute_recommended_action(self, queue_item_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._request("POST", f"/queue/{queue_item_id}/actions/recommended", payload) or {}
+
     def poll_mcp_source(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/mcp/poll", payload) or {}
 
