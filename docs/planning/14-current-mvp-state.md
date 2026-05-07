@@ -95,6 +95,7 @@ Done:
 - `poll-and-route` for generic MCP sources uses the same ambient inference path, so user-installed MCP servers can emit event-ish items without `task_hint` and still reach the right task session when stored context is clear.
 - MCP source mappers normalize provider deeplinks for Slack, GitHub, Notion, Google Docs, Figma, and generic browser URLs into `resource.details` with stable provider IDs, confidence reasons, and browser fallback metadata.
 - `ORCHESTRATOR_TASK_SESSIONS=claude_cli` exposes configured Claude Code sessions from `ORCHESTRATOR_CLAUDE_SESSIONS` through the same task-session API; followups run `claude -p --output-format json --resume <session>` in the configured `cwd`.
+- Claude session config can pin `model`, `tools`, and `max_budget_usd`, so real smoke/followup runs can force cheap read-only behavior instead of inheriting an expensive or tool-enabled default.
 - `ORCHESTRATOR_TASK_SESSIONS` now accepts comma-separated modes, so `codex_app_server,claude_cli` exposes Codex App Server threads and configured Claude Code sessions in one daemon. A composite task-session controller lists both providers and routes followups/bindings to the owner runtime by session ID.
 - `pnpm task:runtime-smoke` starts a temporary orchestrator with `codex_app_server,claude_cli`, checks live Codex app-server sessions plus a configured Claude session are exposed together, then shuts the daemon down.
 - `GET /contexts` ranked search.
@@ -187,6 +188,7 @@ Strong tests now:
 - Router decisions now tag human-queue creation with `human_queue_reason`: `human_blocked`, `ambiguous`, or `risky`. This keeps queue creation aligned to the intake-stack model instead of generic “ask human” routing.
 - Real local Postgres + local-events MCP dogfood proof passed: started Docker Postgres, ran orchestrator with `DATABASE_URL`, `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json`, and `EVENTLOOPOS_LOCAL_EVENTS_PATH=config/local-events.example.json`, ran `poll:mcp:once`, saw one ambiguous human-queue packet, then `dogfood:check` passed. After orchestrator restart, `/queue`, `/activity`, and `/metrics` still showed the routed item and counters from Postgres.
 - `pnpm run test:e2e:postgres-mcp-dogfood` now automates that proof: Docker Postgres up/down, local-events MCP poll, dogfood threshold check, orchestrator restart, persisted queue/activity/metrics assertions.
+- `pnpm run test:e2e:claude-real-followup` is a gated real Claude smoke. Without `EVENTLOOPOS_ENABLE_REAL_CLAUDE_SMOKE=1` it prints a machine-readable skip. With the flag it creates a disposable Claude session using Haiku, disables tools, caps per-call budget, starts orchestrator with that session, sends a followup through `/task-sessions/:id/followup`, and asserts the task message is `sent` with the same native session ID.
 - Opt-in AppleScript UI smoke now proves the Pull Next Paper menu item exists and that Manual Mode captures workspace only on return to Event Loop, then Restore Manual Workspace returns the user to manual mode.
 
 Weak tests:
@@ -201,7 +203,7 @@ Weak tests:
 ## Next Best Work
 
 1. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-2. Add safe real Claude followup smoke against an explicitly supplied disposable Claude session.
-3. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
-4. Decide whether to promote `test:e2e:postgres-mcp-dogfood` into `proof:live` by default when Docker is available.
+2. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
+3. Decide whether to promote `test:e2e:postgres-mcp-dogfood` and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
+4. Add richer after-the-fact history UI for task session/message lineage, not only API/activity logs.
 5. Later: real microphone/wake-word proof and always-listening voice UX.

@@ -5,6 +5,9 @@ export type ClaudeCliSessionConfig = {
   task_id?: string;
   name?: string;
   cwd?: string;
+  model?: string;
+  tools?: string;
+  max_budget_usd?: string;
   status?: ClaudeCliTaskSession["status"];
   created_at?: string;
   updated_at?: string;
@@ -113,8 +116,12 @@ export class ClaudeCliTaskSessionController implements TaskSessionController {
       "json",
       "--resume",
       session.native_session_id,
-      input.text,
     ];
+    const config = this.configForSession(session.native_session_id);
+    if (config?.model) args.push("--model", config.model);
+    if (config?.tools !== undefined) args.push("--tools", config.tools);
+    if (config?.max_budget_usd) args.push("--max-budget-usd", config.max_budget_usd);
+    args.push(input.text);
 
     try {
       const result = await this.execFile(this.command, args, {
@@ -163,6 +170,10 @@ export class ClaudeCliTaskSessionController implements TaskSessionController {
       created_at: createdAt,
       updated_at: updatedAt,
     };
+  }
+
+  private configForSession(sessionId: string): ClaudeCliSessionConfig | undefined {
+    return this.sessions.find((session) => session.session_id === sessionId);
   }
 
   private recordMessage(input: {
@@ -229,6 +240,9 @@ export function parseClaudeSessionConfigs(raw: string | undefined): ClaudeCliSes
       task_id: optionalString(value.task_id),
       name: optionalString(value.name),
       cwd: optionalString(value.cwd),
+      model: optionalString(value.model),
+      tools: typeof value.tools === "string" ? value.tools : undefined,
+      max_budget_usd: optionalString(value.max_budget_usd),
       status: parseStatus(value.status),
       created_at: optionalString(value.created_at),
       updated_at: optionalString(value.updated_at),

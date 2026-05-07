@@ -1,0 +1,225 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+
+const enabled = process.env.EVENTLOOPOS_ENABLE_REAL_CLAUDE_SMOKE === "1";
+const claudeCommand = process.env.EVENTLOOPOS_CLAUDE_COMMAND ?? "claude";
+const model = process.env.EVENTLOOPOS_CLAUDE_SMOKE_MODEL ?? "haiku";
+const maxBudgetUsd = process.env.EVENTLOOPOS_CLAUDE_SMOKE_MAX_BUDGET_USD ?? "0.08";
+const port = process.env.EVENTLOOPOS_CLAUDE_SMOKE_PORT ?? "4388";
+const baseUrl = `http://127.0.0.1:${port}`;
+
+let server;
+
+try {
+  if (!enabled) {
+    console.log(JSON.stringify({
+      ok: true,
+      skipped: true,
+      reason: "set EVENTLOOPOS_ENABLE_REAL_CLAUDE_SMOKE=1 to run real Claude CLI followup smoke",
+    }, null, 2));
+    process.exit(0);
+  }
+
+  const sessionId = process.env.EVENTLOOPOS_CLAUDE_SMOKE_SESSION_ID ?? randomUUID();
+  const taskSessionId = taskSessionIdForClaudeSession(sessionId);
+  const created = await createDisposableClaudeSession(sessionId);
+  assertClaudeResult(created, sessionId, "eventloopos-claude-smoke-ready");
+
+  await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "build"]);
+  server = spawn("pnpm", ["--filter", "@eventloopos/orchestrator", "start"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      ORCHESTRATOR_HOST: "127.0.0.1",
+      ORCHESTRATOR_PORT: port,
+      ORCHESTRATOR_WORKSPACE: "off",
+      ORCHESTRATOR_MCP_SOURCES: "off",
+      ORCHESTRATOR_TASK_SESSIONS: "claude_cli",
+      ORCHESTRATOR_CLAUDE_SESSIONS: JSON.stringify({
+        [sessionId]: {
+          task_id: "task_real_claude_smoke",
+          name: "Real Claude smoke disposable",
+          cwd: process.cwd(),
+          model,
+          tools: "",
+          max_budget_usd: maxBudgetUsd,
+        },
+      }),
+    },
+    stdio: "inherit",
+  });
+  await waitForHealth(server);
+
+  const sessions = await fetchJson("/task-sessions");
+  const session = sessions.sessions?.find((candidate) => candidate.id === taskSessionId);
+  if (!session) {
+    throw new Error(`task session ${taskSessionId} missing from /task-sessions`);
+  }
+  if (session.provider !== "claude") {
+    throw new Error(`expected Claude provider, got ${session.provider}`);
+  }
+
+  const followup = await postJson(`/task-sessions/${encodeURIComponent(taskSessionId)}/followup`, {
+    text: "Reply with exactly: eventloopos-claude-followup-ok",
+    event_ids: ["evt_real_claude_smoke"],
+  }, {
+    "idempotency-key": `idem_real_claude_smoke_${stableId(sessionId)}`,
+  });
+  if (followup.message?.status !== "sent") {
+    throw new Error(`Claude followup was not sent: ${JSON.stringify(followup)}`);
+  }
+  if (followup.message?.native_session_id !== sessionId) {
+    throw new Error(`expected native_session_id ${sessionId}, got ${followup.message?.native_session_id}`);
+  }
+
+  console.log(JSON.stringify({
+    ok: true,
+    base_url: baseUrl,
+    provider: "claude",
+    model,
+    session_id: sessionId,
+    task_session_id: taskSessionId,
+    create_cost_usd: created.total_cost_usd,
+    followup_message_id: followup.message.id,
+    followup_status: followup.message.status,
+    native_result_session_id: followup.message.native_result_session_id,
+  }, null, 2));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  if (server && server.exitCode === null) {
+    server.kill("SIGTERM");
+    await waitForExit(server);
+  }
+}
+
+async function createDisposableClaudeSession(sessionId) {
+  const result = await spawnCapture(claudeCommand, [
+    "-p",
+    "--output-format",
+    "json",
+    "--tools",
+    "",
+    "--model",
+    model,
+    "--max-budget-usd",
+    maxBudgetUsd,
+    "--session-id",
+    sessionId,
+    "Reply with exactly: eventloopos-claude-smoke-ready",
+  ]);
+  return parseJsonOutput(result.stdout, "Claude create session");
+}
+
+function assertClaudeResult(result, expectedSessionId, expectedText) {
+  if (result.is_error || result.session_id !== expectedSessionId || result.result !== expectedText) {
+    throw new Error(`unexpected Claude result: ${JSON.stringify(result)}`);
+  }
+}
+
+async function fetchJson(path) {
+  const response = await fetch(new URL(path, baseUrl));
+  const body = await response.json();
+  if (!response.ok) {
+    throw new Error(`${path} failed: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+async function postJson(path, body, headers = {}) {
+  const response = await fetch(new URL(path, baseUrl), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+  const responseBody = await response.json();
+  if (!response.ok) {
+    throw new Error(`${path} failed: ${JSON.stringify(responseBody)}`);
+  }
+  return responseBody;
+}
+
+async function waitForHealth(child) {
+  const deadline = Date.now() + 20_000;
+  let exited = false;
+  child.once("exit", () => {
+    exited = true;
+  });
+
+  while (Date.now() < deadline) {
+    if (exited) throw new Error("orchestrator exited before health check passed");
+    try {
+      const response = await fetch(new URL("/health", baseUrl));
+      if (response.ok) return;
+    } catch {
+      // keep waiting
+    }
+    await sleep(100);
+  }
+  throw new Error(`timed out waiting for orchestrator health at ${baseUrl}`);
+}
+
+async function spawnChecked(file, args, env = process.env) {
+  await spawnCapture(file, args, env, "inherit");
+}
+
+async function spawnCapture(file, args, env = process.env, stdio = "pipe") {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      cwd: process.cwd(),
+      env,
+      stdio: stdio === "inherit" ? "inherit" : ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    if (child.stdout) {
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk.toString();
+        process.stdout.write(chunk);
+      });
+    }
+    if (child.stderr) {
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk.toString();
+        process.stderr.write(chunk);
+      });
+    }
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}`));
+    });
+  });
+}
+
+function parseJsonOutput(output, label) {
+  const line = output.trim().split(/\r?\n/).findLast((candidate) => candidate.trim().startsWith("{"));
+  if (!line) throw new Error(`${label} did not print JSON`);
+  return JSON.parse(line);
+}
+
+async function waitForExit(child) {
+  return await new Promise((resolve) => {
+    child.once("exit", resolve);
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function taskSessionIdForClaudeSession(sessionId) {
+  return `claude_session_${stableId(sessionId)}`;
+}
+
+function stableId(input) {
+  return input.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}

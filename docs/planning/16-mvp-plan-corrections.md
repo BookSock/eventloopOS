@@ -202,6 +202,7 @@ Real gaps:
 - Human queue routing now has an explicit `human_queue_reason`: `human_blocked`, `ambiguous`, or `risky`. Queue creation should stay inside those reasons so the product remains an intake stack of blocked papers, not an ambient notification stream.
 - Real local Postgres + local-events MCP dogfood proof has been run: MCP poll created one ambiguous intake item, `dogfood:check` passed, and queue/activity/metrics survived orchestrator restart against the same Postgres database.
 - The same proof is scripted as `pnpm run test:e2e:postgres-mcp-dogfood`, so future agents can rerun it instead of relying on notes.
+- Real Claude followup proof now exists behind `EVENTLOOPOS_ENABLE_REAL_CLAUDE_SMOKE=1`: disposable Haiku session, tools disabled, budget capped, orchestrator session exposure, and real `/task-sessions/:id/followup` send.
 - GatewayStore remains broad. Conformance tests reduce risk; split into smaller store ports later, after dogfood-critical safety/history patches.
 
 Latest user steering:
@@ -225,7 +226,7 @@ Release guardrails:
 
 ## Next Best Work
 
-1. Add safe real Claude followup smoke against an explicitly supplied disposable Claude session.
-2. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
-3. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-4. Decide whether `test:e2e:postgres-mcp-dogfood` should run inside `proof:live` by default when Docker is available.
+1. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
+2. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+3. Decide whether `test:e2e:postgres-mcp-dogfood` and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
+4. Add richer after-the-fact history UI for task session/message lineage, not only API/activity logs.

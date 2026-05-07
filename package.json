@@ -23,6 +23,7 @@
     "test:e2e:live:boot": "bin/live-smoke",
     "test:e2e:live:full": "EVENTLOOPOS_ENABLE_NATIVE_BROWSER_LIVE_SMOKE=1 bin/live-smoke",
     "test:e2e:postgres-mcp-dogfood": "bin/postgres-mcp-dogfood-smoke",
+    "test:e2e:claude-real-followup": "bin/claude-real-followup-smoke",
     "test:db:docker": "pnpm --filter @eventloopos/orchestrator run test:db:docker",
     "test:db:native": "pnpm --filter @eventloopos/orchestrator run test:db:native",
     "dev:doctor": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dev:doctor",
@@ -50,7 +51,7 @@
     "fixtures:seed": "pnpm --filter @eventloopos/test-harness --if-present fixtures:seed",
     "packets:golden": "pnpm --filter @eventloopos/test-harness --if-present packets:golden",
     "lint": "pnpm -r --if-present lint",
-    "typecheck": "node --check bin/live-smoke && node --check bin/dev-dogfood && node --check bin/proof-agent && node --check bin/task-runtime-smoke && node --check bin/postgres-mcp-dogfood-smoke && pnpm -r --if-present typecheck",
+    "typecheck": "node --check bin/live-smoke && node --check bin/dev-dogfood && node --check bin/proof-agent && node --check bin/task-runtime-smoke && node --check bin/postgres-mcp-dogfood-smoke && node --check bin/claude-real-followup-smoke && pnpm -r --if-present typecheck",
     "ci": "pnpm test:proof-agent && pnpm proof:agent"
   },
   "devDependencies": {
