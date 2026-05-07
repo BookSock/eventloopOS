@@ -6,6 +6,7 @@ import { createInMemoryGatewayStore } from "../src/gateway_store.js";
 import { createSeededDevelopmentMcpSourceRegistry } from "../src/integrations/mcp_poll/development_registry.js";
 import { createGatewayServer } from "../src/server.js";
 import { buildReviewArtifactsFromEvent, createSeededStore } from "../src/store.js";
+import { createSeededDevelopmentTaskSessions } from "../src/task_sessions/development_task_session_controller.js";
 
 describe("orchestrator gateway API", () => {
   let server: Server;
@@ -1402,6 +1403,118 @@ describe("orchestrator gateway API", () => {
     } finally {
       await new Promise<void>((resolve, reject) => {
         taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("executes recommended resume-agent queue action and marks the item done", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const taskSessions = createSeededDevelopmentTaskSessions(() => new Date("2026-05-06T18:00:00.000Z"));
+    const actionServer = createGatewayServer({
+      store,
+      taskSessions,
+      now: () => new Date("2026-05-06T18:00:00.000Z"),
+    });
+    await new Promise<void>((resolve) => actionServer.listen(0, "127.0.0.1", resolve));
+    const address = actionServer.address() as AddressInfo;
+    const actionBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const event = {
+        id: "evt_manual_blog_action",
+        source: "manual",
+        source_id: "manual:blog-action",
+        idempotency_key: "manual:blog-action",
+        occurred_at: "2026-05-06T17:59:00.000Z",
+        received_at: "2026-05-06T18:00:00.000Z",
+        actor: {
+          id: "actor_manual_jason",
+          type: "human",
+          name: "Jason",
+        },
+        project_hint: "eventloopOS",
+        task_hint: "blog feedback",
+        type: "manual.review_requested",
+        title: "Launch blog final paragraph",
+        summary: "Check final paragraph before sending.",
+        raw_ref: {
+          id: "raw_manual_blog_action",
+          uri: "manual://reviews/blog-action",
+          media_type: "text/plain",
+        },
+        links: [
+          {
+            label: "Draft",
+            url: "https://docs.example.test/blog",
+          },
+        ],
+        resources: [
+          {
+            id: "ctx_manual_blog_action",
+            kind: "manual_note",
+            title: "Launch blog final paragraph",
+            url: "https://docs.example.test/blog",
+            source: "manual",
+            captured_at: "2026-05-06T18:00:00.000Z",
+            restore_confidence: "medium",
+          },
+        ],
+      };
+
+      const eventResponse = await fetch(`${actionBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ event }),
+      });
+      const eventBody = await eventResponse.json() as {
+        queue_item: {
+          id: string;
+        };
+      };
+
+      assert.equal(eventResponse.status, 202);
+      const actionResponse = await fetch(`${actionBaseUrl}/queue/${eventBody.queue_item.id}/actions/recommended`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ actor_id: "mac_queue_app" }),
+      });
+      const actionBody = await actionResponse.json() as {
+        ok: boolean;
+        action_result: {
+          task_id: string;
+          task_session_id: string;
+          task_message: {
+            status: string;
+            text: string;
+            event_ids: string[];
+          };
+        };
+        item: {
+          id: string;
+          state: string;
+        };
+      };
+
+      assert.equal(actionResponse.status, 200);
+      assert.equal(actionBody.ok, true);
+      assert.equal(actionBody.action_result.task_id, "task_blog_feedback");
+      assert.equal(actionBody.action_result.task_session_id, "task_session_blog");
+      assert.equal(actionBody.action_result.task_message.status, "sent");
+      assert.match(actionBody.action_result.task_message.text, /Human approved this queue item/);
+      assert.deepEqual(actionBody.action_result.task_message.event_ids, ["evt_manual_blog_action"]);
+      assert.equal(actionBody.item.id, eventBody.queue_item.id);
+      assert.equal(actionBody.item.state, "done");
+
+      const queueResponse = await fetch(`${actionBaseUrl}/queue/next`);
+      const queueBody = await queueResponse.json() as { item: unknown };
+      assert.equal(queueBody.item, null);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        actionServer.close((error) => (error ? reject(error) : resolve()));
       });
     }
   });

@@ -62,6 +62,19 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
     }
 
+    func testExecuteRecommendedActionCompletesSelectedPacketAndAdvances() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.loadQueue()
+
+        await viewModel.executeRecommendedActionAndNext()
+
+        XCTAssertEqual(client.executedRecommendedActions, ["packet-blog-feedback"])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.packets.map(\.id), ["packet-ci-failed", "packet-external-send"])
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+    }
+
     func testRenewSelectedLeaseKeepsSelectionLoaded() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
         await viewModel.loadQueue()

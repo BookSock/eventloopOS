@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
-import { queueStates, type ApiErrorBody, type QueueState } from "./contracts.js";
+import { queueStates, type Action, type ApiErrorBody, type QueueItemWithPacket, type QueueState } from "./contracts.js";
 import type { GatewayStore } from "./gateway_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import type { McpSourcePollOutput } from "./integrations/mcp_poll/development_registry.js";
@@ -740,6 +740,44 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         });
       }
 
+      const recommendedActionMatch = context.url.pathname.match(/^\/queue\/([^/]+)\/actions\/recommended$/);
+      if (request.method === "POST" && recommendedActionMatch) {
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) {
+          return sendSchemaError(response, context, parsed.message);
+        }
+        const validation = validateQueueActionRequest(parsed.value);
+        if (!validation.ok) {
+          return sendSchemaError(response, context, validation.message);
+        }
+
+        const queueItemId = decodeURIComponent(recommendedActionMatch[1] ?? "");
+        const item = await findQueueItem(options.store, queueItemId);
+        if (!item) {
+          return sendError(response, 404, context, "not_found", `queue item ${queueItemId} was not found`);
+        }
+
+        const actionResult = await executeQueueAction(options, item, item.review_packet.recommended_action, now());
+        if (!actionResult.ok) {
+          return sendError(
+            response,
+            actionResult.status,
+            context,
+            actionResult.code,
+            actionResult.message,
+            actionResult.details,
+          );
+        }
+
+        const completed = await options.store.markQueueItemDone(queueItemId, validation.actorId, now());
+        return sendJson(response, 200, {
+          ok: true,
+          action_result: actionResult.result,
+          item: completed,
+          request_id: context.requestId,
+        });
+      }
+
       if (request.method === "GET" && context.url.pathname.startsWith("/review-packets/")) {
         const id = decodeURIComponent(context.url.pathname.slice("/review-packets/".length));
 
@@ -1130,6 +1168,124 @@ function taskFollowupTextForEvent(event: McpEvent): string {
   }
   lines.push(`Raw ref: ${event.raw_ref.uri}`);
   return lines.join("\n");
+}
+
+async function findQueueItem(store: GatewayStore, queueItemId: string): Promise<QueueItemWithPacket | undefined> {
+  return (await store.listQueue()).find((item) => item.id === queueItemId);
+}
+
+async function executeQueueAction(
+  options: GatewayServerOptions,
+  item: QueueItemWithPacket,
+  action: Action,
+  now: Date,
+): Promise<
+  | { ok: true; result: Record<string, unknown> }
+  | { ok: false; status: number; code: string; message: string; details?: unknown }
+> {
+  if (action.type !== "resume_agent") {
+    return {
+      ok: false,
+      status: 422,
+      code: "unsupported_action",
+      message: `recommended action ${action.type} is not executable yet`,
+    };
+  }
+
+  if (!options.taskSessions?.listSessions) {
+    return {
+      ok: false,
+      status: 501,
+      code: "task_sessions_unavailable",
+      message: "task session listing is not configured",
+    };
+  }
+
+  const taskId = item.task_id ?? (typeof action.payload.task_id === "string" ? action.payload.task_id : undefined);
+  if (!taskId) {
+    return {
+      ok: false,
+      status: 409,
+      code: "task_session_unmatched",
+      message: `queue item ${item.id} has no task id`,
+    };
+  }
+
+  const session = (await options.taskSessions.listSessions()).find((candidate) => taskSessionMatchesTask(candidate, taskId));
+  if (!session || !isRecord(session) || typeof session.id !== "string") {
+    return {
+      ok: false,
+      status: 409,
+      code: "task_session_unmatched",
+      message: `no task session is bound to ${taskId}`,
+    };
+  }
+
+  const eventId = typeof action.payload.event_id === "string" ? action.payload.event_id : undefined;
+  const eventResult = eventId ? await options.store.getEvent(eventId) : undefined;
+  const taskMessage = await options.taskSessions.sendFollowupMessage({
+    task_session_id: session.id,
+    text: taskActionFollowupText(item, eventResult?.event),
+    event_ids: eventId ? [eventId] : [],
+    idempotency_key: `queue_action_${item.id}_${action.id}`,
+  });
+
+  if (isRecord(taskMessage) && taskMessage.status === "blocked") {
+    return {
+      ok: false,
+      status: 409,
+      code: "task_message_blocked",
+      message: `task session ${session.id} did not accept followup`,
+      details: taskMessage,
+    };
+  }
+
+  return {
+    ok: true,
+    result: {
+      type: "resume_agent",
+      queue_item_id: item.id,
+      review_packet_id: item.review_packet_id,
+      task_id: taskId,
+      task_session_id: session.id,
+      task_message: taskMessage,
+      executed_at: now.toISOString(),
+    },
+  };
+}
+
+function taskActionFollowupText(item: QueueItemWithPacket, event: McpEvent | undefined): string {
+  const packet = item.review_packet;
+  const lines = [
+    "Human approved this queue item. Continue work with this context.",
+    `Queue item: ${item.id}`,
+    `Packet: ${packet.title}`,
+    `Summary: ${packet.summary}`,
+  ];
+  if (packet.decision_needed) lines.push(`Decision: ${packet.decision_needed}`);
+  if (event) {
+    lines.push(`Source event: ${event.source} ${event.id}`);
+    lines.push(`Raw ref: ${event.raw_ref.uri}`);
+  }
+  const links = [
+    ...packet.context.flatMap((resource) => resource.url ? [resource.url] : []),
+    ...packet.evidence.flatMap((evidence) => evidence.url ? [evidence.url] : []),
+  ];
+  if (links.length > 0) {
+    lines.push(`Links: ${links.join(", ")}`);
+  }
+  return lines.join("\n");
+}
+
+function validateQueueActionRequest(input: unknown): { ok: true; actorId: string } | { ok: false; message: string } {
+  if (!isRecord(input)) {
+    return { ok: false, message: "queue action request must be an object" };
+  }
+
+  return {
+    ok: true,
+    actorId: typeof input.actor_id === "string" && input.actor_id ? input.actor_id : "unknown",
+  };
 }
 
 function taskIdForHint(taskHint: string): string {

@@ -3,6 +3,7 @@ import Foundation
 public protocol QueueClient: Sendable {
     func fetchQueue() async throws -> [ReviewPacket]
     func complete(packetId: String) async throws -> QueueActionResult
+    func executeRecommendedAction(packetId: String) async throws -> QueueActionResult
     func renewLease(packetId: String) async throws -> QueueActionResult
     func next(after packetId: String?) async throws -> ReviewPacket?
     func contextRestorePlan(resource: ReviewContextResource) async throws -> ContextRestorePlan
@@ -54,6 +55,20 @@ public struct HTTPQueueClient: QueueClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode([
             "action": "done",
+            "actor_id": "mac_queue_app"
+        ])
+
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(QueueActionResult.self, from: data)
+    }
+
+    public func executeRecommendedAction(packetId: String) async throws -> QueueActionResult {
+        let url = baseURL.appending(path: "queue/\(packetId)/actions/recommended")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode([
             "actor_id": "mac_queue_app"
         ])
 
@@ -160,6 +175,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var contextRestoreRequestResources: [ReviewContextResource] = []
     private var contextRestoreRequestIdempotencyKeys: [String] = []
     private var contextRestoreStatusIds: [String] = []
+    private var executedRecommendedActionIds: [String] = []
 
     public init(
         packets: [ReviewPacket] = SeededQueue.packets,
@@ -238,6 +254,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         lock.withLock { contextRestoreStatusIds }
     }
 
+    public var executedRecommendedActions: [String] {
+        lock.withLock { executedRecommendedActionIds }
+    }
+
     public func replacePackets(_ nextPackets: [ReviewPacket]) {
         lock.withLock {
             packets = nextPackets.sorted { $0.priority > $1.priority }
@@ -257,6 +277,18 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
             packets.remove(at: index)
             leasedIds.remove(packetId)
             completedIds.append(packetId)
+            return QueueActionResult(ok: true, completedPacketId: packetId, nextPacket: packets.first)
+        }
+    }
+
+    public func executeRecommendedAction(packetId: String) async throws -> QueueActionResult {
+        try lock.withLock {
+            guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
+                throw QueueClientError.packetNotFound(packetId)
+            }
+            packets.remove(at: index)
+            leasedIds.remove(packetId)
+            executedRecommendedActionIds.append(packetId)
             return QueueActionResult(ok: true, completedPacketId: packetId, nextPacket: packets.first)
         }
     }

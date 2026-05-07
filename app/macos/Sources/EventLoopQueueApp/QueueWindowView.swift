@@ -83,6 +83,10 @@ struct QueueWindowView: View {
                 Task {
                     await viewModel.doneAndNext()
                 }
+            } executeRecommendedAction: {
+                Task {
+                    await viewModel.executeRecommendedActionAndNext()
+                }
             } refreshQueue: {
                 Task {
                     await viewModel.refreshQueue()
@@ -179,6 +183,7 @@ private struct PacketDetail: View {
     let packet: ReviewPacket?
     let placeholderSummary: QueueWindowDetailSummary
     let doneAndNext: () -> Void
+    let executeRecommendedAction: () -> Void
     let refreshQueue: () -> Void
     let restoreContextResource: (ReviewContextResource) -> Void
 
@@ -267,6 +272,16 @@ private struct PacketDetail: View {
 
                 HStack {
                     Spacer()
+                    if packet.recommendedActionType == "resume_agent" {
+                        Button {
+                            executeRecommendedAction()
+                        } label: {
+                            Label(packet.recommendedAction, systemImage: "arrowshape.turn.up.right.circle")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .accessibilityIdentifier("queue-execute-recommended-action-button")
+                    }
                     Button {
                         doneAndNext()
                     } label: {

@@ -166,6 +166,23 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    public func executeRecommendedActionAndNext() async {
+        guard let packetId = selectedPacketID else {
+            return
+        }
+
+        state = .loading
+        do {
+            _ = try await client.executeRecommendedAction(packetId: packetId)
+            let leasedPacket = try await client.next(after: nil)
+            packets = try await client.fetchQueue()
+            selectedPacketID = leasedPacket?.id ?? packets.first?.id
+            state = .loaded
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+
     private func leasedSelectionID(preferredPacketID: String?) async throws -> String? {
         if let preferredPacketID {
             do {

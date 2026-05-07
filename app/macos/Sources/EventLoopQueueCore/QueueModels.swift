@@ -14,6 +14,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
     public let contextResources: [ReviewContextResource]
     public let evidence: [ReviewEvidence]
     public let recommendedAction: String
+    public let recommendedActionType: String
     public let createdAt: Date
     public let workspaceSnapshot: WorkspaceSnapshot?
 
@@ -31,6 +32,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
         contextResources: [ReviewContextResource] = [],
         evidence: [ReviewEvidence] = [],
         recommendedAction: String,
+        recommendedActionType: String = "",
         createdAt: Date,
         workspaceSnapshot: WorkspaceSnapshot? = nil
     ) {
@@ -47,8 +49,49 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
         self.contextResources = contextResources
         self.evidence = evidence
         self.recommendedAction = recommendedAction
+        self.recommendedActionType = recommendedActionType
         self.createdAt = createdAt
         self.workspaceSnapshot = workspaceSnapshot
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case reviewPacketId
+        case title
+        case summary
+        case decisionNeeded
+        case source
+        case priority
+        case riskLevel
+        case confidence
+        case riskTags
+        case contextResources
+        case evidence
+        case recommendedAction
+        case recommendedActionType
+        case createdAt
+        case workspaceSnapshot
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(String.self, forKey: .id)
+        self.id = id
+        self.reviewPacketId = try container.decodeIfPresent(String.self, forKey: .reviewPacketId) ?? id
+        self.title = try container.decode(String.self, forKey: .title)
+        self.summary = try container.decode(String.self, forKey: .summary)
+        self.decisionNeeded = try container.decodeIfPresent(String.self, forKey: .decisionNeeded) ?? ""
+        self.source = try container.decode(String.self, forKey: .source)
+        self.priority = try container.decode(Int.self, forKey: .priority)
+        self.riskLevel = try container.decodeIfPresent(String.self, forKey: .riskLevel) ?? "medium"
+        self.confidence = try container.decodeIfPresent(String.self, forKey: .confidence) ?? "medium"
+        self.riskTags = try container.decodeIfPresent([String].self, forKey: .riskTags) ?? []
+        self.contextResources = try container.decodeIfPresent([ReviewContextResource].self, forKey: .contextResources) ?? []
+        self.evidence = try container.decodeIfPresent([ReviewEvidence].self, forKey: .evidence) ?? []
+        self.recommendedAction = try container.decode(String.self, forKey: .recommendedAction)
+        self.recommendedActionType = try container.decodeIfPresent(String.self, forKey: .recommendedActionType) ?? ""
+        self.createdAt = try container.decode(Date.self, forKey: .createdAt)
+        self.workspaceSnapshot = try container.decodeIfPresent(WorkspaceSnapshot.self, forKey: .workspaceSnapshot)
     }
 }
 
@@ -400,6 +443,7 @@ struct QueueItemDTO: Codable, Equatable, Sendable {
             contextResources: reviewPacket.contextResources,
             evidence: reviewPacket.evidenceResources,
             recommendedAction: reviewPacket.recommendedAction.label,
+            recommendedActionType: reviewPacket.recommendedAction.type ?? "",
             createdAt: createdAt,
             workspaceSnapshot: reviewPacket.workspaceSnapshot
         )
@@ -474,6 +518,7 @@ struct ReviewPacketDTO: Codable, Equatable, Sendable {
 
 struct ActionDTO: Codable, Equatable, Sendable {
     let label: String
+    let type: String?
 }
 
 struct ContextResourceDTO: Codable, Equatable, Sendable {
