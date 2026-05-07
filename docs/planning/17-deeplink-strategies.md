@@ -135,7 +135,14 @@ If provider anchor fails, browser extension opens URL, scrolls near prior positi
 
 ## Next Work
 
-1. Add provider-specific optional metadata to context resources.
-2. Add normalizers for Slack/GitHub/Notion/Google Docs/Figma URLs.
-3. Show restore confidence reason in Mac queue UI.
-4. Track restore success/failure by provider in dogfood metrics.
+Current implementation:
+
+- `app/orchestrator/src/context/deeplink_normalizers.ts` normalizes Slack, GitHub, Notion, Google Docs, Figma, and generic browser URLs.
+- MCP poll mappers run resources through the normalizer and preserve existing top-level fields for compatibility.
+- Provider IDs and confidence reasons live in `resource.details`.
+
+Next:
+
+1. Show restore confidence reason in Mac queue UI.
+2. Track restore success/failure by provider in dogfood metrics.
+3. Dogfood provider anchors against real Slack/GitHub/Notion/Google Docs/Figma pages.

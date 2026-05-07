@@ -85,6 +85,7 @@ Done:
 - Task-hinted events can route into task session.
 - Unhinted Slack/voice/MCP/GitHub-style ambient events can infer a target task from stored task-bound context and inject into an existing task session. If no clear context match exists, event still queues human review.
 - `poll-and-route` for generic MCP sources uses the same ambient inference path, so user-installed MCP servers can emit event-ish items without `task_hint` and still reach the right task session when stored context is clear.
+- MCP source mappers normalize provider deeplinks for Slack, GitHub, Notion, Google Docs, Figma, and generic browser URLs into `resource.details` with stable provider IDs, confidence reasons, and browser fallback metadata.
 - `GET /contexts` ranked search.
 - `POST /contexts/restore-plan`.
 - `POST /contexts/restore-requests`.

@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { normalizeUnknownResource } from "../../context/deeplink_normalizers.js";
 import type { McpEvent, McpPollResult, McpPollSourceConfig } from "./types.js";
 
 export async function readMcpPollFixture(path: string): Promise<McpPollResult> {
@@ -77,7 +78,7 @@ function slackMessageToEvent(item: Record<string, unknown>, receivedAt: string):
       },
     ],
     resources: [
-      {
+      normalizeUnknownResource({
         id: `ctx_${sourceId.replaceAll(":", "_")}`,
         kind: "slack_thread",
         title: optionalString(item, "resource_title") ?? "Slack thread",
@@ -88,7 +89,12 @@ function slackMessageToEvent(item: Record<string, unknown>, receivedAt: string):
         workspace_id: workspaceId,
         channel_id: channelId,
         thread_ts: threadTs,
-      },
+      }, {
+        id: `ctx_${sourceId.replaceAll(":", "_")}`,
+        title: optionalString(item, "resource_title") ?? "Slack thread",
+        source: "slack",
+        captured_at: receivedAt,
+      }),
     ],
   };
 }
@@ -131,16 +137,21 @@ function githubUpdateToEvent(item: Record<string, unknown>, receivedAt: string):
       },
     ],
     resources: [
-      {
+      normalizeUnknownResource({
         id: `ctx_${sourceId.replaceAll(":", "_").replaceAll("/", "_")}`,
-        kind: "github_thread",
+        kind: "github",
         title,
         url,
         source: "github",
         captured_at: receivedAt,
         restore_confidence: "high",
         repo,
-      },
+      }, {
+        id: `ctx_${sourceId.replaceAll(":", "_").replaceAll("/", "_")}`,
+        title,
+        source: "github",
+        captured_at: receivedAt,
+      }),
     ],
   };
 }
@@ -258,7 +269,12 @@ function genericResources(
     if (!resources.every(isRecord)) {
       throw new Error("MCP poll item resources must be objects");
     }
-    return resources;
+    return resources.map((resource, index) => normalizeUnknownResource(resource, {
+      id: `ctx_${safeId(sourceId)}_${index + 1}`,
+      title,
+      source: config.id,
+      captured_at: receivedAt,
+    }));
   }
 
   const url = optionalString(item, "url");
@@ -267,7 +283,7 @@ function genericResources(
   }
 
   return [
-    {
+    normalizeUnknownResource({
       id: `ctx_${safeId(sourceId)}`,
       kind: optionalString(item, "resource_kind") ?? "external_resource",
       title,
@@ -275,7 +291,12 @@ function genericResources(
       source: config.id,
       captured_at: receivedAt,
       restore_confidence: optionalString(item, "restore_confidence") ?? "medium",
-    },
+    }, {
+      id: `ctx_${safeId(sourceId)}`,
+      title,
+      source: config.id,
+      captured_at: receivedAt,
+    }),
   ];
 }
 
