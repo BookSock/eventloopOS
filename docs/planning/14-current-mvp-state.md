@@ -100,6 +100,7 @@ Done:
 - Restore request persistence through same in-memory/Postgres store abstraction as queue storage.
 - Expired restore request leases get reaped and reclaimed.
 - Docker-backed Postgres tests pass locally with `pnpm run test:db:docker`. Native Postgres test runner also creates a throwaway local cluster, runs live DB tests, stops server, and deletes temp data.
+- Postgres API restart smoke proves a routed event stays idempotent across closing one orchestrator server and starting another against the same DB: duplicate retry returns the original route and queue item, with one event row and one queue item row.
 - Doctor checks orchestrator health, AeroSpace, Docker, browser Playwright readiness, Mac/browser restore smoke Swift readiness, optional MCP source config readiness, optional voice transcript command readiness, and Codex app-server.
 - `pnpm --filter @eventloopos/orchestrator run live:aerospace` builds and emits a machine-readable skip by default. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1`, it checks live AeroSpace status/capture/restore-plan without executing workspace moves. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE_EXECUTE=1`, it also moves one real window to a scratch workspace, restores it, and verifies it returned.
 - `voice:listen-command` runs a configured local STT command and pipes line-delimited transcripts into the same wake-phrase voice router. Command args are JSON argv, not shell-parsed strings.

@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
+import type { Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { PostgresQueueStore, type EventRecord, type NewQueueItem } from "../src/db/postgres_queue_store.js";
 import type { ReviewPacket } from "../src/contracts.js";
+import { createPostgresGatewayStore } from "../src/gateway_store.js";
 import { PostgresObservability } from "../src/observability.js";
+import { createGatewayServer } from "../src/server.js";
 
 const createdAt = "2026-05-06T12:00:00.000Z";
 
@@ -154,6 +158,52 @@ describe("PostgresQueueStore", () => {
     assert.equal(queueCount.rows[0].count, 1);
   });
 
+  it("keeps event route idempotent across orchestrator restart", async (t) => {
+    if (!store) {
+      t.skip(skipReason);
+      return;
+    }
+
+    const event = makeEvent("evt_api_restart", "idem_api_restart");
+    const first = await withPostgresGateway(store, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ event }),
+      });
+      assert.equal(response.status, 202);
+      return await response.json() as {
+        route_decision: { id: string; action: string };
+        queue_item: { id: string };
+      };
+    });
+
+    const afterRestart = await withPostgresGateway(store, async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          event: {
+            ...event,
+            id: "evt_api_restart_retry",
+            title: "Retry should not replace first routed event",
+          },
+        }),
+      });
+      assert.equal(response.status, 202);
+      return await response.json() as {
+        route_decision: { id: string; action: string };
+        queue_item: { id: string };
+      };
+    });
+
+    assert.equal(afterRestart.route_decision.id, first.route_decision.id);
+    assert.equal(afterRestart.route_decision.action, "ask_human_now");
+    assert.equal(afterRestart.queue_item.id, first.queue_item.id);
+    assert.equal((await store.pool.query("SELECT count(*)::int AS count FROM events")).rows[0]?.count, 1);
+    assert.equal((await store.pool.query("SELECT count(*)::int AS count FROM queue_items")).rows[0]?.count, 1);
+  });
+
   it("leases next ready item with SKIP LOCKED semantics and reaps stale leases", async (t) => {
     if (!store) {
       t.skip(skipReason);
@@ -288,6 +338,27 @@ describe("PostgresQueueStore", () => {
     assert.equal(await store.claimNextContextRestoreRequest("browser_c", 1_000), undefined);
   });
 });
+
+async function withPostgresGateway<T>(store: PostgresQueueStore, callback: (baseUrl: string) => Promise<T>): Promise<T> {
+  const server = createGatewayServer({
+    store: createPostgresGatewayStore(store),
+    observability: new PostgresObservability(store.pool),
+    now: () => new Date(createdAt),
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address() as AddressInfo;
+    return await callback(`http://127.0.0.1:${address.port}`);
+  } finally {
+    await closeServer(server);
+  }
+}
+
+async function closeServer(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
 
 async function resetExternalTestDatabase(store: PostgresQueueStore) {
   await store.pool.query("DROP SCHEMA IF EXISTS public CASCADE");
