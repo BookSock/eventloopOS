@@ -19,6 +19,14 @@ export type ActivityEvent = {
   details: Record<string, unknown>;
 };
 
+export type ActivityQuery = {
+  limit?: number;
+  task_id?: string;
+  task_session_id?: string;
+  status?: ActivityStatus;
+  since?: string;
+};
+
 export type MetricsSnapshot = {
   counters: Record<string, number>;
   activity_count: number;
@@ -27,7 +35,7 @@ export type MetricsSnapshot = {
 export type Observability = {
   incrementCounter(name: string, by?: number): Promise<void>;
   recordActivity(input: Omit<ActivityEvent, "id">): Promise<ActivityEvent>;
-  listActivity(limit?: number): Promise<ActivityEvent[]>;
+  listActivity(query?: number | ActivityQuery): Promise<ActivityEvent[]>;
   snapshot(): Promise<MetricsSnapshot>;
 };
 
@@ -53,8 +61,12 @@ export class InMemoryObservability implements Observability {
     return event;
   }
 
-  async listActivity(limit = 100): Promise<ActivityEvent[]> {
-    return this.activities.slice(-limit).reverse();
+  async listActivity(query: number | ActivityQuery = {}): Promise<ActivityEvent[]> {
+    const normalized = normalizeActivityQuery(query);
+    return this.activities
+      .filter((event) => activityMatchesQuery(event, normalized))
+      .slice(-normalized.limit)
+      .reverse();
   }
 
   async snapshot(): Promise<MetricsSnapshot> {
@@ -132,15 +144,30 @@ export class PostgresObservability implements Observability {
     return event;
   }
 
-  async listActivity(limit = 100): Promise<ActivityEvent[]> {
+  async listActivity(query: number | ActivityQuery = {}): Promise<ActivityEvent[]> {
+    const normalized = normalizeActivityQuery(query);
+    const clauses: string[] = [];
+    const params: unknown[] = [];
+    const addClause = (sql: string, value: unknown) => {
+      params.push(value);
+      clauses.push(sql.replace("?", `$${params.length}`));
+    };
+
+    if (normalized.task_id) addClause("task_id = ?", normalized.task_id);
+    if (normalized.task_session_id) addClause("task_session_id = ?", normalized.task_session_id);
+    if (normalized.status) addClause("status = ?", normalized.status);
+    if (normalized.since) addClause("occurred_at >= ?::timestamptz", normalized.since);
+    params.push(normalized.limit);
+
     const result = await this.pool.query(
       `
         SELECT *
         FROM activity_events
+        ${clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : ""}
         ORDER BY occurred_at DESC, id DESC
-        LIMIT $1
+        LIMIT $${params.length}
       `,
-      [limit],
+      params,
     );
 
     return result.rows.map(rowToActivityEvent);
@@ -160,6 +187,20 @@ export class PostgresObservability implements Observability {
       activity_count: Number(count.rows[0]?.count ?? 0),
     };
   }
+}
+
+function normalizeActivityQuery(query: number | ActivityQuery): Required<Pick<ActivityQuery, "limit">> & Omit<ActivityQuery, "limit"> {
+  return typeof query === "number"
+    ? { limit: query }
+    : { ...query, limit: query.limit ?? 100 };
+}
+
+function activityMatchesQuery(event: ActivityEvent, query: ActivityQuery & { limit: number }): boolean {
+  if (query.task_id && event.task_id !== query.task_id) return false;
+  if (query.task_session_id && event.task_session_id !== query.task_session_id) return false;
+  if (query.status && event.status !== query.status) return false;
+  if (query.since && new Date(event.occurred_at).getTime() < new Date(query.since).getTime()) return false;
+  return true;
 }
 
 function rowToActivityEvent(row: QueryResultRow): ActivityEvent {

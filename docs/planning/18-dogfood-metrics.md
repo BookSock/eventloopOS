@@ -87,7 +87,7 @@ MVP surfaces:
 
 Current implementation:
 
-- `GET /activity?limit=...` exists as recent local activity.
+- `GET /activity?limit=...` exists as recent local activity and supports filters for `task_id`, `task_session_id`, `status`, and `since` so agents can inspect one task/session history without dumping global history.
 - `GET /metrics` exists as local counters.
 - Postgres mode persists `activity_events` and `metric_counters` through `0003_observability.sql`.
 - In-memory mode remains process-local for fast tests and empty local smoke runs.
@@ -116,6 +116,7 @@ Tests needed:
 - CLI: `dogfood:review` filters current-day activity and fails cleanly when orchestrator is unavailable.
 - CLI: `dogfood:review` groups recent activity by task, task session, and queue item.
 - CLI/API: restore provider metrics and activity rollups show which restore backends are succeeding or failing.
+- API: `/activity` filters return matching in-memory and Postgres events by task session, status, and since timestamp.
 
 ## Success Thresholds
 

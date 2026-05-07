@@ -1457,6 +1457,16 @@ describe("orchestrator gateway API", () => {
       ]);
       assert.equal(activityBody.events[0].task_session_id, "task_session_blog");
       assert.equal(activityBody.events[0].details.idempotency_key, "idem_task_followup_1");
+
+      const filteredActivityResponse = await fetch(`${taskBaseUrl}/activity?task_session_id=task_session_blog&status=ok&since=2026-05-06T11:59:00.000Z`);
+      const filteredActivityBody = await filteredActivityResponse.json() as {
+        count: number;
+        events: Array<{ task_session_id?: string; status?: string }>;
+      };
+      assert.equal(filteredActivityResponse.status, 200);
+      assert.equal(filteredActivityBody.count, 4);
+      assert.ok(filteredActivityBody.events.every((event) => event.task_session_id === "task_session_blog"));
+      assert.ok(filteredActivityBody.events.every((event) => event.status === "ok"));
     } finally {
       await new Promise<void>((resolve, reject) => {
         taskServer.close((error) => (error ? reject(error) : resolve()));
@@ -1519,6 +1529,15 @@ describe("orchestrator gateway API", () => {
       ]);
       assert.equal(activityBody.events[0].status, "failed");
       assert.equal(activityBody.events[0].details.error, "task runtime offline");
+
+      const failedOnlyResponse = await fetch(`${taskBaseUrl}/activity?status=failed&since=2026-05-06T11:59:00.000Z`);
+      const failedOnlyBody = await failedOnlyResponse.json() as {
+        count: number;
+        events: Array<{ status?: string }>;
+      };
+      assert.equal(failedOnlyResponse.status, 200);
+      assert.equal(failedOnlyBody.count, 1);
+      assert.equal(failedOnlyBody.events[0]?.status, "failed");
     } finally {
       await new Promise<void>((resolve, reject) => {
         taskServer.close((error) => (error ? reject(error) : resolve()));

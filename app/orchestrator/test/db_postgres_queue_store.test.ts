@@ -74,6 +74,8 @@ describe("PostgresQueueStore", () => {
       occurred_at: "2026-05-06T12:00:01.000Z",
       actor: "system",
       event_id: "evt_observability",
+      task_id: "task_observability",
+      task_session_id: "task_session_observability",
       source_id: "local_fixture",
       status: "ok",
       summary: "Event routed: fixture",
@@ -95,10 +97,10 @@ describe("PostgresQueueStore", () => {
         type: "event_routed",
         occurred_at: "2026-05-06T12:00:01.000Z",
         actor: "system",
-        task_id: undefined,
+        task_id: "task_observability",
         queue_item_id: undefined,
         event_id: "evt_observability",
-        task_session_id: undefined,
+        task_session_id: "task_session_observability",
         source_id: "local_fixture",
         status: "ok",
         summary: "Event routed: fixture",
@@ -107,6 +109,16 @@ describe("PostgresQueueStore", () => {
         },
       },
     ]);
+    assert.deepEqual((await restarted.listActivity({
+      task_session_id: "task_session_observability",
+      status: "ok",
+      since: "2026-05-06T12:00:00.000Z",
+      limit: 10,
+    })).map((event) => event.id), ["actv_db_fixture"]);
+    assert.deepEqual(await restarted.listActivity({
+      task_id: "task_missing",
+      limit: 10,
+    }), []);
   });
 
   it("deduplicates events by source and idempotency key", async (t) => {
