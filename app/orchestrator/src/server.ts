@@ -11,6 +11,7 @@ import {
 import type { GatewayStore } from "./gateway_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import type { McpSourcePollOutput } from "./integrations/mcp_poll/development_registry.js";
+import { createInMemoryObservability, type Observability } from "./observability.js";
 import type { ContextEntry, ContextRestoreRequestRecord, RouteDecision } from "./store.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
 import { parseRestoreExecuteRequest, parseRestorePlanRequest, type WorkspaceController } from "./workspace/controller.js";
@@ -21,6 +22,7 @@ export type GatewayServerOptions = {
   mcpSources?: McpSourceRegistry;
   workspace?: WorkspaceController;
   workspaceExecuteEnabled?: boolean;
+  observability?: Observability;
   now?: () => Date;
 };
 
@@ -38,6 +40,8 @@ type RequestContext = {
 
 export function createGatewayServer(options: GatewayServerOptions): Server {
   const now = options.now ?? (() => new Date());
+  const observability = options.observability ?? createInMemoryObservability();
+  const serverOptions = { ...options, observability };
 
   return createServer(async (request, response) => {
     const context = buildContext(request);
@@ -49,6 +53,28 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           ok: true,
           service: "eventloop-orchestrator",
           time: now().toISOString(),
+          request_id: context.requestId,
+        });
+      }
+
+      if (request.method === "GET" && context.url.pathname === "/metrics") {
+        return sendJson(response, 200, {
+          metrics: observability.snapshot(),
+          generated_at: now().toISOString(),
+          request_id: context.requestId,
+        });
+      }
+
+      if (request.method === "GET" && context.url.pathname === "/activity") {
+        const validation = validateActivityQuery(context.url);
+        if (!validation.ok) {
+          return sendSchemaError(response, context, validation.message);
+        }
+
+        const events = observability.listActivity(validation.limit);
+        return sendJson(response, 200, {
+          events,
+          count: events.length,
           request_id: context.requestId,
         });
       }
@@ -138,6 +164,20 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           resource: validation.resource,
           restore_plan: plan,
         }, now());
+        observability.incrementCounter("restore_requests_created_total", created.inserted ? 1 : 0);
+        if (created.inserted) {
+          observability.recordActivity({
+            type: "context_restore_requested",
+            occurred_at: created.record.created_at,
+            actor: "system",
+            status: "ok",
+            summary: `Restore requested for ${String(validation.resource.title ?? validation.resource.kind)}`,
+            details: {
+              restore_request_id: created.record.id,
+              resource_kind: validation.resource.kind,
+            },
+          });
+        }
 
         return sendJson(response, created.inserted ? 202 : 200, {
           restore_request: presentContextRestoreRequest(created.record),
@@ -180,6 +220,18 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         if (!record) {
           return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
         }
+        observability.incrementCounter("restore_requests_done_total");
+        observability.recordActivity({
+          type: "context_restore_done",
+          occurred_at: record.updated_at,
+          actor: "system",
+          status: "ok",
+          summary: `Restore completed for ${String(record.resource.title ?? record.resource.kind)}`,
+          details: {
+            restore_request_id: record.id,
+            result: record.result,
+          },
+        });
 
         return sendJson(response, 200, {
           restore_request: presentContextRestoreRequest(record),
@@ -344,7 +396,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
 
             const routed = [];
             for (const event of pollResult.events) {
-              routed.push(await routeEventThroughGateway(options, event, now()));
+              routed.push(await routeEventThroughGateway(serverOptions, event, now()));
             }
 
             eventsSeen += pollResult.events.length;
@@ -367,6 +419,22 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
             });
           }
         }
+        observability.incrementCounter("mcp_poll_cycles_total");
+        observability.incrementCounter("mcp_poll_errors_total", errors);
+        observability.recordActivity({
+          type: "mcp_poll_cycle",
+          occurred_at: now().toISOString(),
+          actor: "system",
+          status: errors === 0 ? "ok" : "failed",
+          summary: `MCP poll cycle saw ${eventsSeen} event(s) from ${sourceIds.value.length} source(s)`,
+          details: {
+            sources_seen: sourceIds.value.length,
+            events_seen: eventsSeen,
+            routed_count: routedCount,
+            duplicates_ignored: duplicatesIgnored,
+            errors,
+          },
+        });
 
         return sendJson(response, 200, {
           ok: errors === 0,
@@ -448,7 +516,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
 
           const routed = [];
           for (const event of pollResult.events) {
-            routed.push(await routeEventThroughGateway(options, event, now()));
+            routed.push(await routeEventThroughGateway(serverOptions, event, now()));
           }
 
           return sendJson(response, 200, {
@@ -662,7 +730,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           return sendSchemaError(response, context, eventValidation.message);
         }
 
-        const routed = await routeEventThroughGateway(options, eventValidation.event, now());
+        const routed = await routeEventThroughGateway(serverOptions, eventValidation.event, now());
 
         return sendJson(response, 202, {
           ok: true,
@@ -682,7 +750,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           return sendSchemaError(response, context, voiceValidation.message);
         }
 
-        const routed = await routeEventThroughGateway(options, voiceValidation.event, now());
+        const routed = await routeEventThroughGateway(serverOptions, voiceValidation.event, now());
 
         return sendJson(response, 202, {
           ok: true,
@@ -731,6 +799,18 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         if (!item) {
           return sendError(response, 404, context, "not_found", `queue item ${queueItemId} was not found`);
         }
+        observability.incrementCounter("queue_items_done_total");
+        observability.recordActivity({
+          type: "queue_item_done",
+          occurred_at: item.updated_at,
+          actor: "human",
+          queue_item_id: item.id,
+          status: "ok",
+          summary: `Queue item done: ${item.review_packet.title}`,
+          details: {
+            review_packet_id: item.review_packet_id,
+          },
+        });
 
         return sendJson(response, 200, {
           ok: true,
@@ -764,7 +844,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           return sendError(response, 404, context, "not_found", `queue item ${queueItemId} was not found`);
         }
 
-        const actionResult = await executeQueueAction(options, item, item.review_packet.recommended_action, now());
+        const actionResult = await executeQueueAction(serverOptions, item, item.review_packet.recommended_action, now());
         if (!actionResult.ok) {
           return sendError(
             response,
@@ -777,6 +857,21 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         }
 
         const completed = await options.store.markQueueItemDone(queueItemId, validation.actorId, now());
+        if (completed) {
+          observability.incrementCounter("queue_items_done_total");
+          observability.recordActivity({
+            type: "queue_item_done",
+            occurred_at: completed.updated_at,
+            actor: "human",
+            queue_item_id: completed.id,
+            status: "ok",
+            summary: `Queue item done: ${completed.review_packet.title}`,
+            details: {
+              review_packet_id: completed.review_packet_id,
+              action_result: actionResult.result,
+            },
+          });
+        }
         return sendJson(response, 200, {
           ok: true,
           action_result: actionResult.result,
@@ -850,6 +945,15 @@ function validateQueueQuery(url: URL): { ok: true; state?: QueueState } | { ok: 
   }
 
   return { ok: true, state: state as QueueState };
+}
+
+function validateActivityQuery(url: URL): { ok: true; limit?: number } | { ok: false; message: string } {
+  const limitParam = url.searchParams.get("limit");
+  const limit = limitParam ? Number(limitParam) : undefined;
+  if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0 || limit > 500)) {
+    return { ok: false, message: "limit must be an integer between 1 and 500" };
+  }
+  return { ok: true, limit };
 }
 
 function validateContextQuery(
@@ -1034,6 +1138,10 @@ async function routeEventThroughGateway(
   const injected = await injectEventIntoTaskSessionIfPossible(event, options.taskSessions, options.store, now);
   if (injected) {
     const result = await options.store.recordEventRoute(event, injected.routeDecision, now);
+    recordRoutedEventActivity(options, event, result.route_decision, {
+      taskMessage: injected.taskMessage,
+      queueItemId: undefined,
+    });
     return {
       event,
       route_decision: result.route_decision,
@@ -1042,12 +1150,53 @@ async function routeEventThroughGateway(
   }
 
   const result = await options.store.ingestEventAsReviewPacket(event, now);
+  recordRoutedEventActivity(options, event, result.route_decision, {
+    queueItemId: result.queue_item?.id,
+  });
   return {
     event,
     route_decision: result.route_decision,
     review_packet: result.review_packet,
     queue_item: result.queue_item,
   };
+}
+
+function recordRoutedEventActivity(
+  options: GatewayServerOptions,
+  event: McpEvent,
+  routeDecision: RouteDecision,
+  input: { taskMessage?: unknown; queueItemId?: string | undefined },
+): void {
+  const observability = options.observability;
+  if (!observability) return;
+
+  observability.incrementCounter("events_ingested_total");
+  if (routeDecision.action === "inject_into_agent_thread") {
+    observability.incrementCounter("events_routed_to_task_session_total");
+    observability.incrementCounter("task_followups_sent_total");
+  }
+  if (input.queueItemId) {
+    observability.incrementCounter("queue_items_created_total");
+  }
+  observability.recordActivity({
+    type: "event_routed",
+    occurred_at: routeDecision.created_at,
+    actor: "system",
+    task_id: routeDecision.target_task_id,
+    queue_item_id: input.queueItemId,
+    event_id: event.id,
+    task_session_id: routeDecision.target_task_session_id,
+    source_id: event.source_id,
+    status: "ok",
+    summary: `Event routed: ${event.title}`,
+    details: {
+      source: event.source,
+      type: event.type,
+      route_action: routeDecision.action,
+      confidence: routeDecision.confidence,
+      task_message: input.taskMessage,
+    },
+  });
 }
 
 function validateVoiceCommandRequest(

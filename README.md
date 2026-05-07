@@ -40,6 +40,15 @@ Live proof covers seeded queue, MCP source discovery, MCP poll-and-route, Slack-
 
 Run `pnpm run dev:doctor` to build the orchestrator and get machine-readable readiness for local live checks: orchestrator health, AeroSpace daemon, Docker daemon, browser Playwright extension E2E readiness, optional MCP source config, optional voice transcript command readiness, and Codex app-server.
 
+Local dogfood inspection:
+
+```sh
+curl http://127.0.0.1:4377/metrics
+curl http://127.0.0.1:4377/activity?limit=20
+```
+
+These endpoints expose in-memory counters and recent activity for the current orchestrator process. They are meant for local debugging first; durable Postgres-backed history is later work.
+
 Personal dogfood stack:
 
 ```sh

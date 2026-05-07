@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { createInMemoryGatewayStore } from "../src/gateway_store.js";
 import { createSeededDevelopmentMcpSourceRegistry } from "../src/integrations/mcp_poll/development_registry.js";
+import { createInMemoryObservability } from "../src/observability.js";
 import { createGatewayServer } from "../src/server.js";
 import { buildReviewArtifactsFromEvent, createSeededStore } from "../src/store.js";
 import { createSeededDevelopmentTaskSessions } from "../src/task_sessions/development_task_session_controller.js";
@@ -338,6 +339,105 @@ describe("orchestrator gateway API", () => {
 
     assert.equal(duplicateResponse.status, 202);
     assert.equal(duplicateBody.queue_item.id, firstBody.queue_item.id);
+  });
+
+  it("records local activity and metrics for routed events and done decisions", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const observability = createInMemoryObservability();
+    const metricsServer = createGatewayServer({
+      store,
+      observability,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+    });
+    await new Promise<void>((resolve) => metricsServer.listen(0, "127.0.0.1", resolve));
+    const address = metricsServer.address() as AddressInfo;
+    const metricsBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const event = {
+        id: "evt_metrics_local_1",
+        source: "local",
+        source_id: "local:metrics:1",
+        idempotency_key: "local:metrics:1",
+        occurred_at: "2026-05-06T11:59:00.000Z",
+        received_at: "2026-05-06T12:00:00.000Z",
+        actor: {
+          id: "actor_local_system",
+          type: "system",
+          name: "Local event source",
+        },
+        type: "local.event",
+        title: "Metrics proof event",
+        summary: "This should produce local metrics.",
+        raw_ref: {
+          id: "raw_metrics_1",
+          uri: "artifact://raw/metrics/1.json",
+          media_type: "application/json",
+        },
+        links: [],
+        resources: [],
+      };
+
+      const routeResponse = await fetch(`${metricsBaseUrl}/events`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ event }),
+      });
+      const routeBody = await routeResponse.json() as {
+        queue_item: {
+          id: string;
+        };
+      };
+
+      assert.equal(routeResponse.status, 202);
+      assert.ok(routeBody.queue_item.id);
+
+      const doneResponse = await fetch(`${metricsBaseUrl}/queue/${routeBody.queue_item.id}/done`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "done",
+          actor_id: "user_jason",
+        }),
+      });
+      assert.equal(doneResponse.status, 200);
+
+      const metricsResponse = await fetch(`${metricsBaseUrl}/metrics`);
+      const metricsBody = await metricsResponse.json() as {
+        metrics: {
+          counters: Record<string, number>;
+          activity_count: number;
+        };
+      };
+
+      assert.equal(metricsResponse.status, 200);
+      assert.equal(metricsBody.metrics.counters.events_ingested_total, 1);
+      assert.equal(metricsBody.metrics.counters.queue_items_created_total, 1);
+      assert.equal(metricsBody.metrics.counters.queue_items_done_total, 1);
+      assert.equal(metricsBody.metrics.activity_count, 2);
+
+      const activityResponse = await fetch(`${metricsBaseUrl}/activity?limit=1`);
+      const activityBody = await activityResponse.json() as {
+        count: number;
+        events: Array<{
+          type: string;
+          queue_item_id: string;
+        }>;
+      };
+
+      assert.equal(activityResponse.status, 200);
+      assert.equal(activityBody.count, 1);
+      assert.equal(activityBody.events[0].type, "queue_item_done");
+      assert.equal(activityBody.events[0].queue_item_id, routeBody.queue_item.id);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        metricsServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   });
 
   it("stores passive browser context without interrupting human queue", async () => {

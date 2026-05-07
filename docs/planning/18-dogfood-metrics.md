@@ -82,6 +82,12 @@ MVP surfaces:
 - `pnpm run dogfood:review` later
 - Mac queue footer: queue count, done today, restore success today
 
+Current implementation:
+
+- `GET /activity?limit=...` exists as in-memory recent activity for current process.
+- `GET /metrics` exists as in-memory counters for current process.
+- Durable Postgres-backed history is not implemented yet.
+
 ## Privacy
 
 Metrics should default to local only. Store counts and IDs. Avoid storing raw Slack/doc content in metrics rows. Raw payloads stay in event/artifact store with existing risk policy.
