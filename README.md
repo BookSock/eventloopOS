@@ -54,6 +54,15 @@ While dogfooding, manually add a human-review queue item from another terminal:
 pnpm run queue:add -- --title "Launch blog final paragraph" --summary "Check final paragraph before sending." --task "blog feedback" --url "https://docs.example.test/blog"
 ```
 
+To inspect and bind agent threads during dogfood:
+
+```sh
+pnpm run task:sessions
+pnpm run task:bind -- --session codex_thread_abc --task "blog feedback"
+```
+
+`task:bind` accepts either a full `--task-id task_blog_feedback` or a human hint via `--task "blog feedback"`, then writes through the orchestrator binding API.
+
 Workspace restore execution is disabled by default. Set `ORCHESTRATOR_WORKSPACE_EXECUTE=enabled` and call `POST /workspace/restore` with `confirm_execute: true` plus an `idempotency-key` header to execute an AeroSpace restore plan.
 
 Set `DATABASE_URL` to run the orchestrator with Postgres-backed queue and context restore request storage.

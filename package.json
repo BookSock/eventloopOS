@@ -29,6 +29,8 @@
     "dev:postgres:url": "pnpm --filter @eventloopos/orchestrator run dev:postgres url",
     "dev:dogfood": "bin/dev-dogfood",
     "queue:add": "pnpm --filter @eventloopos/orchestrator run queue:add",
+    "task:sessions": "pnpm --filter @eventloopos/orchestrator run task:sessions",
+    "task:bind": "pnpm --filter @eventloopos/orchestrator run task:bind",
     "live:aerospace": "pnpm --filter @eventloopos/orchestrator run live:aerospace",
     "voice:listen-command": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run voice:listen-command",
     "voice:stt-smoke": "pnpm --filter @eventloopos/orchestrator run voice:stt-smoke",

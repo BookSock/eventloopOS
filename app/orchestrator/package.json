@@ -16,6 +16,8 @@
     "voice:send": "node dist/src/voice/send_voice_command.js",
     "voice:stt-smoke": "bin/voice-stt-smoke",
     "start": "node dist/src/index.js",
+    "task:sessions": "pnpm run build && node dist/src/task_sessions/task_session_cli.js list",
+    "task:bind": "pnpm run build && node dist/src/task_sessions/task_session_cli.js bind",
     "test": "pnpm run build && node --test dist/test/**/*.test.js dist/src/**/*.test.js src/agents/codex/*.test.mjs src/task_sessions/*.test.mjs",
     "test:db": "pnpm run build && node --test dist/test/db*.test.js",
     "test:db:docker": "bin/dev-postgres test",
