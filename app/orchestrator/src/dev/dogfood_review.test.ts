@@ -37,8 +37,8 @@ describe("dogfood review CLI", () => {
     assert.match(output, /EventloopOS Dogfood Review/);
     assert.match(output, /events_ingested_total: 2/);
     assert.match(output, /queue_clearance_rate: 0.50/);
-    assert.match(output, /Tasks:\n- task_blog_feedback events=2 routed=1 queued=1 done=1 followups=1 failed=0/);
-    assert.match(output, /Sessions:\n- task_session_blog events=2 routed=1 queued=1 done=1 followups=1 failed=0/);
+    assert.match(output, /Tasks:\n- task_blog_feedback events=4 routed=1 queued=1 done=1 followups_attempted=1 followups_sent=1 followups_blocked=0 failed=0/);
+    assert.match(output, /Sessions:\n- task_session_blog events=4 routed=1 queued=1 done=1 followups_attempted=1 followups_sent=1 followups_blocked=0 failed=0/);
     assert.match(output, /Queues:\n- qit_review_1 task=task_blog_feedback session=task_session_blog events=2 done_in=20.0m: Queue item done: Launch review/);
     assert.match(output, /Restore Providers:\n- browser requested=1 done=1 failed=1 retried=0 success=0.50 reasons=browser_quote_fallback/);
     assert.match(output, /queue_item_done ok task=task_blog_feedback queue=qit_review_1: Queue item done: Launch review/);
@@ -65,7 +65,13 @@ describe("dogfood review CLI", () => {
     const parsed = JSON.parse(output) as {
       metrics: { counters: Record<string, number>; activity_count: number };
       events: Array<{ id: string }>;
-      task_rollups: Array<{ id: string; done: number; followups_sent: number }>;
+      task_rollups: Array<{
+        id: string;
+        done: number;
+        followups_attempted: number;
+        followups_sent: number;
+        followups_blocked: number;
+      }>;
       session_rollups: Array<{ id: string; routed: number }>;
       queue_rollups: Array<{ id: string; time_to_done_ms: number }>;
       restore_provider_rollups: Array<{ provider: string; success_rate: number }>;
@@ -77,16 +83,20 @@ describe("dogfood review CLI", () => {
       "actv_restore_done",
       "actv_done",
       "actv_restore_requested",
+      "actv_task_followup_sent",
+      "actv_task_followup_attempted",
       "actv_routed",
     ]);
     assert.deepEqual(parsed.task_rollups, [
       {
         id: "task_blog_feedback",
-        events: 2,
+        events: 4,
         routed: 1,
         queued: 1,
         done: 1,
+        followups_attempted: 1,
         followups_sent: 1,
+        followups_blocked: 0,
         failed: 0,
         last_activity_at: "2026-05-06T12:20:00.000Z",
       },
@@ -136,12 +146,14 @@ function responseForUrl(url: string): Response {
           events_routed_to_task_session_total: 1,
           queue_items_created_total: 2,
           queue_items_done_total: 1,
+          task_followups_attempted_total: 1,
+          task_followups_sent_total: 1,
           restore_requests_done_total: 3,
           restore_requests_failed_total: 1,
           restore_requests_done_provider_browser: 1,
           restore_requests_failed_provider_browser: 1,
         },
-        activity_count: 6,
+          activity_count: 8,
       },
       generated_at: "2026-05-06T12:30:00.000Z",
     });
@@ -149,7 +161,7 @@ function responseForUrl(url: string): Response {
 
   if (url.endsWith("/activity?limit=10")) {
     return jsonResponse({
-      count: 6,
+      count: 8,
       events: [
         {
           id: "actv_restore_failed",
@@ -200,6 +212,34 @@ function responseForUrl(url: string): Response {
             restore_request_id: "ctx_restore_1",
             resource_provider: "browser",
             confidence_reason: "browser_quote_fallback",
+          },
+        },
+        {
+          id: "actv_task_followup_sent",
+          type: "task_followup_sent",
+          occurred_at: "2026-05-06T12:05:00.000Z",
+          actor: "system",
+          task_id: "task_blog_feedback",
+          event_id: "evt_review_1",
+          task_session_id: "task_session_blog",
+          status: "ok",
+          summary: "Task followup sent: task_session_blog",
+          details: {
+            origin: "event_route",
+          },
+        },
+        {
+          id: "actv_task_followup_attempted",
+          type: "task_followup_attempted",
+          occurred_at: "2026-05-06T12:04:00.000Z",
+          actor: "system",
+          task_id: "task_blog_feedback",
+          event_id: "evt_review_1",
+          task_session_id: "task_session_blog",
+          status: "ok",
+          summary: "Task followup attempted: task_session_blog",
+          details: {
+            origin: "event_route",
           },
         },
         {

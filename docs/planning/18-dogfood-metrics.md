@@ -93,6 +93,7 @@ Current implementation:
 - In-memory mode remains process-local for fast tests and empty local smoke runs.
 - `pnpm run dogfood:review` reads `/metrics` and `/activity`, prints text by default, and supports `EVENTLOOPOS_DOGFOOD_REVIEW_FORMAT=json` for agents.
 - `dogfood:review` now derives queue clearance rate, task-session route rate, restore success rate, task rollups, task-session rollups, and per-queue time-to-done from local activity.
+- Task and task-session rollups count `task_followup_attempted`, `task_followup_sent`, and `task_followup_blocked` directly instead of treating every routed event as a followup.
 - Restore request activity records resource provider and confidence reason. Metrics include provider-specific created/done/failed/retried counters, and `dogfood:review` groups restore success/failure by provider.
 - Queue done activity records task ID, and recommended resume-agent actions also record task-session ID, so after-the-fact session history can connect queue work back to agent runtime.
 - Task followup calls now emit attempted plus sent/blocked/failed activity with task session ID, idempotency key, event IDs, payload length, and origin (`event_route`, `queue_action`, or `task_session_api`).

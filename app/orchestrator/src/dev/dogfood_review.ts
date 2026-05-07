@@ -47,7 +47,9 @@ type RollupSummary = {
   routed: number;
   queued: number;
   done: number;
+  followups_attempted: number;
   followups_sent: number;
+  followups_blocked: number;
   failed: number;
   last_activity_at: string;
 };
@@ -231,7 +233,9 @@ function rollupBy(events: ActivityEvent[], keyForEvent: (event: ActivityEvent) =
       routed: 0,
       queued: 0,
       done: 0,
+      followups_attempted: 0,
       followups_sent: 0,
+      followups_blocked: 0,
       failed: 0,
       last_activity_at: event.occurred_at,
     };
@@ -239,7 +243,9 @@ function rollupBy(events: ActivityEvent[], keyForEvent: (event: ActivityEvent) =
     if (event.type === "event_routed") rollup.routed += 1;
     if (event.type === "event_routed" && event.queue_item_id) rollup.queued += 1;
     if (event.type === "queue_item_done") rollup.done += 1;
-    if (event.type === "event_routed" && event.task_session_id) rollup.followups_sent += 1;
+    if (event.type === "task_followup_attempted") rollup.followups_attempted += 1;
+    if (event.type === "task_followup_sent") rollup.followups_sent += 1;
+    if (event.type === "task_followup_blocked") rollup.followups_blocked += 1;
     if (event.status === "failed") rollup.failed += 1;
     if (event.occurred_at > rollup.last_activity_at) rollup.last_activity_at = event.occurred_at;
     rollups.set(id, rollup);
@@ -310,7 +316,7 @@ function appendRollupLines(lines: string[], rollups: RollupSummary[]): void {
   }
   for (const rollup of rollups) {
     lines.push(
-      `- ${rollup.id} events=${rollup.events} routed=${rollup.routed} queued=${rollup.queued} done=${rollup.done} followups=${rollup.followups_sent} failed=${rollup.failed} last=${rollup.last_activity_at}`,
+      `- ${rollup.id} events=${rollup.events} routed=${rollup.routed} queued=${rollup.queued} done=${rollup.done} followups_attempted=${rollup.followups_attempted} followups_sent=${rollup.followups_sent} followups_blocked=${rollup.followups_blocked} failed=${rollup.failed} last=${rollup.last_activity_at}`,
     );
   }
 }
