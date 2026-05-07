@@ -187,15 +187,33 @@ Real gaps:
 - MCP poll cursor/seen state now persists through the gateway store and commits only after successful routing. Use Postgres mode for real Slack/GitHub dogfood if restart-proof cursor state matters.
 - Task followup/session history is not durable enough. Add `task_messages` persistence with idempotency key, runtime, session ID, status, text hash/length, event IDs, native turn ID, timestamps, and error summary.
 - Task runtime types are too loose. Replace `unknown`-heavy boundaries with shared `TaskSession`, `TaskMessage`, `TaskRuntimeCapabilities`, and `TaskRuntimeError` shapes for Codex and Claude.
-- Manual-mode docs say return-to-event-loop snapshots the manual layout, but current code captures on entry. Either fix exit-time capture or change docs; product intent prefers exit-time capture.
+- Manual-mode exit snapshot semantics now match product intent: entering Manual Mode pauses automation, and returning to Event Loop captures the manual layout before restoring queue context.
 - Operational metrics need useful gauges: queue depth by state, stale leases, restore pending/failed, followup status counts, runtime failure counts.
 - GatewayStore remains broad. Conformance tests reduce risk; split into smaller store ports later, after dogfood-critical safety/history patches.
+
+Latest user steering:
+
+- Product center is the intake stack, not interruption policy.
+- User intentionally enters event-loop mode when doing focused throughput work.
+- One active packet should dominate the Mac UI. Sidebar/list can exist for orientation, but should feel secondary to the current paper.
+- Background agents should route new information into existing task sessions first. Queue gets only human-blocked, ambiguous, or risky work.
+- Calendar/meeting awareness, Focus-mode integration, notification fatigue, voice-out, and budget dashboards are not worth MVP time.
+- Voice transcript ingress can stay as an optional experiment because it feeds the same event router, but it is not a core MVP lane.
+- Useful safety now means read-only/poll-first integrations, draft-first external actions, explicit task-message grants for terminal fallback, and local audit history.
+
+Release guardrails:
+
+- MCP/browser/source events should prove one of three outcomes: `store_only`, routed into a task session, or queued because human judgment is needed.
+- Human queue noise should stay visible: high ignore/dismiss rate means router is over-queueing.
+- Task followup history must be reconstructable after the fact: queue item -> event -> task -> runtime/session -> message status.
+- Manual Mode must be a real escape hatch: user can leave event-loop mode, do normal Mac work, then return without losing the manual layout.
+- Browser/context restore should prefer provider deeplinks and show confidence. Full per-app canvas/DOM automation remains later.
 
 ## Next Best Work
 
 1. Add real GitHub installed-tool MCP source config/wrapper, matching the `agent-slack` dogfood path.
 2. Add durable `task_messages` history for Codex/Claude followups and idempotency.
 3. Real Claude+Codex composite dogfood against harmless configured sessions.
-4. Fix manual-mode exit snapshot semantics.
+4. Make Mac queue focus mode more one-paper-at-a-time: current packet dominates, queue list stays secondary.
 5. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
 6. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.

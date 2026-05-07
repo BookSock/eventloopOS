@@ -435,7 +435,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
     }
 
-    func testEnteringManualModeCapturesCurrentWorkspaceSnapshot() async {
+    func testToggleEnteringManualModeDoesNotCaptureUntilReturn() async {
         let snapshot = WorkspaceSnapshot(
             windows: [
                 WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog"),
@@ -449,11 +449,19 @@ final class QueueViewModelTests: XCTestCase {
             workspaceClient: workspaceClient
         )
 
-        await viewModel.enterManualModeAndCaptureWorkspace()
+        await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
 
         XCTAssertEqual(viewModel.mode, .manual)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
         XCTAssertEqual(viewModel.workspaceRestoreState, .skippedManualMode)
+        XCTAssertNil(viewModel.manualWorkspaceSnapshot)
+        XCTAssertEqual(viewModel.manualWorkspaceCaptureState, .idle)
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, 0)
+
+        await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+
+        XCTAssertEqual(viewModel.mode, .eventLoop)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
         XCTAssertEqual(viewModel.manualWorkspaceSnapshot, snapshot)
         XCTAssertEqual(viewModel.manualWorkspaceCaptureState, .captured(snapshot))
         XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
@@ -487,8 +495,8 @@ final class QueueViewModelTests: XCTestCase {
             workspaceClient: workspaceClient
         )
 
-        await viewModel.enterManualModeAndCaptureWorkspace()
-        viewModel.returnToEventLoopMode()
+        viewModel.enterManualMode()
+        await viewModel.returnToEventLoopModeAndPrepareWorkspaceRestore()
         await viewModel.confirmManualWorkspaceRestore()
 
         XCTAssertEqual(viewModel.mode, .manual)
@@ -545,6 +553,7 @@ final class QueueViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.mode, .eventLoop)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
         XCTAssertEqual(viewModel.workspaceRestoreState, .planned(plan))
         XCTAssertEqual(workspaceClient.restorePlanSnapshots, [snapshot])
     }

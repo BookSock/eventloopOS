@@ -8,7 +8,7 @@ This repo is structured as a planning-first MVP workspace:
 - `docs/planning/` - product, architecture, roadmap, and research synthesis.
 - `app/` - implementation workspace for the actual product.
 
-Current MVP direction: build a Mac-native attention scheduler for agent-heavy work. The first version should not try to replace the OS. It should create a ranked review queue, capture/restore enough workspace context, and let the user advance through human-blocked work with one hotkey and one done/next action.
+Current MVP direction: build a Mac-native intake stack for agent-heavy work. The first version should not try to replace the OS or become a notification product. It should create a ranked review queue, capture/restore enough workspace context, route non-human-blocked events into background agents, and let the user advance through one human-blocked packet at a time with one hotkey and one done/next action.
 
 ## Current Proof
 
@@ -113,6 +113,8 @@ pnpm run dev:dogfood
 
 Then edit `var/local-events.json` and run `pnpm --filter @eventloopos/orchestrator run poll:mcp:once` to turn those local items into routed events. This is useful for testing the master-agent polling loop before giving real external integrations access.
 
+Optional voice experiment. Voice is not a core MVP lane; these commands exist only because transcripts feed the same event router as Slack/GitHub/MCP/local events.
+
 Local STT tools can pipe transcripts into the router with `pnpm --filter @eventloopos/orchestrator run voice:send`. Use `EVENTLOOPOS_VOICE_TRANSCRIPT`, or pipe text on stdin. Optional hints: `EVENTLOOPOS_VOICE_PROJECT_HINT`, `EVENTLOOPOS_VOICE_TASK_HINT`, and `EVENTLOOPOS_VOICE_IDEMPOTENCY_KEY`.
 For line-delimited local STT streams, use `pnpm --filter @eventloopos/orchestrator run voice:listen`. Optional `EVENTLOOPOS_VOICE_WAKE_PHRASE=computer` filters ambient transcripts and strips the wake phrase before forwarding.
 For a local STT command that prints line-delimited transcripts, use `pnpm run voice:listen-command` with `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` and optional `EVENTLOOPOS_VOICE_TRANSCRIPT_ARGS_JSON='["--arg","value"]'`. This launches the command with argv, pipes stdout into the wake-phrase router, and is checked by `pnpm run dev:doctor` when configured.
@@ -136,7 +138,7 @@ Codex native thread protocol notes from the installed local CLI live in `externa
 Set `ORCHESTRATOR_TASK_SESSIONS=codex_app_server` to expose local Codex app-server threads through `/task-sessions`; use `[task:blog feedback]` in thread titles/previews, `ORCHESTRATOR_CODEX_TASK_MAP='{"thread_id":"task_blog_feedback"}'`, or hot-loaded `ORCHESTRATOR_CODEX_TASK_MAP_PATH=config/codex-task-map.json` for task routing.
 Set `ORCHESTRATOR_TASK_SESSIONS=claude_cli` with `ORCHESTRATOR_CLAUDE_SESSIONS='{"claude-session-id":{"task_id":"task_blog_feedback","name":"Blog feedback","cwd":"/repo"}}'` to expose configured Claude Code sessions through the same `/task-sessions` API. Followups use `claude -p --output-format json --resume <session>` in the configured `cwd`.
 With `ORCHESTRATOR_CODEX_TASK_MAP_PATH` configured, `PUT /task-sessions/:id/task-binding` writes the map file atomically so agents can bind existing Codex threads to tasks through the orchestrator API.
-The Mac queue app shows task-session binding controls on review packets with `task_id`, auto-loads available sessions for the selected task, lets a human bind an existing Codex thread, then enables the recommended agent handoff from the same queue context. Entering Manual Mode pauses automated workspace restore and captures the current AeroSpace workspace snapshot so normal-computer context is visible in the UI instead of disappearing silently. `Restore Manual Workspace` moves back to that saved normal-computer snapshot and keeps Event Loop automation paused.
+The Mac queue app shows task-session binding controls on review packets with `task_id`, auto-loads available sessions for the selected task, lets a human bind an existing Codex thread, then enables the recommended agent handoff from the same queue context. Manual Mode pauses automated workspace restore so the user can use the Mac normally. Returning to Event Loop captures the manual layout before restoring queue context, so `Restore Manual Workspace` can move back to the normal-computer context and keep automation paused.
 
 Chrome native host install:
 

@@ -12,6 +12,16 @@ Do not build analytics SaaS. Build local counters and history first.
 - Did user clear more work with less hunting?
 - What failed and why?
 
+## Release Guardrail
+
+Every inbound source should be able to show why it did not annoy the human:
+
+- `store_only`: passive context was saved, no queue item.
+- `task_session`: event routed into an existing Codex/Claude task session.
+- `human_queue`: event became a review packet because it was human-blocked, ambiguous, risky, or no task/session match existed.
+
+High `human_queue` plus high ignore/defer rate means the router is over-queueing. That is product failure for the intake-stack MVP.
+
 ## Metrics V0
 
 Track locally:
@@ -42,6 +52,7 @@ Derived:
 
 - Queue clearance rate.
 - Human queue noise rate: created items later ignored.
+- Human queue routing share: queued versus stored/routed-to-task.
 - Restore success rate.
 - Task-session injection rate.
 - Time from queue item creation to done.

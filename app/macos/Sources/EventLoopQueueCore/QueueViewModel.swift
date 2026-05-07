@@ -186,10 +186,16 @@ public final class QueueViewModel: ObservableObject {
         mode = .manual
         shouldRestoreWorkspace = false
         workspaceRestoreState = .skippedManualMode
+        manualWorkspaceSnapshot = nil
+        manualWorkspaceCaptureState = .idle
     }
 
     public func enterManualModeAndCaptureWorkspace() async {
         enterManualMode()
+        await captureManualWorkspaceSnapshot()
+    }
+
+    private func captureManualWorkspaceSnapshot() async {
         manualWorkspaceCaptureState = .capturing
         do {
             let snapshot = try await workspaceClient.capture()
@@ -207,6 +213,9 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func returnToEventLoopModeAndPrepareWorkspaceRestore() async {
+        if mode == .manual {
+            await captureManualWorkspaceSnapshot()
+        }
         returnToEventLoopMode()
         await prepareSelectedWorkspaceRestore()
     }
@@ -221,7 +230,7 @@ public final class QueueViewModel: ObservableObject {
 
     public func toggleManualModeAndPrepareWorkspaceRestoreIfNeeded() async {
         if mode == .eventLoop {
-            await enterManualModeAndCaptureWorkspace()
+            enterManualMode()
         } else {
             await returnToEventLoopModeAndPrepareWorkspaceRestore()
         }
