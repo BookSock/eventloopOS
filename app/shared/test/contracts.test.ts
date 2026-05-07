@@ -91,6 +91,21 @@ describe("contract schemas", () => {
     expect(request.resource.kind).toBe("browser_tab");
   });
 
+  it("allows failed context restore requests for retryable browser failures", () => {
+    const fixture = readFixture(join(fixturesDir, "valid/context_restore_request.json"));
+    const request = ContextRestoreRequestSchema.parse({
+      ...(fixture.data as Record<string, unknown>),
+      status: "failed",
+      result: {
+        ok: false,
+        error: "tab not found"
+      }
+    });
+
+    expect(request.status).toBe("failed");
+    expect(request.result).toMatchObject({ ok: false });
+  });
+
   it("requires review-packet evidence", () => {
     const fixture = readFixture(join(fixturesDir, "valid/review_packet.json"));
     const invalidPacket = {
