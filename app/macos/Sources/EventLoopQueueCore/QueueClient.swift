@@ -9,6 +9,8 @@ public protocol QueueClient: Sendable {
     func contextRestorePlan(resource: ReviewContextResource) async throws -> ContextRestorePlan
     func requestContextRestore(resource: ReviewContextResource, idempotencyKey: String) async throws -> ContextRestoreRequest
     func contextRestoreRequest(id: String) async throws -> ContextRestoreRequest
+    func fetchTaskSessions() async throws -> [TaskSession]
+    func bindTaskSession(sessionId: String, taskId: String) async throws -> TaskBinding
 }
 
 public enum QueueClientError: Error, Equatable, LocalizedError {
@@ -136,6 +138,25 @@ public struct HTTPQueueClient: QueueClient {
         return try decoder.decode(ContextRestoreRequestEnvelope.self, from: data).restoreRequest
     }
 
+    public func fetchTaskSessions() async throws -> [TaskSession] {
+        let url = baseURL.appending(path: "task-sessions")
+        let (data, response) = try await session.data(from: url)
+        try validate(response: response)
+        return try decoder.decode(TaskSessionsEnvelope.self, from: data).sessions
+    }
+
+    public func bindTaskSession(sessionId: String, taskId: String) async throws -> TaskBinding {
+        let url = baseURL.appending(path: "task-sessions/\(sessionId)/task-binding")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(TaskBindingRequest(taskId: taskId))
+
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(TaskBindingEnvelope.self, from: data).binding
+    }
+
     private func validate(response: URLResponse) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw QueueClientError.invalidResponse
@@ -160,6 +181,14 @@ private struct ContextRestorePlanRequest: Encodable {
     let resource: ReviewContextResource
 }
 
+private struct TaskBindingRequest: Encodable {
+    let taskId: String
+
+    enum CodingKeys: String, CodingKey {
+        case taskId = "task_id"
+    }
+}
+
 public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private let lock = NSLock()
     private var packets: [ReviewPacket]
@@ -176,9 +205,20 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var contextRestoreRequestIdempotencyKeys: [String] = []
     private var contextRestoreStatusIds: [String] = []
     private var executedRecommendedActionIds: [String] = []
+    private var taskSessions: [TaskSession]
+    private var taskBindings: [TaskBinding] = []
 
     public init(
         packets: [ReviewPacket] = SeededQueue.packets,
+        taskSessions: [TaskSession] = [
+            TaskSession(
+                id: "task_session_blog",
+                taskId: "task_blog_feedback",
+                provider: "fake",
+                status: "idle",
+                name: "Blog feedback"
+            )
+        ],
         contextRestorePlanResult: Result<ContextRestorePlan, Error> = .success(
             ContextRestorePlan(
                 kind: "open_url",
@@ -220,6 +260,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         contextRestoreStatusResults: [Result<ContextRestoreRequest, Error>] = []
     ) {
         self.packets = packets.sorted { $0.priority > $1.priority }
+        self.taskSessions = taskSessions
         self.contextRestorePlanResult = contextRestorePlanResult
         self.contextRestoreRequestResult = contextRestoreRequestResult
         self.contextRestoreStatusResult = contextRestoreStatusResult ?? contextRestoreRequestResult
@@ -256,6 +297,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public var executedRecommendedActions: [String] {
         lock.withLock { executedRecommendedActionIds }
+    }
+
+    public var boundTaskSessions: [TaskBinding] {
+        lock.withLock { taskBindings }
     }
 
     public func replacePackets(_ nextPackets: [ReviewPacket]) {
@@ -348,6 +393,32 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
                 return try contextRestoreStatusResults.removeFirst().get()
             }
             return try contextRestoreStatusResult.get()
+        }
+    }
+
+    public func fetchTaskSessions() async throws -> [TaskSession] {
+        lock.withLock { taskSessions }
+    }
+
+    public func bindTaskSession(sessionId: String, taskId: String) async throws -> TaskBinding {
+        try lock.withLock {
+            guard let index = taskSessions.firstIndex(where: { $0.id == sessionId }) else {
+                throw QueueClientError.packetNotFound(sessionId)
+            }
+            let current = taskSessions[index]
+            let updated = TaskSession(
+                id: current.id,
+                taskId: taskId,
+                provider: current.provider,
+                status: current.status,
+                name: current.name,
+                preview: current.preview,
+                cwd: current.cwd
+            )
+            taskSessions[index] = updated
+            let binding = TaskBinding(ok: true, taskSessionId: sessionId, taskId: taskId, session: updated)
+            taskBindings.append(binding)
+            return binding
         }
     }
 }

@@ -10,6 +10,7 @@ final class QueueClientTests: XCTestCase {
 
         XCTAssertEqual(loaded.map(\.id), ["qit_blog_feedback", "qit_ci_failed"])
         XCTAssertEqual(loaded.first?.reviewPacketId, "packet-blog-feedback")
+        XCTAssertEqual(loaded.first?.taskId, "task_blog_feedback")
         XCTAssertEqual(loaded.first?.priority, 90)
         XCTAssertEqual(loaded.first?.decisionNeeded, "Choose whether launch positioning should lead with speed or reliability.")
         XCTAssertEqual(loaded.first?.riskLevel, "medium")
@@ -99,6 +100,118 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.status.backend, "aerospace")
         XCTAssertEqual(envelope.status.reason, "server_unavailable")
         XCTAssertEqual(envelope.executeSupported, false)
+    }
+
+    func testTaskSessionsEnvelopeDecodesSessions() throws {
+        let data = """
+        {
+          "sessions": [
+            {
+              "id": "codex_thread_abc",
+              "task_id": "task_blog_feedback",
+              "provider": "codex",
+              "status": "idle",
+              "name": "Blog feedback",
+              "preview": "Draft thread",
+              "cwd": "/repo"
+            }
+          ],
+          "count": 1
+        }
+        """.data(using: .utf8)!
+
+        let envelope = try QueueCoders.makeDecoder().decode(TaskSessionsEnvelope.self, from: data)
+
+        XCTAssertEqual(envelope.sessions.first?.id, "codex_thread_abc")
+        XCTAssertEqual(envelope.sessions.first?.taskId, "task_blog_feedback")
+        XCTAssertEqual(envelope.sessions.first?.provider, "codex")
+        XCTAssertEqual(envelope.sessions.first?.preview, "Draft thread")
+    }
+
+    func testTaskBindingEnvelopeDecodesBinding() throws {
+        let data = """
+        {
+          "ok": true,
+          "binding": {
+            "ok": true,
+            "task_session_id": "codex_thread_abc",
+            "task_id": "task_blog_feedback",
+            "native_thread_id": "thread_abc",
+            "session": {
+              "id": "codex_thread_abc",
+              "task_id": "task_blog_feedback",
+              "provider": "codex",
+              "status": "running"
+            }
+          }
+        }
+        """.data(using: .utf8)!
+
+        let envelope = try QueueCoders.makeDecoder().decode(TaskBindingEnvelope.self, from: data)
+
+        XCTAssertTrue(envelope.ok)
+        XCTAssertEqual(envelope.binding.taskSessionId, "codex_thread_abc")
+        XCTAssertEqual(envelope.binding.taskId, "task_blog_feedback")
+        XCTAssertEqual(envelope.binding.nativeThreadId, "thread_abc")
+        XCTAssertEqual(envelope.binding.session?.status, "running")
+    }
+
+    func testHTTPQueueClientFetchesTaskSessions() async throws {
+        let (client, recorder) = makeHTTPClient { _ in
+            """
+            {
+              "sessions": [
+                {
+                  "id": "task_session_blog",
+                  "task_id": "task_blog_feedback",
+                  "provider": "fake",
+                  "status": "idle"
+                }
+              ],
+              "count": 1
+            }
+            """
+        }
+
+        let sessions = try await client.fetchTaskSessions()
+
+        XCTAssertEqual(recorder.requests.first?.url?.absoluteString, "http://127.0.0.1:4377/task-sessions")
+        XCTAssertEqual(sessions.map(\.id), ["task_session_blog"])
+        XCTAssertEqual(sessions.first?.taskId, "task_blog_feedback")
+    }
+
+    func testHTTPQueueClientBindsTaskSession() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "PUT")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/task-sessions/task_session_blog/task-binding")
+            XCTAssertEqual(
+                try JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: String],
+                ["task_id": "task_blog_feedback"]
+            )
+            return """
+            {
+              "ok": true,
+              "binding": {
+                "ok": true,
+                "task_session_id": "task_session_blog",
+                "task_id": "task_blog_feedback",
+                "session": {
+                  "id": "task_session_blog",
+                  "task_id": "task_blog_feedback",
+                  "provider": "fake",
+                  "status": "idle"
+                }
+              }
+            }
+            """
+        }
+
+        let binding = try await client.bindTaskSession(sessionId: "task_session_blog", taskId: "task_blog_feedback")
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertEqual(binding.taskSessionId, "task_session_blog")
+        XCTAssertEqual(binding.taskId, "task_blog_feedback")
+        XCTAssertEqual(binding.session?.taskId, "task_blog_feedback")
     }
 
     func testWorkspaceRestoreExecutionEnvelopeDecodesReceipt() throws {
@@ -256,5 +369,98 @@ final class QueueClientTests: XCTestCase {
         let url = Bundle.module.url(forResource: "fake_orchestrator_queue", withExtension: "json")!
         let data = try Data(contentsOf: url)
         return try QueueCoders.makeDecoder().decode(QueueEnvelope.self, from: data).packets
+    }
+
+    private func requestBodyData(_ request: URLRequest) -> Data {
+        if let body = request.httpBody {
+            return body
+        }
+        guard let stream = request.httpBodyStream else {
+            return Data()
+        }
+
+        stream.open()
+        defer { stream.close() }
+
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 1024)
+        while stream.hasBytesAvailable {
+            let read = stream.read(&buffer, maxLength: buffer.count)
+            if read <= 0 {
+                break
+            }
+            data.append(buffer, count: read)
+        }
+        return data
+    }
+
+    private func makeHTTPClient(
+        body: @escaping (URLRequest) throws -> String
+    ) -> (HTTPQueueClient, HTTPClientRecorder) {
+        let recorder = HTTPClientRecorder()
+        MockURLProtocol.registry.setHandler { request in
+            recorder.requests.append(request)
+            let data = try body(request).data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, data)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        return (HTTPQueueClient(baseURL: URL(string: "http://127.0.0.1:4377")!, session: session), recorder)
+    }
+}
+
+private final class HTTPClientRecorder: @unchecked Sendable {
+    var requests: [URLRequest] = []
+}
+
+private final class MockURLProtocol: URLProtocol, @unchecked Sendable {
+    static let registry = MockURLProtocolRegistry()
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        do {
+            guard let handler = Self.registry.handler() else {
+                throw QueueClientError.invalidResponse
+            }
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
+}
+
+private final class MockURLProtocolRegistry: @unchecked Sendable {
+    private let lock = NSLock()
+    private var currentHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    func setHandler(_ handler: @escaping (URLRequest) throws -> (HTTPURLResponse, Data)) {
+        lock.withLock {
+            currentHandler = handler
+        }
+    }
+
+    func handler() -> ((URLRequest) throws -> (HTTPURLResponse, Data))? {
+        lock.withLock {
+            currentHandler
+        }
     }
 }

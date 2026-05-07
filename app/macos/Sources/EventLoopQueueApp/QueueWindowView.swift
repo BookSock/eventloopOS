@@ -78,7 +78,10 @@ struct QueueWindowView: View {
                     selectedPacket: viewModel.selectedPacket,
                     packets: viewModel.packets,
                     state: viewModel.state
-                )
+                ),
+                taskSessions: viewModel.taskSessions,
+                selectedTaskSessions: viewModel.selectedTaskSessions,
+                taskBindingState: viewModel.taskBindingState
             ) {
                 Task {
                     await viewModel.doneAndNext()
@@ -94,6 +97,14 @@ struct QueueWindowView: View {
             } restoreContextResource: { resource in
                 Task {
                     await viewModel.requestContextRestore(resource: resource)
+                }
+            } loadTaskSessions: {
+                Task {
+                    await viewModel.loadTaskSessions()
+                }
+            } bindTaskSession: { taskSessionId in
+                Task {
+                    await viewModel.bindSelectedPacket(toTaskSessionId: taskSessionId)
                 }
             }
         }
@@ -182,10 +193,15 @@ private struct QueueRow: View {
 private struct PacketDetail: View {
     let packet: ReviewPacket?
     let placeholderSummary: QueueWindowDetailSummary
+    let taskSessions: [TaskSession]
+    let selectedTaskSessions: [TaskSession]
+    let taskBindingState: TaskBindingState
     let doneAndNext: () -> Void
     let executeRecommendedAction: () -> Void
     let refreshQueue: () -> Void
     let restoreContextResource: (ReviewContextResource) -> Void
+    let loadTaskSessions: () -> Void
+    let bindTaskSession: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -216,6 +232,19 @@ private struct PacketDetail: View {
                         DetailSection(title: "Action", systemImage: "checkmark.circle") {
                             Text(packet.recommendedAction)
                                 .accessibilityIdentifier("packet-recommended-action")
+                        }
+
+                        if let taskId = packet.taskId {
+                            DetailSection(title: "Agent", systemImage: "terminal") {
+                                TaskSessionBindingSection(
+                                    taskId: taskId,
+                                    taskSessions: taskSessions,
+                                    selectedTaskSessions: selectedTaskSessions,
+                                    state: taskBindingState,
+                                    loadTaskSessions: loadTaskSessions,
+                                    bindTaskSession: bindTaskSession
+                                )
+                            }
                         }
 
                         if !packet.riskTags.isEmpty {
@@ -350,6 +379,90 @@ private struct QueuePlaceholder<Summary: QueuePlaceholderSummary>: View {
         .padding(24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+}
+
+private struct TaskSessionBindingSection: View {
+    let taskId: String
+    let taskSessions: [TaskSession]
+    let selectedTaskSessions: [TaskSession]
+    let state: TaskBindingState
+    let loadTaskSessions: () -> Void
+    let bindTaskSession: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(taskId)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("packet-task-id")
+
+            if let session = selectedTaskSessions.first {
+                Label(taskSessionLabel(session), systemImage: "checkmark.circle")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("packet-bound-task-session")
+            } else {
+                Text("No matching task session loaded.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("packet-no-task-session")
+            }
+
+            HStack(spacing: 8) {
+                Button {
+                    loadTaskSessions()
+                } label: {
+                    Label("Load Sessions", systemImage: "arrow.clockwise")
+                }
+                .accessibilityIdentifier("packet-load-task-sessions-button")
+
+                Menu {
+                    ForEach(taskSessions) { session in
+                        Button(taskSessionLabel(session)) {
+                            bindTaskSession(session.id)
+                        }
+                    }
+                } label: {
+                    Label("Bind Session", systemImage: "link")
+                }
+                .disabled(taskSessions.isEmpty)
+                .accessibilityIdentifier("packet-bind-task-session-menu")
+            }
+
+            switch state {
+            case .idle:
+                EmptyView()
+            case .loading:
+                Label("Loading task sessions", systemImage: "hourglass")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("packet-task-binding-loading")
+            case .loaded:
+                Text("\(taskSessions.count) task sessions loaded.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("packet-task-binding-loaded")
+            case let .bound(binding):
+                Text("Bound \(binding.taskSessionId).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("packet-task-binding-bound")
+            case let .failed(message):
+                Text(message)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .accessibilityIdentifier("packet-task-binding-failed")
+            }
+        }
+        .accessibilityIdentifier("packet-task-session-binding")
+    }
+}
+
+private func taskSessionLabel(_ session: TaskSession) -> String {
+    if let name = session.name, !name.isEmpty {
+        return "\(name) (\(session.id))"
+    }
+    return session.id
 }
 
 private struct PacketPill: View {

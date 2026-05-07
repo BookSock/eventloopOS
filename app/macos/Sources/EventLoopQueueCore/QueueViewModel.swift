@@ -9,6 +9,8 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var shouldRestoreWorkspace: Bool
     @Published public private(set) var workspaceRestoreState: WorkspaceRestoreState
     @Published public private(set) var contextRestoreState: ContextRestoreState
+    @Published public private(set) var taskSessions: [TaskSession]
+    @Published public private(set) var taskBindingState: TaskBindingState
 
     private let client: any QueueClient
     private let workspaceClient: any WorkspaceClient
@@ -30,6 +32,8 @@ public final class QueueViewModel: ObservableObject {
         self.shouldRestoreWorkspace = true
         self.workspaceRestoreState = .idle
         self.contextRestoreState = .idle
+        self.taskSessions = []
+        self.taskBindingState = .idle
     }
 
     deinit {
@@ -44,6 +48,21 @@ public final class QueueViewModel: ObservableObject {
 
     public var canExecuteSelectedRecommendedAction: Bool {
         selectedPacket?.recommendedActionType == "resume_agent"
+    }
+
+    public var selectedTaskId: String? {
+        selectedPacket?.taskId
+    }
+
+    public var selectedTaskSessions: [TaskSession] {
+        guard let selectedTaskId else {
+            return []
+        }
+        return taskSessions.filter { $0.taskId == selectedTaskId }
+    }
+
+    public var canBindSelectedPacketToTaskSession: Bool {
+        selectedTaskId != nil
     }
 
     public var selectedWorkspaceSnapshot: WorkspaceSnapshot? {
@@ -184,6 +203,32 @@ public final class QueueViewModel: ObservableObject {
             state = .loaded
         } catch {
             state = .failed(error.localizedDescription)
+        }
+    }
+
+    public func loadTaskSessions() async {
+        taskBindingState = .loading
+        do {
+            taskSessions = try await client.fetchTaskSessions()
+            taskBindingState = .loaded
+        } catch {
+            taskBindingState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func bindSelectedPacket(toTaskSessionId taskSessionId: String) async {
+        guard let taskId = selectedTaskId else {
+            taskBindingState = .failed("Selected packet has no task id")
+            return
+        }
+
+        taskBindingState = .loading
+        do {
+            let binding = try await client.bindTaskSession(sessionId: taskSessionId, taskId: taskId)
+            taskSessions = try await client.fetchTaskSessions()
+            taskBindingState = .bound(binding)
+        } catch {
+            taskBindingState = .failed(error.localizedDescription)
         }
     }
 

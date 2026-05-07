@@ -3,6 +3,7 @@ import Foundation
 public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
     public let id: String
     public let reviewPacketId: String
+    public let taskId: String?
     public let title: String
     public let summary: String
     public let decisionNeeded: String
@@ -21,6 +22,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
     public init(
         id: String,
         reviewPacketId: String? = nil,
+        taskId: String? = nil,
         title: String,
         summary: String,
         decisionNeeded: String = "",
@@ -38,6 +40,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
     ) {
         self.id = id
         self.reviewPacketId = reviewPacketId ?? id
+        self.taskId = taskId
         self.title = title
         self.summary = summary
         self.decisionNeeded = decisionNeeded
@@ -57,6 +60,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id
         case reviewPacketId
+        case taskId
         case title
         case summary
         case decisionNeeded
@@ -78,6 +82,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
         let id = try container.decode(String.self, forKey: .id)
         self.id = id
         self.reviewPacketId = try container.decodeIfPresent(String.self, forKey: .reviewPacketId) ?? id
+        self.taskId = try container.decodeIfPresent(String.self, forKey: .taskId)
         self.title = try container.decode(String.self, forKey: .title)
         self.summary = try container.decode(String.self, forKey: .summary)
         self.decisionNeeded = try container.decodeIfPresent(String.self, forKey: .decisionNeeded) ?? ""
@@ -263,6 +268,100 @@ public enum EventLoopMode: Equatable, Sendable {
     case manual
 }
 
+public struct TaskSessionsEnvelope: Decodable, Equatable, Sendable {
+    public let sessions: [TaskSession]
+
+    public init(sessions: [TaskSession]) {
+        self.sessions = sessions
+    }
+}
+
+public struct TaskSession: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let taskId: String?
+    public let provider: String
+    public let status: String
+    public let name: String?
+    public let preview: String?
+    public let cwd: String?
+
+    public init(
+        id: String,
+        taskId: String? = nil,
+        provider: String,
+        status: String,
+        name: String? = nil,
+        preview: String? = nil,
+        cwd: String? = nil
+    ) {
+        self.id = id
+        self.taskId = taskId
+        self.provider = provider
+        self.status = status
+        self.name = name
+        self.preview = preview
+        self.cwd = cwd
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case taskId = "task_id"
+        case provider
+        case status
+        case name
+        case preview
+        case cwd
+    }
+}
+
+public struct TaskBindingEnvelope: Decodable, Equatable, Sendable {
+    public let ok: Bool
+    public let binding: TaskBinding
+
+    public init(ok: Bool, binding: TaskBinding) {
+        self.ok = ok
+        self.binding = binding
+    }
+}
+
+public struct TaskBinding: Codable, Equatable, Sendable {
+    public let ok: Bool
+    public let taskSessionId: String
+    public let taskId: String
+    public let nativeThreadId: String?
+    public let session: TaskSession?
+
+    public init(
+        ok: Bool,
+        taskSessionId: String,
+        taskId: String,
+        nativeThreadId: String? = nil,
+        session: TaskSession? = nil
+    ) {
+        self.ok = ok
+        self.taskSessionId = taskSessionId
+        self.taskId = taskId
+        self.nativeThreadId = nativeThreadId
+        self.session = session
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case taskSessionId = "task_session_id"
+        case taskId = "task_id"
+        case nativeThreadId = "native_thread_id"
+        case session
+    }
+}
+
+public enum TaskBindingState: Equatable, Sendable {
+    case idle
+    case loading
+    case loaded
+    case bound(TaskBinding)
+    case failed(String)
+}
+
 public struct ContextRestorePlanEnvelope: Decodable, Equatable, Sendable {
     public let restorePlan: ContextRestorePlan
 
@@ -416,6 +515,7 @@ public struct ContextRestoreError: Codable, Equatable, Sendable {
 struct QueueItemDTO: Codable, Equatable, Sendable {
     let id: String
     let reviewPacketId: String
+    let taskId: String?
     let priorityScore: Int
     let createdAt: Date
     let reviewPacket: ReviewPacketDTO
@@ -423,6 +523,7 @@ struct QueueItemDTO: Codable, Equatable, Sendable {
     enum CodingKeys: String, CodingKey {
         case id
         case reviewPacketId = "review_packet_id"
+        case taskId = "task_id"
         case priorityScore = "priority_score"
         case createdAt = "created_at"
         case reviewPacket = "review_packet"
@@ -432,6 +533,7 @@ struct QueueItemDTO: Codable, Equatable, Sendable {
         ReviewPacket(
             id: id,
             reviewPacketId: reviewPacketId,
+            taskId: taskId,
             title: reviewPacket.title,
             summary: reviewPacket.summary,
             decisionNeeded: reviewPacket.decisionNeeded ?? "",

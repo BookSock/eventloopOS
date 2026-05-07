@@ -106,6 +106,7 @@ EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm run live:aerospace
 Codex native thread protocol notes from the installed local CLI live in `external-resources/codex-app-server-protocol.md`.
 Set `ORCHESTRATOR_TASK_SESSIONS=codex_app_server` to expose local Codex app-server threads through `/task-sessions`; use `[task:blog feedback]` in thread titles/previews, `ORCHESTRATOR_CODEX_TASK_MAP='{"thread_id":"task_blog_feedback"}'`, or hot-loaded `ORCHESTRATOR_CODEX_TASK_MAP_PATH=config/codex-task-map.json` for task routing.
 With `ORCHESTRATOR_CODEX_TASK_MAP_PATH` configured, `PUT /task-sessions/:id/task-binding` writes the map file atomically so agents can bind existing Codex threads to tasks through the orchestrator API.
+The Mac queue app shows task-session binding controls on review packets with `task_id`, so a human can load available sessions, bind an existing Codex thread to the selected task, then run the recommended agent handoff from the same queue context.
 
 Chrome native host install:
 

@@ -3,6 +3,7 @@
     {
       "id": "qit_blog_feedback",
       "review_packet_id": "packet-blog-feedback",
+      "task_id": "task_blog_feedback",
       "priority_score": 90,
       "created_at": "2026-01-01T17:00:00Z",
       "review_packet": {
