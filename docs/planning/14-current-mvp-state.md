@@ -60,6 +60,7 @@ Done:
 - Menu bar shell with queue count, selected item, mode, restore state, open queue, refresh, done/next, and mode toggle.
 - Full window empty/loading/error placeholders with retry affordance and unit-covered presentation copy.
 - Render smoke test for real SwiftUI `QueueWindowView` using seeded queue data and nonblank image pixel check.
+- Launch smoke test builds `EventLoopQueueApp`, packages a temporary `.app` bundle, starts it in test mode through Launch Services, verifies it stays alive, then terminates it.
 - Workspace restore planning pause in manual mode.
 - Context resource restore request from queue UI.
 - Restore request status refresh.
@@ -69,7 +70,7 @@ Done:
 
 Gap:
 
-- No app bundle/XCUITest proof of the full installed Mac UI flow yet.
+- No app bundle/XCUITest proof of the full installed Mac UI interaction flow yet.
 
 ## Orchestrator Loop
 
@@ -120,7 +121,7 @@ Weak tests:
 - Docker-backed Postgres live tests skip when Docker absent, but native Postgres live tests pass on this machine.
 - AeroSpace live restore needs installed/running AeroSpace.
 - AeroSpace live smoke exists, but `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1 pnpm --filter @eventloopos/orchestrator run live:aerospace` currently reports `server_unavailable` because AeroSpace.app is not running.
-- No full app bundle/XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, and rendered Mac queue view, but not one combined installed Mac UI flow.
+- No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, and temp `.app` bundle launch, but not one combined installed Mac UI interaction flow.
 - No real microphone wake-word/STT test yet; current coverage proves the local transcript command pipe and router contract with fake process output.
 
 ## Next Best Work

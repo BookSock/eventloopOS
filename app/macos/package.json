@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "test": "swift test",
-    "test:e2e": "swift test --filter QueueWindowRenderTests",
+    "test:e2e": "swift test --filter QueueWindowRenderTests && bin/launch-smoke",
+    "test:e2e:launch": "bin/launch-smoke",
     "typecheck": "swift build"
   }
 }

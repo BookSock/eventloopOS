@@ -11,6 +11,7 @@
     "test:e2e": "pnpm -r --if-present test:e2e",
     "test:e2e:browser": "pnpm --filter @eventloopos/browser-extension --if-present test:e2e",
     "test:e2e:macos": "pnpm --filter @eventloopos/macos --if-present test:e2e",
+    "test:e2e:macos-launch": "pnpm --filter @eventloopos/macos run test:e2e:launch",
     "test:e2e:native-browser": "pnpm --filter @eventloopos/browser-extension run test:e2e:native-browser",
     "test:e2e:native-browser-real-orchestrator": "pnpm --filter @eventloopos/browser-extension run test:e2e:native-browser-real-orchestrator",
     "test:e2e:mac-browser-restore": "pnpm --filter @eventloopos/browser-extension run test:e2e:mac-browser-restore",
