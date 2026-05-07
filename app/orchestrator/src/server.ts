@@ -989,34 +989,46 @@ async function routeEventThroughGateway(
     };
   }
 
-  const injected = await injectEventIntoTaskSessionIfPossible(
-    event,
-    options.taskSessions,
-    options.store,
-    now,
-    (input) => sendTaskFollowupWithActivity(options, input, {
-      origin: "event_route",
-      occurredAt: now.toISOString(),
-      eventId: event.id,
-      sourceId: event.source_id,
-    }),
-  );
-  if (injected) {
-    const result = await options.store.recordEventRoute(event, injected.routeDecision, now);
-    await recordRoutedEventActivity(options, event, result.route_decision, {
-      taskMessage: injected.taskMessage,
-      queueItemId: undefined,
-    });
-    return {
+  let injected: Awaited<ReturnType<typeof injectEventIntoTaskSessionIfPossible>>;
+  let taskMessageError: string | undefined;
+  try {
+    injected = await injectEventIntoTaskSessionIfPossible(
       event,
-      route_decision: result.route_decision,
-      task_message: injected.taskMessage,
-    };
+      options.taskSessions,
+      options.store,
+      now,
+      (input) => sendTaskFollowupWithActivity(options, input, {
+        origin: "event_route",
+        occurredAt: now.toISOString(),
+        eventId: event.id,
+        sourceId: event.source_id,
+      }),
+    );
+  } catch (error) {
+    taskMessageError = error instanceof Error ? error.message : String(error);
+  }
+  if (injected) {
+    if (isRecord(injected.taskMessage) && injected.taskMessage.status === "blocked") {
+      taskMessageError = "task followup blocked";
+    } else {
+      const result = await options.store.recordEventRoute(event, injected.routeDecision, now);
+      await recordRoutedEventActivity(options, event, result.route_decision, {
+        taskMessage: injected.taskMessage,
+        queueItemId: undefined,
+      });
+      return {
+        event,
+        route_decision: result.route_decision,
+        task_message: injected.taskMessage,
+      };
+    }
   }
 
   const result = await options.store.ingestEventAsReviewPacket(event, now);
   await recordRoutedEventActivity(options, event, result.route_decision, {
     queueItemId: result.queue_item?.id,
+    taskMessage: injected?.taskMessage,
+    taskMessageError,
   });
   return {
     event,
@@ -1030,7 +1042,7 @@ async function recordRoutedEventActivity(
   options: GatewayServerOptions,
   event: McpEvent,
   routeDecision: RouteDecision,
-  input: { taskMessage?: unknown; queueItemId?: string | undefined },
+  input: { taskMessage?: unknown; queueItemId?: string | undefined; taskMessageError?: string | undefined },
 ): Promise<void> {
   const observability = options.observability;
   if (!observability) return;
@@ -1059,6 +1071,7 @@ async function recordRoutedEventActivity(
       route_action: routeDecision.action,
       confidence: routeDecision.confidence,
       task_message: input.taskMessage,
+      task_message_error: input.taskMessageError,
     },
   });
 }

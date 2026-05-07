@@ -28,6 +28,20 @@ test("builds tmux send plan as argv arrays without shell interpolation", () => {
   ]);
 });
 
+test("builds tmux send plan without Enter when submit is omitted", () => {
+  const plan = buildTmuxSendPlan({
+    targetPane: "%7",
+    text: "visible draft only",
+  });
+
+  assert.deepEqual(plan, [
+    {
+      file: "tmux",
+      args: ["send-keys", "-t", "%7", "-l", "visible draft only"],
+    },
+  ]);
+});
+
 test("builds Ghostty AppleScript with escaped text for visible terminal input", () => {
   const script = buildGhosttyAppleScript({
     text: "quote \" and slash \\ stay literal",
@@ -36,6 +50,19 @@ test("builds Ghostty AppleScript with escaped text for visible terminal input", 
   assert.equal(script, [
     "tell application \"Ghostty\"",
     "  input text \"quote \\\" and slash \\\\ stay literal\" to focused terminal of selected tab of front window",
+    "end tell",
+  ].join("\n"));
+});
+
+test("builds Ghostty AppleScript with escaped target and multiline text", () => {
+  const script = buildGhosttyAppleScript({
+    text: "line one\nquote \" and slash \\",
+    target: "abc\"123",
+  });
+
+  assert.equal(script, [
+    "tell application \"Ghostty\"",
+    "  input text \"line one\nquote \\\" and slash \\\\\" to terminal id \"abc\\\"123\"",
     "end tell",
   ].join("\n"));
 });
@@ -79,6 +106,38 @@ test("sends terminal task followup through injected execFile adapter", async () 
   });
 });
 
+test("sends terminal task followup as visible draft when submit is omitted", async () => {
+  const calls = [];
+  const message = await sendTaskMessageToTerminal({
+    session: {
+      id: "task_session_tmux_blog",
+      terminal_ref: "tmux:%blog",
+    },
+    text: "Draft only.",
+    idempotency_key: "idem_draft_only",
+  }, {
+    clock: fixedClock,
+    execFile: async (file, args) => {
+      calls.push({ file, args });
+    },
+  });
+
+  assert.equal(message.status, "sent");
+  assert.equal(message.transport.submit, false);
+  assert.equal(message.transport.command_count, 1);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], {
+    file: "tmux",
+    args: [
+      "send-keys",
+      "-t",
+      "%blog",
+      "-l",
+      "[eventloopOS followup]\nEvents: none\n\nDraft only.",
+    ],
+  });
+});
+
 test("blocks terminal send when session has no terminal ref", async () => {
   const message = await sendTaskMessageToTerminal({
     session: {
@@ -102,11 +161,11 @@ test("builds Ghostty send plan for front focused terminal", () => {
   const plan = buildTerminalSendPlan({
     terminalRef: "ghostty:front",
     text: "Visible followup",
-    submit: false,
   });
 
   assert.equal(plan.length, 1);
   assert.equal(plan[0].file, "osascript");
   assert.match(plan[0].args[1], /tell application "Ghostty"/);
   assert.match(plan[0].args[1], /input text "Visible followup"/);
+  assert.doesNotMatch(plan[0].args[1], /Visible followup\\n/);
 });

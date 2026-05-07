@@ -1816,6 +1816,229 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("falls back to the human queue when event-route task followup fails and dedupes retry", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const observability = createInMemoryObservability();
+    let attempts = 0;
+    const taskServer = createGatewayServer({
+      store,
+      observability,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      taskSessions: {
+        listSessions() {
+          return [
+            {
+              id: "task_session_blog",
+              task_id: "task_blog_feedback",
+              status: "idle",
+            },
+          ];
+        },
+        sendFollowupMessage() {
+          attempts += 1;
+          throw new Error("task runtime offline");
+        },
+      },
+    });
+    await new Promise<void>((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+    const address = taskServer.address() as AddressInfo;
+    const taskBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const event = {
+        id: "evt_slack_task_inject_failed",
+        source: "slack",
+        source_id: "slack:T123:C123:failed",
+        idempotency_key: "slack:T123:C123:failed",
+        occurred_at: "2026-05-06T16:59:00.000Z",
+        received_at: "2026-05-06T17:00:00.000Z",
+        task_hint: "blog feedback",
+        type: "slack.message",
+        title: "Slack message from Malis",
+        summary: "Blog needs launch date note before next draft.",
+        raw_ref: {
+          id: "raw_slack_T123_C123_failed",
+          uri: "artifact://raw/slack/T123/C123/failed.json",
+          media_type: "application/json",
+        },
+        links: [
+          {
+            label: "Slack thread",
+            url: "https://slack.example.com/archives/C123/p999000",
+          },
+        ],
+        resources: [],
+      };
+
+      const firstResponse = await fetch(`${taskBaseUrl}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ event }),
+      });
+      const firstBody = await firstResponse.json() as {
+        ok: boolean;
+        route_decision: { action: string };
+        queue_item?: { id: string; state: string };
+        task_message?: unknown;
+      };
+
+      assert.equal(firstResponse.status, 202);
+      assert.equal(firstBody.ok, true);
+      assert.equal(firstBody.route_decision.action, "ask_human_now");
+      assert.equal(firstBody.queue_item?.state, "ready");
+      assert.equal(firstBody.task_message, undefined);
+      assert.equal(attempts, 1);
+
+      const duplicateResponse = await fetch(`${taskBaseUrl}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ event }),
+      });
+      const duplicateBody = await duplicateResponse.json() as {
+        route_decision: { action: string };
+        queue_item?: { id: string };
+        task_message?: unknown;
+      };
+
+      assert.equal(duplicateResponse.status, 202);
+      assert.equal(duplicateBody.route_decision.action, "ask_human_now");
+      assert.equal(duplicateBody.queue_item?.id, firstBody.queue_item?.id);
+      assert.equal(duplicateBody.task_message, undefined);
+      assert.equal(attempts, 1);
+
+      const metricsResponse = await fetch(`${taskBaseUrl}/metrics`);
+      const metricsBody = await metricsResponse.json() as {
+        metrics: { counters: Record<string, number> };
+      };
+      assert.equal(metricsBody.metrics.counters.task_followups_attempted_total, 1);
+      assert.equal(metricsBody.metrics.counters.task_followups_failed_total, 1);
+      assert.equal(metricsBody.metrics.counters.queue_items_created_total, 1);
+
+      const activityResponse = await fetch(`${taskBaseUrl}/activity?limit=3`);
+      const activityBody = await activityResponse.json() as {
+        events: Array<{
+          type: string;
+          details: Record<string, unknown>;
+        }>;
+      };
+      assert.deepEqual(activityBody.events.map((entry) => entry.type), [
+        "event_routed",
+        "task_followup_failed",
+        "task_followup_attempted",
+      ]);
+      assert.equal(activityBody.events[0].details.task_message_error, "task runtime offline");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("falls back to the human queue when event-route task followup is blocked", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const observability = createInMemoryObservability();
+    let attempts = 0;
+    const taskServer = createGatewayServer({
+      store,
+      observability,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      taskSessions: {
+        listSessions() {
+          return [
+            {
+              id: "task_session_blog",
+              task_id: "task_blog_feedback",
+              status: "idle",
+            },
+          ];
+        },
+        sendFollowupMessage(input) {
+          attempts += 1;
+          return {
+            id: "task_msg_blocked",
+            task_session_id: input.task_session_id,
+            event_ids: input.event_ids,
+            idempotency_key: input.idempotency_key,
+            status: "blocked",
+          };
+        },
+      },
+    });
+    await new Promise<void>((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+    const address = taskServer.address() as AddressInfo;
+    const taskBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const event = {
+        id: "evt_slack_task_inject_blocked",
+        source: "slack",
+        source_id: "slack:T123:C123:blocked",
+        idempotency_key: "slack:T123:C123:blocked",
+        occurred_at: "2026-05-06T16:59:00.000Z",
+        received_at: "2026-05-06T17:00:00.000Z",
+        task_hint: "blog feedback",
+        type: "slack.message",
+        title: "Slack message from Malis",
+        summary: "Blog needs launch date note before next draft.",
+        raw_ref: {
+          id: "raw_slack_T123_C123_blocked",
+          uri: "artifact://raw/slack/T123/C123/blocked.json",
+          media_type: "application/json",
+        },
+        links: [],
+        resources: [],
+      };
+
+      const response = await fetch(`${taskBaseUrl}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ event }),
+      });
+      const body = await response.json() as {
+        route_decision: { action: string };
+        queue_item?: { state: string };
+        task_message?: unknown;
+      };
+
+      assert.equal(response.status, 202);
+      assert.equal(body.route_decision.action, "ask_human_now");
+      assert.equal(body.queue_item?.state, "ready");
+      assert.equal(body.task_message, undefined);
+      assert.equal(attempts, 1);
+
+      const duplicateResponse = await fetch(`${taskBaseUrl}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ event }),
+      });
+      assert.equal(duplicateResponse.status, 202);
+      assert.equal(attempts, 1);
+
+      const metricsResponse = await fetch(`${taskBaseUrl}/metrics`);
+      const metricsBody = await metricsResponse.json() as {
+        metrics: { counters: Record<string, number> };
+      };
+      assert.equal(metricsBody.metrics.counters.task_followups_attempted_total, 1);
+      assert.equal(metricsBody.metrics.counters.task_followups_blocked_total, 1);
+      assert.equal(metricsBody.metrics.counters.queue_items_created_total, 1);
+
+      const activityResponse = await fetch(`${taskBaseUrl}/activity?limit=3`);
+      const activityBody = await activityResponse.json() as {
+        events: Array<{ type: string; details: Record<string, unknown> }>;
+      };
+      assert.deepEqual(activityBody.events.map((entry) => entry.type), [
+        "event_routed",
+        "task_followup_blocked",
+        "task_followup_attempted",
+      ]);
+      assert.equal(activityBody.events[0].details.task_message_error, "task followup blocked");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("routes unhinted Slack events into task sessions using stored task context", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const messages = new Map<string, Record<string, unknown>>();
