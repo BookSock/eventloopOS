@@ -79,6 +79,9 @@ class OrchestratorClient:
     def mark_context_restore_done(self, restore_request_id: str, result: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", f"/contexts/restore-requests/{restore_request_id}/done", {"result": result}) or {}
 
+    def get_context_restore_request(self, restore_request_id: str) -> dict[str, Any]:
+        return self._request("GET", f"/contexts/restore-requests/{restore_request_id}") or {}
+
     def list_task_sessions(self) -> dict[str, Any]:
         return self._request("GET", "/task-sessions") or {}
 

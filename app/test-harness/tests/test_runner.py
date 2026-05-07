@@ -259,6 +259,7 @@ class BrowserContextStoreOnlyRunnerTests(unittest.TestCase):
         self.assertEqual(observed["restore_plan"]["kind"], "browser_extension_message")
         self.assertEqual(observed["restore_request"]["status"], "pending")
         self.assertEqual(observed["completed_restore_request"]["status"], "done")
+        self.assertEqual(observed["fetched_restore_request"], observed["completed_restore_request"])
         self.assertEqual(observed["completed_restore_request"]["result"]["ok"], True)
         self.assertIsNone(observed["review_packet"])
         self.assertIsNone(observed["next_queue_item"])

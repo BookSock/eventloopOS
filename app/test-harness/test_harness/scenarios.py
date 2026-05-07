@@ -1060,6 +1060,7 @@ class BrowserContextStoreOnlyScenario:
             "result": self._restore_result_for_resource(event["resources"][0]),
         }
         log["steps"].append({"name": "context_restore_done", "restore_request_id": restore_request["id"]})
+        fetched_restore_request = completed_restore_request
 
         observed = {
             "event": event,
@@ -1067,6 +1068,7 @@ class BrowserContextStoreOnlyScenario:
             "restore_plan": restore_plan,
             "restore_request": restore_request,
             "completed_restore_request": completed_restore_request,
+            "fetched_restore_request": fetched_restore_request,
             "review_packet": None,
             "next_queue_item": None,
             "final_queue": {"item": None},
@@ -1143,6 +1145,14 @@ class BrowserContextStoreOnlyScenario:
             raise ScenarioFailure(f"context restore done response mismatch: {done_response!r}")
         log["steps"].append({"name": "context_restore_done", "restore_request_id": restore_request.get("id")})
 
+        fetched_restore_response = client.get_context_restore_request(restore_request["id"])
+        fetched_restore_request = (
+            fetched_restore_response.get("restore_request") if isinstance(fetched_restore_response, dict) else None
+        )
+        if fetched_restore_request != completed_restore_request:
+            raise ScenarioFailure(f"context restore status response mismatch: {fetched_restore_response!r}")
+        log["steps"].append({"name": "context_restore_status", "restore_request_id": restore_request.get("id")})
+
         next_restore_request = client.next_context_restore_request()
         if next_restore_request is not None:
             raise ScenarioFailure(f"expected no pending restore request after done, got {next_restore_request!r}")
@@ -1159,6 +1169,7 @@ class BrowserContextStoreOnlyScenario:
             "restore_plan": restore_plan,
             "restore_request": restore_request,
             "completed_restore_request": completed_restore_request,
+            "fetched_restore_request": fetched_restore_request,
             "review_packet": None,
             "next_queue_item": None,
             "final_queue": {"item": None},
