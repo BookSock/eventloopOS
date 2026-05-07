@@ -151,7 +151,8 @@ Current extraction:
 - `app/orchestrator/src/task_sessions/task_followup_audit.ts` owns attempted/sent/blocked/failed task-message activity.
 - `app/orchestrator/src/routes/observability.ts` owns metrics/activity route bodies.
 - `app/orchestrator/src/routes/task_sessions.ts` owns task-session list/get/followup/binding route bodies and validation.
-- `server.ts` still owns many HTTP routes, context restore route bodies, queue action execution, MCP poll routes, events, voice, manual review, and workspace routes.
+- `app/orchestrator/src/routes/context_restore.ts` owns restore plan, restore request create/peek/claim/get/done/failed/retry route bodies and validation.
+- `server.ts` still owns many HTTP routes, queue action execution, MCP poll routes, events, voice, manual review, and workspace routes.
 
 Keep doing behavior-preserving extraction first. Add tests before changing policy.
 
@@ -163,7 +164,7 @@ Other architecture notes:
 
 ## Next Best Work
 
-1. Continue behavior-preserving `server.ts` route extraction, especially context restore, MCP sources, queue, events.
+1. Continue behavior-preserving `server.ts` route extraction, especially MCP sources, queue, events, and workspace.
 2. Add restart/failure smoke around Postgres state, restore retry, and task followup chaos.
 3. Add real MCP/Slack source dogfood config around Jason's installed tools.
 4. Add trend comparisons to `dogfood:review`.

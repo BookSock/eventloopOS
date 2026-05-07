@@ -11,6 +11,7 @@ import type { GatewayStore } from "./gateway_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import type { McpSourcePollOutput } from "./integrations/mcp_poll/development_registry.js";
 import { createInMemoryObservability, type Observability } from "./observability.js";
+import { handleContextRestoreRoute } from "./routes/context_restore.js";
 import { handleActivityRoute, handleMetricsRoute } from "./routes/observability.js";
 import {
   handleGetTaskSessionRoute,
@@ -21,7 +22,7 @@ import {
 } from "./routes/task_sessions.js";
 import type { RouteResult } from "./routes/types.js";
 import { injectEventIntoTaskSessionIfPossible } from "./routing/task_session_injection.js";
-import type { ContextRestoreRequestRecord, RouteDecision } from "./store.js";
+import type { RouteDecision } from "./store.js";
 import { sendTaskFollowupWithActivity } from "./task_sessions/task_followup_audit.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
 import { parseRestoreExecuteRequest, parseRestorePlanRequest, type WorkspaceController } from "./workspace/controller.js";
@@ -119,224 +120,18 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         });
       }
 
-      if (request.method === "POST" && context.url.pathname === "/contexts/restore-plan") {
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-        const validation = validateContextRestorePlanRequest(parsed.value);
-        if (!validation.ok) {
-          return sendSchemaError(response, context, validation.message);
-        }
-        const plan = buildContextRestorePlan(validation.resource);
-        if (!plan) {
-          return sendError(response, 422, context, "context_restore_unsupported", "context resource is not restorable");
-        }
-
-        return sendJson(response, 200, {
-          restore_plan: plan,
-          request_id: context.requestId,
-        });
-      }
-
-      if (request.method === "POST" && context.url.pathname === "/contexts/restore-requests") {
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-        const validation = validateContextRestorePlanRequest(parsed.value);
-        if (!validation.ok) {
-          return sendSchemaError(response, context, validation.message);
-        }
-        const plan = buildContextRestorePlan(validation.resource);
-        if (!plan) {
-          return sendError(response, 422, context, "context_restore_unsupported", "context resource is not restorable");
-        }
-        if (plan.kind !== "browser_extension_message") {
-          return sendError(
-            response,
-            422,
-            context,
-            "context_restore_not_browser_extension",
-            "context restore request polling only supports browser extension messages",
-          );
-        }
-
-        const created = await options.store.createContextRestoreRequest({
-          id: `ctx_restore_${randomUUID()}`,
-          idempotency_key: context.idempotencyKey,
-          resource: validation.resource,
-          restore_plan: plan,
-        }, now());
-        const restoreInfo = restoreResourceInfo(created.record.resource);
-        await observability.incrementCounter("restore_requests_created_total", created.inserted ? 1 : 0);
-        if (created.inserted) {
-          await observability.incrementCounter(`restore_requests_created_provider_${restoreInfo.counterProvider}`);
-          await observability.recordActivity({
-            type: "context_restore_requested",
-            occurred_at: created.record.created_at,
-            actor: "system",
-            status: "ok",
-            summary: `Restore requested for ${String(validation.resource.title ?? validation.resource.kind)}`,
-            details: {
-              restore_request_id: created.record.id,
-              resource_kind: validation.resource.kind,
-              resource_provider: restoreInfo.provider,
-              confidence_reason: restoreInfo.confidenceReason,
-            },
-          });
-        }
-
-        return sendJson(response, created.inserted ? 202 : 200, {
-          restore_request: presentContextRestoreRequest(created.record),
-          request_id: context.requestId,
-        });
-      }
-
-      if (request.method === "GET" && context.url.pathname === "/contexts/restore-requests/next") {
-        const nextRequest = await options.store.peekNextContextRestoreRequest(now());
-        return sendJson(response, 200, {
-          restore_request: nextRequest ? presentContextRestoreRequest(nextRequest) : null,
-          request_id: context.requestId,
-        });
-      }
-
-      if (request.method === "POST" && context.url.pathname === "/contexts/restore-requests/claim-next") {
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-        const claimRequest = parseContextRestoreClaimRequest(parsed.value);
-        if (!claimRequest.ok) {
-          return sendSchemaError(response, context, claimRequest.message);
-        }
-        const nextRequest = await options.store.claimNextContextRestoreRequest(
-          claimRequest.leaseOwner,
-          now(),
-          claimRequest.leaseMs,
-        );
-        return sendJson(response, 200, {
-          restore_request: nextRequest ? presentContextRestoreRequest(nextRequest) : null,
-          request_id: context.requestId,
-        });
-      }
-
-      const restoreGetMatch = context.url.pathname.match(/^\/contexts\/restore-requests\/([^/]+)$/);
-      if (request.method === "GET" && restoreGetMatch) {
-        const restoreRequestId = decodeURIComponent(restoreGetMatch[1]);
-        const record = await options.store.getContextRestoreRequest(restoreRequestId);
-        if (!record) {
-          return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
-        }
-        return sendJson(response, 200, {
-          restore_request: presentContextRestoreRequest(record),
-          request_id: context.requestId,
-        });
-      }
-
-      const restoreDoneMatch = context.url.pathname.match(/^\/contexts\/restore-requests\/([^/]+)\/done$/);
-      if (request.method === "POST" && restoreDoneMatch) {
-        const restoreRequestId = decodeURIComponent(restoreDoneMatch[1]);
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-        const record = await options.store.markContextRestoreRequestDone(
-          restoreRequestId,
-          isRecord(parsed.value) && "result" in parsed.value ? parsed.value.result : parsed.value,
-          now(),
-        );
-        if (!record) {
-          return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
-        }
-        const restoreInfo = restoreResourceInfo(record.resource);
-        await observability.incrementCounter("restore_requests_done_total");
-        await observability.incrementCounter(`restore_requests_done_provider_${restoreInfo.counterProvider}`);
-        await observability.recordActivity({
-          type: "context_restore_done",
-          occurred_at: record.updated_at,
-          actor: "system",
-          status: "ok",
-          summary: `Restore completed for ${String(record.resource.title ?? record.resource.kind)}`,
-          details: {
-            restore_request_id: record.id,
-            resource_provider: restoreInfo.provider,
-            confidence_reason: restoreInfo.confidenceReason,
-            result: record.result,
-          },
-        });
-
-        return sendJson(response, 200, {
-          restore_request: presentContextRestoreRequest(record),
-          request_id: context.requestId,
-        });
-      }
-
-      const restoreFailedMatch = context.url.pathname.match(/^\/contexts\/restore-requests\/([^/]+)\/failed$/);
-      if (request.method === "POST" && restoreFailedMatch) {
-        const restoreRequestId = decodeURIComponent(restoreFailedMatch[1]);
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-        const record = await options.store.markContextRestoreRequestFailed(
-          restoreRequestId,
-          isRecord(parsed.value) && "result" in parsed.value ? parsed.value.result : parsed.value,
-          now(),
-        );
-        if (!record) {
-          return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
-        }
-        const restoreInfo = restoreResourceInfo(record.resource);
-        await observability.incrementCounter("restore_requests_failed_total");
-        await observability.incrementCounter(`restore_requests_failed_provider_${restoreInfo.counterProvider}`);
-        await observability.recordActivity({
-          type: "context_restore_failed",
-          occurred_at: record.updated_at,
-          actor: "system",
-          status: "failed",
-          summary: `Restore failed for ${String(record.resource.title ?? record.resource.kind)}`,
-          details: {
-            restore_request_id: record.id,
-            resource_provider: restoreInfo.provider,
-            confidence_reason: restoreInfo.confidenceReason,
-            result: record.result,
-          },
-        });
-
-        return sendJson(response, 200, {
-          restore_request: presentContextRestoreRequest(record),
-          request_id: context.requestId,
-        });
-      }
-
-      const restoreRetryMatch = context.url.pathname.match(/^\/contexts\/restore-requests\/([^/]+)\/retry$/);
-      if (request.method === "POST" && restoreRetryMatch) {
-        const restoreRequestId = decodeURIComponent(restoreRetryMatch[1]);
-        const record = await options.store.retryContextRestoreRequest(restoreRequestId, now());
-        if (!record) {
-          return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
-        }
-        const restoreInfo = restoreResourceInfo(record.resource);
-        await observability.incrementCounter("restore_requests_retried_total");
-        await observability.incrementCounter(`restore_requests_retried_provider_${restoreInfo.counterProvider}`);
-        await observability.recordActivity({
-          type: "context_restore_retried",
-          occurred_at: record.updated_at,
-          actor: "human",
-          status: "ok",
-          summary: `Restore retried for ${String(record.resource.title ?? record.resource.kind)}`,
-          details: {
-            restore_request_id: record.id,
-            resource_provider: restoreInfo.provider,
-            confidence_reason: restoreInfo.confidenceReason,
-          },
-        });
-
-        return sendJson(response, 200, {
-          restore_request: presentContextRestoreRequest(record),
-          request_id: context.requestId,
-        });
+      const contextRestoreRoute = await handleContextRestoreRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        readJsonBody: () => readJsonBody(request),
+        store: options.store,
+        observability,
+        now: now(),
+        requestId: context.requestId,
+        idempotencyKey: context.idempotencyKey,
+      });
+      if (contextRestoreRoute) {
+        return sendRouteResult(response, context, contextRestoreRoute);
       }
 
       if (request.method === "GET" && context.url.pathname === "/workspace/status") {
@@ -1014,96 +809,6 @@ function validateContextQuery(
   };
 }
 
-function validateContextRestorePlanRequest(
-  input: unknown,
-): { ok: true; resource: Record<string, unknown> } | { ok: false; message: string } {
-  if (!isRecord(input)) {
-    return { ok: false, message: "context restore-plan request must be an object" };
-  }
-  const resource = isRecord(input.resource) ? input.resource : input;
-  if (!isRecord(resource)) {
-    return { ok: false, message: "resource must be an object" };
-  }
-  if (typeof resource.kind !== "string" || !resource.kind) {
-    return { ok: false, message: "resource.kind must be a non-empty string" };
-  }
-  return { ok: true, resource };
-}
-
-function parseContextRestoreClaimRequest(
-  input: unknown,
-): { ok: true; leaseOwner: string; leaseMs: number } | { ok: false; message: string } {
-  if (!isRecord(input)) {
-    return { ok: false, message: "context restore claim request must be an object" };
-  }
-  const leaseOwner = typeof input.lease_owner === "string" ? input.lease_owner.trim() : "";
-  if (!leaseOwner) {
-    return { ok: false, message: "lease_owner is required" };
-  }
-  const leaseMs = typeof input.lease_ms === "number" && Number.isInteger(input.lease_ms)
-    ? input.lease_ms
-    : 60_000;
-  if (leaseMs <= 0 || leaseMs > 30 * 60_000) {
-    return { ok: false, message: "lease_ms must be between 1 and 1800000" };
-  }
-
-  return { ok: true, leaseOwner, leaseMs };
-}
-
-function buildContextRestorePlan(resource: Record<string, unknown>): Record<string, unknown> | undefined {
-  const url = typeof resource.url === "string" && resource.url ? resource.url : undefined;
-  if (resource.kind === "browser_tab" && url) {
-    return {
-      kind: "browser_extension_message",
-      side_effect: "local",
-      execute_supported: false,
-      target: "eventloopOS browser extension runtime",
-      message: {
-        type: "eventloop.restore",
-        resource,
-      },
-    };
-  }
-
-  if (url) {
-    return {
-      kind: "open_url",
-      side_effect: "local",
-      execute_supported: false,
-      url,
-    };
-  }
-
-  const path = typeof resource.path === "string" && resource.path ? resource.path : undefined;
-  if (resource.kind === "file" && path) {
-    return {
-      kind: "open_file",
-      side_effect: "local",
-      execute_supported: false,
-      path,
-      line: resource.line,
-      column: resource.column,
-    };
-  }
-
-  return undefined;
-}
-
-function presentContextRestoreRequest(record: ContextRestoreRequestRecord): Record<string, unknown> {
-  return {
-    id: record.id,
-    status: record.status,
-    created_at: record.created_at,
-    updated_at: record.updated_at,
-    idempotency_key: record.idempotency_key,
-    resource: record.resource,
-    restore_plan: record.restore_plan,
-    result: record.result,
-    lease_owner: record.lease_owner,
-    lease_expires_at: record.lease_expires_at,
-  };
-}
-
 function validateEventRequest(input: unknown): { ok: true; event: McpEvent } | { ok: false; message: string } {
   const event = isRecord(input) && isRecord(input.event) ? input.event : input;
   if (!isRecord(event)) {
@@ -1597,23 +1302,6 @@ function readOptionalString(input: Record<string, unknown>, key: string): string
 function stringFromRecord(input: Record<string, unknown>, key: string): string | undefined {
   const value = input[key];
   return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function restoreResourceInfo(resource: Record<string, unknown>): {
-  provider: string;
-  counterProvider: string;
-  confidenceReason?: string;
-} {
-  const details = isRecord(resource.details) ? resource.details : {};
-  const provider = stringFromRecord(details, "provider")
-    ?? stringFromRecord(resource, "source")
-    ?? stringFromRecord(resource, "kind")
-    ?? "unknown";
-  return {
-    provider,
-    counterProvider: stableId(provider),
-    confidenceReason: stringFromRecord(details, "confidence_reason"),
-  };
 }
 
 function stableId(input: string): string {

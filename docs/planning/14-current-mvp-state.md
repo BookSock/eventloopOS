@@ -156,7 +156,7 @@ Weak tests:
 - No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, temp `.app` bundle launch, and opt-in AppleScript menu/window/manual-mode interaction.
 - No real microphone wake-word proof yet; current coverage proves fixture-audio STT with `whisper-cli`, local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
 - Activity history is durable in Postgres mode and process-local in in-memory mode. The report groups by task/session/queue but does not yet compare trends across days.
-- `server.ts` is still large, but task-session injection policy, task followup audit, observability routes, and task-session routes have been extracted into smaller modules. Continue splitting route modules before much more orchestrator feature width.
+- `server.ts` is still large, but task-session injection policy, task followup audit, observability routes, task-session routes, and context-restore routes have been extracted into smaller modules. It is down to roughly 1.4k lines after the context restore split. Continue splitting route modules before much more orchestrator feature width.
 
 ## Next Best Work
 
