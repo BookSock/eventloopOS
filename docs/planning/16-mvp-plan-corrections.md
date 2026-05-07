@@ -166,14 +166,14 @@ Keep doing behavior-preserving extraction first. Add tests before changing polic
 Other architecture notes:
 
 - `gateway_store.ts` is useful as an adapter seam, but event idempotency/route semantics must stay parity-tested across in-memory and Postgres stores.
+- GatewayStore conformance tests now run shared behavior against in-memory and Postgres adapters for event idempotency/context search, queue lease/defer/ignore, context restore retry/done, and workspace restore receipt replay.
 - Route-level observability wrapper now tags responses with route name/duration headers and records low-cardinality counters for request count, status, error code, and duration.
 - Extend `/activity` filters later by task/session/status/since so after-the-fact debugging does not require dumping recent global history.
 
 ## Next Best Work
 
-1. Add GatewayStore conformance tests for event idempotency, queue leasing/defer/ignore, context restore retry, workspace restore receipt replay, and context search.
-2. Enforce MCP read-only source contracts beyond config validation, especially runtime tool metadata checks for user-installed servers.
-3. Add real MCP/Slack source dogfood config around Jason's installed tools.
-4. Add trend comparisons to `dogfood:review`.
-5. Real Claude+Codex composite dogfood against harmless configured sessions.
-6. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.
+1. Enforce MCP read-only source contracts beyond config validation, especially runtime tool metadata checks for user-installed servers.
+2. Add real MCP/Slack source dogfood config around Jason's installed tools.
+3. Add trend comparisons to `dogfood:review`.
+4. Real Claude+Codex composite dogfood against harmless configured sessions.
+5. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.

@@ -221,6 +221,10 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async ingestEventAsReviewPacket(event) {
       const result = await store.recordEventAsReviewPacket(event);
+      if (!result.inserted) {
+        const existing = await store.getEventResult(result.event_id);
+        if (existing) return existing;
+      }
       return {
         event,
         route_decision: result.route_decision,
@@ -230,6 +234,10 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async recordEventRoute(event, routeDecision) {
       const result = await store.recordRoutedEvent(eventToRecord(event), routeDecision);
+      if (!result.inserted) {
+        const existing = await store.getEventResult(result.event_id);
+        if (existing) return existing;
+      }
       return {
         event,
         route_decision: result.route_decision,

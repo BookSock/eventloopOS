@@ -123,6 +123,7 @@ Tests needed:
 - E2E: browser restore done increments restore counters.
 - E2E: task followup success/fail increments task counters.
 - API/DB: queue defer/ignore increments counters, records activity, hides deferred items until due, and stops ignored items from leasing.
+- Store conformance: in-memory and Postgres GatewayStore adapters share event idempotency/context search, queue lease/defer/ignore, context restore retry/done, and workspace restore receipt replay behavior.
 - CLI: `dogfood:review` filters current-day activity and fails cleanly when orchestrator is unavailable.
 - CLI: `dogfood:review` groups recent activity by task, task session, and queue item.
 - CLI/API: restore provider metrics and activity rollups show which restore backends are succeeding or failing.
