@@ -400,6 +400,57 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.contextRestoreState, .requested(resource, restoreRequest))
     }
 
+    func testRefreshContextRestoreRequestUpdatesRequestedState() async {
+        let resource = ReviewContextResource(
+            id: "ctx_browser_123",
+            kind: "browser_tab",
+            title: "Launch doc",
+            url: "https://example.test/launch",
+            source: "chrome-extension",
+            restoreConfidence: "high"
+        )
+        let plan = ContextRestorePlan(
+            kind: "browser_extension_message",
+            sideEffect: "local",
+            executeSupported: false,
+            target: "eventloopOS browser extension runtime",
+            message: ContextRestoreMessage(type: "eventloop.restore", resource: resource),
+            url: nil,
+            path: nil,
+            line: nil,
+            column: nil
+        )
+        let pendingRequest = ContextRestoreRequest(
+            id: "ctx_restore_123",
+            status: "pending",
+            resource: resource,
+            restorePlan: plan
+        )
+        let doneRequest = ContextRestoreRequest(
+            id: "ctx_restore_123",
+            status: "done",
+            resource: resource,
+            restorePlan: plan,
+            result: ContextRestoreResult(
+                ok: true,
+                tabId: 7,
+                url: "https://example.test/launch",
+                restoredScroll: true
+            )
+        )
+        let client = FakeQueueClient(
+            contextRestoreRequestResult: .success(pendingRequest),
+            contextRestoreStatusResult: .success(doneRequest)
+        )
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.requestContextRestore(resource: resource)
+        await viewModel.refreshContextRestoreRequest()
+
+        XCTAssertEqual(client.checkedContextRestoreIds, ["ctx_restore_123"])
+        XCTAssertEqual(viewModel.contextRestoreState, .requested(resource, doneRequest))
+    }
+
     func testPrepareContextRestoreSurfacesFailure() async {
         let resource = ReviewContextResource(
             id: "ctx_unsupported",

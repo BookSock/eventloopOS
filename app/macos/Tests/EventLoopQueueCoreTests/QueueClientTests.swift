@@ -181,6 +181,12 @@ final class QueueClientTests: XCTestCase {
               "url": "https://example.test/launch",
               "restore_confidence": "high"
             },
+            "result": {
+              "ok": true,
+              "tabId": 7,
+              "url": "https://example.test/launch",
+              "restoredScroll": true
+            },
             "restore_plan": {
               "kind": "browser_extension_message",
               "side_effect": "local",
@@ -208,6 +214,10 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.restoreRequest.resource.id, "ctx_browser_123")
         XCTAssertEqual(envelope.restoreRequest.restorePlan.kind, "browser_extension_message")
         XCTAssertEqual(envelope.restoreRequest.restorePlan.message?.type, "eventloop.restore")
+        XCTAssertEqual(envelope.restoreRequest.result?.ok, true)
+        XCTAssertEqual(envelope.restoreRequest.result?.tabId, 7)
+        XCTAssertEqual(envelope.restoreRequest.result?.url, "https://example.test/launch")
+        XCTAssertEqual(envelope.restoreRequest.result?.restoredScroll, true)
     }
 
     func testContextResourceEncodesSnakeCaseRestoreFields() throws {

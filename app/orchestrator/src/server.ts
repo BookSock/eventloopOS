@@ -180,6 +180,20 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         });
       }
 
+      const restoreGetMatch = context.url.pathname.match(/^\/contexts\/restore-requests\/([^/]+)$/);
+      if (request.method === "GET" && restoreGetMatch) {
+        const restoreRequestId = decodeURIComponent(restoreGetMatch[1]);
+        const record = contextRestoreRequests.get(restoreRequestId);
+        if (!record) {
+          return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
+        }
+
+        return sendJson(response, 200, {
+          restore_request: presentContextRestoreRequest(record),
+          request_id: context.requestId,
+        });
+      }
+
       const restoreDoneMatch = context.url.pathname.match(/^\/contexts\/restore-requests\/([^/]+)\/done$/);
       if (request.method === "POST" && restoreDoneMatch) {
         const restoreRequestId = decodeURIComponent(restoreDoneMatch[1]);

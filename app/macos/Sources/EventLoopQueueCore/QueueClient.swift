@@ -7,6 +7,7 @@ public protocol QueueClient: Sendable {
     func next(after packetId: String?) async throws -> ReviewPacket?
     func contextRestorePlan(resource: ReviewContextResource) async throws -> ContextRestorePlan
     func requestContextRestore(resource: ReviewContextResource, idempotencyKey: String) async throws -> ContextRestoreRequest
+    func contextRestoreRequest(id: String) async throws -> ContextRestoreRequest
 }
 
 public enum QueueClientError: Error, Equatable, LocalizedError {
@@ -113,6 +114,13 @@ public struct HTTPQueueClient: QueueClient {
         return try decoder.decode(ContextRestoreRequestEnvelope.self, from: data).restoreRequest
     }
 
+    public func contextRestoreRequest(id: String) async throws -> ContextRestoreRequest {
+        let url = baseURL.appending(path: "contexts/restore-requests/\(id)")
+        let (data, response) = try await session.data(from: url)
+        try validate(response: response)
+        return try decoder.decode(ContextRestoreRequestEnvelope.self, from: data).restoreRequest
+    }
+
     private func validate(response: URLResponse) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw QueueClientError.invalidResponse
@@ -142,6 +150,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var packets: [ReviewPacket]
     private let contextRestorePlanResult: Result<ContextRestorePlan, Error>
     private let contextRestoreRequestResult: Result<ContextRestoreRequest, Error>
+    private let contextRestoreStatusResult: Result<ContextRestoreRequest, Error>
     private var completedIds: [String] = []
     private var leasedIds: Set<String> = []
     private var leaseOrder: [String] = []
@@ -149,6 +158,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var contextRestoreResources: [ReviewContextResource] = []
     private var contextRestoreRequestResources: [ReviewContextResource] = []
     private var contextRestoreRequestIdempotencyKeys: [String] = []
+    private var contextRestoreStatusIds: [String] = []
 
     public init(
         packets: [ReviewPacket] = SeededQueue.packets,
@@ -188,11 +198,13 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
                     column: nil
                 )
             )
-        )
+        ),
+        contextRestoreStatusResult: Result<ContextRestoreRequest, Error>? = nil
     ) {
         self.packets = packets.sorted { $0.priority > $1.priority }
         self.contextRestorePlanResult = contextRestorePlanResult
         self.contextRestoreRequestResult = contextRestoreRequestResult
+        self.contextRestoreStatusResult = contextRestoreStatusResult ?? contextRestoreRequestResult
     }
 
     public var completedPacketIds: [String] {
@@ -217,6 +229,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public var requestedContextRestoreIdempotencyKeys: [String] {
         lock.withLock { contextRestoreRequestIdempotencyKeys }
+    }
+
+    public var checkedContextRestoreIds: [String] {
+        lock.withLock { contextRestoreStatusIds }
     }
 
     public func fetchQueue() async throws -> [ReviewPacket] {
@@ -280,6 +296,13 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
             contextRestoreRequestResources.append(resource)
             contextRestoreRequestIdempotencyKeys.append(idempotencyKey)
             return try contextRestoreRequestResult.get()
+        }
+    }
+
+    public func contextRestoreRequest(id: String) async throws -> ContextRestoreRequest {
+        try lock.withLock {
+            contextRestoreStatusIds.append(id)
+            return try contextRestoreStatusResult.get()
         }
     }
 }

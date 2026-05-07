@@ -569,6 +569,28 @@ describe("orchestrator gateway API", () => {
       assert.equal(doneRestoreRequestBody.restore_request.status, "done");
       assert.deepEqual(doneRestoreRequestBody.restore_request.result, { ok: true, tabId: 7, restoredScroll: true });
 
+      const fetchedRestoreRequestResponse = await fetch(
+        `${routeBaseUrl}/contexts/restore-requests/${restoreRequestBody.restore_request.id}`,
+      );
+      const fetchedRestoreRequestBody = await fetchedRestoreRequestResponse.json() as {
+        restore_request: {
+          id: string;
+          status: string;
+          result: {
+            ok: boolean;
+            tabId: number;
+            restoredScroll: boolean;
+          };
+        };
+      };
+      assert.equal(fetchedRestoreRequestResponse.status, 200);
+      assert.equal(fetchedRestoreRequestBody.restore_request.id, restoreRequestBody.restore_request.id);
+      assert.equal(fetchedRestoreRequestBody.restore_request.status, "done");
+      assert.deepEqual(fetchedRestoreRequestBody.restore_request.result, { ok: true, tabId: 7, restoredScroll: true });
+
+      const missingRestoreRequestResponse = await fetch(`${routeBaseUrl}/contexts/restore-requests/ctx_restore_missing`);
+      assert.equal(missingRestoreRequestResponse.status, 404);
+
       const emptyRestoreRequestResponse = await fetch(`${routeBaseUrl}/contexts/restore-requests/next`);
       const emptyRestoreRequestBody = await emptyRestoreRequestResponse.json() as {
         restore_request: unknown;

@@ -250,6 +250,19 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    public func refreshContextRestoreRequest() async {
+        guard case let .requested(resource, restoreRequest) = contextRestoreState else {
+            return
+        }
+
+        do {
+            let updated = try await client.contextRestoreRequest(id: restoreRequest.id)
+            contextRestoreState = .requested(resource, updated)
+        } catch {
+            contextRestoreState = .failed(resource, error.localizedDescription)
+        }
+    }
+
     public func moveToNext() async {
         do {
             selectedPacketID = try await client.next(after: selectedPacketID)?.id

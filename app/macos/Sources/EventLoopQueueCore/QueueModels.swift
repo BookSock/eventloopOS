@@ -313,17 +313,20 @@ public struct ContextRestoreRequest: Codable, Equatable, Sendable {
     public let status: String
     public let resource: ReviewContextResource
     public let restorePlan: ContextRestorePlan
+    public let result: ContextRestoreResult?
 
     public init(
         id: String,
         status: String,
         resource: ReviewContextResource,
-        restorePlan: ContextRestorePlan
+        restorePlan: ContextRestorePlan,
+        result: ContextRestoreResult? = nil
     ) {
         self.id = id
         self.status = status
         self.resource = resource
         self.restorePlan = restorePlan
+        self.result = result
     }
 
     enum CodingKeys: String, CodingKey {
@@ -331,6 +334,39 @@ public struct ContextRestoreRequest: Codable, Equatable, Sendable {
         case status
         case resource
         case restorePlan = "restore_plan"
+        case result
+    }
+}
+
+public struct ContextRestoreResult: Codable, Equatable, Sendable {
+    public let ok: Bool?
+    public let tabId: Int?
+    public let url: String?
+    public let restoredScroll: Bool?
+    public let error: ContextRestoreError?
+
+    public init(
+        ok: Bool?,
+        tabId: Int?,
+        url: String?,
+        restoredScroll: Bool?,
+        error: ContextRestoreError? = nil
+    ) {
+        self.ok = ok
+        self.tabId = tabId
+        self.url = url
+        self.restoredScroll = restoredScroll
+        self.error = error
+    }
+}
+
+public struct ContextRestoreError: Codable, Equatable, Sendable {
+    public let code: String?
+    public let message: String?
+
+    public init(code: String?, message: String?) {
+        self.code = code
+        self.message = message
     }
 }
 

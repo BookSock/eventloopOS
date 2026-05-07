@@ -71,7 +71,11 @@ struct QueueWindowView: View {
             VStack(alignment: .leading, spacing: 8) {
                 StatusBanner(state: viewModel.state)
                 WorkspaceRestoreBanner(state: viewModel.workspaceRestoreState)
-                ContextRestoreBanner(state: viewModel.contextRestoreState)
+                ContextRestoreBanner(state: viewModel.contextRestoreState) {
+                    Task {
+                        await viewModel.refreshContextRestoreRequest()
+                    }
+                }
             }
                 .padding(12)
         }
@@ -344,6 +348,7 @@ private struct ResourceRow: View {
 
 private struct ContextRestoreBanner: View {
     let state: ContextRestoreState
+    let refresh: () -> Void
 
     var body: some View {
         switch state {
@@ -364,12 +369,20 @@ private struct ContextRestoreBanner: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityIdentifier("context-restore-planned")
         case let .requested(_, restoreRequest):
-            Text("Context restore queued: \(restoreRequest.status)")
-                .font(.caption)
-                .padding(8)
-                .background(.green.opacity(0.12))
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .accessibilityIdentifier("context-restore-requested")
+            HStack(spacing: 8) {
+                Text(restoreRequestSummary(restoreRequest))
+                    .font(.caption)
+                Button(action: refresh) {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Refresh context restore status")
+                .accessibilityIdentifier("context-restore-refresh-button")
+            }
+            .padding(8)
+            .background(restoreRequestBackground(restoreRequest))
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .accessibilityIdentifier("context-restore-requested")
         case let .failed(resource, message):
             Text("\(resource.title): \(message)")
                 .font(.caption)
@@ -391,6 +404,25 @@ private struct ContextRestoreBanner: View {
             return path
         }
         return plan.kind
+    }
+
+    private func restoreRequestSummary(_ restoreRequest: ContextRestoreRequest) -> String {
+        if restoreRequest.status == "done" {
+            if restoreRequest.result?.ok == false {
+                return "Context restore failed"
+            }
+            return "Context restore done"
+        }
+
+        return "Context restore queued: \(restoreRequest.status)"
+    }
+
+    private func restoreRequestBackground(_ restoreRequest: ContextRestoreRequest) -> Color {
+        if restoreRequest.status == "done", restoreRequest.result?.ok == false {
+            return .red.opacity(0.12)
+        }
+
+        return .green.opacity(0.12)
     }
 }
 
