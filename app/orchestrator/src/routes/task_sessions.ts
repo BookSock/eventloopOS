@@ -1,7 +1,66 @@
 import type { Observability } from "../observability.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
+import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
+
+export async function handleTaskSessionsRoute(input: {
+  method: string | undefined;
+  pathname: string;
+  readJsonBody: JsonBodyReader;
+  taskSessions?: TaskSessionController;
+  observability?: Observability;
+  now: Date;
+  requestId: string;
+  idempotencyKey?: string;
+}): Promise<RouteResult | undefined> {
+  if (input.method === "GET" && input.pathname === "/task-sessions") {
+    return handleListTaskSessionsRoute({
+      taskSessions: input.taskSessions,
+      requestId: input.requestId,
+    });
+  }
+
+  const getTaskSessionMatch = input.pathname.match(/^\/task-sessions\/([^/]+)$/);
+  if (input.method === "GET" && getTaskSessionMatch) {
+    return handleGetTaskSessionRoute({
+      taskSessions: input.taskSessions,
+      taskSessionId: decodeURIComponent(getTaskSessionMatch[1] ?? ""),
+      requestId: input.requestId,
+    });
+  }
+
+  const taskFollowupMatch = input.pathname.match(/^\/task-sessions\/([^/]+)\/followup$/);
+  if (input.method === "POST" && taskFollowupMatch) {
+    const parsed = await input.readJsonBody();
+    if (!parsed.ok) return schemaError(parsed.message);
+
+    return handleTaskFollowupRoute({
+      taskSessions: input.taskSessions,
+      observability: input.observability,
+      taskSessionId: decodeURIComponent(taskFollowupMatch[1] ?? ""),
+      body: parsed.value,
+      idempotencyKey: input.idempotencyKey,
+      occurredAt: input.now.toISOString(),
+      requestId: input.requestId,
+    });
+  }
+
+  const taskBindingMatch = input.pathname.match(/^\/task-sessions\/([^/]+)\/task-binding$/);
+  if (input.method === "PUT" && taskBindingMatch) {
+    const parsed = await input.readJsonBody();
+    if (!parsed.ok) return schemaError(parsed.message);
+
+    return handleTaskBindingRoute({
+      taskSessions: input.taskSessions,
+      taskSessionId: decodeURIComponent(taskBindingMatch[1] ?? ""),
+      body: parsed.value,
+      requestId: input.requestId,
+    });
+  }
+
+  return undefined;
+}
 
 export async function handleListTaskSessionsRoute(input: {
   taskSessions?: TaskSessionController;
@@ -177,6 +236,15 @@ export function taskSessionMatchesTask(candidate: unknown, taskId: string): cand
   if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
   const record = candidate as Record<string, unknown>;
   return typeof record.id === "string" && record.id.length > 0 && record.task_id === taskId;
+}
+
+function schemaError(message: string): RouteResult {
+  return {
+    ok: false,
+    status: 400,
+    code: "schema_error",
+    message,
+  };
 }
 
 function validateTaskFollowupRequest(

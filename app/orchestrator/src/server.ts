@@ -8,12 +8,7 @@ import { handleEventsRoute, routeEventThroughGateway } from "./routes/events.js"
 import { handleMcpSourcesRoute, type McpSourceRegistry } from "./routes/mcp_sources.js";
 import { handleActivityRoute, handleMetricsRoute } from "./routes/observability.js";
 import { handleQueueRoute } from "./routes/queue.js";
-import {
-  handleGetTaskSessionRoute,
-  handleListTaskSessionsRoute,
-  handleTaskBindingRoute,
-  handleTaskFollowupRoute,
-} from "./routes/task_sessions.js";
+import { handleTaskSessionsRoute } from "./routes/task_sessions.js";
 import type { RouteResult } from "./routes/types.js";
 import { handleWorkspaceRoute } from "./routes/workspace.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
@@ -129,56 +124,18 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         return sendRouteResult(response, context, mcpSourcesRoute);
       }
 
-      if (request.method === "GET" && context.url.pathname === "/task-sessions") {
-        return sendRouteResult(response, context, await handleListTaskSessionsRoute({
-          taskSessions: options.taskSessions,
-          requestId: context.requestId,
-        }));
-      }
-
-      const getTaskSessionMatch = context.url.pathname.match(/^\/task-sessions\/([^/]+)$/);
-      if (request.method === "GET" && getTaskSessionMatch) {
-        const taskSessionId = decodeURIComponent(getTaskSessionMatch[1] ?? "");
-        return sendRouteResult(response, context, await handleGetTaskSessionRoute({
-          taskSessions: options.taskSessions,
-          taskSessionId,
-          requestId: context.requestId,
-        }));
-      }
-
-      const taskFollowupMatch = context.url.pathname.match(/^\/task-sessions\/([^/]+)\/followup$/);
-      if (request.method === "POST" && taskFollowupMatch) {
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-
-        const taskSessionId = decodeURIComponent(taskFollowupMatch[1] ?? "");
-        return sendRouteResult(response, context, await handleTaskFollowupRoute({
-          taskSessions: options.taskSessions,
-          observability,
-          taskSessionId,
-          body: parsed.value,
-          idempotencyKey: context.idempotencyKey,
-          occurredAt: now().toISOString(),
-          requestId: context.requestId,
-        }));
-      }
-
-      const taskBindingMatch = context.url.pathname.match(/^\/task-sessions\/([^/]+)\/task-binding$/);
-      if (request.method === "PUT" && taskBindingMatch) {
-        const parsed = await readJsonBody(request);
-        if (!parsed.ok) {
-          return sendSchemaError(response, context, parsed.message);
-        }
-
-        const taskSessionId = decodeURIComponent(taskBindingMatch[1] ?? "");
-        return sendRouteResult(response, context, await handleTaskBindingRoute({
-          taskSessions: options.taskSessions,
-          taskSessionId,
-          body: parsed.value,
-          requestId: context.requestId,
-        }));
+      const taskSessionsRoute = await handleTaskSessionsRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        readJsonBody: () => readJsonBody(request),
+        taskSessions: options.taskSessions,
+        observability,
+        now: now(),
+        requestId: context.requestId,
+        idempotencyKey: context.idempotencyKey,
+      });
+      if (taskSessionsRoute) {
+        return sendRouteResult(response, context, taskSessionsRoute);
       }
 
       const eventsRoute = await handleEventsRoute({

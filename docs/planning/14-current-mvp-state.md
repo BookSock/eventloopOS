@@ -169,11 +169,11 @@ Weak tests:
 - No full XCUITest flow; current coverage proves Mac client/orchestrator/browser-extension restore round-trip, real installed extension/native host/orchestrator browser capture, rendered Mac queue view, temp `.app` bundle launch, and opt-in AppleScript menu/window/manual-mode interaction.
 - No real microphone wake-word proof yet; current coverage proves fixture-audio STT with `whisper-cli`, local transcript command pipe, whisper.cpp stream command construction, doctor readiness checks, and router contract with fake process output.
 - Activity history is durable in Postgres mode and process-local in in-memory mode. The report groups by task/session/queue but does not yet compare trends across days.
-- `server.ts` is much smaller: task-session injection policy, task followup audit, observability routes, task-session routes, context/context-restore routes, queue routes, workspace routes, MCP source routes, and events/voice/review-packet routes have been extracted into smaller modules. It is down to roughly 300 lines after the context route split. Continue splitting task-session wiring/manual-review routes before much more orchestrator feature width.
+- `server.ts` is much smaller: task-session injection policy, task followup audit, observability routes, task-session routes, context/context-restore routes, queue routes, workspace routes, MCP source routes, and events/voice/review-packet routes have been extracted into smaller modules. It is down to roughly 250 lines after the task-session route split.
 
 ## Next Best Work
 
-1. Continue extracting `server.ts` route/policy modules without behavior change, especially task-session wiring and manual review.
+1. Add GatewayStore conformance tests for event idempotency, queue leasing/defer/ignore, context restore retry, workspace restore receipt replay, and context search.
 2. Add restart/failure smoke around Postgres state, restore retry, and task followup chaos.
 3. Add trend comparisons to `dogfood:review`.
 4. Add real Slack/GitHub MCP source dogfood config for Jason's installed servers, using the local-events MCP recipe as the template.
