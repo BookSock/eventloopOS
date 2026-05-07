@@ -60,7 +60,8 @@ export function createRestoreRequestPoller({
       };
     }
 
-    await fetchJson(fetchImpl, `${baseUrl}/contexts/restore-requests/${encodeURIComponent(restoreRequest.id)}/done`, {
+    const completionPath = result?.ok === false ? "failed" : "done";
+    await fetchJson(fetchImpl, `${baseUrl}/contexts/restore-requests/${encodeURIComponent(restoreRequest.id)}/${completionPath}`, {
       method: "POST",
       headers: {
         "content-type": "application/json"

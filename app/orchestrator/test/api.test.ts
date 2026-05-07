@@ -718,6 +718,66 @@ describe("orchestrator gateway API", () => {
       assert.equal(duplicateClaimRestoreRequestResponse.status, 200);
       assert.equal(duplicateClaimRestoreRequestBody.restore_request, null);
 
+      const failedRestoreRequestResponse = await fetch(
+        `${routeBaseUrl}/contexts/restore-requests/${restoreRequestBody.restore_request.id}/failed`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ result: { ok: false, error: "tab not found" } }),
+        },
+      );
+      const failedRestoreRequestBody = await failedRestoreRequestResponse.json() as {
+        restore_request: {
+          status: string;
+          result: {
+            ok: boolean;
+            error: string;
+          };
+        };
+      };
+      assert.equal(failedRestoreRequestResponse.status, 200);
+      assert.equal(failedRestoreRequestBody.restore_request.status, "failed");
+      assert.deepEqual(failedRestoreRequestBody.restore_request.result, { ok: false, error: "tab not found" });
+
+      const retryRestoreRequestResponse = await fetch(
+        `${routeBaseUrl}/contexts/restore-requests/${restoreRequestBody.restore_request.id}/retry`,
+        {
+          method: "POST",
+        },
+      );
+      const retryRestoreRequestBody = await retryRestoreRequestResponse.json() as {
+        restore_request: {
+          id: string;
+          status: string;
+          result?: unknown;
+        };
+      };
+      assert.equal(retryRestoreRequestResponse.status, 200);
+      assert.equal(retryRestoreRequestBody.restore_request.id, restoreRequestBody.restore_request.id);
+      assert.equal(retryRestoreRequestBody.restore_request.status, "pending");
+      assert.equal(retryRestoreRequestBody.restore_request.result, undefined);
+
+      const retriedClaimRestoreRequestResponse = await fetch(`${routeBaseUrl}/contexts/restore-requests/claim-next`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ lease_owner: "browser_extension_retry", lease_ms: 60_000 }),
+      });
+      const retriedClaimRestoreRequestBody = await retriedClaimRestoreRequestResponse.json() as {
+        restore_request: {
+          id: string;
+          status: string;
+          lease_owner: string;
+        };
+      };
+      assert.equal(retriedClaimRestoreRequestResponse.status, 200);
+      assert.equal(retriedClaimRestoreRequestBody.restore_request.id, restoreRequestBody.restore_request.id);
+      assert.equal(retriedClaimRestoreRequestBody.restore_request.status, "leased");
+      assert.equal(retriedClaimRestoreRequestBody.restore_request.lease_owner, "browser_extension_retry");
+
       const doneRestoreRequestResponse = await fetch(
         `${routeBaseUrl}/contexts/restore-requests/${restoreRequestBody.restore_request.id}/done`,
         {

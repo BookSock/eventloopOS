@@ -260,6 +260,65 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         });
       }
 
+      const restoreFailedMatch = context.url.pathname.match(/^\/contexts\/restore-requests\/([^/]+)\/failed$/);
+      if (request.method === "POST" && restoreFailedMatch) {
+        const restoreRequestId = decodeURIComponent(restoreFailedMatch[1]);
+        const parsed = await readJsonBody(request);
+        if (!parsed.ok) {
+          return sendSchemaError(response, context, parsed.message);
+        }
+        const record = await options.store.markContextRestoreRequestFailed(
+          restoreRequestId,
+          isRecord(parsed.value) && "result" in parsed.value ? parsed.value.result : parsed.value,
+          now(),
+        );
+        if (!record) {
+          return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
+        }
+        await observability.incrementCounter("restore_requests_failed_total");
+        await observability.recordActivity({
+          type: "context_restore_failed",
+          occurred_at: record.updated_at,
+          actor: "system",
+          status: "failed",
+          summary: `Restore failed for ${String(record.resource.title ?? record.resource.kind)}`,
+          details: {
+            restore_request_id: record.id,
+            result: record.result,
+          },
+        });
+
+        return sendJson(response, 200, {
+          restore_request: presentContextRestoreRequest(record),
+          request_id: context.requestId,
+        });
+      }
+
+      const restoreRetryMatch = context.url.pathname.match(/^\/contexts\/restore-requests\/([^/]+)\/retry$/);
+      if (request.method === "POST" && restoreRetryMatch) {
+        const restoreRequestId = decodeURIComponent(restoreRetryMatch[1]);
+        const record = await options.store.retryContextRestoreRequest(restoreRequestId, now());
+        if (!record) {
+          return sendError(response, 404, context, "not_found", `context restore request ${restoreRequestId} was not found`);
+        }
+        await observability.incrementCounter("restore_requests_retried_total");
+        await observability.recordActivity({
+          type: "context_restore_retried",
+          occurred_at: record.updated_at,
+          actor: "human",
+          status: "ok",
+          summary: `Restore retried for ${String(record.resource.title ?? record.resource.kind)}`,
+          details: {
+            restore_request_id: record.id,
+          },
+        });
+
+        return sendJson(response, 200, {
+          restore_request: presentContextRestoreRequest(record),
+          request_id: context.requestId,
+        });
+      }
+
       if (request.method === "GET" && context.url.pathname === "/workspace/status") {
         if (!options.workspace) {
           return sendError(response, 501, context, "workspace_unavailable", "workspace controller is not configured");

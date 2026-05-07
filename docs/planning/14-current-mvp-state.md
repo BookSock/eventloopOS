@@ -69,6 +69,7 @@ Done:
 - Restore request status refresh.
 - Automatic restore request status polling while Mac UI is open.
 - UI shows queued/done/highlighted/failed restore state.
+- Context restore requests support failed status and retry back to pending. Browser extension marks unsupported/failed restores through `/failed`; `/retry` requeues for another claim.
 - Live Mac client + Chromium extension restore smoke exists: Mac `HTTPQueueClient` creates a real orchestrator restore request, Chromium extension claims it, restores the tab/scroll, and Mac-readable restore request status becomes `done`.
 
 Gap:
@@ -133,7 +134,7 @@ Strong tests now:
 - `dev:doctor` reports whether `ORCHESTRATOR_MCP_SOURCES_PATH` or `config/mcp-sources.json` contains valid MCP polling sources; missing default config is treated as optional/pass.
 - Config paths for MCP sources, Codex task maps, and seed fixtures resolve existing repo-root relative files even when package scripts run from `app/orchestrator`.
 - File-backed local events MCP server exists for dogfood. `config/mcp-sources.local-events.example.json` launches it over stdio, reads `EVENTLOOPOS_LOCAL_EVENTS_PATH`, and returns generic event-ish `items[]` for MCP poll routing.
-- `GET /metrics` and `GET /activity?limit=` expose local dogfood counters and recent activity. Postgres mode persists them across orchestrator restarts; in-memory mode keeps current-process history. Current coverage records event routing, queue done, context restore request/done, and MCP poll cycles.
+- `GET /metrics` and `GET /activity?limit=` expose local dogfood counters and recent activity. Postgres mode persists them across orchestrator restarts; in-memory mode keeps current-process history. Current coverage records event routing, queue done, context restore request/done/failed/retry, and MCP poll cycles.
 - `pnpm run dogfood:review` prints a local daily-ish review from `/metrics` and `/activity`; set `EVENTLOOPOS_DOGFOOD_REVIEW_FORMAT=json` for agent-readable output.
 - Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
 - Mac unit tests cover Manual Mode workspace capture/restore through `HTTPWorkspaceClient.capture()`, `QueueViewModel.enterManualModeAndCaptureWorkspace()`, and `QueueViewModel.confirmManualWorkspaceRestore()`.

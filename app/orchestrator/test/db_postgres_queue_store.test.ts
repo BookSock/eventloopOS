@@ -56,6 +56,7 @@ describe("PostgresQueueStore", () => {
       { id: "0001_core_queue.sql" },
       { id: "0002_context_restore_requests.sql" },
       { id: "0003_observability.sql" },
+      { id: "0004_context_restore_failures.sql" },
     ]);
   });
 
@@ -233,10 +234,30 @@ describe("PostgresQueueStore", () => {
     assert.equal(leased?.lease_owner, "browser_a");
     assert.equal(await store.claimNextContextRestoreRequest("browser_b", 1_000), undefined);
 
+    const failed = await store.markContextRestoreRequestFailed(
+      first.record.id,
+      { ok: false, error: "tab not found" },
+      new Date("2026-05-06T12:00:01.500Z"),
+    );
+    assert.equal(failed?.status, "failed");
+    assert.equal(failed?.lease_owner, undefined);
+    assert.deepEqual(failed?.result, { ok: false, error: "tab not found" });
+    assert.equal(await store.claimNextContextRestoreRequest("browser_after_failed", 1_000), undefined);
+
+    const retried = await store.retryContextRestoreRequest(
+      first.record.id,
+      new Date("2026-05-06T12:00:01.750Z"),
+    );
+    assert.equal(retried?.status, "pending");
+    assert.equal(retried?.result, undefined);
+
     const reapedBeforeExpiry = await store.reapExpiredContextRestoreRequestLeases(new Date("2026-05-06T12:00:00.500Z"));
     assert.deepEqual(reapedBeforeExpiry.map((record) => record.id), []);
 
-    const reapedAfterExpiry = await store.reapExpiredContextRestoreRequestLeases(new Date("2026-05-06T12:00:01.001Z"));
+    const leasedForReap = await store.claimNextContextRestoreRequest("browser_reap", 1_000);
+    assert.equal(leasedForReap?.status, "leased");
+
+    const reapedAfterExpiry = await store.reapExpiredContextRestoreRequestLeases(new Date("2026-05-06T12:00:02.751Z"));
     assert.deepEqual(reapedAfterExpiry.map((record) => record.id), [first.record.id]);
     assert.equal(reapedAfterExpiry[0].status, "pending");
 

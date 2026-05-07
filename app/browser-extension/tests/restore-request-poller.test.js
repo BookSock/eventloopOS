@@ -92,8 +92,8 @@ test("restore request poller is idle when no pending request exists", async () =
   assert.deepEqual(await poller.pollOnce(), { ok: true, restored: false });
 });
 
-test("restore request poller acknowledges unsupported pending request as failed", async () => {
-  const doneBodies = [];
+test("restore request poller marks unsupported pending request as failed", async () => {
+  const failedBodies = [];
   const poller = createRestoreRequestPoller({
     controller: {
       restore: async () => {
@@ -110,8 +110,9 @@ test("restore request poller acknowledges unsupported pending request as failed"
           }
         });
       }
-      doneBodies.push(JSON.parse(init.body));
-      return jsonResponse({ restore_request: { id: "ctx_restore_bad", status: "done" } });
+      assert.equal(url, "http://127.0.0.1:4377/contexts/restore-requests/ctx_restore_bad/failed");
+      failedBodies.push(JSON.parse(init.body));
+      return jsonResponse({ restore_request: { id: "ctx_restore_bad", status: "failed" } });
     }
   });
 
@@ -119,7 +120,7 @@ test("restore request poller acknowledges unsupported pending request as failed"
 
   assert.equal(result.ok, false);
   assert.equal(result.restored, true);
-  assert.deepEqual(doneBodies, [
+  assert.deepEqual(failedBodies, [
     {
       result: {
         ok: false,

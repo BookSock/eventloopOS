@@ -455,6 +455,49 @@ export class PostgresQueueStore {
     return result.rows[0] ? rowToContextRestoreRequestRecord(result.rows[0]) : undefined;
   }
 
+  async markContextRestoreRequestFailed(
+    id: string,
+    resultValue: unknown,
+    now: Date,
+  ): Promise<ContextRestoreRequestRecord | undefined> {
+    const result = await this.pool.query(
+      `
+        UPDATE context_restore_requests
+        SET status = 'failed',
+            result = $2::jsonb,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            updated_at = $3::timestamptz
+        WHERE id = $1
+        RETURNING *
+      `,
+      [id, JSON.stringify(resultValue), now.toISOString()],
+    );
+
+    return result.rows[0] ? rowToContextRestoreRequestRecord(result.rows[0]) : undefined;
+  }
+
+  async retryContextRestoreRequest(
+    id: string,
+    now: Date,
+  ): Promise<ContextRestoreRequestRecord | undefined> {
+    const result = await this.pool.query(
+      `
+        UPDATE context_restore_requests
+        SET status = 'pending',
+            result = NULL,
+            lease_owner = NULL,
+            lease_expires_at = NULL,
+            updated_at = $2::timestamptz
+        WHERE id = $1
+        RETURNING *
+      `,
+      [id, now.toISOString()],
+    );
+
+    return result.rows[0] ? rowToContextRestoreRequestRecord(result.rows[0]) : undefined;
+  }
+
   async reapExpiredContextRestoreRequestLeases(now = this.clock()): Promise<ContextRestoreRequestRecord[]> {
     const client = await this.pool.connect();
     try {

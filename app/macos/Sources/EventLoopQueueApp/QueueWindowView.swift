@@ -649,6 +649,9 @@ private struct ContextRestoreBanner: View {
     }
 
     private func restoreRequestSummary(_ restoreRequest: ContextRestoreRequest) -> String {
+        if restoreRequest.status == "failed" {
+            return "Context restore failed"
+        }
         if restoreRequest.status == "done" {
             if restoreRequest.result?.ok == false {
                 return "Context restore failed"
@@ -663,7 +666,7 @@ private struct ContextRestoreBanner: View {
     }
 
     private func restoreRequestBackground(_ restoreRequest: ContextRestoreRequest) -> Color {
-        if restoreRequest.status == "done", restoreRequest.result?.ok == false {
+        if restoreRequest.status == "failed" || (restoreRequest.status == "done" && restoreRequest.result?.ok == false) {
             return .red.opacity(0.12)
         }
 

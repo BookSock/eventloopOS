@@ -11,6 +11,7 @@ describe("Postgres migrations", () => {
       "0001_core_queue.sql",
       "0002_context_restore_requests.sql",
       "0003_observability.sql",
+      "0004_context_restore_failures.sql",
     ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
@@ -21,6 +22,7 @@ describe("Postgres migrations", () => {
     assert.match(sql, /CREATE TABLE IF NOT EXISTS receipts/);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS context_restore_requests/);
     assert.match(sql, /CHECK \(status IN \('pending', 'leased', 'done'\)\)/);
+    assert.match(sql, /CHECK \(status IN \('pending', 'leased', 'done', 'failed'\)\)/);
     assert.match(sql, /context_restore_requests_pending_idx/);
     assert.match(sql, /context_restore_requests_stale_lease_idx/);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS metric_counters/);

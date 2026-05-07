@@ -14,11 +14,13 @@ import {
   listContextEntries,
   listQueue,
   markContextRestoreRequestDone,
+  markContextRestoreRequestFailed,
   markQueueItemDone,
   nextQueueItem,
   peekNextContextRestoreRequest,
   recordEventRoute,
   reapExpiredLeases,
+  retryContextRestoreRequest,
   renewQueueLease,
   type InMemoryStore,
   type ContextEntry,
@@ -51,6 +53,8 @@ export type GatewayStore = {
   peekNextContextRestoreRequest(now: Date): Promise<ContextRestoreRequestRecord | undefined>;
   getContextRestoreRequest(id: string): Promise<ContextRestoreRequestRecord | undefined>;
   markContextRestoreRequestDone(id: string, result: unknown, now: Date): Promise<ContextRestoreRequestRecord | undefined>;
+  markContextRestoreRequestFailed(id: string, result: unknown, now: Date): Promise<ContextRestoreRequestRecord | undefined>;
+  retryContextRestoreRequest(id: string, now: Date): Promise<ContextRestoreRequestRecord | undefined>;
   ingestEventAsReviewPacket(event: McpEvent, now: Date): Promise<StoredEventResult>;
   recordEventRoute(event: McpEvent, routeDecision: RouteDecision, now: Date): Promise<StoredEventResult>;
 };
@@ -99,6 +103,12 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     },
     async markContextRestoreRequestDone(id, result, now) {
       return markContextRestoreRequestDone(store, id, result, now);
+    },
+    async markContextRestoreRequestFailed(id, result, now) {
+      return markContextRestoreRequestFailed(store, id, result, now);
+    },
+    async retryContextRestoreRequest(id, now) {
+      return retryContextRestoreRequest(store, id, now);
     },
     async ingestEventAsReviewPacket(event, now) {
       return ingestEventAsReviewPacket(store, event, now);
@@ -154,6 +164,12 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async markContextRestoreRequestDone(id, result, now) {
       return store.markContextRestoreRequestDone(id, result, now);
+    },
+    async markContextRestoreRequestFailed(id, result, now) {
+      return store.markContextRestoreRequestFailed(id, result, now);
+    },
+    async retryContextRestoreRequest(id, now) {
+      return store.retryContextRestoreRequest(id, now);
     },
     async ingestEventAsReviewPacket(event) {
       const result = await store.recordEventAsReviewPacket(event);

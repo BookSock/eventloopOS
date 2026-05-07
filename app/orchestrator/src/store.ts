@@ -65,7 +65,7 @@ export type ContextQuery = {
   limit?: number;
 };
 
-export type ContextRestoreRequestStatus = "pending" | "leased" | "done";
+export type ContextRestoreRequestStatus = "pending" | "leased" | "done" | "failed";
 
 export type ContextRestoreRequestRecord = {
   id: string;
@@ -362,6 +362,39 @@ export function markContextRestoreRequestDone(
   record.status = "done";
   record.updated_at = now.toISOString();
   record.result = result;
+  record.lease_owner = undefined;
+  record.lease_expires_at = undefined;
+  return record;
+}
+
+export function markContextRestoreRequestFailed(
+  store: InMemoryStore,
+  restoreRequestId: string,
+  result: unknown,
+  now: Date,
+): ContextRestoreRequestRecord | undefined {
+  const record = store.contextRestoreRequests.get(restoreRequestId);
+  if (!record) return undefined;
+
+  record.status = "failed";
+  record.updated_at = now.toISOString();
+  record.result = result;
+  record.lease_owner = undefined;
+  record.lease_expires_at = undefined;
+  return record;
+}
+
+export function retryContextRestoreRequest(
+  store: InMemoryStore,
+  restoreRequestId: string,
+  now: Date,
+): ContextRestoreRequestRecord | undefined {
+  const record = store.contextRestoreRequests.get(restoreRequestId);
+  if (!record) return undefined;
+
+  record.status = "pending";
+  record.updated_at = now.toISOString();
+  record.result = undefined;
   record.lease_owner = undefined;
   record.lease_expires_at = undefined;
   return record;
