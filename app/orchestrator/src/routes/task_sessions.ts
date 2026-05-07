@@ -1,0 +1,232 @@
+import type { Observability } from "../observability.js";
+import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
+import type { TaskSessionController } from "../task_sessions/types.js";
+import type { RouteResult } from "./types.js";
+
+export async function handleListTaskSessionsRoute(input: {
+  taskSessions?: TaskSessionController;
+  requestId: string;
+}): Promise<RouteResult> {
+  if (!input.taskSessions?.listSessions) {
+    return {
+      ok: false,
+      status: 501,
+      code: "task_sessions_unavailable",
+      message: "task session listing is not configured",
+    };
+  }
+
+  const sessions = await input.taskSessions.listSessions();
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      sessions,
+      count: Array.isArray(sessions) ? sessions.length : 0,
+      request_id: input.requestId,
+    },
+  };
+}
+
+export async function handleGetTaskSessionRoute(input: {
+  taskSessions?: TaskSessionController;
+  taskSessionId: string;
+  requestId: string;
+}): Promise<RouteResult> {
+  if (!input.taskSessions?.getSession) {
+    return {
+      ok: false,
+      status: 501,
+      code: "task_sessions_unavailable",
+      message: "task session lookup is not configured",
+    };
+  }
+
+  const session = await input.taskSessions.getSession(input.taskSessionId);
+  if (!session) {
+    return {
+      ok: false,
+      status: 404,
+      code: "not_found",
+      message: `task session ${input.taskSessionId} was not found`,
+    };
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      session,
+      request_id: input.requestId,
+    },
+  };
+}
+
+export async function handleTaskFollowupRoute(input: {
+  taskSessions?: TaskSessionController;
+  observability?: Observability;
+  taskSessionId: string;
+  body: unknown;
+  idempotencyKey?: string;
+  occurredAt: string;
+  requestId: string;
+}): Promise<RouteResult> {
+  if (!input.taskSessions) {
+    return {
+      ok: false,
+      status: 501,
+      code: "task_sessions_unavailable",
+      message: "task session controller is not configured",
+    };
+  }
+
+  const validation = validateTaskFollowupRequest(input.body, input.idempotencyKey);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      status: 400,
+      code: "schema_error",
+      message: validation.message,
+    };
+  }
+
+  const message = await sendTaskFollowupWithActivity({
+    taskSessions: input.taskSessions,
+    observability: input.observability,
+  }, {
+    task_session_id: input.taskSessionId,
+    text: validation.text,
+    event_ids: validation.eventIds,
+    idempotency_key: validation.idempotencyKey,
+  }, {
+    origin: "task_session_api",
+    occurredAt: input.occurredAt,
+  });
+
+  return {
+    ok: true,
+    status: 202,
+    body: {
+      ok: true,
+      message,
+      request_id: input.requestId,
+    },
+  };
+}
+
+export async function handleTaskBindingRoute(input: {
+  taskSessions?: TaskSessionController;
+  taskSessionId: string;
+  body: unknown;
+  requestId: string;
+}): Promise<RouteResult> {
+  if (!input.taskSessions?.bindTaskSession) {
+    return {
+      ok: false,
+      status: 501,
+      code: "task_binding_unavailable",
+      message: "task session binding is not configured",
+    };
+  }
+
+  const validation = validateTaskBindingRequest(input.body);
+  if (!validation.ok) {
+    return {
+      ok: false,
+      status: 400,
+      code: "schema_error",
+      message: validation.message,
+    };
+  }
+
+  const binding = await input.taskSessions.bindTaskSession({
+    task_session_id: input.taskSessionId,
+    task_id: validation.taskId,
+  });
+
+  if (isRecord(binding) && binding.ok === false) {
+    return {
+      ok: false,
+      status: typeof binding.error === "string" && binding.error.includes("was not found") ? 404 : 409,
+      code: "task_binding_failed",
+      message: typeof binding.error === "string" ? binding.error : "task session binding failed",
+      details: binding,
+    };
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      ok: true,
+      binding,
+      request_id: input.requestId,
+    },
+  };
+}
+
+export function taskSessionMatchesTask(candidate: unknown, taskId: string): candidate is { id: string; task_id: string } {
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+  const record = candidate as Record<string, unknown>;
+  return typeof record.id === "string" && record.id.length > 0 && record.task_id === taskId;
+}
+
+function validateTaskFollowupRequest(
+  input: unknown,
+  headerIdempotencyKey: string | undefined,
+): { ok: true; text: string; eventIds: string[]; idempotencyKey: string } | { ok: false; message: string } {
+  if (!isRecord(input)) {
+    return { ok: false, message: "task followup request must be an object" };
+  }
+
+  const text = typeof input.text === "string" ? input.text.trim() : "";
+  if (!text) {
+    return { ok: false, message: "text must be a non-empty string" };
+  }
+
+  const eventIds = Array.isArray(input.event_ids) ? input.event_ids : [];
+  if (!eventIds.every((eventId) => typeof eventId === "string" && eventId.length > 0)) {
+    return { ok: false, message: "event_ids must be an array of non-empty strings" };
+  }
+
+  const bodyIdempotencyKey = typeof input.idempotency_key === "string" && input.idempotency_key
+    ? input.idempotency_key
+    : undefined;
+  const idempotencyKey = headerIdempotencyKey ?? bodyIdempotencyKey;
+  if (!idempotencyKey) {
+    return { ok: false, message: "idempotency_key or Idempotency-Key header is required" };
+  }
+
+  return {
+    ok: true,
+    text,
+    eventIds,
+    idempotencyKey,
+  };
+}
+
+function validateTaskBindingRequest(input: unknown): { ok: true; taskId: string } | { ok: false; message: string } {
+  if (!isRecord(input)) {
+    return { ok: false, message: "task binding request must be an object" };
+  }
+
+  const taskId = typeof input.task_id === "string" ? input.task_id.trim() : "";
+  if (!taskId) {
+    return { ok: false, message: "task_id must be a non-empty string" };
+  }
+  if (taskId.length > 200) {
+    return { ok: false, message: "task_id must be 200 characters or fewer" };
+  }
+  if (!/^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(taskId)) {
+    return { ok: false, message: "task_id must start with task_ and contain only letters, numbers, underscores, or hyphens" };
+  }
+
+  return {
+    ok: true,
+    taskId,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}

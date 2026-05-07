@@ -11,7 +11,15 @@ import type { GatewayStore } from "./gateway_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
 import type { McpSourcePollOutput } from "./integrations/mcp_poll/development_registry.js";
 import { createInMemoryObservability, type Observability } from "./observability.js";
-import { handleActivityRoute, handleMetricsRoute, type RouteResult } from "./routes/observability.js";
+import { handleActivityRoute, handleMetricsRoute } from "./routes/observability.js";
+import {
+  handleGetTaskSessionRoute,
+  handleListTaskSessionsRoute,
+  handleTaskBindingRoute,
+  handleTaskFollowupRoute,
+  taskSessionMatchesTask,
+} from "./routes/task_sessions.js";
+import type { RouteResult } from "./routes/types.js";
 import { injectEventIntoTaskSessionIfPossible } from "./routing/task_session_injection.js";
 import type { ContextRestoreRequestRecord, RouteDecision } from "./store.js";
 import { sendTaskFollowupWithActivity } from "./task_sessions/task_followup_audit.js";
@@ -603,105 +611,55 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
       }
 
       if (request.method === "GET" && context.url.pathname === "/task-sessions") {
-        if (!options.taskSessions?.listSessions) {
-          return sendError(response, 501, context, "task_sessions_unavailable", "task session listing is not configured");
-        }
-
-        const sessions = await options.taskSessions.listSessions();
-        return sendJson(response, 200, {
-          sessions,
-          count: Array.isArray(sessions) ? sessions.length : 0,
-          request_id: context.requestId,
-        });
+        return sendRouteResult(response, context, await handleListTaskSessionsRoute({
+          taskSessions: options.taskSessions,
+          requestId: context.requestId,
+        }));
       }
 
       const getTaskSessionMatch = context.url.pathname.match(/^\/task-sessions\/([^/]+)$/);
       if (request.method === "GET" && getTaskSessionMatch) {
-        if (!options.taskSessions?.getSession) {
-          return sendError(response, 501, context, "task_sessions_unavailable", "task session lookup is not configured");
-        }
-
         const taskSessionId = decodeURIComponent(getTaskSessionMatch[1] ?? "");
-        const session = await options.taskSessions.getSession(taskSessionId);
-        if (!session) {
-          return sendError(response, 404, context, "not_found", `task session ${taskSessionId} was not found`);
-        }
-
-        return sendJson(response, 200, {
-          session,
-          request_id: context.requestId,
-        });
+        return sendRouteResult(response, context, await handleGetTaskSessionRoute({
+          taskSessions: options.taskSessions,
+          taskSessionId,
+          requestId: context.requestId,
+        }));
       }
 
       const taskFollowupMatch = context.url.pathname.match(/^\/task-sessions\/([^/]+)\/followup$/);
       if (request.method === "POST" && taskFollowupMatch) {
-        if (!options.taskSessions) {
-          return sendError(response, 501, context, "task_sessions_unavailable", "task session controller is not configured");
-        }
-
         const parsed = await readJsonBody(request);
         if (!parsed.ok) {
           return sendSchemaError(response, context, parsed.message);
         }
-        const validation = validateTaskFollowupRequest(parsed.value, context.idempotencyKey);
-        if (!validation.ok) {
-          return sendSchemaError(response, context, validation.message);
-        }
 
         const taskSessionId = decodeURIComponent(taskFollowupMatch[1] ?? "");
-        const message = await sendTaskFollowupWithActivity(serverOptions, {
-          task_session_id: taskSessionId,
-          text: validation.text,
-          event_ids: validation.eventIds,
-          idempotency_key: validation.idempotencyKey,
-        }, {
-          origin: "task_session_api",
+        return sendRouteResult(response, context, await handleTaskFollowupRoute({
+          taskSessions: options.taskSessions,
+          observability,
+          taskSessionId,
+          body: parsed.value,
+          idempotencyKey: context.idempotencyKey,
           occurredAt: now().toISOString(),
-        });
-
-        return sendJson(response, 202, {
-          ok: true,
-          message,
-          request_id: context.requestId,
-        });
+          requestId: context.requestId,
+        }));
       }
 
       const taskBindingMatch = context.url.pathname.match(/^\/task-sessions\/([^/]+)\/task-binding$/);
       if (request.method === "PUT" && taskBindingMatch) {
-        if (!options.taskSessions?.bindTaskSession) {
-          return sendError(response, 501, context, "task_binding_unavailable", "task session binding is not configured");
-        }
-
         const parsed = await readJsonBody(request);
         if (!parsed.ok) {
           return sendSchemaError(response, context, parsed.message);
         }
-        const validation = validateTaskBindingRequest(parsed.value);
-        if (!validation.ok) {
-          return sendSchemaError(response, context, validation.message);
-        }
 
         const taskSessionId = decodeURIComponent(taskBindingMatch[1] ?? "");
-        const binding = await options.taskSessions.bindTaskSession({
-          task_session_id: taskSessionId,
-          task_id: validation.taskId,
-        });
-
-        if (isRecord(binding) && binding.ok === false) {
-          return sendError(
-            response,
-            typeof binding.error === "string" && binding.error.includes("was not found") ? 404 : 409,
-            context,
-            "task_binding_failed",
-            typeof binding.error === "string" ? binding.error : "task session binding failed",
-          );
-        }
-
-        return sendJson(response, 200, {
-          ok: true,
-          binding,
-          request_id: context.requestId,
-        });
+        return sendRouteResult(response, context, await handleTaskBindingRoute({
+          taskSessions: options.taskSessions,
+          taskSessionId,
+          body: parsed.value,
+          requestId: context.requestId,
+        }));
       }
 
       if (request.method === "POST" && context.url.pathname === "/queue/lease-next") {
@@ -1471,68 +1429,6 @@ function validateQueueActionRequest(input: unknown): { ok: true; actorId: string
 
 function taskIdForHint(taskHint: string | undefined): string | undefined {
   return taskHint ? `task_${stableId(taskHint)}` : undefined;
-}
-
-function taskSessionMatchesTask(candidate: unknown, taskId: string): candidate is { id: string; task_id: string } {
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
-  const record = candidate as Record<string, unknown>;
-  return typeof record.id === "string" && record.id.length > 0 && record.task_id === taskId;
-}
-
-function validateTaskFollowupRequest(
-  input: unknown,
-  headerIdempotencyKey: string | undefined,
-): { ok: true; text: string; eventIds: string[]; idempotencyKey: string } | { ok: false; message: string } {
-  if (!isRecord(input)) {
-    return { ok: false, message: "task followup request must be an object" };
-  }
-
-  const text = typeof input.text === "string" ? input.text.trim() : "";
-  if (!text) {
-    return { ok: false, message: "text must be a non-empty string" };
-  }
-
-  const eventIds = Array.isArray(input.event_ids) ? input.event_ids : [];
-  if (!eventIds.every((eventId) => typeof eventId === "string" && eventId.length > 0)) {
-    return { ok: false, message: "event_ids must be an array of non-empty strings" };
-  }
-
-  const bodyIdempotencyKey = typeof input.idempotency_key === "string" && input.idempotency_key
-    ? input.idempotency_key
-    : undefined;
-  const idempotencyKey = headerIdempotencyKey ?? bodyIdempotencyKey;
-  if (!idempotencyKey) {
-    return { ok: false, message: "idempotency_key or Idempotency-Key header is required" };
-  }
-
-  return {
-    ok: true,
-    text,
-    eventIds,
-    idempotencyKey,
-  };
-}
-
-function validateTaskBindingRequest(input: unknown): { ok: true; taskId: string } | { ok: false; message: string } {
-  if (!isRecord(input)) {
-    return { ok: false, message: "task binding request must be an object" };
-  }
-
-  const taskId = typeof input.task_id === "string" ? input.task_id.trim() : "";
-  if (!taskId) {
-    return { ok: false, message: "task_id must be a non-empty string" };
-  }
-  if (taskId.length > 200) {
-    return { ok: false, message: "task_id must be 200 characters or fewer" };
-  }
-  if (!/^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(taskId)) {
-    return { ok: false, message: "task_id must start with task_ and contain only letters, numbers, underscores, or hyphens" };
-  }
-
-  return {
-    ok: true,
-    taskId,
-  };
 }
 
 function validateMcpPollRequest(

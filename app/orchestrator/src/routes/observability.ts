@@ -1,8 +1,5 @@
 import type { Observability } from "../observability.js";
-
-export type RouteResult =
-  | { ok: true; status: number; body: Record<string, unknown> }
-  | { ok: false; status: number; code: string; message: string };
+import type { RouteResult } from "./types.js";
 
 export async function handleMetricsRoute(input: {
   observability: Observability;
