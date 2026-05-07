@@ -185,6 +185,7 @@ Strong tests now:
 - Opening or refreshing the Mac queue is read-only now: it loads the stack without selecting/leasing an active paper. `Pull Next Paper` is the canonical action that turns a queued packet into the current paper.
 - Router-created review packets now use human-block-specific decision copy: task-matched packets ask for approval before sending an update back to the task agent, while unmatched packets say there is no confident task match.
 - Router decisions now tag human-queue creation with `human_queue_reason`: `human_blocked`, `ambiguous`, or `risky`. This keeps queue creation aligned to the intake-stack model instead of generic “ask human” routing.
+- Real local Postgres + local-events MCP dogfood proof passed: started Docker Postgres, ran orchestrator with `DATABASE_URL`, `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json`, and `EVENTLOOPOS_LOCAL_EVENTS_PATH=config/local-events.example.json`, ran `poll:mcp:once`, saw one ambiguous human-queue packet, then `dogfood:check` passed. After orchestrator restart, `/queue`, `/activity`, and `/metrics` still showed the routed item and counters from Postgres.
 - Opt-in AppleScript UI smoke now proves the Pull Next Paper menu item exists and that Manual Mode captures workspace only on return to Event Loop, then Restore Manual Workspace returns the user to manual mode.
 
 Weak tests:
@@ -198,8 +199,8 @@ Weak tests:
 
 ## Next Best Work
 
-1. Wire `dogfood:check` into a real local Postgres + MCP dogfood run once those sources are active.
-2. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-3. Add safe real Claude followup smoke against an explicitly supplied disposable Claude session.
-4. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
+1. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+2. Add safe real Claude followup smoke against an explicitly supplied disposable Claude session.
+3. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
+4. Decide whether to promote local Postgres + MCP dogfood proof into `proof:live` as an opt-in lane or keep it as an operator-run proof.
 5. Later: real microphone/wake-word proof and always-listening voice UX.
