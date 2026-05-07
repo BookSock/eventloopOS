@@ -84,7 +84,7 @@ Done:
 - Idempotency key support for restore request creation.
 - Restore request persistence through same in-memory/Postgres store abstraction as queue storage.
 - Expired restore request leases get reaped and reclaimed.
-- Doctor checks orchestrator health, AeroSpace, Docker, browser Playwright readiness, Codex app-server.
+- Doctor checks orchestrator health, AeroSpace, Docker, browser Playwright readiness, optional voice transcript command readiness, and Codex app-server.
 - `pnpm --filter @eventloopos/orchestrator run live:aerospace` builds and emits a machine-readable skip by default. With `EVENTLOOPOS_ENABLE_LIVE_AEROSPACE=1`, it checks live AeroSpace status/capture/restore-plan without executing workspace moves.
 - `voice:listen-command` runs a configured local STT command and pipes line-delimited transcripts into the same wake-phrase voice router. Command args are JSON argv, not shell-parsed strings.
 
@@ -105,6 +105,7 @@ Strong tests now:
 - Opt-in installed Chromium native messaging smoke that verifies extension -> native host -> orchestrator forwarding with real `chrome.runtime.sendNativeMessage`; passed locally on 2026-05-06.
 - `voice:listen` accepts line-delimited local STT transcript streams, optional wake phrase filtering, and forwards into `/voice/commands`.
 - `voice:listen-command` lets whisper.cpp stream, MLX Whisper wrappers, or other local STT tools feed the same router while staying unit-testable through an injected process.
+- `dev:doctor` reports whether `EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND` is configured and can launch with `--help`; unconfigured voice command is treated as optional/pass.
 - Mac live client smoke is skipped in normal CI and runs inside `pnpm run test:e2e:live:boot` via `EVENTLOOPOS_MACOS_LIVE_ORCHESTRATOR_URL`.
 
 Weak tests:

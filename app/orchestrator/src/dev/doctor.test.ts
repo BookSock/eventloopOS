@@ -68,6 +68,12 @@ describe("developer doctor", () => {
           source_url: "https://playwright.dev/docs/chrome-extensions",
         },
         {
+          name: "voice_transcript_command",
+          ok: true,
+          detail: "optional voice transcript command is not configured",
+          source_url: "https://nodejs.org/api/child_process.html#child_processspawncommand-args-options",
+        },
+        {
           name: "codex_app_server",
           ok: true,
           detail: "Codex app-server responded; sampled 1 thread(s)",
@@ -106,8 +112,37 @@ describe("developer doctor", () => {
       ["aerospace_daemon", false, "Can't connect to AeroSpace server. Is AeroSpace.app running?"],
       ["docker_daemon", false, "failed to connect to the docker API"],
       ["browser_e2e", true, "Playwright available: Version 1.59.1"],
+      ["voice_transcript_command", true, "optional voice transcript command is not configured"],
       ["codex_app_server", true, "Codex app-server responded; sampled 1 thread(s)"],
     ]);
+  });
+
+  it("checks configured local voice transcript command", async () => {
+    const report = await runDoctor({
+      baseUrl: "http://127.0.0.1:4377",
+      voiceTranscriptCommand: "whisper-stream",
+      voiceTranscriptArgs: ["--model", "ggml-base.en.bin"],
+      voiceTranscriptCommandConfigured: true,
+      fetchFn: async () => response({ ok: true }, 200),
+      execFn: async (command, args) => {
+        if (command === "whisper-stream") {
+          assert.deepEqual(args, ["--model", "ggml-base.en.bin", "--help"]);
+          return { stdout: "usage: whisper-stream\n", stderr: "" };
+        }
+        return { stdout: command === "docker" ? "29.3.1\n" : "[]", stderr: "" };
+      },
+      codexCheckFn: async () => ({
+        name: "codex_app_server",
+        ok: true,
+        detail: "Codex app-server responded; sampled 1 thread(s)",
+      }),
+    });
+
+    const voiceCheck = report.checks.find((check) => check.name === "voice_transcript_command");
+
+    assert.equal(voiceCheck?.ok, true);
+    assert.equal(voiceCheck?.detail, "voice transcript command launched with --help");
+    assert.deepEqual(voiceCheck?.command, ["whisper-stream", "--model", "ggml-base.en.bin", "--help"]);
   });
 
   it("prints JSON and exits non-zero when any check fails", async () => {

@@ -15,7 +15,8 @@ export type DoctorCheckName =
   | "aerospace_daemon"
   | "docker_daemon"
   | "codex_app_server"
-  | "browser_e2e";
+  | "browser_e2e"
+  | "voice_transcript_command";
 
 export type DoctorCheck = {
   name: DoctorCheckName;
@@ -38,6 +39,9 @@ export type DoctorOptions = {
   execFn?: ExecFunction;
   fetchFn?: typeof fetch;
   codexCheckFn?: () => Promise<DoctorCheck> | DoctorCheck;
+  voiceTranscriptCommand?: string;
+  voiceTranscriptArgs?: string[];
+  voiceTranscriptCommandConfigured?: boolean;
   stdout?: Pick<NodeJS.WriteStream, "write">;
   stderr?: Pick<NodeJS.WriteStream, "write">;
 };
@@ -45,6 +49,9 @@ export type DoctorOptions = {
 export function doctorOptionsFromEnv(env: NodeJS.ProcessEnv): DoctorOptions {
   return {
     baseUrl: env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377",
+    voiceTranscriptCommand: env.EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND,
+    voiceTranscriptArgs: parseOptionalStringArrayJson(env.EVENTLOOPOS_VOICE_TRANSCRIPT_ARGS_JSON),
+    voiceTranscriptCommandConfigured: env.EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND !== undefined,
   };
 }
 
@@ -57,6 +64,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     checkAerospaceDaemon(execFn),
     checkDockerDaemon(execFn),
     checkBrowserE2E(execFn),
+    checkVoiceTranscriptCommand(options, execFn),
     options.codexCheckFn ? options.codexCheckFn() : checkCodexAppServer(),
   ]);
 
@@ -66,6 +74,47 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
     orchestrator_url: options.baseUrl,
     checks,
   };
+}
+
+async function checkVoiceTranscriptCommand(options: DoctorOptions, execFn: ExecFunction): Promise<DoctorCheck> {
+  if (!options.voiceTranscriptCommandConfigured && !options.voiceTranscriptCommand) {
+    return {
+      name: "voice_transcript_command",
+      ok: true,
+      detail: "optional voice transcript command is not configured",
+      source_url: "https://nodejs.org/api/child_process.html#child_processspawncommand-args-options",
+    };
+  }
+
+  if (!options.voiceTranscriptCommand) {
+    return {
+      name: "voice_transcript_command",
+      ok: false,
+      detail: "EVENTLOOPOS_VOICE_TRANSCRIPT_COMMAND is blank",
+      source_url: "https://nodejs.org/api/child_process.html#child_processspawncommand-args-options",
+    };
+  }
+
+  const command = [options.voiceTranscriptCommand, ...(options.voiceTranscriptArgs ?? []), "--help"];
+  try {
+    await execFn(command[0] ?? options.voiceTranscriptCommand, command.slice(1));
+
+    return {
+      name: "voice_transcript_command",
+      ok: true,
+      detail: "voice transcript command launched with --help",
+      command,
+      source_url: "https://github.com/ggml-org/whisper.cpp/blob/master/examples/stream/stream.cpp",
+    };
+  } catch (error) {
+    return {
+      name: "voice_transcript_command",
+      ok: false,
+      detail: classifyCommandFailure(error),
+      command,
+      source_url: "https://github.com/ggml-org/whisper.cpp/blob/master/examples/stream/stream.cpp",
+    };
+  }
 }
 
 export async function runDoctorCli(options: DoctorOptions): Promise<number> {
@@ -228,6 +277,15 @@ function classifyCommandFailure(error: unknown): string {
 
 function errorDetail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parseOptionalStringArrayJson(value: string | undefined): string[] | undefined {
+  if (!value) return undefined;
+  const parsed = JSON.parse(value) as unknown;
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
+    throw new Error("EVENTLOOPOS_VOICE_TRANSCRIPT_ARGS_JSON must be a JSON array of strings");
+  }
+  return parsed;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
