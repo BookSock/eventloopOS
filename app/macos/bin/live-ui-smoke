@@ -1,0 +1,251 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import {
+  buildPackagedQueueAppBundle,
+  openQueueApp,
+  spawnChecked,
+  terminateProcessByExecutablePath,
+  waitForExit,
+} from "./smoke-app-bundle.mjs";
+
+if (process.platform !== "darwin") {
+  console.log("macOS live queue UI smoke skipped: requires darwin");
+  process.exit(0);
+}
+
+if (process.env.EVENTLOOPOS_ENABLE_MACOS_LIVE_UI_SMOKE !== "1") {
+  console.log("macOS live queue UI smoke skipped: set EVENTLOOPOS_ENABLE_MACOS_LIVE_UI_SMOKE=1");
+  process.exit(0);
+}
+
+const port = process.env.EVENTLOOPOS_MACOS_LIVE_UI_SMOKE_PORT ?? "4383";
+const baseUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? `http://127.0.0.1:${port}`;
+let server;
+let bundle;
+let app;
+
+try {
+  await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "build"]);
+  server = spawn("pnpm", ["--filter", "@eventloopos/orchestrator", "start"], {
+    env: {
+      ...process.env,
+      ORCHESTRATOR_HOST: "127.0.0.1",
+      ORCHESTRATOR_PORT: port,
+      ORCHESTRATOR_WORKSPACE: "off",
+      ORCHESTRATOR_MCP_SOURCES: "off",
+      ORCHESTRATOR_TASK_SESSIONS: "fake",
+    },
+    stdio: "inherit",
+  });
+  await waitForHealth(baseUrl, server);
+
+  const initialReady = await fetchJson(new URL("/queue?state=ready", baseUrl));
+  if (initialReady.count !== 1) {
+    throw new Error(`expected 1 ready queue item before app launch, got ${initialReady.count}`);
+  }
+
+  bundle = await buildPackagedQueueAppBundle();
+  app = openQueueApp(bundle.appBundle, {
+    appArgs: ["--orchestrator-url", baseUrl],
+    env: {
+      EVENTLOOP_ORCHESTRATOR_URL: baseUrl,
+    },
+  });
+  const appOutput = captureOutput(app);
+
+  await waitForProcess(bundle.executablePath, 8_000);
+  const uiProof = await runLiveUiProof();
+
+  const doneQueue = await waitForDoneQueueItem(baseUrl);
+  const activity = await waitForActivity(baseUrl, "queue_item_done");
+  const metrics = await fetchJson(new URL("/metrics", baseUrl));
+
+  await cleanupApp();
+  console.log(JSON.stringify({
+    ok: true,
+    base_url: baseUrl,
+    ui_proof: uiProof,
+    done_queue_count: doneQueue.count,
+    done_queue_item_id: doneQueue.items[0]?.id,
+    activity_id: activity.id,
+    activity_type: activity.type,
+    queue_items_done_total: metrics.metrics?.counters?.queue_items_done_total ?? 0,
+  }, null, 2));
+} catch (error) {
+  if (app && bundle) {
+    await tryTerminate(bundle.executablePath, app);
+  }
+  const output = app?.capturedOutput?.() ?? "";
+  console.error(`${error instanceof Error ? error.message : String(error)}${output ? `\n${output}` : ""}`);
+  process.exitCode = 1;
+} finally {
+  if (bundle) await bundle.cleanup();
+  if (server && !server.killed) {
+    server.kill("SIGTERM");
+    await onceExit(server);
+  }
+}
+
+async function runLiveUiProof() {
+  const script = `
+on waitForMenuBarExtra()
+  repeat with attempt from 1 to 80
+    tell application "System Events"
+      if exists process "EventLoopQueueApp" then
+        tell process "EventLoopQueueApp"
+          if (count of menu bars) is greater than or equal to 2 then return
+        end tell
+      end if
+    end tell
+    delay 0.1
+  end repeat
+  error "EventLoopQueueApp menu bar extra did not appear"
+end waitForMenuBarExtra
+
+on menuItemNames()
+  waitForMenuBarExtra()
+  tell application "System Events"
+    tell process "EventLoopQueueApp"
+      tell menu bar item 1 of menu bar 2
+        click
+        delay 0.2
+        set namesList to name of menu items of menu 1
+      end tell
+      key code 53
+    end tell
+  end tell
+  return namesList
+end menuItemNames
+
+on waitForMenuItem(expectedValue)
+  repeat with attempt from 1 to 50
+    set itemsList to menuItemNames()
+    if itemsList contains expectedValue then return
+    delay 0.1
+  end repeat
+  error "missing menu item after wait: " & expectedValue
+end waitForMenuItem
+
+on clickMenuItem(itemName)
+  waitForMenuBarExtra()
+  tell application "System Events"
+    tell process "EventLoopQueueApp"
+      tell menu bar item 1 of menu bar 2
+        click
+        delay 0.2
+        click menu item itemName of menu 1
+      end tell
+    end tell
+  end tell
+end clickMenuItem
+
+waitForMenuItem("Pull Next Paper")
+waitForMenuItem("Review seeded agent change")
+clickMenuItem("Pull Next Paper")
+delay 0.4
+waitForMenuItem("Review seeded agent change")
+clickMenuItem("Done / Next")
+delay 0.5
+return "live queue mutation clicked"
+`;
+
+  const result = await spawnChecked("osascript", ["-e", script]);
+  return result.stdout.trim();
+}
+
+async function waitForDoneQueueItem(url) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const queue = await fetchJson(new URL("/queue?state=done", url));
+    if (queue.count === 1 && queue.items?.[0]?.state === "done") return queue;
+    await sleep(200);
+  }
+  throw new Error("timed out waiting for done queue item after live UI action");
+}
+
+async function waitForActivity(url, type) {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    const activity = await fetchJson(new URL("/activity?limit=20", url));
+    const found = activity.events?.find((event) => event.type === type);
+    if (found) return found;
+    await sleep(200);
+  }
+  throw new Error(`timed out waiting for activity ${type}`);
+}
+
+async function waitForHealth(url, child) {
+  const deadline = Date.now() + 15_000;
+  let exited = false;
+  child.once("exit", () => {
+    exited = true;
+  });
+
+  while (Date.now() < deadline) {
+    if (exited) throw new Error("orchestrator exited before health check passed");
+    try {
+      const response = await fetch(new URL("/health", url));
+      if (response.ok) return;
+    } catch {
+      // Server not ready yet.
+    }
+    await sleep(250);
+  }
+  throw new Error(`timed out waiting for orchestrator health at ${url}/health`);
+}
+
+async function waitForProcess(executablePath, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const ps = await spawnChecked("ps", ["-axo", "command="]);
+    if (ps.stdout.includes(executablePath)) return;
+    await sleep(100);
+  }
+  throw new Error(`EventLoopQueueApp process did not appear for ${executablePath}`);
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url);
+  const body = await response.json();
+  if (!response.ok) {
+    throw new Error(`GET ${url.pathname} failed with ${response.status}: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+function captureOutput(child) {
+  let output = "";
+  child.stdout.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+  child.capturedOutput = () => output;
+  return output;
+}
+
+async function cleanupApp() {
+  if (!bundle || !app) return;
+  await terminateProcessByExecutablePath(bundle.executablePath);
+  await waitForExit(app, 3_000);
+}
+
+async function tryTerminate(executablePath, child) {
+  try {
+    await terminateProcessByExecutablePath(executablePath);
+    await waitForExit(child, 3_000);
+  } catch {
+    child.kill("SIGKILL");
+  }
+}
+
+async function onceExit(child) {
+  return await new Promise((resolve) => {
+    child.once("exit", resolve);
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

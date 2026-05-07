@@ -195,6 +195,7 @@ Real gaps:
 - Composite runtime dogfood now has `pnpm task:runtime-smoke`, which starts a temp daemon and proves live Codex app-server sessions plus a configured Claude session appear through the same task-session API.
 - Live proof now has `pnpm proof:live`: it writes a separate proof manifest, runs a temp live orchestrator smoke with dogfood threshold checks before shutdown, and runs the composite task-runtime smoke.
 - Mac app now has a true Pull Next Paper action and global hotkey (`Cmd+Opt+Shift+J`): it leases/presents the current top packet, returns from Manual Mode if needed, captures the manual workspace on return, loads bound task sessions, and plans queue workspace restore.
+- Live Mac queue mutation proof now exists: `pnpm test:e2e:macos-live-ui` launches the packaged app against a temp live orchestrator, clicks `Pull Next Paper` and `Done / Next`, then asserts queue done state, activity, and metrics. It is included in `pnpm proof:live`.
 - GatewayStore remains broad. Conformance tests reduce risk; split into smaller store ports later, after dogfood-critical safety/history patches.
 
 Latest user steering:
@@ -219,7 +220,7 @@ Release guardrails:
 ## Next Best Work
 
 1. Wire dogfood threshold checks into a real local Postgres + MCP source dogfood session.
-2. Add live Mac queue mutation smoke that asserts menu/UI actions changed orchestrator `/queue`, `/activity`, and task followup state.
+2. Add live Mac task handoff UI smoke that proves a recommended agent action changes orchestrator task followup/history, not only queue done state.
 3. Add safe real Claude followup smoke against an explicitly supplied disposable Claude session.
 4. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
 5. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
