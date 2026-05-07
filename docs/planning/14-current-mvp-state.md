@@ -159,8 +159,10 @@ Weak tests:
 
 ## Next Best Work
 
-1. Add trend comparisons to `dogfood:review`.
+1. Add composite Codex+Claude task-session runtime so both providers can run in one orchestrator.
 2. Continue extracting `server.ts` route/policy modules without behavior change.
-3. Add real Slack/GitHub MCP source dogfood config for Jason's installed servers, using the local-events MCP recipe as the template.
-4. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-5. Later: real microphone/wake-word proof and always-listening voice UX.
+3. Add restart/failure smoke around Postgres state, restore retry, and task followup chaos.
+4. Add trend comparisons to `dogfood:review`.
+5. Add real Slack/GitHub MCP source dogfood config for Jason's installed servers, using the local-events MCP recipe as the template.
+6. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+7. Later: real microphone/wake-word proof and always-listening voice UX.

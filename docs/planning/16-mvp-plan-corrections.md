@@ -76,6 +76,14 @@ Terminal control is fallback, not primary runtime. It must be:
 
 Current product target only needs Codex and Claude Code. Keep TaskSessionController broad enough for these two without designing full provider ecosystem now.
 
+Near-term runtime shape:
+
+- Orchestrator should support Codex and Claude Code in the same daemon, not exactly one runtime mode.
+- Add a `CompositeTaskSessionController` that lists sessions from multiple controllers and routes each followup/binding to the controller that owns the session.
+- Codex keeps writable task binding through the task-map path.
+- Claude Code can start with configured static sessions plus followup send; writable binding can come after dogfood proves need.
+- Terminal/tmux/Ghostty adapter stays fallback for visible draft input, not main task runtime.
+
 ## Failure Recovery
 
 MVP needs 90/10 durability, not perfect distributed recovery.
@@ -89,6 +97,8 @@ Required now:
 - Dogfood logs make after-the-fact debugging possible.
 - Duplicate/retried events return stored route before side effects.
 - In Postgres mode, activity and metric history survive orchestrator restart.
+- Restart-proof proof path: use same Postgres DB, ingest event, create/lease queue item or restore request, restart orchestrator, assert duplicate route returns stored result and leases/retries remain visible.
+- Task followup chaos proof: runtime throw should record attempted + failed activity and avoid duplicate followup on retry.
 
 Later:
 
@@ -145,11 +155,18 @@ Current extraction:
 
 Keep doing behavior-preserving extraction first. Add tests before changing policy.
 
+Other architecture notes:
+
+- `gateway_store.ts` is useful as an adapter seam, but event idempotency/route semantics must stay parity-tested across in-memory and Postgres stores.
+- Add route-level observability wrapper before more API growth: route name, duration, status/error code, request ID.
+- Extend `/activity` filters later by task/session/status/since so after-the-fact debugging does not require dumping recent global history.
+
 ## Next Best Work
 
-1. Add real MCP/Slack source dogfood config around Jason's installed tools.
-2. Continue behavior-preserving `server.ts` route extraction.
-3. Add task-message history/outbox-lite: local activity row before/after followup, retry-visible failure, no silent side effects.
-4. Add trend comparisons to `dogfood:review`.
-5. Real Claude followup dogfood against harmless configured session.
-6. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.
+1. Add composite Codex+Claude task-session runtime so both can be active in one orchestrator.
+2. Continue behavior-preserving `server.ts` route extraction, especially context restore, MCP sources, queue, events.
+3. Add restart/failure smoke around Postgres state, restore retry, and task followup chaos.
+4. Add real MCP/Slack source dogfood config around Jason's installed tools.
+5. Add trend comparisons to `dogfood:review`.
+6. Real Claude followup dogfood against harmless configured session.
+7. Provider deep-link dogfood: Slack/GitHub/Notion/GDocs/Figma/browser restore success by confidence reason.
