@@ -203,6 +203,7 @@ Real gaps:
 - Real local Postgres + local-events MCP dogfood proof has been run: MCP poll created one ambiguous intake item, `dogfood:check` passed, and queue/activity/metrics survived orchestrator restart against the same Postgres database.
 - The same proof is scripted as `pnpm run test:e2e:postgres-mcp-dogfood`, so future agents can rerun it instead of relying on notes.
 - Real Claude followup proof now exists behind `EVENTLOOPOS_ENABLE_REAL_CLAUDE_SMOKE=1`: disposable Haiku session, tools disabled, budget capped, orchestrator session exposure, and real `/task-sessions/:id/followup` send.
+- Provider deeplink proof now exists as `pnpm run test:e2e:provider-deeplink`: Slack permalink, GitHub code-line permalink, and generic browser fallback travel through MCP mapping into stored event context with confidence metadata.
 - GatewayStore remains broad. Conformance tests reduce risk; split into smaller store ports later, after dogfood-critical safety/history patches.
 
 Latest user steering:
@@ -226,7 +227,7 @@ Release guardrails:
 
 ## Next Best Work
 
-1. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
-2. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-3. Decide whether `test:e2e:postgres-mcp-dogfood` and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
-4. Add richer after-the-fact history UI for task session/message lineage, not only API/activity logs.
+1. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
+2. Decide whether `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` should run inside `proof:live` when local capabilities are available.
+3. Add richer after-the-fact history UI for task session/message lineage, not only API/activity logs.
+4. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.

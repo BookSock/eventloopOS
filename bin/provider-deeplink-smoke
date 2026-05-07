@@ -1,0 +1,255 @@
+#!/usr/bin/env node
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+
+const host = process.env.ORCHESTRATOR_HOST ?? "127.0.0.1";
+const port = process.env.EVENTLOOPOS_PROVIDER_DEEPLINK_SMOKE_PORT ?? "4389";
+const baseUrl = `http://${host}:${port}`;
+const expected = [
+  {
+    id: "evt_slack_deeplink_fixture_slack_deeplink",
+    provider: "slack",
+    confidence_reason: "slack_permalink",
+    kind: "slack_thread",
+  },
+  {
+    id: "evt_github_deeplink_fixture_github_deeplink",
+    provider: "github",
+    confidence_reason: "github_code_line_permalink",
+    kind: "github",
+  },
+  {
+    id: "evt_browser_deeplink_fixture_browser_deeplink",
+    provider: "browser",
+    confidence_reason: "generic_url",
+    kind: "url",
+  },
+];
+
+let server;
+let tempDir;
+
+try {
+  tempDir = await mkdtemp(path.join(tmpdir(), "eventloopos-deeplink-"));
+  const localEventsPath = path.join(tempDir, "local-events.json");
+  await writeFile(localEventsPath, `${JSON.stringify(localEventsFixture(), null, 2)}\n`, "utf8");
+
+  await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "build"]);
+  server = spawn("pnpm", ["--filter", "@eventloopos/orchestrator", "start"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      ORCHESTRATOR_HOST: host,
+      ORCHESTRATOR_PORT: port,
+      ORCHESTRATOR_TASK_SESSIONS: "off",
+      ORCHESTRATOR_WORKSPACE: "off",
+      ORCHESTRATOR_MCP_SOURCES_PATH: "config/mcp-sources.local-events.example.json",
+      EVENTLOOPOS_LOCAL_EVENTS_PATH: localEventsPath,
+    },
+    stdio: "inherit",
+  });
+  await waitForHealth(server);
+
+  const poll = await postJson("/mcp-sources/poll-all-and-route", { source_ids: ["local_events_source"] });
+  if (poll.ok !== true || poll.routed_count !== expected.length || poll.errors !== 0) {
+    throw new Error(`unexpected provider deeplink poll result: ${JSON.stringify(poll)}`);
+  }
+
+  const proofs = [];
+  for (const assertion of expected) {
+    const eventResult = await fetchJson(`/events/${assertion.id}`);
+    const resource = eventResult.event?.resources?.[0];
+    if (!resource) {
+      throw new Error(`missing resource for ${assertion.id}: ${JSON.stringify(eventResult)}`);
+    }
+    if (resource.kind !== assertion.kind) {
+      throw new Error(`expected ${assertion.id} kind ${assertion.kind}, got ${resource.kind}`);
+    }
+    if (resource.details?.provider !== assertion.provider) {
+      throw new Error(`expected ${assertion.id} provider ${assertion.provider}, got ${resource.details?.provider}`);
+    }
+    if (resource.details?.confidence_reason !== assertion.confidence_reason) {
+      throw new Error(`expected ${assertion.id} confidence ${assertion.confidence_reason}, got ${resource.details?.confidence_reason}`);
+    }
+    proofs.push({
+      event_id: assertion.id,
+      provider: resource.details.provider,
+      kind: resource.kind,
+      restore_confidence: resource.restore_confidence,
+      confidence_reason: resource.details.confidence_reason,
+      details: providerDetailProof(resource.details),
+    });
+  }
+
+  console.log(JSON.stringify({
+    ok: true,
+    base_url: baseUrl,
+    routed_count: poll.routed_count,
+    providers: proofs,
+  }, null, 2));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  if (server && server.exitCode === null) {
+    server.kill("SIGTERM");
+    await waitForExit(server);
+  }
+  if (tempDir) {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+function localEventsFixture() {
+  return {
+    items: [
+      {
+        id: "slack-deeplink",
+        source: "slack",
+        source_id: "deeplink_fixture_slack_deeplink",
+        type: "slack.message",
+        title: "Slack launch thread",
+        summary: "Slack thread has launch feedback.",
+        occurred_at: "2026-05-07T12:00:00.000Z",
+        resources: [
+          {
+            id: "ctx_slack_deeplink",
+            title: "Slack launch thread",
+            url: "https://acme.slack.com/archives/C123/p1715000000123456",
+            source: "slack",
+            team_id: "T123",
+          },
+        ],
+      },
+      {
+        id: "github-deeplink",
+        source: "github",
+        source_id: "deeplink_fixture_github_deeplink",
+        type: "github.update",
+        title: "GitHub code line",
+        summary: "GitHub code line needs review.",
+        occurred_at: "2026-05-07T12:01:00.000Z",
+        resources: [
+          {
+            id: "ctx_github_deeplink",
+            title: "GitHub code line",
+            url: "https://github.com/acme/eventloopOS/blob/abc123/app/orchestrator/src/server.ts#L10-L20",
+            source: "github",
+          },
+        ],
+      },
+      {
+        id: "browser-deeplink",
+        source: "browser",
+        source_id: "deeplink_fixture_browser_deeplink",
+        type: "browser.review_requested",
+        title: "Browser article",
+        summary: "Browser page needs review.",
+        occurred_at: "2026-05-07T12:02:00.000Z",
+        resources: [
+          {
+            id: "ctx_browser_deeplink",
+            kind: "external_resource",
+            title: "Browser article",
+            url: "https://example.test/blog#section",
+            source: "browser",
+          },
+        ],
+      },
+    ],
+    nextCursor: "browser-deeplink",
+  };
+}
+
+function providerDetailProof(details) {
+  if (details.provider === "slack") {
+    return {
+      channel_id: details.channel_id,
+      message_ts: details.message_ts,
+      thread_ts: details.thread_ts,
+    };
+  }
+  if (details.provider === "github") {
+    return {
+      owner: details.owner,
+      repo: details.repo,
+      resource_type: details.resource_type,
+      commit_sha: details.commit_sha,
+      file_path: details.file_path,
+      line_start: details.line_start,
+      line_end: details.line_end,
+    };
+  }
+  return {};
+}
+
+async function fetchJson(pathname) {
+  const response = await fetch(new URL(pathname, baseUrl));
+  const body = await response.json();
+  if (!response.ok) {
+    throw new Error(`${pathname} failed: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+async function postJson(pathname, body) {
+  const response = await fetch(new URL(pathname, baseUrl), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const responseBody = await response.json();
+  if (!response.ok) {
+    throw new Error(`${pathname} failed: ${JSON.stringify(responseBody)}`);
+  }
+  return responseBody;
+}
+
+async function waitForHealth(child) {
+  const deadline = Date.now() + 15_000;
+  let exited = false;
+  child.once("exit", () => {
+    exited = true;
+  });
+  while (Date.now() < deadline) {
+    if (exited) throw new Error("orchestrator exited before health check passed");
+    try {
+      const response = await fetch(new URL("/health", baseUrl));
+      if (response.ok) return;
+    } catch {
+      // keep waiting
+    }
+    await sleep(100);
+  }
+  throw new Error(`timed out waiting for orchestrator health at ${baseUrl}`);
+}
+
+async function spawnChecked(file, args, env = process.env) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      cwd: process.cwd(),
+      env,
+      stdio: "inherit",
+    });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}`));
+    });
+  });
+}
+
+async function waitForExit(child) {
+  return await new Promise((resolve) => {
+    child.once("exit", resolve);
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

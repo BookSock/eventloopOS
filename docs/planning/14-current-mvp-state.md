@@ -189,6 +189,7 @@ Strong tests now:
 - Real local Postgres + local-events MCP dogfood proof passed: started Docker Postgres, ran orchestrator with `DATABASE_URL`, `ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.local-events.example.json`, and `EVENTLOOPOS_LOCAL_EVENTS_PATH=config/local-events.example.json`, ran `poll:mcp:once`, saw one ambiguous human-queue packet, then `dogfood:check` passed. After orchestrator restart, `/queue`, `/activity`, and `/metrics` still showed the routed item and counters from Postgres.
 - `pnpm run test:e2e:postgres-mcp-dogfood` now automates that proof: Docker Postgres up/down, local-events MCP poll, dogfood threshold check, orchestrator restart, persisted queue/activity/metrics assertions.
 - `pnpm run test:e2e:claude-real-followup` is a gated real Claude smoke. Without `EVENTLOOPOS_ENABLE_REAL_CLAUDE_SMOKE=1` it prints a machine-readable skip. With the flag it creates a disposable Claude session using Haiku, disables tools, caps per-call budget, starts orchestrator with that session, sends a followup through `/task-sessions/:id/followup`, and asserts the task message is `sent` with the same native session ID.
+- `pnpm run test:e2e:provider-deeplink` starts a temp orchestrator with local-events MCP fixtures and proves Slack permalink, GitHub code-line permalink, and generic browser URL resources survive MCP mapping into stored event context with provider details, restore confidence, and confidence reasons.
 - Opt-in AppleScript UI smoke now proves the Pull Next Paper menu item exists and that Manual Mode captures workspace only on return to Event Loop, then Restore Manual Workspace returns the user to manual mode.
 
 Weak tests:
@@ -203,7 +204,7 @@ Weak tests:
 ## Next Best Work
 
 1. Add app bundle/XCUITest smoke for installed Mac UI flow beyond the current AppleScript UI smoke.
-2. Provider deep-link dogfood for Slack/GitHub/browser first; Notion/GDocs/Figma only if they appear in Jason's real loop.
-3. Decide whether to promote `test:e2e:postgres-mcp-dogfood` and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
-4. Add richer after-the-fact history UI for task session/message lineage, not only API/activity logs.
+2. Decide whether to promote `test:e2e:postgres-mcp-dogfood`, `test:e2e:provider-deeplink`, and gated `test:e2e:claude-real-followup` into `proof:live` when local capabilities are available.
+3. Add richer after-the-fact history UI for task session/message lineage, not only API/activity logs.
+4. Add Notion/GDocs/Figma dogfood only if they appear in Jason's real loop.
 5. Later: real microphone/wake-word proof and always-listening voice UX.
