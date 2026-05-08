@@ -65,6 +65,39 @@ describe("isolated AeroSpace smoke", () => {
     assert.equal(controller.window(12), undefined);
   });
 
+  it("falls back to exactly one new TextEdit window when macOS hides window titles", async () => {
+    const controller = new FakeWorkspaceController([{ id: 11, app: "Ghostty", title: "", workspace: "dev" }]);
+
+    const result = await runIsolatedAerospaceSmoke({
+      enabled: true,
+      runId: "test",
+      controller,
+      launchWindow: async (): Promise<SmokeWindowHandle> => {
+        controller.addWindow({ id: 12, app: "TextEdit", title: "", workspace: "main" });
+        return {
+          title: "eventloopOS-isolated-smoke-test.txt",
+          appName: "TextEdit",
+          cleanup: async () => {
+            controller.removeWindow(12);
+            return { attempted: true, ok: true };
+          },
+        };
+      },
+      scratchWorkspace: "eventloop-smoke",
+      waitTimeoutMs: 20,
+      pollIntervalMs: 1,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.skipped, false);
+    if (result.ok && !result.skipped) {
+      assert.equal(result.target_window_id, 12);
+      assert.equal(result.original_workspace, "main");
+      assert.equal(result.scratch_workspace, "eventloop-smoke");
+      assert.deepEqual(result.non_test_changed_windows, []);
+    }
+  });
+
   it("uses a fallback scratch workspace when smoke window already lives in scratch", async () => {
     const controller = new FakeWorkspaceController([]);
 
@@ -261,6 +294,7 @@ function fakeLauncher(
     controller.addWindow({ id: input.id, app: "TextEdit", title: input.title, workspace: input.workspace });
     return {
       title: input.title,
+      appName: "TextEdit",
       cleanup: async () => {
         input.cleanupCalls?.push("cleanup");
         controller.removeWindow(input.id);

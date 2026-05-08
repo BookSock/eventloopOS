@@ -79,6 +79,7 @@ export type SmokeWindowCleanupResult = {
 
 export type SmokeWindowHandle = {
   title: string;
+  appName?: string;
   cleanup(): Promise<SmokeWindowCleanupResult>;
 };
 
@@ -135,7 +136,7 @@ export async function runIsolatedAerospaceSmoke(options: {
   let forceFloatingProof: ForceFloatingProof | undefined;
 
   try {
-    const launchedHandle = await (options.launchWindow ?? launchTextEditSmokeWindow)(runId);
+    const launchedHandle = await (options.launchWindow ?? launchDefaultSmokeWindow)(runId);
     handle = launchedHandle;
     if (before.windows.some((window) => titleMatches(window, launchedHandle.title))) {
       cleanup = await handle.cleanup();
@@ -155,6 +156,7 @@ export async function runIsolatedAerospaceSmoke(options: {
       timeoutMs: waitTimeoutMs,
       pollIntervalMs,
       excludedWindowIds: baseline,
+      fallbackAppName: launchedHandle.appName,
     });
     const target = launched.target;
     smokeWindowId = target.id;
@@ -343,20 +345,30 @@ async function executeCommands(controller: WorkspaceController, commands: Aerosp
 async function waitForSmokeWindow(
   controller: WorkspaceController,
   title: string,
-  options: { timeoutMs: number; pollIntervalMs: number; excludedWindowIds: Map<number, AerospaceWindow> },
+  options: { timeoutMs: number; pollIntervalMs: number; excludedWindowIds: Map<number, AerospaceWindow>; fallbackAppName?: string },
 ): Promise<{ snapshot: WorkspaceSnapshot; target: AerospaceWindow }> {
   const deadline = Date.now() + options.timeoutMs;
   let lastTitles = "";
+  let lastFallbackCandidates: AerospaceWindow[] = [];
   while (Date.now() < deadline) {
     const snapshot = await controller.capture();
     const target = snapshot.windows.find((window) => !options.excludedWindowIds.has(window.id) && titleMatches(window, title));
     if (target) {
       return { snapshot, target };
     }
+    if (options.fallbackAppName) {
+      lastFallbackCandidates = snapshot.windows.filter((window) => !options.excludedWindowIds.has(window.id) && window.app === options.fallbackAppName);
+      if (lastFallbackCandidates.length === 1) {
+        return { snapshot, target: lastFallbackCandidates[0] };
+      }
+    }
     lastTitles = snapshot.windows.map((window) => window.title).filter(Boolean).join(", ");
     await sleep(options.pollIntervalMs);
   }
-  throw new Error(`timed out waiting for smoke window "${title}". Captured titles: ${lastTitles}`);
+  const fallbackDetail = options.fallbackAppName
+    ? ` New ${options.fallbackAppName} candidates: ${JSON.stringify(lastFallbackCandidates.map((window) => ({ id: window.id, title: window.title, workspace: window.workspace })))}`
+    : "";
+  throw new Error(`timed out waiting for smoke window "${title}". Captured titles: ${lastTitles}.${fallbackDetail}`);
 }
 
 async function waitForWindowGone(
@@ -494,6 +506,61 @@ function isNonTilingLayoutError(error: unknown): boolean {
   return message.includes("The window is non-tiling");
 }
 
+async function launchDefaultSmokeWindow(runId: string): Promise<SmokeWindowHandle> {
+  if (await canOpenApp("Ghostty")) {
+    return await launchGhosttySmokeWindow(runId);
+  }
+  return await launchTextEditSmokeWindow(runId);
+}
+
+async function canOpenApp(appName: string): Promise<boolean> {
+  try {
+    await execFileAsync("open", ["-Ra", appName], { timeout: 5_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function launchGhosttySmokeWindow(runId: string): Promise<SmokeWindowHandle> {
+  const dir = await mkdtemp(join(tmpdir(), "eventloopos-isolated-aerospace-"));
+  const title = `eventloopOS-isolated-smoke-${runId}`;
+  const scriptPath = join(dir, "ghostty-smoke.zsh");
+  await writeFile(
+    scriptPath,
+    [
+      "#!/bin/zsh",
+      `printf '\\033]0;${escapeShellSingleQuoted(title)}\\007'`,
+      "while true; do sleep 60; done",
+      "",
+    ].join("\n"),
+    { mode: 0o700 },
+  );
+  await execFileAsync("open", ["-F", "-na", "Ghostty", "--args", "-e", scriptPath], { timeout: 5_000 });
+
+  return {
+    title,
+    appName: "Ghostty",
+    cleanup: async () => {
+      try {
+        await execFileAsync("pkill", ["-f", scriptPath], { timeout: 5_000 });
+      } catch {
+        // Process may already be gone.
+      }
+      try {
+        await rm(dir, { recursive: true, force: true });
+        return { attempted: true, ok: true };
+      } catch (error) {
+        return {
+          attempted: true,
+          ok: false,
+          detail: error instanceof Error ? error.message : String(error),
+        };
+      }
+    },
+  };
+}
+
 async function launchTextEditSmokeWindow(runId: string): Promise<SmokeWindowHandle> {
   const dir = await mkdtemp(join(tmpdir(), "eventloopos-isolated-aerospace-"));
   const fileName = `eventloopOS-isolated-smoke-${runId}.txt`;
@@ -503,6 +570,7 @@ async function launchTextEditSmokeWindow(runId: string): Promise<SmokeWindowHand
 
   return {
     title: fileName,
+    appName: "TextEdit",
     cleanup: async () => {
       try {
         await execFileAsync(
@@ -546,6 +614,10 @@ async function execAerospace(command: string, args: string[]): Promise<{ stdout:
 
 function escapeAppleScriptString(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function escapeShellSingleQuoted(value: string): string {
+  return value.replaceAll("'", "'\\''");
 }
 
 function defaultRunId(): string {

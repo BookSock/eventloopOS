@@ -249,12 +249,33 @@ async function checkAerospaceDaemon(execFn: ExecFunction): Promise<DoctorCheck> 
   const command = [plan.command, ...plan.args];
   try {
     const result = await execFn(command[0] ?? "aerospace", command.slice(1));
-    JSON.parse(result.stdout);
+    const windows = JSON.parse(result.stdout) as unknown;
+    if (!Array.isArray(windows)) {
+      return {
+        name: "aerospace_daemon",
+        ok: false,
+        detail: "AeroSpace list-windows returned non-array JSON",
+        command,
+        source_url: "https://nikitabobko.github.io/AeroSpace/commands.html#list-windows",
+      };
+    }
+    if (windows.length === 0) {
+      const nativeSpaceWindowCount = await currentNativeSpaceDebugWindowCount(execFn);
+      if (nativeSpaceWindowCount !== undefined && nativeSpaceWindowCount > 0) {
+        return {
+          name: "aerospace_daemon",
+          ok: false,
+          detail: `AeroSpace returned 0 managed windows, but native Spaces debug sees ${nativeSpaceWindowCount} current-space window id(s). Regrant Accessibility for AeroSpace.app or restart/reinstall the fork.`,
+          command,
+          source_url: "https://nikitabobko.github.io/AeroSpace/commands.html#list-windows",
+        };
+      }
+    }
 
     return {
       name: "aerospace_daemon",
       ok: true,
-      detail: "AeroSpace CLI returned window JSON",
+      detail: `AeroSpace CLI returned ${windows.length} managed window(s)`,
       command,
       source_url: "https://nikitabobko.github.io/AeroSpace/commands.html#list-windows",
     };
@@ -267,6 +288,25 @@ async function checkAerospaceDaemon(execFn: ExecFunction): Promise<DoctorCheck> 
       source_url: "https://nikitabobko.github.io/AeroSpace/commands.html#list-windows",
     };
   }
+}
+
+async function currentNativeSpaceDebugWindowCount(execFn: ExecFunction): Promise<number | undefined> {
+  try {
+    const result = await execFn("aerospace", ["debug-windows", "--native-spaces"]);
+    const parsed = JSON.parse(jsonObjectPrefix(result.stdout)) as unknown;
+    if (!isRecord(parsed)) return undefined;
+    const ids = parsed["current-space-window-ids"];
+    return Array.isArray(ids) ? ids.length : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function jsonObjectPrefix(stdout: string): string {
+  const start = stdout.indexOf("{");
+  const end = stdout.lastIndexOf("}");
+  if (start === -1 || end === -1 || end < start) return stdout;
+  return stdout.slice(start, end + 1);
 }
 
 async function checkDockerDaemon(execFn: ExecFunction): Promise<DoctorCheck> {

@@ -6,6 +6,7 @@ import {
   type TaskMessageHistoryQuery,
 } from "../task_sessions/task_message_history.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
+import { taskSessionMatchesTask } from "../task_sessions/session_selection.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
@@ -422,11 +423,7 @@ export async function handleTaskBindingRoute(input: {
   };
 }
 
-export function taskSessionMatchesTask(candidate: unknown, taskId: string): candidate is { id: string; task_id: string } {
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
-  const record = candidate as Record<string, unknown>;
-  return typeof record.id === "string" && record.id.length > 0 && record.task_id === taskId;
-}
+export { taskSessionMatchesTask };
 
 function schemaError(message: string): RouteResult {
   return {

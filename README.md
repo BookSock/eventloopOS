@@ -74,6 +74,10 @@ pnpm proof:live
 
 This is the real-host lane. It requires macOS, AeroSpace (`brew install --cask nikitabobko/tap/aerospace`), Codex CLI, and a runnable Chromium/Playwright browser stack for native browser capture/restore. It writes `artifacts/proof-live-manifest.json`, `artifacts/live-smoke/<run-id>/manifest.json`, `artifacts/onboarding-live/<run-id>/manifest.json`, and per-command logs under `artifacts/proof-agent/<run-id>/`. Use this when claiming the Mac app, live orchestrator, onboarding scan, AeroSpace readiness, and browser/native-host path work on a real machine.
 
+`proof:live` also runs the real Codex completion + workspace proof. That proof starts a Codex task from the master command, opens a visible Ghostty TUI on the same Codex app-server thread, routes a Slack-like event into that existing thread, detects a completed Codex turn, queues human review, approves it back into the same thread, and runs isolated AeroSpace window restore.
+
+If doctor reports `AeroSpace returned 0 managed windows` while native Spaces debug sees windows, regrant Accessibility for `AeroSpace.app` and restart AeroSpace before trusting any workspace proof.
+
 Lower-disturbance AeroSpace proof:
 
 ```sh

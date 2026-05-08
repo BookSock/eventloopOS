@@ -9,8 +9,8 @@ import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import type { Observability } from "../observability.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
+import { bestTaskSessionForTask } from "../task_sessions/session_selection.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
-import { taskSessionMatchesTask } from "./task_sessions.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
 
@@ -428,7 +428,7 @@ async function executeQueueAction(
     };
   }
 
-  const session = (await input.taskSessions.listSessions()).find((candidate) => taskSessionMatchesTask(candidate, taskId));
+  const session = bestTaskSessionForTask(await input.taskSessions.listSessions(), taskId);
   if (!session || !isRecord(session) || typeof session.id !== "string") {
     return {
       ok: false,

@@ -7,7 +7,7 @@ import { createSeededDevelopmentMcpSourceRegistry } from "../src/integrations/mc
 import { createInMemoryObservability } from "../src/observability.js";
 import { createGatewayServer } from "../src/server.js";
 import { buildReviewArtifactsFromEvent, createSeededStore } from "../src/store.js";
-import { createSeededDevelopmentTaskSessions } from "../src/task_sessions/development_task_session_controller.js";
+import { createSeededDevelopmentTaskSessions, DevelopmentTaskSessionController } from "../src/task_sessions/development_task_session_controller.js";
 
 describe("orchestrator gateway API", () => {
   let server: Server;
@@ -3182,7 +3182,11 @@ describe("orchestrator gateway API", () => {
 
   it("executes recommended resume-agent queue action and marks the item done", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
-    const taskSessions = createSeededDevelopmentTaskSessions(() => new Date("2026-05-06T18:00:00.000Z"));
+    let taskSessionClock = new Date("2026-05-06T17:00:00.000Z");
+    const taskSessions = new DevelopmentTaskSessionController({ clock: () => taskSessionClock });
+    taskSessions.seedSession({ id: "task_session_blog_old", task_id: "task_blog_feedback" });
+    taskSessionClock = new Date("2026-05-06T17:30:00.000Z");
+    taskSessions.seedSession({ id: "task_session_blog_new", task_id: "task_blog_feedback" });
     const actionServer = createGatewayServer({
       store,
       taskSessions,
@@ -3275,7 +3279,7 @@ describe("orchestrator gateway API", () => {
       assert.equal(actionResponse.status, 200);
       assert.equal(actionBody.ok, true);
       assert.equal(actionBody.action_result.task_id, "task_blog_feedback");
-      assert.equal(actionBody.action_result.task_session_id, "task_session_blog");
+      assert.equal(actionBody.action_result.task_session_id, "task_session_blog_new");
       assert.equal(actionBody.action_result.task_message.status, "sent");
       assert.match(actionBody.action_result.task_message.text, /Human approved this queue item/);
       assert.deepEqual(actionBody.action_result.task_message.event_ids, ["evt_manual_blog_action"]);

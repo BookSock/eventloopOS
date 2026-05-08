@@ -31,6 +31,8 @@ pnpm run dev:doctor:preflight
 
 `dev:doctor:preflight` builds the orchestrator and checks local tools before the orchestrator is running. It treats the `http://127.0.0.1:4377/health` check as optional, but still checks Docker, AeroSpace, browser tooling, Swift, MCP config shape, optional voice command config, and Codex app-server readiness. For a stricter check after the stack is running, use `pnpm run dev:doctor`. Launch AeroSpace once after installing it so the CLI can talk to the app server.
 
+If `aerospace_daemon` says AeroSpace returned `0 managed windows` while native Spaces debug sees current-space windows, AeroSpace does not currently have enough Accessibility/window access to manage the desktop. Regrant Accessibility for `AeroSpace.app`, restart AeroSpace, then rerun `pnpm run dev:doctor:preflight` before testing workspace restore.
+
 ## Proof commands
 
 Use the fixture proof when you want the broad deterministic lane without requiring real Mac automation:

@@ -3,6 +3,7 @@ import type { GatewayStore } from "../gateway_store.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import type { ContextEntry, RouteDecision } from "../store.js";
 import { taskIdForHint } from "../store.js";
+import { bestTaskSessionForTask, taskSessionMatchesTask } from "../task_sessions/session_selection.js";
 import type { TaskFollowupInput, TaskSessionController } from "../task_sessions/types.js";
 
 export type TaskFollowupSender = (input: TaskFollowupInput) => Promise<unknown> | unknown;
@@ -69,7 +70,7 @@ async function taskInjectionTargetForEvent(
 } | undefined> {
   const hintedTaskId = taskIdForHint(event.task_hint);
   if (hintedTaskId) {
-    const session = sessions.find((candidate) => taskSessionMatchesTask(candidate, hintedTaskId));
+    const session = bestTaskSessionForTask(sessions, hintedTaskId);
     if (!session) return undefined;
     return {
       session,
@@ -82,7 +83,7 @@ async function taskInjectionTargetForEvent(
   const match = await strongestContextTaskMatch(event, store, taskIdsForSessions(sessions));
   if (!match) return undefined;
 
-  const session = sessions.find((candidate) => taskSessionMatchesTask(candidate, match.taskId));
+  const session = bestTaskSessionForTask(sessions, match.taskId);
   if (!session) return undefined;
 
   return {
@@ -173,12 +174,6 @@ function shouldTryTaskSessionInjection(event: McpEvent): boolean {
   if (event.type === "browser.context_captured") return false;
   if (event.type.endsWith(".review_requested")) return false;
   return event.source === "slack" || event.source === "github" || event.source === "mcp_poll" || event.source === "voice";
-}
-
-function taskSessionMatchesTask(candidate: unknown, taskId: string): boolean {
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
-  const record = candidate as Record<string, unknown>;
-  return typeof record.id === "string" && record.id.length > 0 && record.task_id === taskId;
 }
 
 function taskIdsForSessions(sessions: unknown[]): Set<string> {

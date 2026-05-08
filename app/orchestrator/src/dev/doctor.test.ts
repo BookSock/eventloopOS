@@ -16,7 +16,7 @@ describe("developer doctor", () => {
       execFn: async (command, args) => {
         if (command === "aerospace") {
           assert.deepEqual(args, captureWorkspacePlan().args);
-          return { stdout: "[]", stderr: "" };
+          return { stdout: JSON.stringify([{ "window-id": 1, "app-name": "Ghostty" }]), stderr: "" };
         }
         if (command === "docker") {
           assert.deepEqual(args, ["info", "--format", "{{.ServerVersion}}"]);
@@ -55,7 +55,7 @@ describe("developer doctor", () => {
         {
           name: "aerospace_daemon",
           ok: true,
-          detail: "AeroSpace CLI returned window JSON",
+          detail: "AeroSpace CLI returned 1 managed window(s)",
           command: [captureWorkspacePlan().command, ...captureWorkspacePlan().args],
           source_url: "https://nikitabobko.github.io/AeroSpace/commands.html#list-windows",
         },
@@ -101,6 +101,46 @@ describe("developer doctor", () => {
         },
       ],
     });
+  });
+
+  it("fails AeroSpace when native Space has windows but managed list is empty", async () => {
+    const report = await runDoctor({
+      baseUrl: "http://127.0.0.1:4377",
+      platform: "darwin",
+      requireOrchestrator: false,
+      fetchFn: async () => {
+        throw new Error("offline");
+      },
+      execFn: async (command, args) => {
+        if (command === "aerospace" && args[0] === "list-windows") {
+          return { stdout: "[]", stderr: "" };
+        }
+        if (command === "aerospace" && args[0] === "debug-windows") {
+          return { stdout: JSON.stringify({ "current-space-window-ids": [101, 102] }), stderr: "" };
+        }
+        if (command === "docker") {
+          return { stdout: "29.3.1\n", stderr: "" };
+        }
+        if (command === "pnpm") {
+          return { stdout: "Version 1.59.1\n", stderr: "" };
+        }
+        if (command === "swift") {
+          return { stdout: "swift-driver version: 1.127.8 Apple Swift version 6.2.1\n", stderr: "" };
+        }
+        throw new Error(`unexpected command ${command}`);
+      },
+      codexCheckFn: async () => ({
+        name: "codex_app_server",
+        ok: true,
+        detail: "Codex app-server responded; sampled 1 thread(s)",
+      }),
+    });
+
+    const aerospace = report.checks.find((check) => check.name === "aerospace_daemon");
+    assert.equal(report.ok, false);
+    assert.equal(aerospace?.ok, false);
+    assert.match(aerospace?.detail ?? "", /returned 0 managed windows/);
+    assert.match(aerospace?.detail ?? "", /native Spaces debug sees 2/);
   });
 
   it("surfaces blocked daemons without hiding other checks", async () => {
