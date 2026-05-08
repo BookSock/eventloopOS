@@ -1,0 +1,516 @@
+#!/usr/bin/env node
+import { createServer } from "node:net";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { spawn } from "node:child_process";
+
+const startedAt = new Date();
+const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+const repoRoot = process.cwd();
+const artifactDir = resolve(repoRoot, process.env.EVENTLOOPOS_EVENT_LOOP_PROOF_ARTIFACT_DIR ?? `artifacts/event-loop-proof/${runId}`);
+const manifestPath = resolve(artifactDir, "manifest.json");
+const databaseUrl = process.env.EVENTLOOPOS_EVENT_LOOP_PROOF_DATABASE_URL;
+const restartAfterQueue = process.env.EVENTLOOPOS_EVENT_LOOP_PROOF_RESTART_AFTER_QUEUE === "1";
+const taskSessionMode = process.env.EVENTLOOPOS_EVENT_LOOP_PROOF_TASK_SESSIONS ?? "fake";
+const taskPrompt = process.env.EVENTLOOPOS_EVENT_LOOP_PROOF_TASK_PROMPT
+  ?? "Start a draft for launch email. Wait for routed context before sending anything.";
+const taskCwd = process.env.EVENTLOOPOS_EVENT_LOOP_PROOF_TASK_CWD;
+const taskModel = process.env.EVENTLOOPOS_EVENT_LOOP_PROOF_TASK_MODEL;
+const bindTaskAfterStart = process.env.EVENTLOOPOS_EVENT_LOOP_PROOF_BIND_TASK === "1";
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.event_loop_proof",
+  run_id: runId,
+  started_at: startedAt.toISOString(),
+  finished_at: undefined,
+  duration_ms: undefined,
+  artifact_dir: artifactDir,
+  orchestrator_url: undefined,
+  database_url: databaseUrl ? redactDatabaseUrl(databaseUrl) : undefined,
+  restart_after_queue: restartAfterQueue,
+  task_session_mode: taskSessionMode,
+  task_cwd: taskCwd,
+  task_model: taskModel,
+  bind_task_after_start: bindTaskAfterStart,
+  steps: [],
+  passed: false,
+};
+
+let server;
+let port;
+mkdirSync(dirname(manifestPath), { recursive: true });
+writeManifest();
+
+try {
+  port = await freePort();
+  manifest.orchestrator_url = `http://127.0.0.1:${port}`;
+  writeManifest();
+
+  await step("build orchestrator", async () => {
+    await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "build"]);
+  });
+
+  server = startOrchestrator(port);
+
+  await step("wait for orchestrator", async () => {
+    await waitForHealth(manifest.orchestrator_url);
+  });
+
+  const task = await step("start task session", async () => {
+    const request = {
+      task_id: "task_launch_email",
+      prompt: taskPrompt,
+    };
+    if (taskCwd) request.cwd = taskCwd;
+    if (taskModel) request.model = taskModel;
+
+    const body = await postJson("/task-sessions", request, { "Idempotency-Key": "event-loop-proof-start-task" });
+    const started = body.started;
+    assert(started?.ok === true, `expected task start ok, got ${JSON.stringify(body)}`);
+    assert(typeof started.task_session_id === "string" && started.task_session_id.length > 0, `unexpected task session id ${started.task_session_id}`);
+    if (taskSessionMode === "fake") {
+      assert(started.task_session_id === "task_session_task_launch_email", `unexpected task session id ${started.task_session_id}`);
+    }
+    assert(started.message?.status === "sent", "initial task prompt was not sent to runtime");
+    return {
+      task_id: started.task_id,
+      task_session_id: started.task_session_id,
+      start_message_id: started.message.id,
+    };
+  });
+
+  if (bindTaskAfterStart) {
+    await step("bind task session to task", async () => {
+      await waitForTaskSessionVisible(task.task_session_id);
+      const body = await putJson(`/task-sessions/${encodeURIComponent(task.task_session_id)}/task-binding`, {
+        task_id: task.task_id,
+      });
+      assert(body.ok === true, `task binding failed: ${JSON.stringify(body)}`);
+      await waitForTaskSessionBinding(task.task_session_id, task.task_id);
+      return {
+        task_session_id: task.task_session_id,
+        task_id: task.task_id,
+      };
+    });
+  }
+
+  await step("route slack event into task", async () => {
+    const event = buildSlackEvent();
+    const body = await postJson("/events", { event });
+    assert(body.route_decision?.action === "inject_into_agent_thread", `slack route did not inject: ${JSON.stringify(body.route_decision)}`);
+    assert(body.route_decision?.target_task_id === task.task_id, "slack route targeted wrong task");
+    assert(body.route_decision?.target_task_session_id === task.task_session_id, "slack route targeted wrong session");
+    assert(body.task_message?.status === "sent", "slack task message not sent");
+    assert(body.queue_item === undefined, "slack routed event unexpectedly queued human review");
+
+    const duplicate = await postJson("/events", { event });
+    assert(duplicate.queue_item === undefined, "duplicate slack event created queue item");
+  });
+
+  await step("route voice command into task", async () => {
+    const body = await postJson("/voice/commands", {
+      transcript: "Launch email should mention that trial customers need a migration note.",
+      task_hint: "launch email",
+      project_hint: "eventloopOS",
+      source_id: "voice:event-loop-proof-launch-email",
+    }, { "Idempotency-Key": "voice:event-loop-proof-launch-email" });
+    assert(body.event?.source === "voice", "voice command did not normalize to voice event");
+    assert(body.route_decision?.action === "inject_into_agent_thread", `voice route did not inject: ${JSON.stringify(body.route_decision)}`);
+    assert(body.task_message?.task_session_id === task.task_session_id, "voice message targeted wrong session");
+    assert(body.task_message?.status === "sent", "voice task message not sent");
+  });
+
+  const queued = await step("codex waiting run queues human review", async () => {
+    const body = await postJson("/agent-runs", buildCodexWaitingRun());
+    assert(body.agent_run?.provider === "codex", "agent run provider not codex");
+    assert(body.agent_run?.status === "waiting_approval", "agent run not waiting approval");
+    assert(body.review_packet?.agent_run_id === "run_event_loop_codex_waiting", "review packet not tied to run");
+    assert(body.review_packet?.recommended_action?.type === "resume_agent", "recommended action not resume_agent");
+    assert(body.queue_item?.state === "ready", "agent run queue item not ready");
+    assert(body.queue_item?.task_id === task.task_id, "agent run queue item not tied to task");
+    return {
+      queue_item_id: body.queue_item.id,
+      review_packet_id: body.review_packet.id,
+      agent_run_id: body.agent_run.id,
+    };
+  });
+
+  if (restartAfterQueue) {
+    await step("restart orchestrator and prove queue persists", async () => {
+      await stopOrchestrator();
+      server = startOrchestrator(port);
+      await waitForHealth(manifest.orchestrator_url);
+
+      const body = await getJson("/queue");
+      const item = (body.items ?? []).find((candidate) => candidate.id === queued.queue_item_id);
+      assert(item?.state === "ready", `queued item missing after restart: ${JSON.stringify(body)}`);
+
+      const messages = await getJson(`/task-messages?task_session_id=${encodeURIComponent(task.task_session_id)}&status=sent&limit=20`);
+      const sent = Array.isArray(messages.messages) ? messages.messages : [];
+      assert(sent.some((message) => message.event_ids?.includes("evt_event_loop_slack_launch_feedback")), "slack task message missing after restart");
+      assert(sent.some((message) => message.event_ids?.includes("evt_voice_voice_event_loop_proof_launch_email")), "voice task message missing after restart");
+
+      const metrics = await getJson("/metrics");
+      const counters = metrics.metrics?.counters ?? {};
+      assert(Number(counters.events_routed_to_task_session_total ?? 0) >= 2, "persisted metrics missing routed event count");
+      assert(Number(counters.agent_run_queue_items_created_total ?? 0) >= 1, "persisted metrics missing agent-run queued item count");
+
+      return {
+        queue_item_id: item.id,
+        task_message_count: sent.length,
+      };
+    });
+
+    await step("reconnect fake task runtime after restart", async () => {
+      const body = await postJson("/task-sessions", {
+        task_id: task.task_id,
+        prompt: "Reconnect fake task runtime after orchestrator restart.",
+      }, { "Idempotency-Key": "event-loop-proof-reconnect-task" });
+      const started = body.started;
+      assert(started?.ok === true, `expected reconnect start ok, got ${JSON.stringify(body)}`);
+      assert(started.task_session_id === task.task_session_id, `reconnected wrong task session ${started.task_session_id}`);
+      return {
+        task_session_id: started.task_session_id,
+      };
+    });
+  }
+
+  await step("human approves queue item and runtime gets followup", async () => {
+    const body = await postJson(`/queue/${encodeURIComponent(queued.queue_item_id)}/actions/recommended`, {
+      actor_id: "event_loop_proof",
+    });
+    assert(body.ok === true, `recommended action failed: ${JSON.stringify(body)}`);
+    assert(body.item?.state === "done", "queue item not marked done");
+    assert(body.action_result?.task_session_id === task.task_session_id, "approved queue item targeted wrong session");
+    assert(body.action_result?.task_message?.status === "sent", "approved queue item did not send task followup");
+    assert(body.action_result?.task_message?.event_ids?.length === 0, "agent-run resume action should not invent event ids");
+    assert(String(body.action_result?.task_message?.text ?? "").includes("Human approved this queue item"), "followup missing human approval text");
+  });
+
+  await step("assert queue drained and history observable", async () => {
+    const next = await getJson("/queue/next");
+    assert(next.item === null, `expected empty queue, got ${JSON.stringify(next.item)}`);
+
+    const messages = await getJson(`/task-messages?task_session_id=${encodeURIComponent(task.task_session_id)}&status=sent&limit=20`);
+    const sent = Array.isArray(messages.messages) ? messages.messages : [];
+    assert(sent.length >= 3, `expected at least 3 durable sent messages, got ${sent.length}`);
+    assert(sent.some((message) => message.event_ids?.includes("evt_event_loop_slack_launch_feedback")), "missing slack event task message");
+    assert(sent.some((message) => message.event_ids?.includes("evt_voice_voice_event_loop_proof_launch_email")), "missing voice task message");
+    assert(sent.some((message) => String(message.idempotency_key).startsWith("queue_action_")), "missing queue action followup");
+
+    const lineage = await getJson(`/queue/${encodeURIComponent(queued.queue_item_id)}/lineage?limit=20`);
+    assert(lineage.lineage?.queue_item?.state === "done", "lineage did not return done queue item");
+    assert(lineage.lineage?.task_messages?.length >= 1, "lineage missing task messages");
+
+    const metrics = await getJson("/metrics");
+    const counters = metrics.metrics?.counters ?? {};
+    assert(Number(counters.events_routed_to_task_session_total ?? 0) >= 2, "metrics missing routed event count");
+    assert(Number(counters.task_followups_sent_total ?? 0) >= 3, "metrics missing sent followup count");
+    assert(Number(counters.queue_items_done_total ?? 0) >= 1, "metrics missing done queue count");
+
+    const activity = await getJson(`/activity?task_session_id=${encodeURIComponent(task.task_session_id)}&limit=50`);
+    const activityTypes = new Set((activity.events ?? []).map((event) => event.type));
+    assert(activityTypes.has("task_followup_sent"), "activity missing task_followup_sent");
+    assert(activityTypes.has("queue_item_done"), "activity missing queue_item_done");
+  });
+
+  manifest.passed = true;
+} catch (error) {
+  manifest.error = error instanceof Error ? error.stack ?? error.message : String(error);
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  await stopOrchestrator();
+  manifest.finished_at = new Date().toISOString();
+  manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+  writeManifest();
+  console.log(`event-loop proof manifest: ${manifestPath}`);
+}
+
+function startOrchestrator(port) {
+  const child = spawn("node", ["app/orchestrator/dist/src/index.js"], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      ...(databaseUrl ? { DATABASE_URL: databaseUrl } : {}),
+      ORCHESTRATOR_HOST: "127.0.0.1",
+      ORCHESTRATOR_PORT: String(port),
+      ORCHESTRATOR_SEED_FIXTURE: "app/orchestrator/fixtures/empty-review-packets.json",
+      ORCHESTRATOR_TASK_SESSIONS: taskSessionMode,
+      ORCHESTRATOR_MCP_SOURCES: "off",
+      ORCHESTRATOR_WORKSPACE: "off",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.pipe(process.stdout);
+  child.stderr.pipe(process.stderr);
+  return child;
+}
+
+async function stopOrchestrator() {
+  if (!server || server.killed || server.exitCode !== null) return;
+  server.kill("SIGTERM");
+  await onceExit(server);
+  server = undefined;
+}
+
+async function step(name, run) {
+  const record = {
+    name,
+    status: "running",
+    started_at: new Date().toISOString(),
+    finished_at: undefined,
+    duration_ms: undefined,
+    details: undefined,
+    error: undefined,
+  };
+  manifest.steps.push(record);
+  writeManifest();
+  console.log(`event-loop proof start: ${name}`);
+  try {
+    const details = await run();
+    record.status = "passed";
+    record.details = details;
+    return details;
+  } catch (error) {
+    record.status = "failed";
+    record.error = error instanceof Error ? error.message : String(error);
+    throw error;
+  } finally {
+    record.finished_at = new Date().toISOString();
+    record.duration_ms = Date.parse(record.finished_at) - Date.parse(record.started_at);
+    writeManifest();
+    console.log(`event-loop proof ${record.status}: ${name}`);
+  }
+}
+
+function buildSlackEvent() {
+  return {
+    id: "evt_event_loop_slack_launch_feedback",
+    source: "slack",
+    source_id: "slack:dm:event-loop-proof",
+    idempotency_key: "slack:event-loop-proof:launch-feedback",
+    occurred_at: "2026-05-07T20:00:00.000Z",
+    received_at: "2026-05-07T20:00:01.000Z",
+    actor: {
+      id: "actor_teammate",
+      type: "human",
+      name: "Teammate",
+    },
+    project_hint: "eventloopOS",
+    task_hint: "launch email",
+    type: "slack.message",
+    title: "Launch email feedback",
+    summary: "Mention migration note for trial customers before sending launch email.",
+    raw_ref: {
+      id: "raw_slack_event_loop_proof",
+      uri: "slack://dm/event-loop-proof/launch-feedback",
+      media_type: "application/json",
+    },
+    links: [
+      {
+        label: "Slack thread",
+        url: "https://slack.example.test/archives/DTEST/p1715112000000000",
+      },
+    ],
+    resources: [
+      {
+        id: "ctx_slack_event_loop_proof",
+        kind: "slack_thread",
+        title: "Launch email feedback",
+        url: "https://slack.example.test/archives/DTEST/p1715112000000000",
+        source: "slack",
+        captured_at: "2026-05-07T20:00:01.000Z",
+        restore_confidence: "high",
+        text_quote: "Mention migration note for trial customers.",
+      },
+    ],
+  };
+}
+
+function buildCodexWaitingRun() {
+  return {
+    id: "run_event_loop_codex_waiting",
+    provider: "codex",
+    task_id: "task_launch_email",
+    thread_id: "codex_thread_event_loop_smoke",
+    status: "waiting_approval",
+    started_at: "2026-05-07T20:01:00.000Z",
+    updated_at: "2026-05-07T20:02:00.000Z",
+    blocked_reason: "Codex drafted launch email and needs approval before sending external message.",
+    risk_tags: ["external_send"],
+    evidence: [
+      {
+        id: "ev_event_loop_codex_waiting",
+        kind: "raw",
+        title: "Codex run summary",
+        url: "artifact://event-loop-proof/codex-run.jsonl",
+      },
+    ],
+    output_refs: [
+      {
+        id: "raw_event_loop_codex_waiting",
+        uri: "artifact://event-loop-proof/codex-run.jsonl",
+        media_type: "application/jsonl",
+      },
+    ],
+    resume_actions: [
+      {
+        id: "act_event_loop_codex_waiting_resume",
+        type: "resume_agent",
+        label: "Resume Codex run",
+        requires_confirmation: true,
+        side_effect: "local",
+        payload: {
+          agent_run_id: "run_event_loop_codex_waiting",
+          thread_id: "codex_thread_event_loop_smoke",
+        },
+      },
+    ],
+  };
+}
+
+async function getJson(path) {
+  const response = await fetch(new URL(path, manifest.orchestrator_url));
+  return await parseResponse(response, "GET", path);
+}
+
+async function postJson(path, body, headers = {}) {
+  const response = await fetch(new URL(path, manifest.orchestrator_url), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+  return await parseResponse(response, "POST", path);
+}
+
+async function putJson(path, body, headers = {}) {
+  const response = await fetch(new URL(path, manifest.orchestrator_url), {
+    method: "PUT",
+    headers: {
+      "content-type": "application/json",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+  return await parseResponse(response, "PUT", path);
+}
+
+async function parseResponse(response, method, path) {
+  const text = await response.text();
+  let body;
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch (error) {
+    throw new Error(`${method} ${path} returned invalid JSON ${response.status}: ${text}`);
+  }
+  if (!response.ok) {
+    throw new Error(`${method} ${path} failed ${response.status}: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+async function waitForTaskSessionBinding(taskSessionId, taskId) {
+  const deadline = Date.now() + 10_000;
+  let lastBody;
+  while (Date.now() < deadline) {
+    const body = await getJson("/task-sessions");
+    lastBody = body;
+    const session = (body.sessions ?? []).find((candidate) => candidate?.id === taskSessionId);
+    if (session?.task_id === taskId) return session;
+    await sleep(250);
+  }
+  throw new Error(`task session ${taskSessionId} did not bind to ${taskId}: ${JSON.stringify(lastBody)}`);
+}
+
+async function waitForTaskSessionVisible(taskSessionId) {
+  const deadline = Date.now() + 20_000;
+  let lastBody;
+  while (Date.now() < deadline) {
+    const body = await getJson("/task-sessions");
+    lastBody = body;
+    const session = (body.sessions ?? []).find((candidate) => candidate?.id === taskSessionId);
+    if (session) return session;
+    await sleep(500);
+  }
+  throw new Error(`task session ${taskSessionId} did not become visible: ${JSON.stringify(lastBody)}`);
+}
+
+async function waitForHealth(baseUrl) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(new URL("/health", baseUrl));
+      if (response.ok) return;
+    } catch {
+      // Server still booting.
+    }
+    await sleep(100);
+  }
+  throw new Error(`timed out waiting for ${baseUrl}/health`);
+}
+
+async function spawnChecked(command, args) {
+  return await new Promise((resolveSpawn, rejectSpawn) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      env: process.env,
+      stdio: "inherit",
+    });
+    child.on("error", rejectSpawn);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolveSpawn();
+      } else {
+        rejectSpawn(new Error(`${command} ${args.join(" ")} exited with ${signal ?? code}`));
+      }
+    });
+  });
+}
+
+async function freePort() {
+  const probe = createServer();
+  await new Promise((resolveListen, rejectListen) => {
+    probe.once("error", rejectListen);
+    probe.listen(0, "127.0.0.1", resolveListen);
+  });
+  const address = probe.address();
+  await new Promise((resolveClose) => probe.close(resolveClose));
+  if (!address || typeof address === "string") {
+    throw new Error("failed to allocate free TCP port");
+  }
+  return address.port;
+}
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
+function onceExit(child) {
+  return new Promise((resolveExit) => {
+    child.once("exit", resolveExit);
+  });
+}
+
+function writeManifest() {
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+function redactDatabaseUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) parsed.password = "redacted";
+    return parsed.toString();
+  } catch {
+    return "redacted";
+  }
+}

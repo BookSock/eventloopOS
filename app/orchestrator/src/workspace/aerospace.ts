@@ -137,6 +137,18 @@ export function focusWorkspacePlan(workspace: string): AerospaceCommand {
   };
 }
 
+export type AerospaceLayout = "h_tiles" | "v_tiles" | "h_accordion" | "v_accordion" | "tiles" | "accordion" | "floating";
+
+export function layoutWindowPlan(windowId: number, layout: AerospaceLayout): AerospaceCommand {
+  assertSafeWindowId(windowId);
+  assertSafeLayout(layout);
+
+  return {
+    command: "aerospace",
+    args: ["layout", "--window-id", String(windowId), layout],
+  };
+}
+
 export function restoreWorkspacePlan(snapshot: WorkspaceSnapshot, currentWindows: AerospaceWindow[]): RestorePlan {
   const currentWindowIds = new Set(currentWindows.map((window) => window.id));
   const commands: AerospaceCommand[] = [];
@@ -286,8 +298,19 @@ function assertSafeAerospaceCommand(command: AerospaceCommand): void {
     assertSafeWorkspace(rest[2] ?? "");
     return;
   }
+  if (subcommand === "layout" && rest.length === 3 && rest[0] === "--window-id") {
+    assertSafeWindowId(Number(rest[1]));
+    assertSafeLayout(rest[2] ?? "");
+    return;
+  }
 
   throw new Error(`unsafe aerospace args: ${command.args.join(" ")}`);
+}
+
+function assertSafeLayout(layout: string): asserts layout is AerospaceLayout {
+  if (!["h_tiles", "v_tiles", "h_accordion", "v_accordion", "tiles", "accordion", "floating"].includes(layout)) {
+    throw new Error(`unsafe aerospace layout: ${layout}`);
+  }
 }
 
 function capabilityStatusFromError(error: unknown): WorkspaceCapabilityStatus {

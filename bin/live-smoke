@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants, mkdirSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { createRequire } from "node:module";
 
 const port = process.env.ORCHESTRATOR_PORT ?? "4377";
 const host = process.env.ORCHESTRATOR_HOST ?? "127.0.0.1";
@@ -214,7 +215,8 @@ function requirePath(path, message) {
 async function requireChromium() {
   let browser;
   try {
-    const { chromium } = await import("playwright");
+    const browserExtensionRequire = createRequire(resolve(process.cwd(), "app/browser-extension/package.json"));
+    const { chromium } = browserExtensionRequire("playwright");
     browser = await chromium.launch({ channel: "chromium", headless: true });
   } catch (error) {
     throw new Error(`Chromium/Playwright browser setup missing: ${error instanceof Error ? error.message : String(error)}`);

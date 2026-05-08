@@ -716,6 +716,16 @@ Risks:
 - AeroSpace workspaces are not native Mission Control spaces.
 - browser tabs still need extension; AeroSpace sees windows, not semantic tabs.
 
+Dogfood learnings from May 2026:
+
+- Do not make "EventLoop normal mode" mean `aerospace enable off` or quitting AeroSpace. Turning AeroSpace on/off can rearrange windows even when the user does nothing else, because AeroSpace imports windows into its workspace graph on enable and releases/rehydrates them on disable.
+- For power-user dogfood, prefer keeping AeroSpace running as a stable workspace backend. EventLoop on/off should pause EventLoop orchestration, not tear down the window manager.
+- When AeroSpace is enabled, do not use raw native/Rectangle/Hammerspoon window moves for windows AeroSpace knows about. AeroSpace can snap them back because its workspace graph still owns the old monitor/workspace assignment.
+- For monitor moves under AeroSpace, route by exact `--window-id` when possible. A Hammerspoon dogfood shim proved that `hs.window:id()` matches AeroSpace `%{window-id}`, and exact-id `aerospace move-node-to-monitor --window-id ...` avoids moving the wrong focused window.
+- Rapid repeat hotkeys need serialization. Two monitor/workspace moves in flight can race focus/layout updates and feel slow or unstable.
+- Stock AeroSpace works for basic workspace proofing, but Jason dogfood should prefer the local fork with `experimental-native-spaces = true` once installed. Native Space scoping better matches the desired "task virtual desktops across real macOS Spaces" model and should reduce cross-Space contamination.
+- Product setup should explicitly distinguish three modes: AeroSpace absent, AeroSpace stock, and AeroSpace native-spaces fork. Doctor output should show which mode is active and warn when a stock build is used for native-Space dogfood.
+
 ## Chrome Extension Still Needed
 
 AeroSpace does not replace Chrome extension.

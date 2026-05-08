@@ -1,6 +1,3 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createInterface, type Interface } from "node:readline";
-import type { Readable, Writable } from "node:stream";
 import type { CodexAppServerRequest } from "./codex_app_server_thread_client.js";
 
 type PendingRequest = {
@@ -9,37 +6,62 @@ type PendingRequest = {
   timeout: NodeJS.Timeout;
 };
 
-export type CodexAppServerStdioOptions = {
-  command?: string;
-  args?: string[];
+type WebSocketEvent = {
+  data?: unknown;
+  error?: unknown;
+};
+
+type WebSocketLike = {
+  send(data: string): void;
+  close(): void;
+  addEventListener(type: "open" | "message" | "close" | "error", listener: (event: WebSocketEvent) => void): void;
+};
+
+type WebSocketConstructor = new (url: string) => WebSocketLike;
+
+export type CodexAppServerWebSocketOptions = {
+  url: string;
   requestTimeoutMs?: number;
   clientInfo?: {
     name: string;
     title: string | null;
     version: string;
   };
-  spawnFn?: typeof spawn;
+  WebSocketCtor?: WebSocketConstructor;
 };
 
-export class NdjsonRpcClient {
-  private readonly lines: Interface;
+export type CodexAppServerWebSocketConnection = {
+  request: CodexAppServerRequest;
+  close(): void;
+  initialized: Promise<unknown>;
+};
+
+export class WebSocketJsonRpcClient {
   private readonly pending = new Map<number, PendingRequest>();
   private nextRequestId = 1;
   private closed = false;
+  private readonly opened: Promise<void>;
 
   constructor(
-    private readonly input: Writable,
-    output: Readable,
+    private readonly socket: WebSocketLike,
     private readonly requestTimeoutMs = 10_000,
   ) {
-    this.lines = createInterface({ input: output });
-    this.lines.on("line", (line) => this.handleLine(line));
-    this.lines.on("close", () => this.close(new Error("Codex app-server stream closed")));
+    this.opened = new Promise((resolve, reject) => {
+      socket.addEventListener("open", () => resolve());
+      socket.addEventListener("error", (event) => reject(new Error(errorMessage(event.error ?? "Codex app-server websocket error"))));
+    });
+    socket.addEventListener("message", (event) => this.handleMessage(event.data));
+    socket.addEventListener("close", () => this.close(new Error("Codex app-server websocket closed")));
+    socket.addEventListener("error", (event) => this.close(new Error(errorMessage(event.error ?? "Codex app-server websocket error"))));
   }
 
   request: CodexAppServerRequest = async ({ method, params }) => {
     if (this.closed) {
-      throw new Error("Codex app-server stream is closed");
+      throw new Error("Codex app-server websocket is closed");
+    }
+    await this.opened;
+    if (this.closed) {
+      throw new Error("Codex app-server websocket is closed");
     }
 
     const id = this.nextRequestId++;
@@ -52,27 +74,32 @@ export class NdjsonRpcClient {
       this.pending.set(id, { resolve, reject, timeout });
     });
 
-    this.input.write(`${JSON.stringify(payload)}\n`);
+    this.socket.send(JSON.stringify(payload));
     return await promise;
   };
 
-  close(reason = new Error("Codex app-server stream closed")): void {
+  close(reason = new Error("Codex app-server websocket closed")): void {
     if (this.closed) return;
     this.closed = true;
-    this.lines.close();
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timeout);
       pending.reject(reason);
     }
     this.pending.clear();
+    try {
+      this.socket.close();
+    } catch {
+      // Socket may already be closed.
+    }
   }
 
-  private handleLine(line: string): void {
-    if (!line.trim()) return;
+  private handleMessage(data: unknown): void {
+    const text = typeof data === "string" ? data : Buffer.isBuffer(data) ? data.toString("utf8") : undefined;
+    if (!text?.trim()) return;
 
     let message: unknown;
     try {
-      message = JSON.parse(line);
+      message = JSON.parse(text);
     } catch {
       return;
     }
@@ -96,20 +123,12 @@ export class NdjsonRpcClient {
   }
 }
 
-export type CodexAppServerStdioConnection = {
-  request: CodexAppServerRequest;
-  close(): void;
-  child: ChildProcessWithoutNullStreams;
-  initialized: Promise<unknown>;
-};
-
-export function createCodexAppServerStdioConnection(options: CodexAppServerStdioOptions = {}): CodexAppServerStdioConnection {
-  const command = options.command ?? "codex";
-  const args = options.args ?? ["app-server", "--listen", "stdio://"];
-  const child = (options.spawnFn ?? spawn)(command, args, { stdio: ["pipe", "pipe", "pipe"] });
-  const rpc = new NdjsonRpcClient(child.stdin, child.stdout, options.requestTimeoutMs);
-  child.on("close", () => rpc.close(new Error("Codex app-server process closed")));
-  child.on("error", (error) => rpc.close(error));
+export function createCodexAppServerWebSocketConnection(
+  options: CodexAppServerWebSocketOptions,
+): CodexAppServerWebSocketConnection {
+  const WebSocketCtor = options.WebSocketCtor ?? defaultWebSocketConstructor();
+  const socket = new WebSocketCtor(options.url);
+  const rpc = new WebSocketJsonRpcClient(socket, options.requestTimeoutMs);
 
   const rawRequest = rpc.request;
   const initialized = Promise.resolve(rawRequest({
@@ -136,17 +155,22 @@ export function createCodexAppServerStdioConnection(options: CodexAppServerStdio
     request,
     close() {
       rpc.close();
-      if (!child.killed) {
-        child.kill("SIGTERM");
-      }
     },
-    child,
     initialized,
   };
 }
 
+function defaultWebSocketConstructor(): WebSocketConstructor {
+  const WebSocketCtor = (globalThis as { WebSocket?: WebSocketConstructor }).WebSocket;
+  if (!WebSocketCtor) {
+    throw new Error("global WebSocket is unavailable; use stdio Codex app-server transport");
+  }
+  return WebSocketCtor;
+}
+
 function errorMessage(error: unknown): string {
   if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
   if (error && typeof error === "object" && !Array.isArray(error)) {
     const record = error as Record<string, unknown>;
     if (typeof record.message === "string") return record.message;

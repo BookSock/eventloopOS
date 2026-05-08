@@ -5,13 +5,18 @@ This is the friend-onboarding path for a fresh clone. It avoids Jason-specific c
 ## Prerequisites
 
 - macOS with Xcode Command Line Tools: `xcode-select --install`
-- Node.js 22 or newer. With `nvm`: `nvm use`
+- Homebrew, if you want the one-line AeroSpace install
+- Node.js 22 or newer. `fnm use` and `nvm use` both read `.nvmrc`; otherwise install Node 22+ by your preferred manager.
 - `pnpm` via Corepack: `corepack enable`
 - Swift toolchain from Xcode Command Line Tools
-- Docker for Postgres-backed local dogfood
+- Python 3 for the test harness
+- Docker for Postgres-backed local dogfood and Postgres restart proofs
+- Codex CLI, signed in locally, for real task sessions and `dev:dogfood`
 - AeroSpace for workspace capture/restore:
   `brew install --cask nikitabobko/tap/aerospace`
-- Optional: Google Chrome for browser context capture/restore
+- Optional but recommended: Google Chrome for browser context capture/restore
+
+Jason's current dogfood path uses a personal AeroSpace fork with `experimental-native-spaces` and `experimental-force-floating-windows`. Stock AeroSpace is enough for basic workspace capture/restore, but the fork gives the closest version of the intended product behavior.
 
 ## Install
 
@@ -24,7 +29,7 @@ pnpm install
 pnpm run dev:doctor
 ```
 
-`dev:doctor` builds the orchestrator and reports readiness. For a real trial, AeroSpace should report healthy before starting the dogfood stack. Launch AeroSpace once after installing it so the CLI can talk to the app server.
+`dev:doctor` builds the orchestrator and reports readiness. It is strict: it expects a running orchestrator at `http://127.0.0.1:4377`, Docker, AeroSpace, browser tooling, and Codex app-server readiness. If you have not started the dogfood stack yet, an orchestrator health failure is expected. For a real trial, AeroSpace and Codex should report healthy before starting the dogfood stack. Launch AeroSpace once after installing it so the CLI can talk to the app server.
 
 ## Proof commands
 
@@ -36,13 +41,69 @@ pnpm proof:agent
 
 It writes `artifacts/proof-manifest.json` and per-command logs under `artifacts/proof-agent/<run-id>/`.
 
+Use the focused product loop proof when you want a quick real-orchestrator check of the core event loop without touching windows:
+
+```sh
+pnpm test:e2e:event-loop
+```
+
+It starts a task session, routes Slack and voice inputs into that session, queues a Codex-style waiting run, executes the recommended queue action, verifies history/activity/metrics, and writes `artifacts/event-loop-proof/<run-id>/manifest.json`.
+
+Use the Postgres restart product proof when you want to prove the queue survives an orchestrator crash/restart:
+
+```sh
+pnpm test:e2e:event-loop:postgres
+```
+
+It starts a disposable Docker Postgres container, runs the focused product loop, restarts the orchestrator while a queue item is ready, verifies persisted queue/history/metrics, reconnects the fake runtime, executes the recommended action, then removes the container.
+
+Use the live Codex product loop proof when you want to prove real Codex app-server thread creation and followups work:
+
+```sh
+pnpm test:e2e:event-loop:codex
+```
+
+It creates a real Codex thread in an isolated artifact workdir, binds it to the smoke task, routes Slack and voice inputs into that thread, queues human review, executes the recommended action back into Codex, and writes `artifacts/event-loop-codex-proof/<run-id>/manifest.json`. It is opt-in because it may consume model/API resources.
+
+Use the stronger Codex completion + workspace proof when you want to prove visible Ghostty and EventLoop can share one Codex app-server thread:
+
+```sh
+pnpm test:e2e:event-loop:codex-completion-workspace
+```
+
+It starts one shared websocket `codex app-server`, starts a real Codex task through the orchestrator, opens a sacrificial Ghostty TUI attached to the same thread, proves an independent manual-style websocket client can add a turn to that thread, routes a Slack-like event into the same thread afterward, detects the completed turn, queues human review from the agent-run marker, approves it back into the same thread, then runs the isolated AeroSpace one-window move/restore proof. It writes `artifacts/event-loop-codex-completion-workspace/<run-id>/manifest.json` and closes its smoke windows afterward.
+
+macOS may ask once whether Ghostty can execute `bin/ghostty-codex-remote`. Allow that stable helper for this live proof; earlier versions used per-run artifact scripts and could prompt every run.
+
+Use the deep local proof for the strongest non-public-push check:
+
+```sh
+pnpm proof:deep
+```
+
+It combines the Postgres restart product proof with the isolated AeroSpace move/restore proof.
+
 Use the live proof only on a real Mac with AeroSpace running and the browser stack available:
 
 ```sh
 pnpm proof:live
 ```
 
-It fails during preflight when macOS, AeroSpace, or native browser setup is missing. It writes `artifacts/proof-live-manifest.json`, `artifacts/live-smoke/<run-id>/manifest.json`, and per-command logs under `artifacts/proof-agent/<run-id>/`.
+It fails during preflight when macOS, AeroSpace, Codex, or native browser setup is missing. It writes `artifacts/proof-live-manifest.json`, `artifacts/live-smoke/<run-id>/manifest.json`, `artifacts/onboarding-live/<run-id>/manifest.json`, and per-command logs under `artifacts/proof-agent/<run-id>/`.
+
+If Playwright browser dependencies are missing, install them before running browser proof lanes:
+
+```sh
+pnpm --filter @eventloopos/browser-extension exec playwright install chromium
+```
+
+Use the isolated live proof when you want to keep working while checking the AeroSpace move/restore path:
+
+```sh
+pnpm proof:live:isolated
+```
+
+It creates one unique temporary TextEdit document, waits for that newly-created window in AeroSpace, moves only that window to `eventloop-smoke`, restores it, closes it, verifies the window disappeared after cleanup, and fails if any pre-existing window ID changes workspace. It writes `artifacts/live-aerospace-isolated/<run-id>/manifest.json`. It can still briefly focus TextEdit while the sacrificial window opens.
 
 ## Run the queue app
 
@@ -52,7 +113,15 @@ Start the local dogfood stack:
 pnpm run dev:dogfood
 ```
 
-This starts dev Postgres through Docker, verifies AeroSpace, builds the orchestrator, and launches the Mac queue app. It does not require Slack, Gmail, GitHub, or Chrome. By default, workspace restore execution is disabled until a restore is explicitly confirmed. Press `Ctrl-C` in the terminal to stop the stack.
+This starts dev Postgres through Docker, verifies AeroSpace, starts a shared Codex app-server, builds the orchestrator, and launches the Mac queue app. It does not require Slack, Gmail, GitHub, or Chrome. By default, workspace restore execution is disabled until a restore is explicitly confirmed. Press `Ctrl-C` in the terminal to stop the stack.
+
+When `codex_app_server` task sessions are enabled, `dev:dogfood` starts a shared websocket `codex app-server` and points the orchestrator at it. That lets a visible Ghostty/Codex TUI and eventloopOS use the same native thread:
+
+```sh
+codex --remote <printed-ws-url> resume <thread-id>
+```
+
+Set `EVENTLOOPOS_DOGFOOD_SHARED_CODEX_APP_SERVER=0` to fall back to the orchestrator's private stdio app-server.
 
 Use in-memory state only for a throwaway run:
 

@@ -58,6 +58,7 @@ describe("orchestrator config schema", () => {
         thread_blog: "task_blog_feedback",
       }),
       ORCHESTRATOR_CODEX_TASK_MAP_PATH: "state/codex-task-map.json",
+      ORCHESTRATOR_CODEX_APP_SERVER_URL: "ws://127.0.0.1:4567",
     });
 
     assert.equal(result.ok, true);
@@ -65,6 +66,18 @@ describe("orchestrator config schema", () => {
       assert.deepEqual(result.value.taskSessions, ["codex_app_server"]);
       assert.deepEqual(result.value.codexTaskMap, { thread_blog: "task_blog_feedback" });
       assert.equal(result.value.codexTaskMapPath, "state/codex-task-map.json");
+      assert.equal(result.value.codexAppServerUrl, "ws://127.0.0.1:4567");
+    }
+  });
+
+  it("rejects malformed Codex app-server websocket URL", () => {
+    const result = loadConfig({
+      ORCHESTRATOR_CODEX_APP_SERVER_URL: "http://127.0.0.1:4567",
+    });
+
+    assert.equal(result.ok, false);
+    if (!result.ok) {
+      assert.deepEqual(result.issues, ["ORCHESTRATOR_CODEX_APP_SERVER_URL must start with ws:// or wss://"]);
     }
   });
 

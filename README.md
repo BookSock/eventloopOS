@@ -2,6 +2,8 @@
 
 Human event loop for computer work.
 
+License: AGPL-3.0-only. See [LICENSE](LICENSE).
+
 This repo is structured as a planning-first MVP workspace:
 
 - `external-resources/` - source links, research notes, API docs, competitive references.
@@ -20,7 +22,49 @@ Fixture/default proof for agent handoff:
 pnpm proof:agent
 ```
 
-This runs lint, typecheck, unit tests, and fixture E2E through `bin/proof-agent`. It writes `artifacts/proof-manifest.json` plus per-command stdout/stderr logs under `artifacts/proof-agent/<run-id>/`. The manifest is machine-readable and is updated at run start, command start, command finish, and interruption.
+This runs lint, typecheck, unit tests, product event-loop smoke, and fixture E2E through `bin/proof-agent`. It writes `artifacts/proof-manifest.json` plus per-command stdout/stderr logs under `artifacts/proof-agent/<run-id>/`. The manifest is machine-readable and is updated at run start, command start, command finish, and interruption.
+
+Focused product loop proof:
+
+```sh
+pnpm test:e2e:event-loop
+```
+
+This boots a real local orchestrator with fake task runtime, starts a task session, routes Slack and voice inputs into it, queues a Codex-style waiting run for human review, executes the recommended queue action, checks task-message history, checks activity/metrics, and writes `artifacts/event-loop-proof/<run-id>/manifest.json`.
+
+Durability product loop proof:
+
+```sh
+pnpm test:e2e:event-loop:postgres
+```
+
+This starts a disposable Docker Postgres container, runs the same event-loop proof with Postgres backing, kills and restarts the orchestrator while a human review item is queued, proves queue/history/metrics survive, reconnects the fake task runtime, executes the recommended action, and writes `artifacts/event-loop-postgres-proof/<run-id>/manifest.json`.
+
+Live Codex product loop proof:
+
+```sh
+pnpm test:e2e:event-loop:codex
+```
+
+This starts a real local `codex app-server` through the orchestrator, creates a real Codex thread in an isolated artifact workdir, binds that thread to the smoke task, routes Slack and voice inputs into it, queues a human review item, executes the recommended action back into the same Codex thread, and writes `artifacts/event-loop-codex-proof/<run-id>/manifest.json`. It is opt-in because it uses the local Codex runtime and may consume model/API resources.
+
+Live Codex completion + workspace proof:
+
+```sh
+pnpm test:e2e:event-loop:codex-completion-workspace
+```
+
+This starts one shared websocket `codex app-server`, points the orchestrator at it with `ORCHESTRATOR_CODEX_APP_SERVER_URL`, starts a real Codex task, opens a sacrificial Ghostty TUI attached to the same thread, proves an independent manual-style websocket client can add a turn to that thread, routes a Slack-like event into the same thread afterward, detects the completed Codex turn, creates and approves a human review queue item, resumes the same thread, then runs the isolated AeroSpace one-window move/restore proof. It writes `artifacts/event-loop-codex-completion-workspace/<run-id>/manifest.json`.
+
+macOS may ask once whether Ghostty can execute `bin/ghostty-codex-remote`; that stable helper avoids per-run artifact-script prompts.
+
+Deep local proof:
+
+```sh
+pnpm proof:deep
+```
+
+This combines the Postgres restart product proof with the lower-disturbance isolated AeroSpace proof. It writes `artifacts/proof-deep-manifest.json` and per-command proof logs.
 
 Full local Mac proof:
 
@@ -28,7 +72,15 @@ Full local Mac proof:
 pnpm proof:live
 ```
 
-This is the real-host lane. It requires macOS, AeroSpace (`brew install --cask nikitabobko/tap/aerospace`), and a runnable Chromium/Playwright browser stack for native browser capture/restore. It writes `artifacts/proof-live-manifest.json`, `artifacts/live-smoke/<run-id>/manifest.json`, and per-command logs under `artifacts/proof-agent/<run-id>/`. Use this when claiming the Mac app, live orchestrator, AeroSpace readiness, and browser/native-host path work on a real machine.
+This is the real-host lane. It requires macOS, AeroSpace (`brew install --cask nikitabobko/tap/aerospace`), Codex CLI, and a runnable Chromium/Playwright browser stack for native browser capture/restore. It writes `artifacts/proof-live-manifest.json`, `artifacts/live-smoke/<run-id>/manifest.json`, `artifacts/onboarding-live/<run-id>/manifest.json`, and per-command logs under `artifacts/proof-agent/<run-id>/`. Use this when claiming the Mac app, live orchestrator, onboarding scan, AeroSpace readiness, and browser/native-host path work on a real machine.
+
+Lower-disturbance AeroSpace proof:
+
+```sh
+pnpm proof:live:isolated
+```
+
+This launches a unique temporary TextEdit document, captures its AeroSpace window, moves only that newly-created window to `eventloop-smoke`, restores it, closes it, and fails if any pre-existing window ID changes workspace during the proof. It also verifies the sacrificial window disappeared after cleanup and writes a manifest under `artifacts/live-aerospace-isolated/<run-id>/manifest.json`. It is meant for running while the machine is in use, but it may still briefly focus TextEdit while creating the sacrificial window.
 
 Baseline CI proof:
 
@@ -56,7 +108,7 @@ Full local smoke adds installed Chromium extension/native host capture against t
 pnpm run test:e2e:live:full
 ```
 
-Live proof covers seeded queue, MCP source discovery, MCP poll-and-route, Slack-specific and generic MCP source poll -> route -> done, poll-all MCP sweep -> route -> done, Slack/MCP task-hinted events injecting into an existing task session without creating a human queue item, voice transcript -> task-session followup routing, AgentRun `waiting_approval` -> review packet -> queue item intake, passive browser context `store_only`, ranked browser context search, provider deeplink normalization for Slack/GitHub/Notion/Google Docs/Figma/browser URLs, context restore-plan generation, leased browser restore-request claim/done/failure-retry flow, ranked task-attached browser context search, task-session discovery + idempotent followup, task-session binding, bind-gated recommended handoff, native-host forwarding, browser runtime capture/restore messages with quote highlight receipts, workspace status/capture/restore-plan contracts, workspace snapshot context through the queue API, workspace status/restore-disabled smoke in the live harness, and macOS manual-mode queue state with `Cmd-Option-Shift-M` global hotkey wiring. The macOS view model auto-renews queue leases, auto-refreshes context restore-request status, plans selected workspace restores, shows packet decision/risk/context/evidence detail with open links, and skips workspace restore planning while manual mode is active.
+Live proof covers seeded queue, MCP source discovery, MCP poll-and-route, Slack-specific and generic MCP source poll -> route -> done, poll-all MCP sweep -> route -> done, Slack/MCP task-hinted events injecting into an existing task session without creating a human queue item, voice transcript -> task-session followup routing, AgentRun `waiting_approval` -> review packet -> queue item intake, live onboarding scan over current Mac windows plus Codex task runtime discovery, passive browser context `store_only`, ranked browser context search, provider deeplink normalization for Slack/GitHub/Notion/Google Docs/Figma/browser URLs, context restore-plan generation, leased browser restore-request claim/done/failure-retry flow, ranked task-attached browser context search, task-session discovery + idempotent followup, task-session binding, bind-gated recommended handoff, native-host forwarding, browser runtime capture/restore messages with quote highlight receipts, workspace status/capture/restore-plan contracts, workspace snapshot context through the queue API, workspace status/restore-disabled smoke in the live harness, and macOS manual-mode queue state with `Cmd-Option-Shift-M` global hotkey wiring. The macOS view model auto-renews queue leases, auto-refreshes context restore-request status, plans selected workspace restores, shows packet decision/risk/context/evidence detail with open links, and skips workspace restore planning while manual mode is active.
 
 Run `pnpm run dev:doctor` to build the orchestrator and get machine-readable readiness for local live checks: orchestrator health, AeroSpace daemon, Docker daemon, browser Playwright extension E2E readiness, optional MCP source config, optional voice transcript command readiness, and Codex app-server.
 
@@ -77,6 +129,8 @@ pnpm run dev:dogfood
 ```
 
 This requires AeroSpace (`brew install --cask nikitabobko/tap/aerospace`), starts dev Postgres, builds and runs the orchestrator with Codex app-server task sessions, uses AeroSpace in disabled-execute mode, auto-loads `config/mcp-sources.json` when present, and launches the Mac queue app against the local orchestrator. Press `Ctrl-C` in the terminal to stop the app, orchestrator, optional poll loop, and dev Postgres. Set `EVENTLOOPOS_DOGFOOD_POSTGRES=0` for empty in-memory mode. Set `EVENTLOOPOS_DOGFOOD_MCP_POLL=1` to run the MCP poll loop while dogfooding. Set `EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=0` only for queue/router hacking without workspace restore.
+
+For Codex dogfood, the launcher starts a shared websocket `codex app-server` by default and prints its `ws://` URL. Use `codex --remote <printed-ws-url> resume <thread-id>` in Ghostty when you want a visible TUI attached to the same thread eventloopOS controls. Set `EVENTLOOPOS_DOGFOOD_SHARED_CODEX_APP_SERVER=0` to use the private stdio app-server path.
 
 Fresh-clone first run without Docker:
 

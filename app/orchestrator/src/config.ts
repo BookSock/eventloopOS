@@ -11,6 +11,7 @@ export type OrchestratorConfig = {
   taskSessions: "off" | TaskSessionMode[];
   codexTaskMap?: Record<string, string>;
   codexTaskMapPath?: string;
+  codexAppServerUrl?: string;
   claudeSessionsRaw?: string;
   mcpSources: "seeded" | "config" | "off";
   mcpSourcesPath?: string;
@@ -45,11 +46,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
   }
   const codexTaskMapRaw = env.ORCHESTRATOR_CODEX_TASK_MAP;
   const codexTaskMapPathRaw = env.ORCHESTRATOR_CODEX_TASK_MAP_PATH;
+  const codexAppServerUrl = env.ORCHESTRATOR_CODEX_APP_SERVER_URL?.trim();
   const codexTaskMapPath = resolveConfiguredPath(codexTaskMapPathRaw);
   const codexTaskMap = parseCodexTaskMap(codexTaskMapRaw, issues);
   validateClaudeSessionsRaw(env.ORCHESTRATOR_CLAUDE_SESSIONS, issues);
   if (codexTaskMapPathRaw !== undefined && !codexTaskMapPathRaw.trim()) {
     issues.push("ORCHESTRATOR_CODEX_TASK_MAP_PATH must be non-empty when set");
+  }
+  if (codexAppServerUrl !== undefined && codexAppServerUrl.length === 0) {
+    issues.push("ORCHESTRATOR_CODEX_APP_SERVER_URL must be non-empty when set");
+  } else if (codexAppServerUrl && !codexAppServerUrl.startsWith("ws://") && !codexAppServerUrl.startsWith("wss://")) {
+    issues.push("ORCHESTRATOR_CODEX_APP_SERVER_URL must start with ws:// or wss://");
   }
   const taskSessions = parseTaskSessionModes(taskSessionsRaw, issues);
   if (mcpSourcesRaw !== "seeded" && mcpSourcesRaw !== "config" && mcpSourcesRaw !== "off") {
@@ -83,6 +90,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
       taskSessions,
       codexTaskMap,
       codexTaskMapPath,
+      codexAppServerUrl,
       claudeSessionsRaw: env.ORCHESTRATOR_CLAUDE_SESSIONS,
       mcpSources,
       mcpSourcesPath,

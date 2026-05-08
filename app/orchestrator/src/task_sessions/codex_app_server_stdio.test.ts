@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { PassThrough } from "node:stream";
-import { NdjsonRpcClient } from "./codex_app_server_stdio.js";
+import { EventEmitter } from "node:events";
+import { createCodexAppServerStdioConnection, NdjsonRpcClient } from "./codex_app_server_stdio.js";
 
 describe("NdjsonRpcClient", () => {
   it("writes newline JSON requests and resolves matching responses", async () => {
@@ -58,4 +59,62 @@ describe("NdjsonRpcClient", () => {
 
     await assert.rejects(Promise.resolve(responsePromise), /closed for test/);
   });
+
+  it("initializes with experimental API capability for metadata-bearing turn starts", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const written: string[] = [];
+    stdin.on("data", (chunk) => written.push(String(chunk)));
+    const emitter = new EventEmitter();
+    const child = Object.assign(emitter, {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill() {
+        child.killed = true;
+        emitter.emit("close");
+      },
+    }) as typeof emitter & {
+      stdin: PassThrough;
+      stdout: PassThrough;
+      stderr: PassThrough;
+      killed: boolean;
+      kill(): void;
+    };
+
+    const connection = createCodexAppServerStdioConnection({
+      spawnFn: (() => child) as never,
+    });
+    await waitFor(() => written.join("").includes("\n"));
+
+    assert.deepEqual(JSON.parse(written.join("").trim()), {
+      id: 1,
+      method: "initialize",
+      params: {
+        clientInfo: {
+          name: "eventloopos",
+          title: "eventloopOS",
+          version: "0.0.0",
+        },
+        capabilities: {
+          experimentalApi: true,
+        },
+      },
+    });
+
+    stdout.write(JSON.stringify({ id: 1, result: { ok: true } }) + "\n");
+    assert.deepEqual(await connection.initialized, { ok: true });
+    connection.close();
+  });
 });
+
+async function waitFor(predicate: () => boolean): Promise<void> {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("timed out waiting for condition");
+}

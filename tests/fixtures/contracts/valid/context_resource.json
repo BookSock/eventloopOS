@@ -3,7 +3,7 @@
   "data": {
     "id": "ctx_browser_001",
     "kind": "browser_tab",
-    "title": "Pagerfree feedback",
+    "title": "Launch feedback",
     "url": "https://example.com/feedback",
     "source": "browser-extension",
     "captured_at": "2026-05-06T17:00:00Z",
@@ -11,7 +11,7 @@
     "window_id": "win_1",
     "tab_id": "tab_7",
     "scroll_y": 420,
-    "text_quote": "Pagerfree should remember context",
+    "text_quote": "Product should remember context",
     "selector_hint": "#feedback"
   }
 }

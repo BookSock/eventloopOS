@@ -13,7 +13,8 @@ import { PostgresObservability, type Observability } from "./observability.js";
 import { createSeededStore } from "./store.js";
 import { ClaudeCliTaskSessionController, parseClaudeSessionConfigs } from "./task_sessions/claude_cli_task_session_controller.js";
 import { CodexAppServerThreadClient } from "./task_sessions/codex_app_server_thread_client.js";
-import { createCodexAppServerStdioConnection, type CodexAppServerStdioConnection } from "./task_sessions/codex_app_server_stdio.js";
+import { createCodexAppServerStdioConnection } from "./task_sessions/codex_app_server_stdio.js";
+import { createCodexAppServerWebSocketConnection } from "./task_sessions/codex_app_server_ws.js";
 import { CodexNativeThreadController } from "./task_sessions/codex_native_thread_controller.js";
 import { CompositeTaskSessionController, type CompositeTaskSessionRuntime } from "./task_sessions/composite_task_session_controller.js";
 import { CodexTaskMapResolver } from "./task_sessions/codex_task_map.js";
@@ -118,7 +119,9 @@ function createTaskSessionRuntime(): { controller: TaskSessionController; close?
 }
 
 function createCodexTaskSessionRuntime(runtimeConfig: OrchestratorConfig): CompositeTaskSessionRuntime & { close: () => void } {
-    const connection: CodexAppServerStdioConnection = createCodexAppServerStdioConnection();
+    const connection = runtimeConfig.codexAppServerUrl
+      ? createCodexAppServerWebSocketConnection({ url: runtimeConfig.codexAppServerUrl })
+      : createCodexAppServerStdioConnection();
     const taskMap = new CodexTaskMapResolver({
       inlineMap: runtimeConfig.codexTaskMap,
       mapPath: runtimeConfig.codexTaskMapPath,

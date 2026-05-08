@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
+import { createServer } from "node:net";
 
 const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377";
 const usePostgres = process.env.EVENTLOOPOS_DOGFOOD_POSTGRES !== "0";
@@ -21,10 +22,13 @@ try {
   await requireAerospace();
   const databaseUrl = usePostgres ? await startPostgres() : undefined;
   await runChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "build"]);
+  const taskSessionModes = process.env.ORCHESTRATOR_TASK_SESSIONS ?? "codex_app_server";
+  const codexAppServerUrl = await maybeStartSharedCodexAppServer(taskSessionModes);
 
   const orchestrator = spawnChild("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "start"], {
     DATABASE_URL: databaseUrl,
-    ORCHESTRATOR_TASK_SESSIONS: process.env.ORCHESTRATOR_TASK_SESSIONS ?? "codex_app_server",
+    ORCHESTRATOR_TASK_SESSIONS: taskSessionModes,
+    ORCHESTRATOR_CODEX_APP_SERVER_URL: process.env.ORCHESTRATOR_CODEX_APP_SERVER_URL ?? codexAppServerUrl,
     ORCHESTRATOR_CODEX_TASK_MAP_PATH: process.env.ORCHESTRATOR_CODEX_TASK_MAP_PATH ?? "config/codex-task-map.json",
     ORCHESTRATOR_MCP_SOURCES: process.env.ORCHESTRATOR_MCP_SOURCES ?? defaultMcpSourcesMode(),
     ORCHESTRATOR_MCP_SOURCES_PATH: process.env.ORCHESTRATOR_MCP_SOURCES_PATH ?? defaultMcpSourcesPath(),
@@ -42,6 +46,10 @@ try {
   });
 
   process.stdout.write(`eventloopOS dogfood stack ready at ${orchestratorUrl}\n`);
+  if (codexAppServerUrl) {
+    process.stdout.write(`Shared Codex app-server: ${codexAppServerUrl}\n`);
+    process.stdout.write("Open visible Codex threads with: codex --remote <url> resume <thread-id>\n");
+  }
   process.stdout.write("Queue app is running. Ctrl-C here stops app, orchestrator, poll loop, and dev Postgres.\n");
   const appCode = await waitForExit(app);
   await cleanup();
@@ -96,6 +104,56 @@ function defaultMcpSourcesMode() {
 
 function defaultMcpSourcesPath() {
   return existsSync("config/mcp-sources.json") ? "config/mcp-sources.json" : undefined;
+}
+
+async function maybeStartSharedCodexAppServer(taskSessionModes) {
+  if (process.env.ORCHESTRATOR_CODEX_APP_SERVER_URL) {
+    return undefined;
+  }
+  if (process.env.EVENTLOOPOS_DOGFOOD_SHARED_CODEX_APP_SERVER === "0") {
+    return undefined;
+  }
+  if (!taskSessionModes.split(",").map((mode) => mode.trim()).includes("codex_app_server")) {
+    return undefined;
+  }
+
+  const port = await freePort();
+  const url = `ws://127.0.0.1:${port}`;
+  spawnChild("codex", ["app-server", "--listen", url]);
+  await waitForCodexAppServerReady(port, 15_000);
+  return url;
+}
+
+async function waitForCodexAppServerReady(port, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  const readyUrl = `http://127.0.0.1:${port}/readyz`;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(readyUrl);
+      if (response.ok) return;
+    } catch {
+      // keep waiting
+    }
+    await sleep(100);
+  }
+  throw new Error(`shared Codex app-server did not become ready at ${readyUrl}`);
+}
+
+async function freePort() {
+  return await new Promise((resolve, reject) => {
+    const socket = createServer();
+    socket.once("error", reject);
+    socket.listen(0, "127.0.0.1", () => {
+      const address = socket.address();
+      socket.close(() => {
+        if (address && typeof address === "object") {
+          resolve(address.port);
+        } else {
+          reject(new Error("failed to allocate free port"));
+        }
+      });
+    });
+  });
 }
 
 async function waitForHealth(baseUrl, timeoutMs) {

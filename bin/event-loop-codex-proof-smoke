@@ -1,0 +1,118 @@
+#!/usr/bin/env node
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { spawn } from "node:child_process";
+
+const startedAt = new Date();
+const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+const repoRoot = process.cwd();
+const artifactDir = resolve(repoRoot, process.env.EVENTLOOPOS_EVENT_LOOP_CODEX_PROOF_ARTIFACT_DIR ?? `artifacts/event-loop-codex-proof/${runId}`);
+const manifestPath = resolve(artifactDir, "manifest.json");
+const nestedArtifactDir = resolve(artifactDir, "event-loop-proof");
+const codexTaskMapPath = resolve(artifactDir, "codex-task-map.json");
+const codexWorkdir = resolve(artifactDir, "codex-workdir");
+
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.event_loop_codex_proof",
+  run_id: runId,
+  started_at: startedAt.toISOString(),
+  finished_at: undefined,
+  duration_ms: undefined,
+  artifact_dir: artifactDir,
+  nested_artifact_dir: nestedArtifactDir,
+  codex_task_map_path: codexTaskMapPath,
+  codex_workdir: codexWorkdir,
+  steps: [],
+  passed: false,
+};
+
+mkdirSync(dirname(manifestPath), { recursive: true });
+mkdirSync(codexWorkdir, { recursive: true });
+writeFileSync(codexTaskMapPath, "{}\n", "utf8");
+writeManifest();
+
+try {
+  await step("run event loop through live codex app-server", async () => {
+    await spawnChecked("bin/event-loop-proof-smoke", [], {
+      ...process.env,
+      ORCHESTRATOR_CODEX_TASK_MAP_PATH: codexTaskMapPath,
+      EVENTLOOPOS_EVENT_LOOP_PROOF_TASK_SESSIONS: "codex_app_server",
+      EVENTLOOPOS_EVENT_LOOP_PROOF_BIND_TASK: "1",
+      EVENTLOOPOS_EVENT_LOOP_PROOF_TASK_CWD: codexWorkdir,
+      EVENTLOOPOS_EVENT_LOOP_PROOF_TASK_MODEL: process.env.EVENTLOOPOS_EVENT_LOOP_CODEX_PROOF_MODEL ?? "",
+      EVENTLOOPOS_EVENT_LOOP_PROOF_TASK_PROMPT: [
+        "eventloopOS live Codex proof.",
+        "Do not edit files. Do not run shell commands.",
+        "Acknowledge routed context in one short sentence when turns arrive.",
+      ].join(" "),
+      EVENTLOOPOS_EVENT_LOOP_PROOF_ARTIFACT_DIR: nestedArtifactDir,
+    });
+    return {
+      manifest_path: resolve(nestedArtifactDir, "manifest.json"),
+    };
+  });
+
+  manifest.passed = true;
+} catch (error) {
+  manifest.error = error instanceof Error ? error.stack ?? error.message : String(error);
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  manifest.finished_at = new Date().toISOString();
+  manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+  writeManifest();
+  console.log(`event-loop codex proof manifest: ${manifestPath}`);
+}
+
+async function step(name, run) {
+  const record = {
+    name,
+    status: "running",
+    started_at: new Date().toISOString(),
+    finished_at: undefined,
+    duration_ms: undefined,
+    details: undefined,
+    error: undefined,
+  };
+  manifest.steps.push(record);
+  writeManifest();
+  console.log(`event-loop codex proof start: ${name}`);
+  try {
+    const details = await run();
+    record.status = "passed";
+    record.details = details;
+    return details;
+  } catch (error) {
+    record.status = "failed";
+    record.error = error instanceof Error ? error.message : String(error);
+    throw error;
+  } finally {
+    record.finished_at = new Date().toISOString();
+    record.duration_ms = Date.parse(record.finished_at) - Date.parse(record.started_at);
+    writeManifest();
+    console.log(`event-loop codex proof ${record.status}: ${name}`);
+  }
+}
+
+async function spawnChecked(command, args, env) {
+  return await new Promise((resolveSpawn, rejectSpawn) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      env,
+      stdio: "inherit",
+    });
+    child.on("error", rejectSpawn);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolveSpawn();
+      } else {
+        rejectSpawn(new Error(`${command} ${args.join(" ")} exited with ${signal ?? code}`));
+      }
+    });
+  });
+}
+
+function writeManifest() {
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}

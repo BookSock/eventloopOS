@@ -1,0 +1,1085 @@
+#!/usr/bin/env node
+import { createServer } from "node:net";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { execFile, spawn } from "node:child_process";
+
+const startedAt = new Date();
+const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+const repoRoot = process.cwd();
+const artifactDir = resolve(repoRoot, process.env.EVENTLOOPOS_CODEX_COMPLETION_WORKSPACE_ARTIFACT_DIR ?? `artifacts/event-loop-codex-completion-workspace/${runId}`);
+const manifestPath = resolve(artifactDir, "manifest.json");
+const codexTaskMapPath = resolve(artifactDir, "codex-task-map.json");
+const codexWorkdir = resolve(artifactDir, "codex-workdir");
+const ghosttyCodexRemoteHelperPath = resolve(repoRoot, "bin/ghostty-codex-remote");
+const taskId = "task_completion_workspace_proof";
+const markerPrefix = "EVENTLOOPOS_AGENT_RUN ";
+const taskPrompt = [
+  "eventloopOS completion proof.",
+  "Do not edit files. Do not run shell commands.",
+  "Reply with exactly: READY",
+].join(" ");
+
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.codex_completion_workspace_proof",
+  run_id: runId,
+  started_at: startedAt.toISOString(),
+  finished_at: undefined,
+  duration_ms: undefined,
+  artifact_dir: artifactDir,
+  codex_task_map_path: codexTaskMapPath,
+  codex_workdir: codexWorkdir,
+  orchestrator_url: undefined,
+  codex_app_server_url: undefined,
+  ghostty_remote_tui: undefined,
+  ghostty_cleanup: undefined,
+  steps: [],
+  passed: false,
+};
+
+let server;
+let appServer;
+let ghosttyRemoteTui;
+let port;
+
+mkdirSync(dirname(manifestPath), { recursive: true });
+mkdirSync(codexWorkdir, { recursive: true });
+writeFileSync(codexTaskMapPath, "{}\n", "utf8");
+writeManifest();
+
+try {
+  port = await freePort();
+  manifest.orchestrator_url = `http://127.0.0.1:${port}`;
+  writeManifest();
+
+  await step("build orchestrator", async () => {
+    await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "build"]);
+  });
+
+  await step("start shared Codex websocket app-server", async () => {
+    appServer = await startCodexAppServer();
+    manifest.codex_app_server_url = appServer.url;
+    writeManifest();
+    return {
+      url: appServer.url,
+    };
+  });
+
+  server = startOrchestrator(port, appServer.url);
+
+  await step("wait for orchestrator", async () => {
+    await waitForHealth(manifest.orchestrator_url);
+  });
+
+  const task = await step("start real Codex task session through master command", async () => {
+    const body = await spawnJson("pnpm", [
+      "master:send",
+      "--",
+      "--base-url",
+      manifest.orchestrator_url,
+      "--idempotency-key",
+      "codex-completion-workspace-start-task",
+      "start-new-task",
+      "--task",
+      "completion workspace proof",
+      "--cwd",
+      codexWorkdir,
+      taskPrompt,
+    ]);
+    const started = body.started;
+    assert(started?.ok === true, `task start failed: ${JSON.stringify(body)}`);
+    assert(typeof started.task_session_id === "string", "missing task session id");
+    assert(typeof started.session?.native_thread_id === "string", "missing native Codex thread id");
+    await writeCodexTaskMap(started.session.native_thread_id, taskId);
+    return {
+      task_id: started.task_id,
+      task_session_id: started.task_session_id,
+      native_thread_id: started.session.native_thread_id,
+      start_message_id: started.message?.id,
+    };
+  });
+
+  ghosttyRemoteTui = await step("launch Ghostty TUI attached to same Codex thread", async () => {
+    const proof = await launchGhosttyCodexTui(task);
+    manifest.ghostty_remote_tui = proof;
+    writeManifest();
+    return proof;
+  });
+
+  const initialTurn = await step("wait for initial Codex turn completion", async () => {
+    const turn = await waitForCompletedCodexTurn(appServer, task.native_thread_id, {
+      afterCompletedAt: 0,
+      timeoutMs: 180_000,
+    });
+    return summarizeTurn(turn);
+  });
+
+  await step("verify Ghostty and EventLoop share loaded Codex app-server", async () => {
+    const loaded = await waitForLoadedCodexThread(appServer, task.native_thread_id, 30_000);
+    assert(loaded.found === true, `Ghostty TUI did not load thread ${task.native_thread_id}: ${JSON.stringify(loaded)}`);
+    return {
+      ghostty_window_id: ghosttyRemoteTui.window_id,
+      loaded_thread_id: task.native_thread_id,
+      loaded_count: loaded.loaded_count,
+    };
+  });
+
+  await step("simulate manual Ghostty client turn on same Codex thread", async () => {
+    const manualClient = await connectInitializedCodexClient("eventloopos-proof-manual");
+    try {
+      const response = await manualClient.request("turn/start", {
+        threadId: task.native_thread_id,
+        input: [
+          {
+            type: "text",
+            text: [
+              "Manual visible TUI interleave proof.",
+              "Do not edit files. Do not run shell commands.",
+              "Reply with exactly: MANUAL_TUI_ACK",
+            ].join("\n"),
+            text_elements: [],
+          },
+        ],
+        responsesapiClientMetadata: {
+          eventloopos_probe: "manual_tui_interleave",
+        },
+      }, 60_000);
+      const completed = await waitForCompletedCodexTurn(appServer, task.native_thread_id, {
+        afterCompletedAt: initialTurn.completed_at ?? 0,
+        timeoutMs: 180_000,
+        requireAgentText: "MANUAL_TUI_ACK",
+      });
+      return {
+        started: summarizeTurnResponse(response),
+        completed: summarizeTurn(completed),
+      };
+    } finally {
+      manualClient.close();
+    }
+  });
+
+  await step("route Slack-like event into Codex task after manual turn", async () => {
+    const event = buildSlackEvent();
+    const body = await postJson("/events", { event });
+    assert(body.route_decision?.action === "inject_into_agent_thread", `route did not inject: ${JSON.stringify(body.route_decision)}`);
+    assert(body.route_decision?.target_task_id === task.task_id, "route targeted wrong task");
+    assert(body.route_decision?.target_task_session_id === task.task_session_id, "route targeted wrong task session");
+    assert(body.task_message?.status === "sent", "routed task message not sent");
+    return {
+      event_id: event.id,
+      task_message_id: body.task_message.id,
+    };
+  });
+
+  await step("send completion-marker command to Codex task", async () => {
+    const body = await postJson(`/task-sessions/${encodeURIComponent(task.task_session_id)}/followup`, {
+      text: [
+        "Use the routed event context.",
+        "Do not edit files. Do not run shell commands.",
+        `Reply with exactly one line beginning ${markerPrefix} followed by compact JSON:`,
+        `${markerPrefix}{"status":"waiting_approval","blocked_reason":"Codex proof task processed routed context and needs human approval before external send.","risk_tags":["external_send"],"summary":"Routed context processed; approval needed."}`,
+      ].join("\n"),
+      event_ids: ["evt_completion_workspace_slack_feedback"],
+      idempotency_key: "codex-completion-workspace-marker-command",
+    }, { "Idempotency-Key": "codex-completion-workspace-marker-command" });
+    assert(body.message?.status === "sent", `completion-marker command not sent: ${JSON.stringify(body)}`);
+    return {
+      task_message_id: body.message.id,
+    };
+  });
+
+  const queued = await step("poll completed Codex turn and enqueue human review", async () => {
+    const turn = await waitForCompletedCodexTurn(appServer, task.native_thread_id, {
+      afterCompletedAt: 0,
+      timeoutMs: 240_000,
+      requireMarker: true,
+    });
+    const marker = parseAgentRunMarker(turn);
+    const agentRun = buildAgentRunFromMarker({
+      marker,
+      task,
+      turn,
+    });
+    const body = await postJson("/agent-runs", agentRun);
+    assert(body.agent_run?.id === agentRun.id, "agent run id mismatch");
+    assert(body.agent_run?.status === "waiting_approval", "agent run not waiting approval");
+    assert(body.queue_item?.state === "ready", "agent run did not queue human review");
+    assert(body.queue_item?.task_id === task.task_id, "queue item task mismatch");
+    return {
+      turn: summarizeTurn(turn),
+      agent_run_id: body.agent_run.id,
+      queue_item_id: body.queue_item.id,
+      review_packet_id: body.review_packet.id,
+    };
+  });
+
+  await step("approve queued item and resume same Codex thread", async () => {
+    const body = await postJson(`/queue/${encodeURIComponent(queued.queue_item_id)}/actions/recommended`, {
+      actor_id: "codex_completion_workspace_proof",
+    });
+    assert(body.ok === true, `recommended action failed: ${JSON.stringify(body)}`);
+    assert(body.item?.state === "done", "queue item not done");
+    assert(body.action_result?.task_session_id === task.task_session_id, "approval did not target same task session");
+    assert(body.action_result?.task_message?.status === "sent", "approval followup not sent");
+    return {
+      queue_item_id: queued.queue_item_id,
+      task_message_id: body.action_result.task_message.id,
+    };
+  });
+
+  await step("run isolated AeroSpace workspace proof", async () => {
+    const nestedManifest = resolve(artifactDir, "aerospace-isolated-proof.json");
+    await spawnChecked("pnpm", ["proof:live:isolated"], {
+      ...process.env,
+      EVENTLOOPOS_PROOF_MANIFEST: nestedManifest,
+    });
+    return {
+      command: "pnpm proof:live:isolated",
+    };
+  });
+
+  await step("assert queue drained and task history observable", async () => {
+    const next = await getJson("/queue/next");
+    assert(next.item === null, `expected empty queue, got ${JSON.stringify(next.item)}`);
+
+    const messages = await getJson(`/task-messages?task_session_id=${encodeURIComponent(task.task_session_id)}&limit=20`);
+    const sent = (messages.messages ?? []).filter((message) => message.status === "sent");
+    assert(sent.length >= 3, `expected at least 3 sent task messages, got ${sent.length}`);
+
+    const activity = await getJson(`/activity?task_session_id=${encodeURIComponent(task.task_session_id)}&limit=100`);
+    const types = new Set((activity.events ?? []).map((event) => event.type));
+    assert(types.has("task_followup_sent"), "activity missing task_followup_sent");
+    assert(types.has("queue_item_done"), "activity missing queue_item_done");
+    return {
+      sent_task_messages: sent.length,
+      activity_types: [...types].sort(),
+    };
+  });
+
+  manifest.passed = true;
+} catch (error) {
+  manifest.error = error instanceof Error ? error.stack ?? error.message : String(error);
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  await cleanupGhosttyRemoteTui();
+  manifest.ghostty_cleanup = await verifyGhosttyRemoteTuiCleanedUp();
+  if (manifest.passed && manifest.ghostty_cleanup.ok !== true) {
+    manifest.passed = false;
+    manifest.error = `Ghostty cleanup verification failed: ${JSON.stringify(manifest.ghostty_cleanup)}`;
+    process.exitCode = 1;
+  }
+  await stopOrchestrator();
+  appServer?.close();
+  manifest.finished_at = new Date().toISOString();
+  manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+  writeManifest();
+  console.log(`codex completion workspace proof manifest: ${manifestPath}`);
+}
+
+async function startCodexAppServer() {
+  const appServerPort = await freePort();
+  const url = `ws://127.0.0.1:${appServerPort}`;
+  const child = spawn("codex", ["app-server", "--listen", url], {
+    cwd: repoRoot,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.pipe(process.stdout);
+  child.stderr.on("data", (chunk) => process.stderr.write(chunk));
+
+  await waitForCodexAppServerReady(appServerPort);
+  const rpc = await connectCodexWebSocket(url);
+  await rpc.request("initialize", {
+    clientInfo: {
+      name: "eventloopos-proof",
+      title: "eventloopOS proof",
+      version: "0.0.0",
+    },
+    capabilities: {
+      experimentalApi: true,
+    },
+  });
+
+  return {
+    url,
+    request: rpc.request,
+    close() {
+      rpc.close();
+      if (!child.killed) child.kill("SIGTERM");
+    },
+  };
+}
+
+async function connectCodexWebSocket(url) {
+  assert(typeof WebSocket === "function", "global WebSocket is unavailable; need Node with WebSocket support");
+  const socket = new WebSocket(url);
+  await new Promise((resolveOpen, rejectOpen) => {
+    socket.addEventListener("open", resolveOpen, { once: true });
+    socket.addEventListener("error", () => rejectOpen(new Error(`failed to open Codex app-server websocket ${url}`)), { once: true });
+  });
+
+  const pending = new Map();
+  let nextId = 1;
+  let closed = false;
+
+  socket.addEventListener("message", (event) => {
+    const text = typeof event.data === "string" ? event.data : undefined;
+    if (!text?.trim()) return;
+    let message;
+    try {
+      message = JSON.parse(text);
+    } catch {
+      return;
+    }
+    if (typeof message.id !== "number") return;
+    const request = pending.get(message.id);
+    if (!request) return;
+    pending.delete(message.id);
+    clearTimeout(request.timeout);
+    if (message.error !== undefined) {
+      request.reject(new Error(errorMessage(message.error)));
+      return;
+    }
+    request.resolve(message.result);
+  });
+  socket.addEventListener("close", () => {
+    closed = true;
+    for (const request of pending.values()) {
+      clearTimeout(request.timeout);
+      request.reject(new Error("Codex app-server websocket closed"));
+    }
+    pending.clear();
+  });
+
+  const request = async (method, params, timeoutMs = 30_000) => {
+    if (closed) throw new Error("Codex app-server websocket is closed");
+    const id = nextId++;
+    socket.send(JSON.stringify({ id, method, params }));
+    return await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`Codex app-server request timed out: ${method}`));
+      }, timeoutMs);
+      pending.set(id, { resolve, reject, timeout });
+    });
+  };
+
+  return {
+    request,
+    close() {
+      closed = true;
+      for (const request of pending.values()) {
+        clearTimeout(request.timeout);
+        request.reject(new Error("Codex app-server websocket closed"));
+      }
+      pending.clear();
+      socket.close();
+    },
+  };
+}
+
+async function connectInitializedCodexClient(name) {
+  const client = await connectCodexWebSocket(appServer.url);
+  await client.request("initialize", {
+    clientInfo: {
+      name,
+      title: name,
+      version: "0.0.0",
+    },
+    capabilities: {
+      experimentalApi: true,
+    },
+  });
+  return client;
+}
+
+async function waitForCodexAppServerReady(appServerPort) {
+  const readyUrl = `http://127.0.0.1:${appServerPort}/readyz`;
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(readyUrl);
+      if (response.ok) return;
+    } catch {
+      // App server not ready yet.
+    }
+    await sleep(250);
+  }
+  throw new Error(`timed out waiting for Codex app-server readyz at ${readyUrl}`);
+}
+
+async function launchGhosttyCodexTui(task) {
+  const before = await listAerospaceWindows();
+  const beforeIds = new Set(before.map((window) => window.window_id));
+  const launcherPath = ghosttyCodexRemoteHelperPath;
+  const title = `eventloopOS-codexw-smoke-${runId}`;
+  ghosttyRemoteTui = {
+    title,
+    launcher_path: launcherPath,
+    native_thread_id: task.native_thread_id,
+  };
+  manifest.ghostty_remote_tui = ghosttyRemoteTui;
+  writeManifest();
+  await spawnChecked("open", [
+    "-F",
+    "-na",
+    "Ghostty",
+    "--env",
+    `CODEX_HOME=${process.env.CODEX_HOME ?? `${process.env.HOME}/.codex-work`}`,
+    "--env",
+    `EVENTLOOPOS_CODEX_APP_SERVER_URL=${appServer.url}`,
+    "--env",
+    `EVENTLOOPOS_THREAD_ID=${task.native_thread_id}`,
+    "--env",
+    `EVENTLOOPOS_CODEX_WORKDIR=${codexWorkdir}`,
+    "--env",
+    `EVENTLOOPOS_GHOSTTY_TITLE=${title}`,
+    "--args",
+    "-e",
+    launcherPath,
+  ]);
+
+  const launched = await waitForGhosttySmokeWindow(title, beforeIds, launcherPath, 30_000);
+  const originalWorkspace = launched.workspace;
+  const scratchWorkspace = originalWorkspace === "eventloop-smoke" ? "eventloop-smoke-alt" : "eventloop-smoke";
+  await execFilePromise("aerospace", ["move-node-to-workspace", "--window-id", String(launched.window_id), scratchWorkspace]);
+  await sleep(500);
+  await assertNoNonTestWindowMoved(before, new Set([launched.window_id]));
+  await execFilePromise("aerospace", ["move-node-to-workspace", "--window-id", String(launched.window_id), originalWorkspace]);
+  await sleep(500);
+  await assertNoNonTestWindowMoved(before, new Set([launched.window_id]));
+
+  const proof = {
+    title,
+    launcher_path: launcherPath,
+    window_id: launched.window_id,
+    original_workspace: originalWorkspace,
+    scratch_workspace: scratchWorkspace,
+    native_thread_id: task.native_thread_id,
+  };
+  ghosttyRemoteTui = proof;
+  manifest.ghostty_remote_tui = proof;
+  writeManifest();
+  return proof;
+}
+
+async function waitForLoadedCodexThread(appServerConnection, threadId, timeoutMs) {
+  const started = Date.now();
+  let last = [];
+  while (Date.now() - started < timeoutMs) {
+    const result = await appServerConnection.request("thread/loaded/list", {
+      limit: 100,
+    }, 30_000);
+    last = Array.isArray(result.data) ? result.data : [];
+    if (last.some((thread) => loadedThreadId(thread) === threadId)) {
+      return {
+        found: true,
+        loaded_count: last.length,
+      };
+    }
+    await sleep(1_000);
+  }
+  return {
+    found: false,
+    loaded_count: last.length,
+    loaded_ids: last.map((thread) => loadedThreadId(thread)).filter(Boolean),
+  };
+}
+
+function loadedThreadId(thread) {
+  if (typeof thread === "string") return thread;
+  if (thread && typeof thread === "object" && typeof thread.id === "string") return thread.id;
+  return undefined;
+}
+
+async function cleanupGhosttyRemoteTui() {
+  if (!ghosttyRemoteTui) return;
+  if (ghosttyRemoteTui.launcher_path) {
+    try {
+      await execFilePromise("pkill", ["-f", ghosttyRemoteTui.launcher_path], { timeoutMs: 5_000 });
+    } catch {
+      // Process may already be gone.
+    }
+  }
+  if (ghosttyRemoteTui.window_id) {
+    try {
+      await execFilePromise("aerospace", ["close", "--window-id", String(ghosttyRemoteTui.window_id)], { timeoutMs: 5_000 });
+    } catch {
+      // Window id can churn while Ghostty starts; fall back to title match below.
+    }
+  }
+  if (ghosttyRemoteTui.title) {
+    try {
+      const windows = await listAerospaceWindows();
+      for (const window of windows) {
+        if (window.app_name === "Ghostty" && window.title.includes(ghosttyRemoteTui.title)) {
+          await execFilePromise("aerospace", ["close", "--window-id", String(window.window_id)], { timeoutMs: 5_000 });
+        }
+      }
+    } catch {
+      // Cleanup is best-effort; manifest preserves title/window id for manual close if needed.
+    }
+  }
+}
+
+async function verifyGhosttyRemoteTuiCleanedUp() {
+  if (!ghosttyRemoteTui) {
+    return {
+      ok: true,
+      reason: "not_launched",
+    };
+  }
+  const remainingPids = ghosttyRemoteTui.launcher_path ? await pgrep(ghosttyRemoteTui.launcher_path) : [];
+  const remainingWindows = [];
+  try {
+    const windows = await listAerospaceWindows();
+    for (const window of windows) {
+      if (
+        (ghosttyRemoteTui.window_id && window.window_id === ghosttyRemoteTui.window_id)
+        || (ghosttyRemoteTui.title && window.app_name === "Ghostty" && window.title.includes(ghosttyRemoteTui.title))
+      ) {
+        remainingWindows.push(window);
+      }
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "cleanup_window_check_failed",
+      error: error instanceof Error ? error.message : String(error),
+      remaining_pids: remainingPids,
+    };
+  }
+  return {
+    ok: remainingPids.length === 0 && remainingWindows.length === 0,
+    remaining_pids: remainingPids,
+    remaining_windows: remainingWindows,
+  };
+}
+
+async function waitForGhosttySmokeWindow(title, beforeIds, launcherPath, timeoutMs) {
+  const started = Date.now();
+  let fallbackCandidate;
+  while (Date.now() - started < timeoutMs) {
+    const windows = await listAerospaceWindows();
+    const titleCandidates = windows.filter((window) => (
+      window.app_name === "Ghostty"
+      && !beforeIds.has(window.window_id)
+      && window.title.includes(title)
+    ));
+    if (titleCandidates.length === 1) return titleCandidates[0];
+    if (titleCandidates.length > 1) {
+      throw new Error(`Ghostty smoke launch created multiple title-matched windows: ${JSON.stringify(titleCandidates)}`);
+    }
+
+    const smokePids = await pgrep(launcherPath);
+    const pidWindows = [];
+    for (const pid of smokePids) {
+      pidWindows.push(...await listAerospaceWindowsForPid(pid));
+    }
+    const newPidWindows = pidWindows.filter((window) => !beforeIds.has(window.window_id));
+    if (newPidWindows.length === 1) {
+      return newPidWindows[0];
+    }
+    if (newPidWindows.length > 1) {
+      fallbackCandidate = newPidWindows.find((window) => window.title.includes(title));
+    }
+
+    const newGhosttyWindows = windows.filter((window) => window.app_name === "Ghostty" && !beforeIds.has(window.window_id));
+    if (newGhosttyWindows.length === 1) {
+      fallbackCandidate = newGhosttyWindows[0];
+    } else if (newGhosttyWindows.length > 1) {
+      throw new Error(`Ghostty smoke launch created multiple untitled candidate windows: ${JSON.stringify(newGhosttyWindows)}`);
+    }
+    await sleep(500);
+  }
+  if (fallbackCandidate) {
+    return fallbackCandidate;
+  }
+  throw new Error(`timed out waiting for new Ghostty smoke window titled ${title}`);
+}
+
+async function pgrep(pattern) {
+  try {
+    const { stdout } = await execFilePromise("pgrep", ["-f", pattern], { timeoutMs: 5_000 });
+    return stdout.split(/\r?\n/)
+      .map((line) => Number(line.trim()))
+      .filter((pid) => Number.isInteger(pid) && pid > 0);
+  } catch {
+    return [];
+  }
+}
+
+async function assertNoNonTestWindowMoved(before, testWindowIds) {
+  const after = await listAerospaceWindows();
+  const afterById = new Map(after.map((window) => [window.window_id, window]));
+  const changed = [];
+  for (const beforeWindow of before) {
+    if (testWindowIds.has(beforeWindow.window_id)) continue;
+    const afterWindow = afterById.get(beforeWindow.window_id);
+    if (!afterWindow) continue;
+    if (afterWindow.workspace !== beforeWindow.workspace) {
+      changed.push({
+        window_id: beforeWindow.window_id,
+        app_name: beforeWindow.app_name,
+        title: beforeWindow.title,
+        before: beforeWindow.workspace,
+        after: afterWindow.workspace,
+      });
+    }
+  }
+  assert(changed.length === 0, `non-test windows changed workspace: ${JSON.stringify(changed)}`);
+}
+
+async function listAerospaceWindows() {
+  const { stdout } = await execFilePromise("aerospace", [
+    "list-windows",
+    "--all",
+    "--format",
+    "%{window-id}|%{app-name}|%{window-title}|%{workspace}",
+  ], { timeoutMs: 10_000 });
+  return stdout.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split("|");
+      const windowId = Number(parts.shift());
+      const appName = parts.shift() ?? "";
+      const workspace = parts.pop() ?? "";
+      const title = parts.join("|");
+      assert(Number.isInteger(windowId), `invalid AeroSpace window id line: ${line}`);
+      return {
+        window_id: windowId,
+        app_name: appName,
+        title,
+        workspace,
+      };
+    });
+}
+
+async function listAerospaceWindowsForPid(pid) {
+  const { stdout } = await execFilePromise("aerospace", [
+    "list-windows",
+    "--monitor",
+    "all",
+    "--pid",
+    String(pid),
+    "--format",
+    "%{window-id}|%{app-name}|%{window-title}|%{workspace}",
+  ], { timeoutMs: 10_000 });
+  return parseAerospaceWindowLines(stdout);
+}
+
+function parseAerospaceWindowLines(stdout) {
+  return stdout.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split("|");
+      const windowId = Number(parts.shift());
+      const appName = parts.shift() ?? "";
+      const workspace = parts.pop() ?? "";
+      const title = parts.join("|");
+      assert(Number.isInteger(windowId), `invalid AeroSpace window id line: ${line}`);
+      return {
+        window_id: windowId,
+        app_name: appName,
+        title,
+        workspace,
+      };
+    });
+}
+
+async function waitForCompletedCodexTurn(appServerConnection, threadId, options) {
+  const started = Date.now();
+  let last = [];
+  while (Date.now() - started < options.timeoutMs) {
+    const result = await appServerConnection.request("thread/turns/list", {
+      threadId,
+      limit: 10,
+      sortDirection: "desc",
+    }, 45_000);
+    last = Array.isArray(result.data) ? result.data : [];
+    const completed = last.find((turn) => {
+      if (turn.status !== "completed") return false;
+      if (typeof turn.completedAt === "number" && turn.completedAt <= options.afterCompletedAt) return false;
+      if (options.requireMarker && !agentMessages(turn).some((text) => text.includes(markerPrefix))) return false;
+      if (options.requireAgentText && !agentMessages(turn).some((text) => text.includes(options.requireAgentText))) return false;
+      return true;
+    });
+    if (completed) return completed;
+    await sleep(2_000);
+  }
+
+  throw new Error(`timed out waiting for completed Codex turn on ${threadId}; last turns: ${JSON.stringify(last.map(summarizeTurn))}`);
+}
+
+function parseAgentRunMarker(turn) {
+  for (const text of agentMessages(turn)) {
+    const index = text.indexOf(markerPrefix);
+    if (index === -1) continue;
+    const line = text.slice(index + markerPrefix.length).split(/\r?\n/, 1)[0]?.trim() ?? "";
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+    } catch {
+      throw new Error(`invalid ${markerPrefix.trim()} JSON: ${line}`);
+    }
+  }
+  throw new Error(`completed turn ${turn.id} did not include ${markerPrefix.trim()} marker`);
+}
+
+function buildAgentRunFromMarker(input) {
+  const status = input.marker.status === "blocked" ? "blocked" : "waiting_approval";
+  const now = new Date().toISOString();
+  const stableTurnId = stableId(input.turn.id);
+  return {
+    id: `run_codex_completion_${stableTurnId}`,
+    provider: "codex",
+    task_id: input.task.task_id,
+    thread_id: input.task.native_thread_id,
+    status,
+    started_at: input.turn.startedAt ? new Date(input.turn.startedAt * 1000).toISOString() : now,
+    updated_at: now,
+    completed_at: input.turn.completedAt ? new Date(input.turn.completedAt * 1000).toISOString() : now,
+    blocked_reason: typeof input.marker.blocked_reason === "string"
+      ? input.marker.blocked_reason
+      : "Codex task completed and needs human review.",
+    risk_tags: Array.isArray(input.marker.risk_tags)
+      ? input.marker.risk_tags.filter((item) => typeof item === "string")
+      : [],
+    evidence: [
+      {
+        id: `ev_codex_completion_${stableTurnId}`,
+        kind: "codex_turn",
+        title: typeof input.marker.summary === "string" ? input.marker.summary : "Codex turn completion marker",
+        ref: `codex-app-server://thread/${input.task.native_thread_id}/turn/${input.turn.id}`,
+        captured_at: now,
+      },
+    ],
+    output_refs: [
+      {
+        id: `raw_codex_completion_${stableTurnId}`,
+        uri: `codex-app-server://thread/${input.task.native_thread_id}/turn/${input.turn.id}`,
+        media_type: "application/json",
+      },
+    ],
+    resume_actions: [
+      {
+        id: `act_codex_completion_${stableTurnId}_resume`,
+        type: "resume_agent",
+        label: "Resume Codex task",
+        requires_confirmation: true,
+        side_effect: "local",
+        payload: {
+          agent_run_id: `run_codex_completion_${stableTurnId}`,
+          thread_id: input.task.native_thread_id,
+        },
+      },
+    ],
+  };
+}
+
+function agentMessages(turn) {
+  const items = Array.isArray(turn.items) ? turn.items : [];
+  return items
+    .filter((item) => item?.type === "agentMessage" && typeof item.text === "string")
+    .map((item) => item.text);
+}
+
+function summarizeTurn(turn) {
+  return {
+    id: turn.id,
+    status: turn.status,
+    started_at: turn.startedAt,
+    completed_at: turn.completedAt,
+    item_count: Array.isArray(turn.items) ? turn.items.length : 0,
+    item_types: Array.isArray(turn.items) ? turn.items.map((item) => item?.type).filter(Boolean) : [],
+  };
+}
+
+function summarizeTurnResponse(response) {
+  const turn = response?.turn;
+  if (!turn || typeof turn !== "object") {
+    return response;
+  }
+  return summarizeTurn(turn);
+}
+
+async function writeCodexTaskMap(threadId, mappedTaskId) {
+  writeFileSync(codexTaskMapPath, `${JSON.stringify({ [threadId]: mappedTaskId }, null, 2)}\n`, "utf8");
+  await sleep(500);
+}
+
+function startOrchestrator(listenPort, codexAppServerUrl) {
+  const child = spawn("node", ["app/orchestrator/dist/src/index.js"], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      ORCHESTRATOR_HOST: "127.0.0.1",
+      ORCHESTRATOR_PORT: String(listenPort),
+      ORCHESTRATOR_SEED_FIXTURE: "app/orchestrator/fixtures/empty-review-packets.json",
+      ORCHESTRATOR_TASK_SESSIONS: "codex_app_server",
+      ORCHESTRATOR_CODEX_APP_SERVER_URL: codexAppServerUrl,
+      ORCHESTRATOR_CODEX_TASK_MAP_PATH: codexTaskMapPath,
+      ORCHESTRATOR_MCP_SOURCES: "off",
+      ORCHESTRATOR_WORKSPACE: "aerospace",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.pipe(process.stdout);
+  child.stderr.pipe(process.stderr);
+  return child;
+}
+
+async function stopOrchestrator() {
+  if (!server || server.killed || server.exitCode !== null) return;
+  server.kill("SIGTERM");
+  await onceExit(server);
+  server = undefined;
+}
+
+async function step(name, run) {
+  const record = {
+    name,
+    status: "running",
+    started_at: new Date().toISOString(),
+    finished_at: undefined,
+    duration_ms: undefined,
+    details: undefined,
+    error: undefined,
+  };
+  manifest.steps.push(record);
+  writeManifest();
+  console.log(`codex completion workspace proof start: ${name}`);
+  try {
+    const details = await run();
+    record.status = "passed";
+    record.details = details;
+    return details;
+  } catch (error) {
+    record.status = "failed";
+    record.error = error instanceof Error ? error.message : String(error);
+    throw error;
+  } finally {
+    record.finished_at = new Date().toISOString();
+    record.duration_ms = Date.parse(record.finished_at) - Date.parse(record.started_at);
+    writeManifest();
+    console.log(`codex completion workspace proof ${record.status}: ${name}`);
+  }
+}
+
+function buildSlackEvent() {
+  return {
+    id: "evt_completion_workspace_slack_feedback",
+    source: "slack",
+    source_id: "slack:dm:completion-workspace-proof",
+    idempotency_key: "slack:completion-workspace-proof:feedback",
+    occurred_at: new Date().toISOString(),
+    received_at: new Date().toISOString(),
+    actor: {
+      id: "actor_teammate",
+      type: "human",
+      name: "Teammate",
+    },
+    project_hint: "eventloopOS",
+    task_hint: "completion workspace proof",
+    type: "slack.message",
+    title: "Completion workspace feedback",
+    summary: "Mention that routed event context reached the Codex task before human approval.",
+    raw_ref: {
+      id: "raw_completion_workspace_slack",
+      uri: "slack://dm/completion-workspace-proof/feedback",
+      media_type: "application/json",
+    },
+    links: [
+      {
+        label: "Slack thread",
+        url: "https://slack.example.test/archives/DTEST/p1715112000000001",
+      },
+    ],
+    resources: [
+      {
+        id: "ctx_completion_workspace_slack",
+        kind: "slack_thread",
+        title: "Completion workspace feedback",
+        url: "https://slack.example.test/archives/DTEST/p1715112000000001",
+        source: "slack",
+        captured_at: new Date().toISOString(),
+        restore_confidence: "high",
+        text_quote: "Routed event context reached the Codex task.",
+      },
+    ],
+  };
+}
+
+async function getJson(path) {
+  const response = await fetch(new URL(path, manifest.orchestrator_url));
+  return await parseResponse(response, "GET", path);
+}
+
+async function postJson(path, body, headers = {}) {
+  const response = await fetch(new URL(path, manifest.orchestrator_url), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+  return await parseResponse(response, "POST", path);
+}
+
+async function parseResponse(response, method, path) {
+  const text = await response.text();
+  let body;
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`${method} ${path} returned invalid JSON ${response.status}: ${text}`);
+  }
+  if (!response.ok) {
+    throw new Error(`${method} ${path} failed ${response.status}: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+async function waitForHealth(url) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(new URL("/health", url));
+      if (response.ok) return;
+    } catch {
+      // Server not ready yet.
+    }
+    await sleep(250);
+  }
+  throw new Error(`timed out waiting for orchestrator health at ${url}/health`);
+}
+
+async function freePort() {
+  return await new Promise((resolve, reject) => {
+    const socket = createServer();
+    socket.once("error", reject);
+    socket.listen(0, "127.0.0.1", () => {
+      const address = socket.address();
+      socket.close(() => {
+        if (address && typeof address === "object") {
+          resolve(address.port);
+        } else {
+          reject(new Error("failed to allocate free port"));
+        }
+      });
+    });
+  });
+}
+
+async function spawnChecked(command, args, env = process.env) {
+  return await new Promise((resolveSpawn, rejectSpawn) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      env,
+      stdio: "inherit",
+    });
+    child.on("error", rejectSpawn);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolveSpawn();
+      } else {
+        rejectSpawn(new Error(`${command} ${args.join(" ")} exited with ${signal ?? code}`));
+      }
+    });
+  });
+}
+
+async function spawnJson(command, args, env = process.env) {
+  const output = await spawnCapture(command, args, env);
+  const lines = output.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index];
+    if (!line.startsWith("{")) continue;
+    try {
+      return JSON.parse(line);
+    } catch {
+      // Keep scanning; pnpm may print unrelated braces in logs.
+    }
+  }
+  throw new Error(`${command} ${args.join(" ")} did not print a JSON object. stdout: ${output.stdout} stderr: ${output.stderr}`);
+}
+
+async function spawnCapture(command, args, env = process.env) {
+  return await new Promise((resolveSpawn, rejectSpawn) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      encoding: "utf8",
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      const text = String(chunk);
+      stdout += text;
+      process.stdout.write(text);
+    });
+    child.stderr.on("data", (chunk) => {
+      const text = String(chunk);
+      stderr += text;
+      process.stderr.write(text);
+    });
+    child.on("error", rejectSpawn);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolveSpawn({ stdout, stderr });
+      } else {
+        rejectSpawn(new Error(`${command} ${args.join(" ")} exited with ${signal ?? code}. stdout: ${stdout} stderr: ${stderr}`));
+      }
+    });
+  });
+}
+
+async function execFilePromise(command, args, options = {}) {
+  return await new Promise((resolveExec, rejectExec) => {
+    execFile(command, args, {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: options.timeoutMs ?? 10_000,
+    }, (error, stdout, stderr) => {
+      if (error) {
+        rejectExec(error);
+        return;
+      }
+      resolveExec({ stdout, stderr });
+    });
+  });
+}
+
+function writeManifest() {
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function errorMessage(error) {
+  if (typeof error === "string") return error;
+  if (error && typeof error === "object" && typeof error.message === "string") return error.message;
+  return JSON.stringify(error);
+}
+
+function stableId(input) {
+  return String(input).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "unknown";
+}
+
+function onceExit(child) {
+  return new Promise((resolve) => {
+    child.once("exit", resolve);
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

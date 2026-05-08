@@ -1,0 +1,163 @@
+#!/usr/bin/env node
+import { createServer } from "node:net";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { spawn } from "node:child_process";
+
+const startedAt = new Date();
+const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+const repoRoot = process.cwd();
+const artifactDir = resolve(repoRoot, process.env.EVENTLOOPOS_EVENT_LOOP_POSTGRES_PROOF_ARTIFACT_DIR ?? `artifacts/event-loop-postgres-proof/${runId}`);
+const manifestPath = resolve(artifactDir, "manifest.json");
+const containerName = process.env.EVENTLOOPOS_EVENT_LOOP_POSTGRES_CONTAINER ?? `eventloopos-product-loop-proof-${process.pid}`;
+const port = String(process.env.EVENTLOOPOS_EVENT_LOOP_POSTGRES_PORT ?? await freePort());
+const databaseUrl = process.env.EVENTLOOPOS_EVENT_LOOP_POSTGRES_DATABASE_URL
+  ?? `postgres://eventloop:eventloop@127.0.0.1:${port}/eventloop_test`;
+const nestedArtifactDir = resolve(artifactDir, "event-loop-proof");
+
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.event_loop_postgres_proof",
+  run_id: runId,
+  started_at: startedAt.toISOString(),
+  finished_at: undefined,
+  duration_ms: undefined,
+  artifact_dir: artifactDir,
+  nested_artifact_dir: nestedArtifactDir,
+  postgres_container: containerName,
+  postgres_port: port,
+  database_url: redactDatabaseUrl(databaseUrl),
+  steps: [],
+  passed: false,
+};
+
+let startedPostgres = false;
+mkdirSync(dirname(manifestPath), { recursive: true });
+writeManifest();
+
+try {
+  await step("start disposable postgres", async () => {
+    await spawnChecked("pnpm", ["run", "dev:postgres:up"], postgresEnv());
+    startedPostgres = true;
+    return {
+      container: containerName,
+      port,
+    };
+  });
+
+  await step("run event loop smoke across restart", async () => {
+    await spawnChecked("bin/event-loop-proof-smoke", [], {
+      ...process.env,
+      EVENTLOOPOS_EVENT_LOOP_PROOF_DATABASE_URL: databaseUrl,
+      EVENTLOOPOS_EVENT_LOOP_PROOF_RESTART_AFTER_QUEUE: "1",
+      EVENTLOOPOS_EVENT_LOOP_PROOF_ARTIFACT_DIR: nestedArtifactDir,
+    });
+    return {
+      manifest_path: resolve(nestedArtifactDir, "manifest.json"),
+    };
+  });
+
+  manifest.passed = true;
+} catch (error) {
+  manifest.error = error instanceof Error ? error.stack ?? error.message : String(error);
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  if (startedPostgres && process.env.EVENTLOOPOS_KEEP_DEV_POSTGRES !== "1") {
+    await step("stop disposable postgres", async () => {
+      await spawnChecked("pnpm", ["run", "dev:postgres:down"], postgresEnv(), { allowFailure: true });
+    }).catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+    });
+  }
+
+  manifest.finished_at = new Date().toISOString();
+  manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+  writeManifest();
+  console.log(`event-loop postgres proof manifest: ${manifestPath}`);
+}
+
+async function step(name, run) {
+  const record = {
+    name,
+    status: "running",
+    started_at: new Date().toISOString(),
+    finished_at: undefined,
+    duration_ms: undefined,
+    details: undefined,
+    error: undefined,
+  };
+  manifest.steps.push(record);
+  writeManifest();
+  console.log(`event-loop postgres proof start: ${name}`);
+  try {
+    const details = await run();
+    record.status = "passed";
+    record.details = details;
+    return details;
+  } catch (error) {
+    record.status = "failed";
+    record.error = error instanceof Error ? error.message : String(error);
+    throw error;
+  } finally {
+    record.finished_at = new Date().toISOString();
+    record.duration_ms = Date.parse(record.finished_at) - Date.parse(record.started_at);
+    writeManifest();
+    console.log(`event-loop postgres proof ${record.status}: ${name}`);
+  }
+}
+
+function postgresEnv() {
+  return {
+    ...process.env,
+    EVENTLOOPOS_POSTGRES_CONTAINER: containerName,
+    EVENTLOOPOS_POSTGRES_PORT: port,
+    EVENTLOOPOS_TEST_DATABASE_URL: databaseUrl,
+  };
+}
+
+async function spawnChecked(command, args, env, options = {}) {
+  return await new Promise((resolveSpawn, rejectSpawn) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      env,
+      stdio: "inherit",
+    });
+    child.on("error", rejectSpawn);
+    child.on("exit", (code, signal) => {
+      if (code === 0 || options.allowFailure) {
+        resolveSpawn();
+      } else {
+        rejectSpawn(new Error(`${command} ${args.join(" ")} exited with ${signal ?? code}`));
+      }
+    });
+  });
+}
+
+async function freePort() {
+  const probe = createServer();
+  await new Promise((resolveListen, rejectListen) => {
+    probe.once("error", rejectListen);
+    probe.listen(0, "127.0.0.1", resolveListen);
+  });
+  const address = probe.address();
+  await new Promise((resolveClose) => probe.close(resolveClose));
+  if (!address || typeof address === "string") {
+    throw new Error("failed to allocate free TCP port");
+  }
+  return address.port;
+}
+
+function writeManifest() {
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+function redactDatabaseUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) parsed.password = "redacted";
+    return parsed.toString();
+  } catch {
+    return "redacted";
+  }
+}

@@ -1,0 +1,414 @@
+#!/usr/bin/env node
+import { createServer } from "node:net";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { execFile, spawn } from "node:child_process";
+
+const startedAt = new Date();
+const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+const repoRoot = process.cwd();
+const artifactDir = resolve(repoRoot, process.env.EVENTLOOPOS_WORKSPACE_TASK_SWITCH_ARTIFACT_DIR ?? `artifacts/workspace-task-switch/${runId}`);
+const manifestPath = resolve(artifactDir, "manifest.json");
+const smokeTitles = [
+  `eventloopOS-task-switch-alpha-${runId}.txt`,
+  `eventloopOS-task-switch-beta-${runId}.txt`,
+];
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.workspace_task_switch_proof",
+  run_id: runId,
+  started_at: startedAt.toISOString(),
+  finished_at: undefined,
+  duration_ms: undefined,
+  artifact_dir: artifactDir,
+  orchestrator_url: undefined,
+  task_windows: [],
+  steps: [],
+  passed: false,
+};
+
+let server;
+let port;
+let smokeDir;
+
+mkdirSync(dirname(manifestPath), { recursive: true });
+writeManifest();
+
+try {
+  port = await freePort();
+  manifest.orchestrator_url = `http://127.0.0.1:${port}`;
+  writeManifest();
+
+  await step("build orchestrator", async () => {
+    await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "build"]);
+  });
+
+  server = startOrchestrator(port);
+
+  await step("wait for orchestrator", async () => {
+    await waitForHealth(manifest.orchestrator_url);
+  });
+
+  const before = await step("capture baseline windows", async () => {
+    const windows = await listAerospaceWindows();
+    return {
+      windows,
+      count: windows.length,
+    };
+  });
+
+  const taskWindows = await step("launch two sacrificial task windows", async () => {
+    smokeDir = mkdtempSync(join(tmpdir(), "eventloopos-task-switch-"));
+    for (const title of smokeTitles) {
+      const path = join(smokeDir, title);
+      writeFileSync(path, `${title}\n`, "utf8");
+      await execFilePromise("open", ["-a", "TextEdit", path], { timeoutMs: 5_000 });
+    }
+    const launched = await waitForSmokeWindows(smokeTitles, new Set(before.windows.map((window) => window.id)));
+    manifest.task_windows = launched;
+    writeManifest();
+    return launched;
+  });
+
+  const baselineById = new Map(before.windows.map((window) => [window.id, window]));
+  const alpha = taskWindows.find((window) => window.title.includes("alpha"));
+  const beta = taskWindows.find((window) => window.title.includes("beta"));
+  assert(alpha && beta, `missing smoke windows: ${JSON.stringify(taskWindows)}`);
+  const allowedIds = new Set([alpha.id, beta.id]);
+  const alphaWorkspace = alpha.workspace === "eventloop-alpha" ? "eventloop-alpha-alt" : "eventloop-alpha";
+  const betaWorkspace = beta.workspace === "eventloop-beta" ? "eventloop-beta-alt" : "eventloop-beta";
+
+  await step("restore task alpha workspace snapshot", async () => {
+    const body = await postJson("/workspace/restore", {
+      confirm_execute: true,
+      snapshot: {
+        backend: "aerospace",
+        windows: [
+          { ...alpha, workspace: alphaWorkspace },
+          { ...beta, workspace: betaWorkspace },
+        ],
+      },
+      current_windows: taskWindows,
+    }, { "Idempotency-Key": `workspace-task-switch-alpha-${runId}` });
+    assert(body.ok === true, `alpha restore failed: ${JSON.stringify(body)}`);
+    assertOnlyTestWindowsInPlan(body.plan, allowedIds);
+    const current = await listAerospaceWindows();
+    await assertWindowWorkspace(alpha.id, alphaWorkspace, current);
+    await assertWindowWorkspace(beta.id, betaWorkspace, current);
+    await assertNoBaselineWindowMoved(baselineById, current, allowedIds);
+    return {
+      command_count: body.plan.commands.length,
+      alpha_workspace: alphaWorkspace,
+      beta_workspace: betaWorkspace,
+    };
+  });
+
+  await step("switch to task beta workspace snapshot", async () => {
+    const currentTaskWindows = await currentVersions([alpha.id, beta.id]);
+    const body = await postJson("/workspace/restore", {
+      confirm_execute: true,
+      snapshot: {
+        backend: "aerospace",
+        windows: [
+          { ...alpha, workspace: betaWorkspace },
+          { ...beta, workspace: alphaWorkspace },
+        ],
+      },
+      current_windows: currentTaskWindows,
+    }, { "Idempotency-Key": `workspace-task-switch-beta-${runId}` });
+    assert(body.ok === true, `beta restore failed: ${JSON.stringify(body)}`);
+    assertOnlyTestWindowsInPlan(body.plan, allowedIds);
+    const current = await listAerospaceWindows();
+    await assertWindowWorkspace(alpha.id, betaWorkspace, current);
+    await assertWindowWorkspace(beta.id, alphaWorkspace, current);
+    await assertNoBaselineWindowMoved(baselineById, current, allowedIds);
+    return {
+      command_count: body.plan.commands.length,
+      alpha_workspace: betaWorkspace,
+      beta_workspace: alphaWorkspace,
+    };
+  });
+
+  await step("restore sacrificial windows to original workspaces", async () => {
+    const currentTaskWindows = await currentVersions([alpha.id, beta.id]);
+    const body = await postJson("/workspace/restore", {
+      confirm_execute: true,
+      snapshot: {
+        backend: "aerospace",
+        windows: [
+          alpha,
+          beta,
+        ],
+      },
+      current_windows: currentTaskWindows,
+    }, { "Idempotency-Key": `workspace-task-switch-cleanup-${runId}` });
+    assert(body.ok === true, `cleanup restore failed: ${JSON.stringify(body)}`);
+    assertOnlyTestWindowsInPlan(body.plan, allowedIds);
+    const current = await listAerospaceWindows();
+    await assertWindowWorkspace(alpha.id, alpha.workspace, current);
+    await assertWindowWorkspace(beta.id, beta.workspace, current);
+    await assertNoBaselineWindowMoved(baselineById, current, allowedIds);
+    return {
+      command_count: body.plan.commands.length,
+    };
+  });
+
+  manifest.passed = true;
+} catch (error) {
+  manifest.error = error instanceof Error ? error.stack ?? error.message : String(error);
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  await cleanupSmokeWindows();
+  await stopOrchestrator();
+  manifest.finished_at = new Date().toISOString();
+  manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+  writeManifest();
+  console.log(`workspace task switch proof manifest: ${manifestPath}`);
+}
+
+function startOrchestrator(listenPort) {
+  const child = spawn("node", ["app/orchestrator/dist/src/index.js"], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      ORCHESTRATOR_HOST: "127.0.0.1",
+      ORCHESTRATOR_PORT: String(listenPort),
+      ORCHESTRATOR_SEED_FIXTURE: "app/orchestrator/fixtures/empty-review-packets.json",
+      ORCHESTRATOR_TASK_SESSIONS: "off",
+      ORCHESTRATOR_MCP_SOURCES: "off",
+      ORCHESTRATOR_WORKSPACE: "aerospace",
+      ORCHESTRATOR_WORKSPACE_EXECUTE: "enabled",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.pipe(process.stdout);
+  child.stderr.pipe(process.stderr);
+  return child;
+}
+
+async function step(name, run) {
+  const record = {
+    name,
+    status: "running",
+    started_at: new Date().toISOString(),
+    finished_at: undefined,
+    duration_ms: undefined,
+    details: undefined,
+    error: undefined,
+  };
+  manifest.steps.push(record);
+  writeManifest();
+  console.log(`workspace task switch proof start: ${name}`);
+  try {
+    const details = await run();
+    record.status = "passed";
+    record.details = details;
+    return details;
+  } catch (error) {
+    record.status = "failed";
+    record.error = error instanceof Error ? error.message : String(error);
+    throw error;
+  } finally {
+    record.finished_at = new Date().toISOString();
+    record.duration_ms = Date.parse(record.finished_at) - Date.parse(record.started_at);
+    writeManifest();
+    console.log(`workspace task switch proof ${record.status}: ${name}`);
+  }
+}
+
+async function waitForSmokeWindows(titles, excludedIds) {
+  const deadline = Date.now() + 15_000;
+  let last = [];
+  while (Date.now() < deadline) {
+    const windows = await listAerospaceWindows();
+    last = windows;
+    const found = titles.map((title) => windows.find((window) => !excludedIds.has(window.id) && window.title.includes(title)));
+    if (found.every(Boolean)) return found;
+    await sleep(250);
+  }
+  throw new Error(`timed out waiting for task switch windows ${titles.join(", ")}; last=${JSON.stringify(last)}`);
+}
+
+async function currentVersions(ids) {
+  const windows = await listAerospaceWindows();
+  return ids.map((id) => {
+    const window = windows.find((candidate) => candidate.id === id);
+    assert(window, `window ${id} missing`);
+    return window;
+  });
+}
+
+function assertOnlyTestWindowsInPlan(plan, allowedIds) {
+  const commands = Array.isArray(plan?.commands) ? plan.commands : [];
+  for (const command of commands) {
+    const args = Array.isArray(command.args) ? command.args : [];
+    const windowId = Number(args[2]);
+    assert(args[0] === "move-node-to-workspace", `unexpected restore command ${JSON.stringify(command)}`);
+    assert(args[1] === "--window-id", `restore command missing --window-id ${JSON.stringify(command)}`);
+    assert(allowedIds.has(windowId), `restore plan tried to move non-test window ${windowId}`);
+  }
+}
+
+async function assertWindowWorkspace(windowId, workspace, windows) {
+  const window = windows.find((candidate) => candidate.id === windowId);
+  assert(window, `window ${windowId} missing`);
+  assert(window.workspace === workspace, `window ${windowId} workspace ${window.workspace}, expected ${workspace}`);
+}
+
+async function assertNoBaselineWindowMoved(baselineById, current, allowedIds) {
+  const currentById = new Map(current.map((window) => [window.id, window]));
+  const changed = [];
+  for (const [id, before] of baselineById) {
+    if (allowedIds.has(id)) continue;
+    const after = currentById.get(id);
+    if (after && after.workspace !== before.workspace) {
+      changed.push({ id, app: before.app, title: before.title, before: before.workspace, after: after.workspace });
+    }
+  }
+  assert(changed.length === 0, `non-test windows changed workspace: ${JSON.stringify(changed)}`);
+}
+
+async function listAerospaceWindows() {
+  const { stdout } = await execFilePromise("aerospace", [
+    "list-windows",
+    "--all",
+    "--format",
+    "%{window-id}|%{app-name}|%{window-title}|%{workspace}",
+  ], { timeoutMs: 10_000 });
+  return stdout.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split("|");
+      const id = Number(parts.shift());
+      const app = parts.shift() ?? "";
+      const workspace = parts.pop() ?? "";
+      const title = parts.join("|");
+      assert(Number.isInteger(id), `invalid AeroSpace window id line: ${line}`);
+      return { id, app, title, workspace };
+    });
+}
+
+async function waitForHealth(url) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(new URL("/health", url));
+      if (response.ok) return;
+    } catch {
+      // Server not ready yet.
+    }
+    await sleep(250);
+  }
+  throw new Error(`timed out waiting for orchestrator health at ${url}/health`);
+}
+
+async function postJson(path, body, headers = {}) {
+  const response = await fetch(new URL(path, manifest.orchestrator_url), {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...headers,
+    },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  const parsed = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    throw new Error(`POST ${path} failed ${response.status}: ${JSON.stringify(parsed)}`);
+  }
+  return parsed;
+}
+
+async function cleanupSmokeWindows() {
+  for (const title of smokeTitles) {
+    try {
+      await execFilePromise("osascript", [
+        "-e",
+        `tell application "TextEdit" to close (documents whose name is "${escapeAppleScriptString(title)}") saving no`,
+      ], { timeoutMs: 5_000 });
+    } catch {
+      // Already closed.
+    }
+  }
+  if (smokeDir) {
+    rmSync(smokeDir, { recursive: true, force: true });
+  }
+}
+
+async function stopOrchestrator() {
+  if (!server || server.killed || server.exitCode !== null) return;
+  server.kill("SIGTERM");
+  await new Promise((resolve) => server.once("exit", resolve));
+  server = undefined;
+}
+
+async function spawnChecked(command, args, env = process.env) {
+  return await new Promise((resolveSpawn, rejectSpawn) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      env,
+      stdio: "inherit",
+    });
+    child.on("error", rejectSpawn);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolveSpawn();
+      } else {
+        rejectSpawn(new Error(`${command} ${args.join(" ")} exited with ${signal ?? code}`));
+      }
+    });
+  });
+}
+
+async function execFilePromise(command, args, options = {}) {
+  return await new Promise((resolveExec, rejectExec) => {
+    execFile(command, args, {
+      cwd: repoRoot,
+      encoding: "utf8",
+      timeout: options.timeoutMs ?? 10_000,
+      maxBuffer: 1024 * 1024,
+    }, (error, stdout, stderr) => {
+      if (error) {
+        rejectExec(error);
+        return;
+      }
+      resolveExec({ stdout, stderr });
+    });
+  });
+}
+
+async function freePort() {
+  return await new Promise((resolve, reject) => {
+    const socket = createServer();
+    socket.once("error", reject);
+    socket.listen(0, "127.0.0.1", () => {
+      const address = socket.address();
+      socket.close(() => {
+        if (address && typeof address === "object") {
+          resolve(address.port);
+        } else {
+          reject(new Error("failed to allocate free port"));
+        }
+      });
+    });
+  });
+}
+
+function writeManifest() {
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+function escapeAppleScriptString(value) {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

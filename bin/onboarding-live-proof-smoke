@@ -1,0 +1,240 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { createServer } from "node:net";
+
+const startedAt = new Date();
+const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+const repoRoot = process.cwd();
+const artifactDir = resolve(repoRoot, process.env.EVENTLOOPOS_ONBOARDING_LIVE_ARTIFACT_DIR ?? `artifacts/onboarding-live/${runId}`);
+const manifestPath = resolve(artifactDir, "manifest.json");
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.onboarding_live_proof",
+  run_id: runId,
+  started_at: startedAt.toISOString(),
+  finished_at: undefined,
+  duration_ms: undefined,
+  artifact_dir: artifactDir,
+  orchestrator_url: undefined,
+  summary: undefined,
+  proposals: [],
+  task_session_count: undefined,
+  steps: [],
+  passed: false,
+};
+
+let server;
+let port;
+
+mkdirSync(dirname(manifestPath), { recursive: true });
+writeManifest();
+
+try {
+  port = await freePort();
+  manifest.orchestrator_url = `http://127.0.0.1:${port}`;
+  writeManifest();
+
+  await step("build orchestrator", async () => {
+    await spawnChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "build"]);
+  });
+
+  server = startOrchestrator(port);
+
+  await step("wait for orchestrator", async () => {
+    await waitForHealth(manifest.orchestrator_url);
+  });
+
+  const scan = await step("scan current Mac context", async () => {
+    const body = await getJson("/onboarding/scan");
+    assert(body.ok === true, `onboarding scan failed: ${JSON.stringify(redactScan(body))}`);
+    assert(body.summary?.window_count > 0, `expected live windows, got ${JSON.stringify(body.summary)}`);
+    assert(body.summary?.proposal_count > 0, `expected task proposals, got ${JSON.stringify(body.summary)}`);
+    const redacted = redactScan(body);
+    manifest.summary = redacted.summary;
+    manifest.proposals = redacted.proposals;
+    manifest.task_session_count = redacted.task_session_count;
+    writeManifest();
+    return redacted;
+  });
+
+  await step("verify Codex task runtime is visible", async () => {
+    const sessions = await getJson("/task-sessions");
+    const count = Array.isArray(sessions.sessions) ? sessions.sessions.length : 0;
+    const providers = Array.from(new Set((sessions.sessions ?? []).map((session) => session.provider).filter(Boolean))).sort();
+    assert(scan.summary.task_session_count === count, `onboarding session count ${scan.summary.task_session_count} did not match /task-sessions ${count}`);
+    assert(providers.includes("codex"), `expected Codex provider in task sessions, got ${providers.join(",") || "none"}`);
+    return {
+      count,
+      providers,
+      sample: (sessions.sessions ?? []).slice(0, 3).map((session) => ({
+        id: session.id,
+        provider: session.provider,
+        task_id: session.task_id,
+        status: session.status,
+      })),
+    };
+  });
+
+  manifest.passed = true;
+} catch (error) {
+  manifest.error = error instanceof Error ? error.stack ?? error.message : String(error);
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  await stopOrchestrator();
+  manifest.finished_at = new Date().toISOString();
+  manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+  writeManifest();
+  console.log(`onboarding live proof manifest: ${manifestPath}`);
+}
+
+function startOrchestrator(listenPort) {
+  const child = spawn("node", ["app/orchestrator/dist/src/index.js"], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      ORCHESTRATOR_HOST: "127.0.0.1",
+      ORCHESTRATOR_PORT: String(listenPort),
+      ORCHESTRATOR_SEED_FIXTURE: "app/orchestrator/fixtures/empty-review-packets.json",
+      ORCHESTRATOR_TASK_SESSIONS: "codex_app_server",
+      ORCHESTRATOR_MCP_SOURCES: "off",
+      ORCHESTRATOR_WORKSPACE: "aerospace",
+      ORCHESTRATOR_WORKSPACE_EXECUTE: "disabled",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.pipe(process.stdout);
+  child.stderr.pipe(process.stderr);
+  return child;
+}
+
+async function step(name, run) {
+  const record = {
+    name,
+    status: "running",
+    started_at: new Date().toISOString(),
+    finished_at: undefined,
+    duration_ms: undefined,
+    details: undefined,
+    error: undefined,
+  };
+  manifest.steps.push(record);
+  writeManifest();
+  console.log(`onboarding live proof start: ${name}`);
+  try {
+    const details = await run();
+    record.status = "passed";
+    record.details = details;
+    return details;
+  } catch (error) {
+    record.status = "failed";
+    record.error = error instanceof Error ? error.message : String(error);
+    throw error;
+  } finally {
+    record.finished_at = new Date().toISOString();
+    record.duration_ms = Date.parse(record.finished_at) - Date.parse(record.started_at);
+    writeManifest();
+    console.log(`onboarding live proof ${record.status}: ${name}`);
+  }
+}
+
+function redactScan(body) {
+  const proposals = (body.proposals ?? []).map((proposal) => ({
+    id: proposal.id,
+    task_id: proposal.task_id,
+    title: proposal.title,
+    confidence: proposal.confidence,
+    reason: proposal.reason,
+    window_count: Array.isArray(proposal.windows) ? proposal.windows.length : 0,
+    task_session_count: Array.isArray(proposal.task_sessions) ? proposal.task_sessions.length : 0,
+  }));
+  return {
+    ok: body.ok,
+    captured_at: body.captured_at,
+    summary: body.summary,
+    task_session_count: body.summary?.task_session_count ?? 0,
+    proposals,
+    ungrouped_window_count: Array.isArray(body.ungrouped_windows) ? body.ungrouped_windows.length : undefined,
+    warnings: body.warnings ?? [],
+  };
+}
+
+async function waitForHealth(url) {
+  const deadline = Date.now() + 20_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(new URL("/health", url));
+      if (response.ok) return;
+    } catch {
+      // Server not ready yet.
+    }
+    await sleep(250);
+  }
+  throw new Error(`timed out waiting for orchestrator health at ${url}/health`);
+}
+
+async function getJson(path) {
+  const response = await fetch(new URL(path, manifest.orchestrator_url));
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    throw new Error(`GET ${path} failed ${response.status}: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+async function spawnChecked(command, args, env = process.env) {
+  return await new Promise((resolveSpawn, rejectSpawn) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      env,
+      stdio: "inherit",
+    });
+    child.on("error", rejectSpawn);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolveSpawn();
+      } else {
+        rejectSpawn(new Error(`${command} ${args.join(" ")} exited with ${signal ?? code}`));
+      }
+    });
+  });
+}
+
+async function stopOrchestrator() {
+  if (!server || server.killed || server.exitCode !== null) return;
+  server.kill("SIGTERM");
+  await new Promise((resolve) => server.once("exit", resolve));
+  server = undefined;
+}
+
+async function freePort() {
+  return await new Promise((resolve, reject) => {
+    const socket = createServer();
+    socket.once("error", reject);
+    socket.listen(0, "127.0.0.1", () => {
+      const address = socket.address();
+      socket.close(() => {
+        if (address && typeof address === "object") {
+          resolve(address.port);
+        } else {
+          reject(new Error("failed to allocate free port"));
+        }
+      });
+    });
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function writeManifest() {
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}

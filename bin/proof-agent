@@ -197,6 +197,7 @@ function parseCommands(value) {
     { name: "lint", cmd: "pnpm", args: ["lint"] },
     { name: "typecheck", cmd: "pnpm", args: ["typecheck"] },
     { name: "test", cmd: "pnpm", args: ["test"] },
+    { name: "product event loop smoke", cmd: "pnpm", args: ["test:e2e:event-loop"] },
     { name: "test:e2e", cmd: "pnpm", args: ["test:e2e"] },
   ];
 }

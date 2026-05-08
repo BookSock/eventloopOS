@@ -10,6 +10,7 @@
     "dogfood:check": "node dist/src/dev/dogfood_check.js",
     "dev:postgres": "bin/dev-postgres",
     "live:aerospace": "pnpm run build && node dist/src/workspace/live_aerospace_smoke.js",
+    "live:aerospace:isolated": "pnpm run build && EVENTLOOPOS_ENABLE_ISOLATED_AEROSPACE=1 node dist/src/workspace/isolated_aerospace_smoke.js",
     "mcp:agent-slack": "node dist/src/mcp_sources/agent_slack_events_server.js",
     "mcp:gh-notifications": "node dist/src/mcp_sources/gh_notifications_server.js",
     "mcp:local-events": "node dist/src/mcp_sources/local_events_server.js",
