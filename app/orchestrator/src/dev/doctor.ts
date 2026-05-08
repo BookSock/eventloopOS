@@ -44,6 +44,7 @@ export type DoctorReport = {
 
 export type DoctorOptions = {
   baseUrl: string;
+  requireOrchestrator?: boolean;
   now?: () => Date;
   execFn?: ExecFunction;
   fetchFn?: typeof fetch;
@@ -63,6 +64,7 @@ export function doctorOptionsFromEnv(env: NodeJS.ProcessEnv): DoctorOptions {
   const transcriptCommandConfig = resolveTranscriptCommandConfigFromEnv(env);
   return {
     baseUrl: env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377",
+    requireOrchestrator: env.EVENTLOOPOS_DOCTOR_REQUIRE_ORCHESTRATOR !== "0",
     voiceTranscriptCommand: transcriptCommandConfig.command,
     voiceTranscriptArgs: transcriptCommandConfig.args,
     voiceTranscriptCommandConfigured: transcriptCommandConfig.configured,
@@ -77,7 +79,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   const fetchFn = options.fetchFn ?? fetch;
   const readFileFn = options.readFileFn ?? readTextFile;
   const checks = await Promise.all([
-    checkOrchestratorHealth(options.baseUrl, fetchFn),
+    checkOrchestratorHealth(options.baseUrl, fetchFn, options.requireOrchestrator !== false),
     checkAerospaceDaemon(execFn),
     checkDockerDaemon(execFn),
     checkBrowserE2E(execFn),
@@ -214,7 +216,7 @@ export async function runDoctorCli(options: DoctorOptions): Promise<number> {
   return report.ok ? 0 : 1;
 }
 
-async function checkOrchestratorHealth(baseUrl: string, fetchFn: typeof fetch): Promise<DoctorCheck> {
+async function checkOrchestratorHealth(baseUrl: string, fetchFn: typeof fetch, required: boolean): Promise<DoctorCheck> {
   try {
     const response = await fetchFn(new URL("/health", baseUrl));
     const body = await response.json() as unknown;
@@ -222,15 +224,21 @@ async function checkOrchestratorHealth(baseUrl: string, fetchFn: typeof fetch): 
 
     return {
       name: "orchestrator_health",
-      ok,
-      detail: ok ? "orchestrator health endpoint responded" : `unexpected health response: HTTP ${response.status}`,
+      ok: ok || !required,
+      detail: ok
+        ? "orchestrator health endpoint responded"
+        : required
+          ? `unexpected health response: HTTP ${response.status}`
+          : `optional orchestrator health check did not pass: HTTP ${response.status}`,
       source_url: `${baseUrl.replace(/\/$/, "")}/health`,
     };
   } catch (error) {
     return {
       name: "orchestrator_health",
-      ok: false,
-      detail: errorDetail(error),
+      ok: !required,
+      detail: required
+        ? errorDetail(error)
+        : `optional orchestrator health check skipped: ${errorDetail(error)}`,
       source_url: `${baseUrl.replace(/\/$/, "")}/health`,
     };
   }

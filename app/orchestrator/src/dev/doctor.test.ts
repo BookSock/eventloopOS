@@ -447,6 +447,50 @@ describe("developer doctor", () => {
     assert.equal(parsed.checks[0].name, "orchestrator_health");
     assert.equal(parsed.checks[0].detail, "fetch failed");
   });
+
+  it("can treat orchestrator health as optional for fresh-clone preflight", async () => {
+    const writes: string[] = [];
+    const exitCode = await runDoctorCli({
+      baseUrl: "http://127.0.0.1:4377",
+      requireOrchestrator: false,
+      platform: "darwin",
+      fetchFn: async () => {
+        throw new Error("fetch failed");
+      },
+      execFn: async (command, args) => {
+        if (command === "docker") return { stdout: "29.3.1\n", stderr: "" };
+        if (command === "pnpm") return { stdout: "Version 1.59.1\n", stderr: "" };
+        if (command === "swift") {
+          assert.deepEqual(args, ["--version"]);
+          return { stdout: "swift-driver version: 1.127.8 Apple Swift version 6.2.1\n", stderr: "" };
+        }
+        return { stdout: "[]", stderr: "" };
+      },
+      codexCheckFn: async () => ({
+        name: "codex_app_server",
+        ok: true,
+        detail: "Codex app-server responded; sampled 1 thread(s)",
+      }),
+      stdout: {
+        write(chunk: string) {
+          writes.push(chunk);
+          return true;
+        },
+      },
+    });
+
+    assert.equal(exitCode, 0);
+    const parsed = JSON.parse(writes.join(""));
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.checks[0].name, "orchestrator_health");
+    assert.equal(parsed.checks[0].ok, true);
+    assert.equal(parsed.checks[0].detail, "optional orchestrator health check skipped: fetch failed");
+  });
+
+  it("reads optional orchestrator health mode from env", () => {
+    assert.equal(doctorOptionsFromEnv({ EVENTLOOPOS_DOCTOR_REQUIRE_ORCHESTRATOR: "0" }).requireOrchestrator, false);
+    assert.equal(doctorOptionsFromEnv({}).requireOrchestrator, true);
+  });
 });
 
 function response(body: unknown, status: number): Response {

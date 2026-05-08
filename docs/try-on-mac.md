@@ -26,10 +26,10 @@ cd eventloopOS
 fnm use
 corepack enable
 pnpm install
-pnpm run dev:doctor
+pnpm run dev:doctor:preflight
 ```
 
-`dev:doctor` builds the orchestrator and reports readiness. It is strict: it expects a running orchestrator at `http://127.0.0.1:4377`, Docker, AeroSpace, browser tooling, and Codex app-server readiness. If you have not started the dogfood stack yet, an orchestrator health failure is expected. For a real trial, AeroSpace and Codex should report healthy before starting the dogfood stack. Launch AeroSpace once after installing it so the CLI can talk to the app server.
+`dev:doctor:preflight` builds the orchestrator and checks local tools before the orchestrator is running. It treats the `http://127.0.0.1:4377/health` check as optional, but still checks Docker, AeroSpace, browser tooling, Swift, MCP config shape, optional voice command config, and Codex app-server readiness. For a stricter check after the stack is running, use `pnpm run dev:doctor`. Launch AeroSpace once after installing it so the CLI can talk to the app server.
 
 ## Proof commands
 
@@ -175,7 +175,7 @@ After cloning, a Codex CLI agent should be able to follow this file. Useful firs
 
 ```sh
 pnpm install
-pnpm run dev:doctor
+pnpm run dev:doctor:preflight
 pnpm run dev:dogfood
 pnpm run queue:add -- --title "Test paper" --summary "Confirm local queue works."
 ```

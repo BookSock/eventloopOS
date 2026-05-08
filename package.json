@@ -37,6 +37,7 @@
     "test:db:docker": "pnpm --filter @eventloopos/orchestrator run test:db:docker",
     "test:db:native": "pnpm --filter @eventloopos/orchestrator run test:db:native",
     "dev:doctor": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dev:doctor",
+    "dev:doctor:preflight": "EVENTLOOPOS_DOCTOR_REQUIRE_ORCHESTRATOR=0 pnpm run dev:doctor",
     "dogfood:review": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dogfood:review",
     "dogfood:check": "pnpm --filter @eventloopos/orchestrator run build && pnpm --filter @eventloopos/orchestrator run dogfood:check",
     "proof:agent": "bin/proof-agent",
