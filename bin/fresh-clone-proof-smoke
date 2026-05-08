@@ -1,0 +1,138 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+
+const startedAt = new Date();
+const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+const repoRoot = process.cwd();
+const artifactDir = resolve(repoRoot, process.env.EVENTLOOPOS_FRESH_CLONE_ARTIFACT_DIR ?? `artifacts/fresh-clone/${runId}`);
+const manifestPath = resolve(artifactDir, "manifest.json");
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.fresh_clone_proof",
+  run_id: runId,
+  started_at: startedAt.toISOString(),
+  finished_at: undefined,
+  duration_ms: undefined,
+  artifact_dir: artifactDir,
+  temp_dir: undefined,
+  steps: [],
+  passed: false,
+};
+
+mkdirSync(dirname(manifestPath), { recursive: true });
+writeManifest();
+
+try {
+  const tempRoot = await mkdtemp(join(tmpdir(), "eventloopos-fresh-clone-"));
+  const cloneDir = join(tempRoot, "eventloopOS");
+  manifest.temp_dir = cloneDir;
+  writeManifest();
+
+  await step("copy tracked and shareable untracked files", async () => {
+    const files = await spawnCapture("sh", ["-c", "git ls-files -z; git ls-files --others --exclude-standard -z"], repoRoot);
+    await spawnChecked("rsync", ["-a", "--from0", "--files-from=-", "./", `${cloneDir}/`], repoRoot, files.stdoutBuffer);
+    return {
+      clone_dir: cloneDir,
+      copied_bytes: files.stdoutBuffer.length,
+    };
+  });
+
+  await step("install dependencies from lockfile", async () => {
+    await spawnChecked("pnpm", ["install", "--frozen-lockfile"], cloneDir);
+  });
+
+  await step("run fresh-clone preflight doctor", async () => {
+    await spawnChecked("pnpm", ["run", "dev:doctor:preflight"], cloneDir);
+  });
+
+  await step("typecheck fresh clone", async () => {
+    await spawnChecked("pnpm", ["typecheck"], cloneDir);
+  });
+
+  manifest.passed = true;
+} catch (error) {
+  manifest.error = error instanceof Error ? error.stack ?? error.message : String(error);
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  await step("cleanup temp clone", async () => {
+    if (manifest.temp_dir) {
+      rmSync(dirname(manifest.temp_dir), { recursive: true, force: true });
+    }
+  }, { allowFailure: true });
+  manifest.finished_at = new Date().toISOString();
+  manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+  writeManifest();
+  console.log(`fresh clone proof manifest: ${manifestPath}`);
+}
+
+async function step(name, run, options = {}) {
+  const record = {
+    name,
+    status: "running",
+    started_at: new Date().toISOString(),
+    finished_at: undefined,
+    duration_ms: undefined,
+    details: undefined,
+    error: undefined,
+  };
+  manifest.steps.push(record);
+  writeManifest();
+  console.log(`fresh clone proof start: ${name}`);
+  try {
+    const details = await run();
+    record.status = "passed";
+    record.details = details;
+    return details;
+  } catch (error) {
+    record.status = "failed";
+    record.error = error instanceof Error ? error.message : String(error);
+    if (!options.allowFailure) throw error;
+  } finally {
+    record.finished_at = new Date().toISOString();
+    record.duration_ms = Date.parse(record.finished_at) - Date.parse(record.started_at);
+    writeManifest();
+    console.log(`fresh clone proof ${record.status}: ${name}`);
+  }
+}
+
+async function spawnChecked(command, args, cwd, stdin) {
+  return await new Promise((resolveSpawn, rejectSpawn) => {
+    const child = spawn(command, args, {
+      cwd,
+      stdio: [stdin ? "pipe" : "ignore", "inherit", "inherit"],
+    });
+    if (stdin) {
+      child.stdin.end(stdin);
+    }
+    child.on("error", rejectSpawn);
+    child.on("exit", (code, signal) => {
+      if (code === 0) resolveSpawn();
+      else rejectSpawn(new Error(`${command} ${args.join(" ")} exited with ${signal ?? code}`));
+    });
+  });
+}
+
+async function spawnCapture(command, args, cwd) {
+  return await new Promise((resolveSpawn, rejectSpawn) => {
+    const child = spawn(command, args, { cwd, stdio: ["ignore", "pipe", "inherit"] });
+    const chunks = [];
+    child.stdout.on("data", (chunk) => chunks.push(chunk));
+    child.on("error", rejectSpawn);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolveSpawn({ stdoutBuffer: Buffer.concat(chunks) });
+      } else {
+        rejectSpawn(new Error(`${command} ${args.join(" ")} exited with ${signal ?? code}`));
+      }
+    });
+  });
+}
+
+function writeManifest() {
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}

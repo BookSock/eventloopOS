@@ -47,6 +47,7 @@
     "proof:live:isolated": "EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"isolated AeroSpace workspace proof\",\"cmd\":\"pnpm\",\"args\":[\"--filter\",\"@eventloopos/orchestrator\",\"run\",\"live:aerospace:isolated\"]}]' bin/proof-agent --manifest artifacts/proof-live-isolated-manifest.json",
     "proof:live:workspace-switch": "EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"isolated workspace task switch proof\",\"cmd\":\"node\",\"args\":[\"bin/workspace-task-switch-proof-smoke\"]}]' bin/proof-agent --manifest artifacts/proof-live-workspace-switch-manifest.json",
     "proof:master-priority": "EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"master priority queue proof\",\"cmd\":\"node\",\"args\":[\"bin/master-priority-proof-smoke\"]}]' bin/proof-agent --manifest artifacts/proof-master-priority-manifest.json",
+    "proof:fresh-clone": "node bin/fresh-clone-proof-smoke",
     "proof:audit": "node bin/mvp-proof-audit",
     "test:proof-agent": "EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"proof-agent-smoke\",\"cmd\":\"node\",\"args\":[\"--version\"]}]' bin/proof-agent --manifest artifacts/proof-agent-smoke-manifest.json",
     "dev:postgres": "pnpm --filter @eventloopos/orchestrator run dev:postgres",
@@ -79,7 +80,7 @@
     "fixtures:seed": "pnpm --filter @eventloopos/test-harness --if-present fixtures:seed",
     "packets:golden": "pnpm --filter @eventloopos/test-harness --if-present packets:golden",
     "lint": "pnpm -r --if-present lint",
-    "typecheck": "node --check bin/live-smoke && node --check bin/dev-dogfood && node --check bin/proof-agent && node --check bin/task-runtime-smoke && node --check bin/postgres-mcp-dogfood-smoke && node --check bin/claude-real-followup-smoke && node --check bin/provider-deeplink-smoke && node --check bin/agent-run-cli-smoke && node --check bin/event-loop-proof-smoke && node --check bin/event-loop-postgres-proof-smoke && node --check bin/event-loop-codex-proof-smoke && node --check bin/event-loop-codex-completion-workspace-proof-smoke && node --check bin/workspace-task-switch-proof-smoke && node --check bin/master-priority-proof-smoke && node --check bin/onboarding-live-proof-smoke && node --check bin/mvp-proof-audit && zsh -n bin/ghostty-codex-remote && pnpm -r --if-present typecheck",
+    "typecheck": "node --check bin/live-smoke && node --check bin/dev-dogfood && node --check bin/proof-agent && node --check bin/task-runtime-smoke && node --check bin/postgres-mcp-dogfood-smoke && node --check bin/claude-real-followup-smoke && node --check bin/provider-deeplink-smoke && node --check bin/agent-run-cli-smoke && node --check bin/event-loop-proof-smoke && node --check bin/event-loop-postgres-proof-smoke && node --check bin/event-loop-codex-proof-smoke && node --check bin/event-loop-codex-completion-workspace-proof-smoke && node --check bin/workspace-task-switch-proof-smoke && node --check bin/master-priority-proof-smoke && node --check bin/onboarding-live-proof-smoke && node --check bin/mvp-proof-audit && node --check bin/fresh-clone-proof-smoke && zsh -n bin/ghostty-codex-remote && pnpm -r --if-present typecheck",
     "ci": "pnpm test:proof-agent && pnpm proof:agent"
   },
   "devDependencies": {

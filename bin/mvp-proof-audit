@@ -56,6 +56,22 @@ try {
     "isolated workspace task switch proof",
   ]);
 
+  checkLatestManifest("fresh clone proof", "artifacts/fresh-clone/*/manifest.json", (manifest) => {
+    const requiredSteps = [
+      "copy tracked and shareable untracked files",
+      "install dependencies from lockfile",
+      "run fresh-clone preflight doctor",
+      "typecheck fresh clone",
+      "cleanup temp clone",
+    ];
+    assert(manifest.passed === true, "latest fresh-clone manifest did not pass");
+    assertStepsPassed(manifest.steps, requiredSteps);
+    return {
+      temp_dir: manifest.temp_dir,
+      duration_ms: manifest.duration_ms,
+    };
+  });
+
   checkLatestManifest("onboarding scan details", "artifacts/onboarding-live/*/manifest.json", (manifest) => {
     assert(manifest.passed === true, "latest onboarding manifest did not pass");
     assert(manifest.summary?.window_count > 0, "onboarding did not capture windows");
