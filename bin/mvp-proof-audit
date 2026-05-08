@@ -1,0 +1,215 @@
+#!/usr/bin/env node
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { mkdirSync } from "node:fs";
+import { globSync } from "node:fs";
+
+const repoRoot = process.cwd();
+const startedAt = new Date();
+const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+const artifactDir = resolve(repoRoot, process.env.EVENTLOOPOS_MVP_AUDIT_ARTIFACT_DIR ?? `artifacts/mvp-audit/${runId}`);
+const manifestPath = resolve(artifactDir, "manifest.json");
+
+const audit = {
+  schema_version: 1,
+  kind: "eventloopos.mvp_proof_audit",
+  run_id: runId,
+  started_at: startedAt.toISOString(),
+  finished_at: undefined,
+  objective: "end-to-end MVP proof for onboarding, Codex task runtime, queue, workspace switching, and friend-ready local install",
+  checks: [],
+  passed: false,
+};
+
+mkdirSync(dirname(manifestPath), { recursive: true });
+
+try {
+  checkProofManifest("baseline fixture proof", "artifacts/proof-manifest.json", [
+    "lint",
+    "typecheck",
+    "test",
+    "product event loop smoke",
+    "test:e2e",
+  ]);
+
+  checkProofManifest("live Mac proof", "artifacts/proof-live-manifest.json", [
+    "live orchestrator boot proof",
+    "provider deeplink smoke",
+    "agent run cli smoke",
+    "live onboarding scan proof",
+    "live mac queue mutation smoke",
+    "live mac task handoff smoke",
+    "master priority queue proof",
+    "isolated workspace task switch proof",
+    "task runtime smoke",
+  ]);
+
+  checkProofManifest("live onboarding proof", "artifacts/proof-live-onboarding-manifest.json", [
+    "live onboarding scan proof",
+  ]);
+
+  checkProofManifest("master priority proof", "artifacts/proof-master-priority-manifest.json", [
+    "master priority queue proof",
+  ]);
+
+  checkProofManifest("workspace task switch proof", "artifacts/proof-live-workspace-switch-manifest.json", [
+    "isolated workspace task switch proof",
+  ]);
+
+  checkLatestManifest("onboarding scan details", "artifacts/onboarding-live/*/manifest.json", (manifest) => {
+    assert(manifest.passed === true, "latest onboarding manifest did not pass");
+    assert(manifest.summary?.window_count > 0, "onboarding did not capture windows");
+    assert(manifest.summary?.proposal_count > 0, "onboarding did not propose tasks");
+    assert(manifest.summary?.task_session_count > 0, "onboarding did not see task sessions");
+    assert((manifest.proposals ?? []).some((proposal) => proposal.window_count > 0), "onboarding had no window-backed proposal");
+    assert((manifest.proposals ?? []).some((proposal) => proposal.task_session_count > 0), "onboarding had no task-session-backed proposal");
+    return {
+      window_count: manifest.summary.window_count,
+      proposal_count: manifest.summary.proposal_count,
+      task_session_count: manifest.summary.task_session_count,
+    };
+  });
+
+  checkLatestManifest("real Codex completion workspace proof", "artifacts/event-loop-codex-completion-workspace/*/manifest.json", (manifest) => {
+    const requiredSteps = [
+      "start real Codex task session through master command",
+      "launch Ghostty TUI attached to same Codex thread",
+      "verify Ghostty and EventLoop share loaded Codex app-server",
+      "simulate manual Ghostty client turn on same Codex thread",
+      "route Slack-like event into Codex task after manual turn",
+      "poll completed Codex turn and enqueue human review",
+      "approve queued item and resume same Codex thread",
+      "run isolated AeroSpace workspace proof",
+      "assert queue drained and task history observable",
+    ];
+    assert(manifest.passed === true, "latest Codex completion workspace manifest did not pass");
+    assertStepsPassed(manifest.steps, requiredSteps);
+    const stepByName = new Map((manifest.steps ?? []).map((step) => [step.name, step]));
+    const start = stepByName.get("start real Codex task session through master command")?.details;
+    const ghostty = stepByName.get("launch Ghostty TUI attached to same Codex thread")?.details;
+    const review = stepByName.get("poll completed Codex turn and enqueue human review")?.details;
+    assert(start?.native_thread_id, "Codex task start did not record native_thread_id");
+    assert(ghostty?.native_thread_id === start.native_thread_id, "Ghostty did not attach to same native thread");
+    assert(review?.queue_item_id, "Codex completion did not queue human review");
+    return {
+      task_session_id: start.task_session_id,
+      native_thread_id: start.native_thread_id,
+      ghostty_window_id: ghostty.window_id,
+      queue_item_id: review.queue_item_id,
+    };
+  });
+
+  checkLatestManifest("workspace switching details", "artifacts/workspace-task-switch/*/manifest.json", (manifest) => {
+    const requiredSteps = [
+      "capture baseline windows",
+      "launch two sacrificial task windows",
+      "restore task alpha workspace snapshot",
+      "switch to task beta workspace snapshot",
+      "restore sacrificial windows to original workspaces",
+    ];
+    assert(manifest.passed === true, "latest workspace-switch manifest did not pass");
+    assertStepsPassed(manifest.steps, requiredSteps);
+    assert(Array.isArray(manifest.task_windows) && manifest.task_windows.length === 2, "workspace proof did not use two task windows");
+    return {
+      task_window_count: manifest.task_windows.length,
+      task_window_ids: manifest.task_windows.map((window) => window.id),
+    };
+  });
+
+  checkLatestManifest("master priority details", "artifacts/master-priority/*/manifest.json", (manifest) => {
+    const requiredSteps = [
+      "add low priority background item",
+      "master command creates higher priority task-hinted item",
+      "queue is reordered by priority",
+    ];
+    assert(manifest.passed === true, "latest master-priority manifest did not pass");
+    assertStepsPassed(manifest.steps, requiredSteps);
+    const queueStep = (manifest.steps ?? []).find((step) => step.name === "queue is reordered by priority");
+    const items = queueStep?.details?.items ?? [];
+    assert(items.length === 2, "priority proof did not compare two queue items");
+    assert(items[0].priority_score > items[1].priority_score, "priority proof did not put master item first");
+    return {
+      first_item: items[0]?.id,
+      first_score: items[0]?.priority_score,
+      second_score: items[1]?.priority_score,
+    };
+  });
+
+  audit.passed = audit.checks.every((check) => check.status === "passed");
+} catch (error) {
+  audit.error = error instanceof Error ? error.stack ?? error.message : String(error);
+  process.exitCode = 1;
+} finally {
+  audit.finished_at = new Date().toISOString();
+  writeFileSync(manifestPath, `${JSON.stringify(audit, null, 2)}\n`);
+  for (const check of audit.checks) {
+    console.log(`${check.status === "passed" ? "pass" : "fail"} ${check.name}`);
+  }
+  console.log(`mvp proof audit manifest: ${manifestPath}`);
+  if (!audit.passed) process.exitCode = 1;
+}
+
+function checkProofManifest(name, path, requiredCommands) {
+  addCheck(name, path, () => {
+    const manifest = readJson(path);
+    assert(manifest.passed === true, `${path} did not pass`);
+    const commands = manifest.commands ?? [];
+    assertStepsPassed(commands, requiredCommands);
+    return {
+      run_id: manifest.run_id,
+      command_count: commands.length,
+    };
+  });
+}
+
+function checkLatestManifest(name, pattern, verifier) {
+  const matches = globSync(pattern, { cwd: repoRoot }).sort();
+  const latest = matches.at(-1);
+  addCheck(name, latest ?? pattern, () => {
+    assert(latest, `no manifest matched ${pattern}`);
+    const manifest = readJson(latest);
+    const details = verifier(manifest);
+    return {
+      path: latest,
+      run_id: manifest.run_id,
+      ...details,
+    };
+  });
+}
+
+function addCheck(name, evidencePath, fn) {
+  const check = {
+    name,
+    status: "running",
+    evidence_path: evidencePath,
+    details: undefined,
+    error: undefined,
+  };
+  audit.checks.push(check);
+  try {
+    check.details = fn();
+    check.status = "passed";
+  } catch (error) {
+    check.status = "failed";
+    check.error = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function assertStepsPassed(steps, requiredNames) {
+  const byName = new Map((steps ?? []).map((step) => [step.name, step]));
+  for (const name of requiredNames) {
+    const step = byName.get(name);
+    assert(step, `missing step: ${name}`);
+    assert(step.status === "passed", `step did not pass: ${name}`);
+  }
+}
+
+function readJson(path) {
+  const fullPath = resolve(repoRoot, path);
+  assert(existsSync(fullPath), `missing manifest: ${path}`);
+  return JSON.parse(readFileSync(fullPath, "utf8"));
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}

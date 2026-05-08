@@ -32,6 +32,7 @@ artifacts/event-loop-codex-completion-workspace/*
 artifacts/workspace-task-switch/*
 artifacts/master-priority/*
 artifacts/onboarding-live/*
+artifacts/mvp-audit/*
 artifacts/proof-manifest.json
 artifacts/proof-agent-smoke-manifest.json
 artifacts/proof-deep-manifest.json
