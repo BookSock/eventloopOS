@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { inspectCodexSession } from "../agents/codex/session_inspector.js";
 import type { GatewayStore } from "../gateway_store.js";
 import type { Observability } from "../observability.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
@@ -13,6 +14,7 @@ type FanOutMatch = {
   task_session_id?: string;
   matched_packet_id?: string;
   matched_packet_title?: string;
+  idle_seconds?: number;
 };
 
 export async function handleMasterRoute(input: {
@@ -191,7 +193,23 @@ async function resolveFanOutMatches(
     }
   }
 
-  return [...taskCandidates.values()].sort((a, b) => a.task_id.localeCompare(b.task_id));
+  let candidates = [...taskCandidates.values()];
+
+  if (validation.idleMinSeconds !== undefined) {
+    const filtered: FanOutMatch[] = [];
+    for (const candidate of candidates) {
+      const session = sessions.find((entry) => isRecord(entry) && typeof entry.id === "string" && entry.id === candidate.task_session_id);
+      const nativeThreadId = isRecord(session) && typeof session.native_thread_id === "string" ? session.native_thread_id : undefined;
+      if (!nativeThreadId) continue;
+      const inspection = await inspectCodexSession(nativeThreadId, { now: input.now });
+      if (!inspection.exists || inspection.idle_seconds === undefined) continue;
+      if (inspection.idle_seconds < validation.idleMinSeconds) continue;
+      filtered.push({ ...candidate, idle_seconds: inspection.idle_seconds });
+    }
+    candidates = filtered;
+  }
+
+  return candidates.sort((a, b) => a.task_id.localeCompare(b.task_id));
 }
 
 type ValidatedFanOutRequest = {
@@ -199,6 +217,7 @@ type ValidatedFanOutRequest = {
   taskIds: string[];
   taskIdPattern?: RegExp;
   taskHintSubstring?: string;
+  idleMinSeconds?: number;
   target?: string;
   dryRun: boolean;
   idempotencyKey: string;
@@ -236,8 +255,16 @@ function validateFanOutRequest(input: unknown): { ok: true } & ValidatedFanOutRe
     ? selector.task_hint_substring.trim()
     : undefined;
 
-  if (taskIds.length === 0 && !taskIdPattern && !taskHintSubstring) {
-    return { ok: false, message: "selector must include task_ids, task_id_pattern, or task_hint_substring" };
+  let idleMinSeconds: number | undefined;
+  if (selector.idle_min_seconds !== undefined && selector.idle_min_seconds !== null) {
+    if (typeof selector.idle_min_seconds !== "number" || !Number.isFinite(selector.idle_min_seconds) || selector.idle_min_seconds < 0) {
+      return { ok: false, message: "selector.idle_min_seconds must be a non-negative finite number" };
+    }
+    idleMinSeconds = Math.floor(selector.idle_min_seconds);
+  }
+
+  if (taskIds.length === 0 && !taskIdPattern && !taskHintSubstring && idleMinSeconds === undefined) {
+    return { ok: false, message: "selector must include task_ids, task_id_pattern, task_hint_substring, or idle_min_seconds" };
   }
 
   const dryRun = input.dry_run === true;
@@ -253,6 +280,7 @@ function validateFanOutRequest(input: unknown): { ok: true } & ValidatedFanOutRe
     taskIds,
     taskIdPattern,
     taskHintSubstring,
+    idleMinSeconds,
     target,
     dryRun,
     idempotencyKey,

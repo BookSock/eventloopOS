@@ -1,7 +1,8 @@
 import { dirname } from "node:path";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 
-export type CodexTaskMap = Record<string, string>;
+export type CodexTaskMapEntry = { task_id: string; terminal_ref?: string };
+export type CodexTaskMap = Record<string, CodexTaskMapEntry>;
 
 export type CodexTaskMapResolverOptions = {
   inlineMap?: CodexTaskMap;
@@ -34,16 +35,27 @@ export class CodexTaskMapResolver {
 
   async taskIdForThreadId(threadId: string): Promise<string | undefined> {
     const fileMap = await this.readFileMap();
+    const entry = fileMap?.[threadId] ?? this.inlineMap[threadId];
+    return entry?.task_id;
+  }
+
+  async entryForThreadId(threadId: string): Promise<CodexTaskMapEntry | undefined> {
+    const fileMap = await this.readFileMap();
     return fileMap?.[threadId] ?? this.inlineMap[threadId];
   }
 
-  async bindThreadToTask(threadId: string, taskId: string): Promise<CodexTaskMap> {
+  async bindThreadToTask(threadId: string, taskId: string, terminalRef?: string): Promise<CodexTaskMap> {
     if (!this.mapPath) {
       throw new Error("Codex task map path is not configured");
     }
 
     const current = await this.readWritableFileMap();
-    const next = sortMap({ ...current, [threadId]: taskId });
+    const existing = current[threadId];
+    const nextEntry: CodexTaskMapEntry = {
+      task_id: taskId,
+      ...(terminalRef !== undefined ? { terminal_ref: terminalRef } : existing?.terminal_ref ? { terminal_ref: existing.terminal_ref } : {}),
+    };
+    const next = sortMap({ ...current, [threadId]: nextEntry });
     const serialized = `${JSON.stringify(next, null, 2)}\n`;
     const tmpPath = `${this.mapPath}.${process.pid}.${Date.now()}.tmp`;
     await this.makeDirectory(dirname(this.mapPath));
@@ -82,11 +94,28 @@ export function parseCodexTaskMap(raw: string, label = "Codex task map"): CodexT
   }
 
   const map: CodexTaskMap = {};
-  for (const [threadId, taskId] of Object.entries(parsed as Record<string, unknown>)) {
-    if (!threadId || typeof taskId !== "string" || !taskId) {
-      throw new Error(`${label} entries must be non-empty string task ids`);
+  for (const [threadId, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!threadId) {
+      throw new Error(`${label} entries must use non-empty thread ids`);
     }
-    map[threadId] = taskId;
+    if (typeof value === "string") {
+      if (!value) throw new Error(`${label} entry for ${threadId} must be a non-empty task id`);
+      map[threadId] = { task_id: value };
+      continue;
+    }
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const obj = value as Record<string, unknown>;
+      if (typeof obj.task_id !== "string" || !obj.task_id) {
+        throw new Error(`${label} entry for ${threadId} must include a task_id string`);
+      }
+      const entry: CodexTaskMapEntry = { task_id: obj.task_id };
+      if (typeof obj.terminal_ref === "string" && obj.terminal_ref) {
+        entry.terminal_ref = obj.terminal_ref;
+      }
+      map[threadId] = entry;
+      continue;
+    }
+    throw new Error(`${label} entry for ${threadId} must be a string or { task_id, terminal_ref? } object`);
   }
   return map;
 }

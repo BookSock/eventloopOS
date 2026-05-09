@@ -9,7 +9,7 @@ export type OrchestratorConfig = {
   seedFixturePath?: string;
   databaseUrl?: string;
   taskSessions: "off" | TaskSessionMode[];
-  codexTaskMap?: Record<string, string>;
+  codexTaskMap?: Record<string, { task_id: string; terminal_ref?: string }>;
   codexTaskMapPath?: string;
   codexAppServerUrl?: string;
   claudeSessionsRaw?: string;
@@ -140,7 +140,7 @@ function resolveConfiguredPath(rawPath: string | undefined): string | undefined 
   return candidates.find((candidate) => existsSync(candidate)) ?? trimmedPath;
 }
 
-function parseCodexTaskMap(raw: string | undefined, issues: string[]): Record<string, string> | undefined {
+function parseCodexTaskMap(raw: string | undefined, issues: string[]): Record<string, { task_id: string; terminal_ref?: string }> | undefined {
   if (!raw) return undefined;
   try {
     const parsed = JSON.parse(raw) as unknown;
@@ -148,13 +148,33 @@ function parseCodexTaskMap(raw: string | undefined, issues: string[]): Record<st
       issues.push("ORCHESTRATOR_CODEX_TASK_MAP must be a JSON object mapping thread ids to task ids");
       return undefined;
     }
-    const map: Record<string, string> = {};
-    for (const [threadId, taskId] of Object.entries(parsed as Record<string, unknown>)) {
-      if (!threadId || typeof taskId !== "string" || !taskId) {
-        issues.push("ORCHESTRATOR_CODEX_TASK_MAP entries must be non-empty string task ids");
+    const map: Record<string, { task_id: string; terminal_ref?: string }> = {};
+    for (const [threadId, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!threadId) {
+        issues.push("ORCHESTRATOR_CODEX_TASK_MAP entries must use non-empty thread ids");
         return undefined;
       }
-      map[threadId] = taskId;
+      if (typeof value === "string") {
+        if (!value) {
+          issues.push("ORCHESTRATOR_CODEX_TASK_MAP entries must be non-empty task ids");
+          return undefined;
+        }
+        map[threadId] = { task_id: value };
+        continue;
+      }
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        const obj = value as Record<string, unknown>;
+        if (typeof obj.task_id !== "string" || !obj.task_id) {
+          issues.push(`ORCHESTRATOR_CODEX_TASK_MAP entry for ${threadId} must include task_id`);
+          return undefined;
+        }
+        const entry: { task_id: string; terminal_ref?: string } = { task_id: obj.task_id };
+        if (typeof obj.terminal_ref === "string" && obj.terminal_ref) entry.terminal_ref = obj.terminal_ref;
+        map[threadId] = entry;
+        continue;
+      }
+      issues.push(`ORCHESTRATOR_CODEX_TASK_MAP entry for ${threadId} must be a string or { task_id, terminal_ref? }`);
+      return undefined;
     }
     return map;
   } catch {

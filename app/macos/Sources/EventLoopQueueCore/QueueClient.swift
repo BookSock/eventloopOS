@@ -24,6 +24,7 @@ public protocol QueueClient: Sendable {
     func autoPromoteReadingQueue(minAgeSeconds: Int) async throws -> ReadingQueuePromoteResult
     func bumpQueueItemPriority(packetId: String, delta: Int?, score: Int?, reason: String?) async throws -> QueueActionResult
     func masterFanOut(message: String, taskHintSubstring: String?, taskIdPattern: String?, taskIds: [String], dryRun: Bool, idempotencyKey: String) async throws -> MasterFanOutResult
+    func fetchActivity(limit: Int) async throws -> ActivityFeedResult
 }
 
 public extension QueueClient {
@@ -403,6 +404,15 @@ public struct HTTPQueueClient: QueueClient {
         return try decoder.decode(ReadingQueuePromoteResult.self, from: data)
     }
 
+    public func fetchActivity(limit: Int = 30) async throws -> ActivityFeedResult {
+        var components = URLComponents(url: baseURL.appending(path: "activity"), resolvingAgainstBaseURL: false)
+        components?.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        guard let url = components?.url else { throw QueueClientError.invalidResponse }
+        let (data, response) = try await session.data(from: url)
+        try validate(response: response)
+        return try decoder.decode(ActivityFeedResult.self, from: data)
+    }
+
     public func autoPromoteReadingQueue(minAgeSeconds: Int) async throws -> ReadingQueuePromoteResult {
         let url = baseURL.appending(path: "reading-queue/auto-promote")
         var request = URLRequest(url: url)
@@ -692,6 +702,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var onboardingScan: OnboardingScan
     private var approvedOnboardingIds: [String] = []
     private var readingQueueContexts: [ReadingQueueContext] = []
+    private var fakeActivityEvents: [ActivityEvent] = []
     private let masterCommandResult: MasterCommandResult?
 
     public init(
@@ -1293,6 +1304,16 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     public func autoPromoteReadingQueue(minAgeSeconds: Int) async throws -> ReadingQueuePromoteResult {
         // Fake stub: same as promoting all unbound. Tests can layer behavior on top.
         return try await promoteReadingQueueContexts(ids: [])
+    }
+
+    public func fetchActivity(limit: Int = 30) async throws -> ActivityFeedResult {
+        lock.withLock {
+            ActivityFeedResult(count: fakeActivityEvents.count, events: Array(fakeActivityEvents.prefix(limit)))
+        }
+    }
+
+    public func setFakeActivity(_ events: [ActivityEvent]) {
+        lock.withLock { fakeActivityEvents = events }
     }
 
     public func promoteReadingQueueContexts(ids: [String]) async throws -> ReadingQueuePromoteResult {

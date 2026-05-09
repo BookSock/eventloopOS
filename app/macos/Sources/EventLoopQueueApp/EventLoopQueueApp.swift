@@ -12,9 +12,16 @@ struct EventLoopQueueApp: App {
 
     init() {
         let configuration = QueueAppConfiguration.parse(arguments: CommandLine.arguments)
+        let voiceService: VoiceTranscriptionService?
+        if ProcessInfo.processInfo.environment["EVENTLOOPOS_VOICE_DISABLED"] == "1" {
+            voiceService = nil
+        } else {
+            voiceService = AppleSpeechVoiceTranscriptionService()
+        }
         let viewModel = QueueViewModel(
             client: configuration.makeClient(),
-            workspaceClient: configuration.makeWorkspaceClient()
+            workspaceClient: configuration.makeWorkspaceClient(),
+            voiceTranscriptionService: voiceService
         )
         _viewModel = StateObject(wrappedValue: viewModel)
         globalHotKeyController = GlobalHotKeyController(

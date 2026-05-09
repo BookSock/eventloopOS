@@ -64,7 +64,7 @@ describe("orchestrator config schema", () => {
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.deepEqual(result.value.taskSessions, ["codex_app_server"]);
-      assert.deepEqual(result.value.codexTaskMap, { thread_blog: "task_blog_feedback" });
+      assert.deepEqual(result.value.codexTaskMap, { thread_blog: { task_id: "task_blog_feedback" } });
       assert.equal(result.value.codexTaskMapPath, "state/codex-task-map.json");
       assert.equal(result.value.codexAppServerUrl, "ws://127.0.0.1:4567");
     }

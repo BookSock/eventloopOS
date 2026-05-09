@@ -36,6 +36,18 @@ public enum PacketChangeBadge: Equatable, Sendable {
     case contextChanged(addedResources: Int)
 }
 
+public struct PendingTerminalSendConfirmation: Equatable, Sendable {
+    public let packetId: String
+    public let terminalRef: String
+    public let sessionId: String
+
+    public init(packetId: String, terminalRef: String, sessionId: String) {
+        self.packetId = packetId
+        self.terminalRef = terminalRef
+        self.sessionId = sessionId
+    }
+}
+
 public enum VoiceCaptureState: Equatable, Sendable {
     case unavailable
     case idle
@@ -79,10 +91,16 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var onboardingState: OnboardingState
     @Published public var auxiliarySheet: QueueAuxiliarySheet?
     @Published public private(set) var voiceCaptureState: VoiceCaptureState
+    @Published public private(set) var readingQueueUnboundCount: Int = 0
+    @Published public var pendingTerminalSendConfirmation: PendingTerminalSendConfirmation?
+    @Published public private(set) var activityEvents: [ActivityEvent] = []
+
+    private static let terminalSendConfirmedDefaultsKey = "eventLoopOS.terminalSendConfirmed.v1"
 
     private let client: any QueueClient
     private let workspaceClient: any WorkspaceClient
     private let voiceTranscriptionService: VoiceTranscriptionService?
+    private let userDefaults: UserDefaults
     private var queueRefreshTask: Task<Void, Never>?
     private var leaseRenewalTask: Task<Void, Never>?
     private var contextRestoreRefreshTask: Task<Void, Never>?
@@ -92,11 +110,13 @@ public final class QueueViewModel: ObservableObject {
         client: any QueueClient,
         workspaceClient: any WorkspaceClient = NoOpWorkspaceClient(),
         initialPackets: [ReviewPacket] = [],
-        voiceTranscriptionService: VoiceTranscriptionService? = nil
+        voiceTranscriptionService: VoiceTranscriptionService? = nil,
+        userDefaults: UserDefaults = .standard
     ) {
         self.client = client
         self.workspaceClient = workspaceClient
         self.voiceTranscriptionService = voiceTranscriptionService
+        self.userDefaults = userDefaults
         self.packets = initialPackets
         self.selectedPacketID = initialPackets.first?.id
         self.state = .idle
@@ -220,6 +240,7 @@ public final class QueueViewModel: ObservableObject {
         } catch {
             state = .failed(error.localizedDescription)
         }
+        await refreshReadingQueueCount()
     }
 
     public func startAutomaticQueueRefresh(
@@ -461,6 +482,41 @@ public final class QueueViewModel: ObservableObject {
             taskBindingState = .failed(selectedRecommendedActionBlockReason ?? "Recommended action is not ready")
             return
         }
+
+        if let session = selectedTaskSessions.first,
+           let terminalRef = session.terminalRef,
+           !isTerminalSendConfirmed {
+            pendingTerminalSendConfirmation = PendingTerminalSendConfirmation(
+                packetId: packetId,
+                terminalRef: terminalRef,
+                sessionId: session.id
+            )
+            return
+        }
+
+        await runRecommendedActionAfterChecks(packetId: packetId)
+    }
+
+    public func confirmPendingTerminalSendAndProceed() async {
+        guard let pending = pendingTerminalSendConfirmation else { return }
+        userDefaults.set(true, forKey: Self.terminalSendConfirmedDefaultsKey)
+        pendingTerminalSendConfirmation = nil
+        await runRecommendedActionAfterChecks(packetId: pending.packetId)
+    }
+
+    public func cancelPendingTerminalSend() {
+        pendingTerminalSendConfirmation = nil
+    }
+
+    public var isTerminalSendConfirmed: Bool {
+        userDefaults.bool(forKey: Self.terminalSendConfirmedDefaultsKey)
+    }
+
+    public func resetTerminalSendConfirmation() {
+        userDefaults.removeObject(forKey: Self.terminalSendConfirmedDefaultsKey)
+    }
+
+    private func runRecommendedActionAfterChecks(packetId: String) async {
         let workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot()
 
         state = .loading
@@ -674,6 +730,24 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    public func refreshActivity(limit: Int = 30) async {
+        do {
+            let result = try await client.fetchActivity(limit: limit)
+            activityEvents = result.events
+        } catch {
+            // Silent: activity feed is informational.
+        }
+    }
+
+    public func refreshReadingQueueCount() async {
+        do {
+            let result = try await client.fetchReadingQueue()
+            readingQueueUnboundCount = result.count
+        } catch {
+            // Silent: this is informational. State stays as last known.
+        }
+    }
+
     public func promoteReadingQueue(contextIds: [String] = []) async {
         masterCommandState = .sending
         do {
@@ -740,6 +814,11 @@ public final class QueueViewModel: ObservableObject {
 
     public func presentOnboarding() {
         auxiliarySheet = .onboarding
+    }
+
+    public func presentActivity() {
+        auxiliarySheet = .activity
+        Task { await refreshActivity() }
     }
 
     public func dismissAuxiliarySheet() {

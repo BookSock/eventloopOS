@@ -9,7 +9,7 @@ describe("CodexTaskMapResolver", () => {
       JSON.stringify({ thread_blog: "task_blog_after_agent_update" }),
     ];
     const resolver = new CodexTaskMapResolver({
-      inlineMap: { thread_blog: "task_blog_from_env", thread_infra: "task_infra_from_env" },
+      inlineMap: { thread_blog: { task_id: "task_blog_from_env" }, thread_infra: { task_id: "task_infra_from_env" } },
       mapPath: "state/codex-task-map.json",
       readTextFile: async () => snapshots.shift() ?? "{}",
     });
@@ -22,7 +22,7 @@ describe("CodexTaskMapResolver", () => {
   it("falls back to inline mapping and reports file read failures", async () => {
     const errors: Error[] = [];
     const resolver = new CodexTaskMapResolver({
-      inlineMap: { thread_blog: "task_blog_from_env" },
+      inlineMap: { thread_blog: { task_id: "task_blog_from_env" } },
       mapPath: "missing.json",
       readTextFile: async () => {
         throw new Error("ENOENT");
@@ -38,7 +38,7 @@ describe("CodexTaskMapResolver", () => {
   it("treats missing map file as empty during lookup", async () => {
     const errors: Error[] = [];
     const resolver = new CodexTaskMapResolver({
-      inlineMap: { thread_blog: "task_blog_from_env" },
+      inlineMap: { thread_blog: { task_id: "task_blog_from_env" } },
       mapPath: "missing.json",
       readTextFile: async () => {
         throw Object.assign(new Error("missing"), { code: "ENOENT" });
@@ -68,16 +68,17 @@ describe("CodexTaskMapResolver", () => {
       },
     });
 
-    const map = await resolver.bindThreadToTask("thread_alpha", "task_alpha");
+    const map = await resolver.bindThreadToTask("thread_alpha", "task_alpha", "ghostty:front");
 
     assert.deepEqual(map, {
-      thread_alpha: "task_alpha",
-      thread_zeta: "task_zeta",
+      thread_alpha: { task_id: "task_alpha", terminal_ref: "ghostty:front" },
+      thread_zeta: { task_id: "task_zeta" },
     });
     assert.deepEqual(directories, ["state"]);
     assert.equal(writes.length, 1);
     assert.match(writes[0]?.path ?? "", /^state\/codex-task-map\.json\.\d+\.\d+\.tmp$/);
-    assert.equal(writes[0]?.text, '{\n  "thread_alpha": "task_alpha",\n  "thread_zeta": "task_zeta"\n}\n');
+    assert.match(writes[0]?.text ?? "", /"thread_alpha"/);
+    assert.match(writes[0]?.text ?? "", /"terminal_ref": "ghostty:front"/);
     assert.deepEqual(renames, [{ from: writes[0]?.path, to: "state/codex-task-map.json" }]);
   });
 
@@ -97,7 +98,7 @@ describe("CodexTaskMapResolver", () => {
 
     await resolver.bindThreadToTask("thread_blog", "task_blog");
 
-    assert.equal(writes[0], '{\n  "thread_blog": "task_blog"\n}\n');
+    assert.equal(writes[0], '{\n  "thread_blog": {\n    "task_id": "task_blog"\n  }\n}\n');
   });
 
   it("rejects writes when no map path is configured", async () => {
@@ -108,13 +109,20 @@ describe("CodexTaskMapResolver", () => {
 });
 
 describe("parseCodexTaskMap", () => {
-  it("parses valid thread-to-task JSON", () => {
-    assert.deepEqual(parseCodexTaskMap('{"thread_blog":"task_blog"}'), { thread_blog: "task_blog" });
+  it("parses valid thread-to-task JSON in legacy string form", () => {
+    assert.deepEqual(parseCodexTaskMap('{"thread_blog":"task_blog"}'), { thread_blog: { task_id: "task_blog" } });
+  });
+
+  it("parses object-form entries with terminal_ref", () => {
+    assert.deepEqual(
+      parseCodexTaskMap('{"thread_blog":{"task_id":"task_blog","terminal_ref":"ghostty:front"}}'),
+      { thread_blog: { task_id: "task_blog", terminal_ref: "ghostty:front" } },
+    );
   });
 
   it("rejects malformed maps with precise messages", () => {
     assert.throws(() => parseCodexTaskMap("{bad json", "ORCHESTRATOR_CODEX_TASK_MAP"), /must be valid JSON/);
     assert.throws(() => parseCodexTaskMap("[]", "file map"), /must be a JSON object/);
-    assert.throws(() => parseCodexTaskMap('{"thread_blog":""}', "file map"), /entries must be non-empty string task ids/);
+    assert.throws(() => parseCodexTaskMap('{"thread_blog":""}', "file map"), /must be a non-empty task id/);
   });
 });

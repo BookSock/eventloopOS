@@ -132,6 +132,10 @@ function infoPlist(options) {
   <string>13.0</string>
   <key>LSUIElement</key>
   <true/>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>eventloopOS uses speech recognition to turn the mic button in the master command sheet into typed text.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>eventloopOS records short voice notes for the master command sheet.</string>
 </dict>
 </plist>
 `;

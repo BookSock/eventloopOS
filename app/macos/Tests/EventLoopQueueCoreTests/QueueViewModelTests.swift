@@ -1007,6 +1007,133 @@ final class QueueViewModelTests: XCTestCase {
         }
     }
 
+    func testRefreshActivityPopulatesEvents() async {
+        let client = FakeQueueClient(packets: [])
+        client.setFakeActivity([
+            ActivityEvent(
+                id: "act_1",
+                type: "master_fan_out",
+                occurredAt: Date(timeIntervalSince1970: 0),
+                actor: "human",
+                summary: "Master fan-out: 3 delivered"
+            ),
+            ActivityEvent(
+                id: "act_2",
+                type: "terminal_keystroke_attempted",
+                occurredAt: Date(timeIntervalSince1970: 100),
+                actor: "system",
+                taskId: "task_blog",
+                taskSessionId: "session_blog",
+                summary: "Sent 1 keystroke command(s) to ghostty:front."
+            ),
+        ])
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.refreshActivity()
+
+        XCTAssertEqual(viewModel.activityEvents.count, 2)
+        XCTAssertEqual(viewModel.activityEvents.first?.type, "master_fan_out")
+        XCTAssertEqual(viewModel.activityEvents[1].taskId, "task_blog")
+    }
+
+    func testFirstTerminalSendShowsConfirmModalAndDoesNotExecute() async {
+        let suiteName = "eventLoopOSTerminalSendTest_\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let packet = ReviewPacket(
+            id: "qit_term",
+            taskId: "task_term",
+            title: "Term test",
+            summary: "send",
+            source: "test",
+            priority: 500,
+            recommendedAction: "Send to Agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(
+            packets: [packet],
+            taskSessions: [
+                TaskSession(id: "session_term", taskId: "task_term", provider: "codex", status: "idle", terminalRef: "ghostty:front")
+            ]
+        )
+        let viewModel = QueueViewModel(client: client, userDefaults: defaults)
+        await viewModel.refreshQueue()
+        viewModel.selectedPacketID = "qit_term"
+        await viewModel.loadTaskSessions()
+
+        await viewModel.executeRecommendedActionAndNext()
+
+        XCTAssertNotNil(viewModel.pendingTerminalSendConfirmation)
+        XCTAssertEqual(viewModel.pendingTerminalSendConfirmation?.terminalRef, "ghostty:front")
+        XCTAssertEqual(client.executedRecommendedActions.count, 0, "should not execute until confirmed")
+
+        await viewModel.confirmPendingTerminalSendAndProceed()
+        XCTAssertNil(viewModel.pendingTerminalSendConfirmation)
+        XCTAssertTrue(viewModel.isTerminalSendConfirmed)
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testTerminalSendDoesNotPromptAfterConfirmedFlag() async {
+        let suiteName = "eventLoopOSTerminalSendTest_\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.set(true, forKey: "eventLoopOS.terminalSendConfirmed.v1")
+
+        let packet = ReviewPacket(
+            id: "qit_term2",
+            taskId: "task_term2",
+            title: "Term test 2",
+            summary: "send",
+            source: "test",
+            priority: 500,
+            recommendedAction: "Send to Agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(
+            packets: [packet],
+            taskSessions: [
+                TaskSession(id: "session_term2", taskId: "task_term2", provider: "codex", status: "idle", terminalRef: "ghostty:front")
+            ]
+        )
+        let viewModel = QueueViewModel(client: client, userDefaults: defaults)
+        await viewModel.refreshQueue()
+        viewModel.selectedPacketID = "qit_term2"
+        await viewModel.loadTaskSessions()
+
+        await viewModel.executeRecommendedActionAndNext()
+
+        XCTAssertNil(viewModel.pendingTerminalSendConfirmation)
+        XCTAssertEqual(client.executedRecommendedActions, ["qit_term2"])
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testReadingQueueCountRefreshesOnQueueRefresh() async {
+        let client = FakeQueueClient(packets: [])
+        client.setReadingQueueContexts([
+            ReadingQueueContext(
+                id: "browser_tab:1",
+                title: "Tab one",
+                url: "https://example.test/one",
+                capturedAt: Date(timeIntervalSince1970: 0),
+                eventId: "evt_a",
+                source: "browser"
+            ),
+            ReadingQueueContext(
+                id: "browser_tab:2",
+                title: "Tab two",
+                url: "https://example.test/two",
+                capturedAt: Date(timeIntervalSince1970: 0),
+                eventId: "evt_b",
+                source: "browser"
+            ),
+        ])
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.refreshQueue()
+        XCTAssertEqual(viewModel.readingQueueUnboundCount, 2)
+    }
+
     func testChangeBadgeReportsNewWhenPacketUnseen() async {
         let packet = ReviewPacket(
             id: "qit_a",

@@ -10,6 +10,7 @@ import { handleEventsRoute, routeEventThroughGateway } from "./routes/events.js"
 import { handleMcpSourcesRoute, type McpSourceRegistry } from "./routes/mcp_sources.js";
 import { handleActivityRoute, handleMetricsRoute } from "./routes/observability.js";
 import { handleOnboardingRoute } from "./routes/onboarding.js";
+import { handleAgentsRoute } from "./routes/agents.js";
 import { handleMasterRoute } from "./routes/master.js";
 import { handleQueueRoute } from "./routes/queue.js";
 import { handleReadingQueueRoute } from "./routes/reading_queue.js";
@@ -134,6 +135,27 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           observability,
           routeNameForPath(request.method, context.url.pathname) ?? "workspace",
           workspaceRoute,
+          startedAt,
+        );
+      }
+
+      const agentsRoute = await handleAgentsRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        readJsonBody: () => readJsonBody(request),
+        workspace: options.workspace,
+        taskSessions: options.taskSessions,
+        observability,
+        now: now(),
+        requestId: context.requestId,
+      });
+      if (agentsRoute) {
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "agents",
+          agentsRoute,
           startedAt,
         );
       }

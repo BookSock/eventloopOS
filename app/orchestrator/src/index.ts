@@ -55,8 +55,59 @@ server.listen(config.value.port, config.value.host, () => {
   console.log(`eventloop orchestrator listening on http://${config.value.host}:${config.value.port}`);
 });
 
+const autoBindIntervalMs = parsePositiveInteger(process.env.EVENTLOOPOS_CODEX_AUTO_BIND_INTERVAL_MS);
+let autoBindTimer: NodeJS.Timeout | undefined;
+if (autoBindIntervalMs && autoBindIntervalMs > 0) {
+  const orchestratorUrl = `http://${config.value.host}:${config.value.port}`;
+  autoBindTimer = setInterval(async () => {
+    try {
+      const response = await fetch(`${orchestratorUrl}/agents/codex/auto-bind`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      if (!response.ok) {
+        console.warn(`auto-bind tick HTTP ${response.status}`);
+      }
+    } catch (error) {
+      console.warn(`auto-bind tick failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, autoBindIntervalMs);
+  console.log(`codex auto-bind enabled every ${autoBindIntervalMs}ms`);
+}
+
+const autoPromoteIntervalMs = parsePositiveInteger(process.env.EVENTLOOPOS_READING_QUEUE_AUTO_PROMOTE_INTERVAL_MS);
+const autoPromoteMinAgeSeconds = parsePositiveInteger(process.env.EVENTLOOPOS_READING_QUEUE_AUTO_PROMOTE_MIN_AGE_SECONDS) ?? 300;
+let autoPromoteTimer: NodeJS.Timeout | undefined;
+if (autoPromoteIntervalMs && autoPromoteIntervalMs > 0) {
+  const orchestratorUrl = `http://${config.value.host}:${config.value.port}`;
+  autoPromoteTimer = setInterval(async () => {
+    try {
+      const response = await fetch(`${orchestratorUrl}/reading-queue/auto-promote`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ min_age_seconds: autoPromoteMinAgeSeconds, actor_id: "orchestrator-auto-promote-timer" }),
+      });
+      if (!response.ok) {
+        console.warn(`auto-promote tick HTTP ${response.status}`);
+      }
+    } catch (error) {
+      console.warn(`auto-promote tick failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }, autoPromoteIntervalMs);
+  console.log(`reading-queue auto-promote enabled every ${autoPromoteIntervalMs}ms (min age ${autoPromoteMinAgeSeconds}s)`);
+}
+
+function parsePositiveInteger(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
+    if (autoPromoteTimer) clearInterval(autoPromoteTimer);
+    if (autoBindTimer) clearInterval(autoBindTimer);
     taskSessionRuntime?.close?.();
     server.close(() => {
       gatewayRuntime.close?.().finally(() => process.exit(0));

@@ -35,7 +35,7 @@ export type CodexNativeThreadClient = {
 };
 
 export type CodexTaskSessionBindingWriter = {
-  bindThreadToTask(threadId: string, taskId: string): Promise<unknown> | unknown;
+  bindThreadToTask(threadId: string, taskId: string, terminalRef?: string): Promise<unknown> | unknown;
 };
 
 export type CodexTaskSession = {
@@ -244,7 +244,7 @@ export class CodexNativeThreadController implements TaskSessionController {
       };
     }
 
-    await this.bindingWriter.bindThreadToTask(session.native_thread_id, input.task_id);
+    await this.bindingWriter.bindThreadToTask(session.native_thread_id, input.task_id, input.terminal_ref);
     return {
       ok: true,
       task_session_id: input.task_session_id,
