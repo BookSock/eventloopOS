@@ -7,6 +7,7 @@ import type {
   QueueItemWithPacket,
   QueueState,
   ReviewPacket,
+  WorkspaceSnapshot,
 } from "../contracts.js";
 import type { McpCursorState, McpEvent } from "../integrations/mcp_poll/types.js";
 import type { McpPollStateSnapshot } from "../integrations/mcp_poll/persistent_cursor_store.js";
@@ -32,6 +33,7 @@ import {
   type ContextRestoreRequestRecord,
   type RouteDecision,
   type StoredEventResult,
+  type TaskWorkspaceSnapshotRecord,
 } from "../store.js";
 import { stableId } from "../store/ids.js";
 import { runMigrations } from "./migrations.js";
@@ -158,6 +160,56 @@ export class PostgresQueueStore {
 
   async clearMcpPollState(sourceId: string): Promise<void> {
     await this.pool.query("DELETE FROM mcp_poll_states WHERE source_id = $1", [sourceId]);
+  }
+
+  async getLatestTaskWorkspaceSnapshot(taskId: string): Promise<TaskWorkspaceSnapshotRecord | undefined> {
+    const result = await this.pool.query(
+      `
+        SELECT task_id, snapshot, captured_at, updated_at, source_queue_item_id, actor_id
+        FROM task_workspace_snapshots
+        WHERE task_id = $1
+      `,
+      [taskId],
+    );
+    const row = result.rows[0];
+    return row ? rowToTaskWorkspaceSnapshotRecord(row) : undefined;
+  }
+
+  async saveTaskWorkspaceSnapshot(input: {
+    taskId: string;
+    snapshot: WorkspaceSnapshot;
+    capturedAt: Date;
+    sourceQueueItemId?: string;
+    actorId?: string;
+  }): Promise<TaskWorkspaceSnapshotRecord> {
+    const result = await this.pool.query(
+      `
+        INSERT INTO task_workspace_snapshots (
+          task_id,
+          snapshot,
+          captured_at,
+          updated_at,
+          source_queue_item_id,
+          actor_id
+        )
+        VALUES ($1, $2::jsonb, $3::timestamptz, $3::timestamptz, $4, $5)
+        ON CONFLICT (task_id) DO UPDATE SET
+          snapshot = EXCLUDED.snapshot,
+          captured_at = EXCLUDED.captured_at,
+          updated_at = EXCLUDED.updated_at,
+          source_queue_item_id = EXCLUDED.source_queue_item_id,
+          actor_id = EXCLUDED.actor_id
+        RETURNING task_id, snapshot, captured_at, updated_at, source_queue_item_id, actor_id
+      `,
+      [
+        input.taskId,
+        JSON.stringify(input.snapshot),
+        input.capturedAt.toISOString(),
+        input.sourceQueueItemId ?? null,
+        input.actorId ?? null,
+      ],
+    );
+    return rowToTaskWorkspaceSnapshotRecord(result.rows[0]);
   }
 
   async getTaskMessageByIdempotencyKey(idempotencyKey: string): Promise<DurableTaskMessageRecord | undefined> {
@@ -862,7 +914,7 @@ export class PostgresQueueStore {
     return result.rows.map(rowToContextRestoreRequestRecord);
   }
 
-  async leaseNext(owner: string, leaseMs = this.defaultLeaseMs): Promise<QueueItemWithPacket | undefined> {
+  async leaseNext(owner: string, leaseMs = this.defaultLeaseMs, excludeQueueItemId?: string): Promise<QueueItemWithPacket | undefined> {
     const client = await this.pool.connect();
     const now = this.clock();
     const leaseExpiresAt = new Date(now.getTime() + leaseMs);
@@ -876,6 +928,7 @@ export class PostgresQueueStore {
             FROM queue_items
             WHERE state = 'ready'
               AND (due_at IS NULL OR due_at <= $1::timestamptz)
+              AND ($4::text IS NULL OR id <> $4)
             ORDER BY priority_score DESC, created_at ASC, id ASC
             LIMIT 1
             FOR UPDATE SKIP LOCKED
@@ -889,7 +942,7 @@ export class PostgresQueueStore {
           WHERE q.id = next_item.id
           RETURNING q.id
         `,
-        [now.toISOString(), owner, leaseExpiresAt.toISOString()],
+        [now.toISOString(), owner, leaseExpiresAt.toISOString(), excludeQueueItemId ?? null],
       );
 
       if (!result.rows[0]) {
@@ -1005,6 +1058,53 @@ export class PostgresQueueStore {
         await client.query("COMMIT");
         return undefined;
       }
+
+      const item = await this.getQueueItemById(client, queueItemId);
+      await client.query("COMMIT");
+      return item;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async bumpPriority(
+    queueItemId: string,
+    input: { delta?: number; score?: number; reason?: string },
+  ): Promise<QueueItemWithPacket | undefined> {
+    const client = await this.pool.connect();
+    const now = this.clock().toISOString();
+    try {
+      await client.query("BEGIN");
+      const current = await client.query<{ priority_score: number; priority_reasons: string[] }>(
+        "SELECT priority_score, priority_reasons FROM queue_items WHERE id = $1 FOR UPDATE",
+        [queueItemId],
+      );
+      if (!current.rows[0]) {
+        await client.query("COMMIT");
+        return undefined;
+      }
+      const before = Number(current.rows[0].priority_score);
+      const next = typeof input.score === "number" && Number.isFinite(input.score)
+        ? Math.round(input.score)
+        : before + Math.round(input.delta ?? 0);
+      const clamped = Math.max(0, Math.min(10_000, next));
+      const reasonTag = input.reason ?? "manual_priority_bump";
+      const reasons = current.rows[0].priority_reasons ?? [];
+      const nextReasons = reasons.includes(reasonTag) ? reasons : [...reasons, reasonTag];
+
+      await client.query(
+        `
+          UPDATE queue_items
+          SET priority_score = $2,
+              priority_reasons = $3::text[],
+              updated_at = $4::timestamptz
+          WHERE id = $1
+        `,
+        [queueItemId, clamped, nextReasons, now],
+      );
 
       const item = await this.getQueueItemById(client, queueItemId);
       await client.query("COMMIT");
@@ -1320,4 +1420,21 @@ export class PostgresQueueStore {
 
     return result.rows[0] ? rowToQueueItemWithPacket(result.rows[0]) : undefined;
   }
+}
+
+function rowToTaskWorkspaceSnapshotRecord(row: Record<string, unknown>): TaskWorkspaceSnapshotRecord {
+  return {
+    task_id: String(row.task_id),
+    snapshot: row.snapshot as WorkspaceSnapshot,
+    captured_at: requiredDateToIso(row.captured_at),
+    updated_at: requiredDateToIso(row.updated_at),
+    source_queue_item_id: row.source_queue_item_id ? String(row.source_queue_item_id) : undefined,
+    actor_id: row.actor_id ? String(row.actor_id) : undefined,
+  };
+}
+
+function requiredDateToIso(value: unknown): string {
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string" && value) return new Date(value).toISOString();
+  throw new Error("expected timestamp value");
 }

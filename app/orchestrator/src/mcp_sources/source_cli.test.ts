@@ -63,9 +63,13 @@ describe("MCP source CLI", () => {
           preview: [
             {
               id: "evt_1",
+              source_id: "todo:/Users/jason/private/todo.md:12:Sensitive todo text",
               source: "local",
+              project_hint: "Sensitive project",
+              task_hint: "Sensitive task",
               title: "Sensitive source title",
               summary: "Sensitive source summary",
+              url: "https://example.com/private/thread",
             },
           ],
         }, 200);
@@ -74,7 +78,18 @@ describe("MCP source CLI", () => {
 
     const body = JSON.parse(writes[0] ?? "{}") as {
       ok: boolean;
-      previews: Array<{ preview: Array<{ title: string; summary: string }> }>;
+      previews: Array<{
+        source_id: string;
+        preview: Array<{
+          id: string;
+          source_id: string;
+          project_hint: string;
+          task_hint: string;
+          title: string;
+          summary: string;
+          url: string;
+        }>;
+      }>;
     };
     assert.equal(exitCode, 0);
     assert.deepEqual(requested, [
@@ -82,8 +97,14 @@ describe("MCP source CLI", () => {
       "POST http://127.0.0.1:4377/mcp-sources/local_events_source/preview",
     ]);
     assert.equal(body.ok, true);
+    assert.equal(body.previews[0].source_id, "[redacted]");
+    assert.equal(body.previews[0].preview[0].id, "[redacted]");
+    assert.equal(body.previews[0].preview[0].source_id, "[redacted]");
+    assert.equal(body.previews[0].preview[0].project_hint, "[redacted]");
+    assert.equal(body.previews[0].preview[0].task_hint, "[redacted]");
     assert.equal(body.previews[0].preview[0].title, "[redacted]");
     assert.equal(body.previews[0].preview[0].summary, "[redacted]");
+    assert.equal(body.previews[0].preview[0].url, "[redacted]");
   });
 
   it("routes selected sources once", async () => {

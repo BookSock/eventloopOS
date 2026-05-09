@@ -21,6 +21,30 @@ export function buildContextResource({ tab, page, capturedAt = new Date().toISOS
   return resource;
 }
 
+export function buildTabRegistryResource({ tab, capturedAt = new Date().toISOString() }) {
+  const resource = {
+    id: `browser_tab:${tab.id ?? tab.url}`,
+    kind: "browser_tab",
+    title: tab.title ?? tab.url ?? "Browser tab",
+    url: tab.url,
+    source: "chrome-extension",
+    captured_at: capturedAt,
+    restore_confidence: "medium",
+    window_id: tab.windowId == null ? undefined : String(tab.windowId),
+    tab_id: tab.id == null ? undefined : String(tab.id),
+    details: {
+      registry_capture: true,
+      active: tab.active === true,
+      pinned: tab.pinned === true,
+      audible: tab.audible === true,
+      discarded: tab.discarded === true
+    }
+  };
+
+  validateContextResource(resource);
+  return resource;
+}
+
 export function validateContextResource(resource) {
   const normalized = normalizeContextResource(resource);
   assertObject(normalized, "resource");

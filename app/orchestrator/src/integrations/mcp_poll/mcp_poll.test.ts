@@ -375,11 +375,17 @@ describe("MCP poll ingestion", () => {
     const todoConfigs = await readMcpSourceConfigs(join(process.cwd(), "../../config/mcp-sources.todo-md.example.json"));
     const gmailConfigs = await readMcpSourceConfigs(join(process.cwd(), "../../config/mcp-sources.gmail-gws.example.json"));
     const slackConfigs = await readMcpSourceConfigs(join(process.cwd(), "../../config/mcp-sources.agent-slack.example.json"));
+    const dogfoodConfigs = await readMcpSourceConfigs(join(process.cwd(), "../../config/mcp-sources.dogfood.example.json"));
 
     assert.equal(scriptConfigs[0].id, "script_events_source");
     assert.equal(todoConfigs[0].id, "todo_md_source");
     assert.equal(gmailConfigs[0].server.envAllowlist.includes("EVENTLOOPOS_GMAIL_CONFIG_DIR"), true);
     assert.equal(slackConfigs[0].eventMapper, "slack_message_to_event");
+    assert.deepEqual(
+      dogfoodConfigs.map((config) => config.id),
+      ["agent_slack_search_source", "gmail_unread_source", "todo_md_source"],
+    );
+    assert.equal(dogfoodConfigs.every((config) => config.riskPolicy.readOnly && !config.riskPolicy.allowWriteTools), true);
   });
 
   it("rejects write-enabled MCP source configs for MVP polling", async () => {

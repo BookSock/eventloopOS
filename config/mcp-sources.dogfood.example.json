@@ -1,0 +1,131 @@
+{
+  "sources": [
+    {
+      "id": "agent_slack_search_source",
+      "server": {
+        "name": "eventloopos-agent-slack",
+        "command": "node",
+        "args": ["dist/src/mcp_sources/agent_slack_events_server.js"],
+        "envAllowlist": [
+          "PATH",
+          "HOME",
+          "XDG_CONFIG_HOME",
+          "XDG_RUNTIME_DIR",
+          "EVENTLOOPOS_AGENT_SLACK_COMMAND",
+          "EVENTLOOPOS_AGENT_SLACK_QUERY",
+          "EVENTLOOPOS_AGENT_SLACK_WORKSPACE",
+          "EVENTLOOPOS_AGENT_SLACK_CHANNELS",
+          "EVENTLOOPOS_AGENT_SLACK_USER",
+          "EVENTLOOPOS_AGENT_SLACK_AFTER",
+          "EVENTLOOPOS_AGENT_SLACK_BEFORE",
+          "EVENTLOOPOS_AGENT_SLACK_LIMIT",
+          "EVENTLOOPOS_AGENT_SLACK_MAX_CONTENT_CHARS",
+          "EVENTLOOPOS_AGENT_SLACK_TIMEOUT_MS",
+          "EVENTLOOPOS_AGENT_SLACK_MAX_BUFFER_BYTES"
+        ],
+        "stderrLogPath": "var/log/mcp/agent_slack_search_source.stderr.log"
+      },
+      "poll": {
+        "tool": "search_messages",
+        "args": {},
+        "timeoutMs": 10000
+      },
+      "cursor": {
+        "strategy": "field",
+        "field": "ts",
+        "initial": "0",
+        "dedupeWindow": 1000
+      },
+      "eventMapper": "slack_message_to_event",
+      "riskPolicy": {
+        "readOnly": true,
+        "allowWriteTools": false,
+        "maxRiskLevel": "low",
+        "untrustedTextFields": ["text"]
+      }
+    },
+    {
+      "id": "gmail_unread_source",
+      "server": {
+        "name": "eventloopos-script-events",
+        "command": "node",
+        "args": ["dist/src/mcp_sources/script_events_server.js"],
+        "envAllowlist": [
+          "EVENTLOOPOS_SCRIPT_EVENTS_COMMAND",
+          "EVENTLOOPOS_SCRIPT_EVENTS_ARGS",
+          "EVENTLOOPOS_GMAIL_COMMAND",
+          "EVENTLOOPOS_GMAIL_CONFIG_DIR",
+          "EVENTLOOPOS_GMAIL_USER_ID",
+          "EVENTLOOPOS_GMAIL_QUERY",
+          "EVENTLOOPOS_GMAIL_LIMIT",
+          "EVENTLOOPOS_GMAIL_TASK_HINT",
+          "EVENTLOOPOS_GMAIL_PROJECT_HINT",
+          "EVENTLOOPOS_GMAIL_TIMEOUT_MS",
+          "EVENTLOOPOS_GMAIL_MAX_BUFFER_BYTES",
+          "PATH",
+          "HOME",
+          "XDG_CONFIG_HOME",
+          "XDG_RUNTIME_DIR"
+        ],
+        "stderrLogPath": "var/log/mcp/gmail_unread_source.stderr.log"
+      },
+      "poll": {
+        "tool": "poll_script",
+        "args": {
+          "script_command": "node",
+          "script_args": ["../../scripts/poll-gmail-unread.mjs"]
+        },
+        "timeoutMs": 15000
+      },
+      "cursor": {
+        "strategy": "field",
+        "field": "id",
+        "dedupeWindow": 2000
+      },
+      "eventMapper": "generic_item_to_event",
+      "riskPolicy": {
+        "readOnly": true,
+        "allowWriteTools": false,
+        "maxRiskLevel": "low",
+        "untrustedTextFields": ["title", "summary", "text"]
+      }
+    },
+    {
+      "id": "todo_md_source",
+      "server": {
+        "name": "eventloopos-script-events",
+        "command": "node",
+        "args": ["dist/src/mcp_sources/script_events_server.js"],
+        "envAllowlist": [
+          "EVENTLOOPOS_SCRIPT_EVENTS_COMMAND",
+          "EVENTLOOPOS_SCRIPT_EVENTS_ARGS",
+          "EVENTLOOPOS_TODO_MD_PATHS",
+          "EVENTLOOPOS_TODO_MD_PROJECT_HINT",
+          "EVENTLOOPOS_TODO_MD_TASK_HINT",
+          "PATH",
+          "HOME"
+        ],
+        "stderrLogPath": "var/log/mcp/todo_md_source.stderr.log"
+      },
+      "poll": {
+        "tool": "poll_script",
+        "args": {
+          "script_command": "node",
+          "script_args": ["../../scripts/poll-todo-md.mjs"]
+        },
+        "timeoutMs": 10000
+      },
+      "cursor": {
+        "strategy": "hash",
+        "dedupeWindow": 2000
+      },
+      "eventMapper": "generic_item_to_event",
+      "riskPolicy": {
+        "readOnly": true,
+        "allowWriteTools": false,
+        "maxRiskLevel": "low",
+        "untrustedTextFields": ["title", "summary", "text"]
+      }
+    }
+  ]
+}

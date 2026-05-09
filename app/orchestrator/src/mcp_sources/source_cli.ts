@@ -106,15 +106,27 @@ async function readResponseJson(response: Response): Promise<JsonRecord> {
 
 function stripPreviewText(body: JsonRecord): JsonRecord {
   return JSON.parse(JSON.stringify(body, (_key, value) => {
-    if (typeof value === "string" && (value.length > 180 || looksLikeContentField(_key))) {
+    if (typeof value === "string" && (value.length > 180 || looksLikeSensitiveField(_key))) {
       return "[redacted]";
     }
     return value;
   })) as JsonRecord;
 }
 
-function looksLikeContentField(key: string): boolean {
-  return key === "title" || key === "summary" || key === "text" || key === "body";
+function looksLikeSensitiveField(key: string): boolean {
+  const normalized = key.toLowerCase();
+  return normalized === "id"
+    || normalized === "source_id"
+    || normalized === "project_hint"
+    || normalized === "task_hint"
+    || normalized === "title"
+    || normalized === "summary"
+    || normalized === "text"
+    || normalized === "body"
+    || normalized === "url"
+    || normalized === "uri"
+    || normalized === "permalink"
+    || normalized === "raw_ref";
 }
 
 function errorMessage(body: unknown): string | undefined {

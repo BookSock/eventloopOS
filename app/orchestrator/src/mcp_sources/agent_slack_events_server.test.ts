@@ -9,6 +9,7 @@ import {
   parseAgentSlackJsonOutput,
   searchAgentSlackMessages,
   searchOptionsFromEnv,
+  searchOptionsFromEnvAndToolArgs,
   searchOptionsWithCursor,
   type AgentSlackExecFile,
 } from "./agent_slack_events_server.js";
@@ -56,6 +57,36 @@ describe("agent-slack MCP server", () => {
       "--before",
       "2026-05-07",
     ]);
+  });
+
+  it("lets poll args override Slack search options per source", () => {
+    const options = searchOptionsFromEnvAndToolArgs({
+      EVENTLOOPOS_AGENT_SLACK_QUERY: "env query",
+      EVENTLOOPOS_AGENT_SLACK_LIMIT: "7",
+    }, {
+      command: "agent-slack",
+      query: "dm search",
+      channels: ["D123", " C456 "],
+      user: "@person",
+      limit: 3,
+      max_content_chars: 200,
+      timeout_ms: 4000,
+      max_buffer_bytes: 500000,
+    });
+
+    assert.deepEqual(options, {
+      command: "agent-slack",
+      query: "dm search",
+      workspace: undefined,
+      channels: ["D123", "C456"],
+      user: "@person",
+      after: undefined,
+      before: undefined,
+      limit: 3,
+      maxContentChars: 200,
+      timeoutMs: 4000,
+      maxBufferBytes: 500000,
+    });
   });
 
   it("uses MCP cursor as Slack after date when explicit after is absent", () => {

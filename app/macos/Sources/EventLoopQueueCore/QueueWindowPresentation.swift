@@ -100,6 +100,7 @@ public struct TaskSessionTargetPresentation: Equatable, Sendable {
     public let status: String
     public let sessionId: String
     public let identityLabel: String
+    public let terminalLabel: String?
 
     public init(session: TaskSession) {
         let displayName = session.name?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -108,10 +109,12 @@ public struct TaskSessionTargetPresentation: Equatable, Sendable {
         self.status = taskSessionStatusLabel(session.status)
         self.sessionId = session.id
         self.subtitle = "\(provider) | \(status) | \(session.id)"
+        self.terminalLabel = TaskSessionTargetPresentation.terminalLabel(for: session.terminalRef)
         self.identityLabel = [
             session.taskId,
             "\(provider) \(status)",
             session.id,
+            terminalLabel,
         ]
             .compactMap { value in
                 let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -128,6 +131,29 @@ public struct TaskSessionTargetPresentation: Equatable, Sendable {
         } else {
             self.detail = nil
         }
+    }
+
+    private static func terminalLabel(for terminalRef: String?) -> String? {
+        guard let trimmed = terminalRef?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        let lowered = trimmed.lowercased()
+        if lowered == "ghostty:front" {
+            return "Ghostty (front window)"
+        }
+        if lowered.hasPrefix("ghostty:") {
+            return "Ghostty terminal \(trimmed.dropFirst("ghostty:".count))"
+        }
+        if lowered.hasPrefix("tmux:") {
+            return "tmux pane \(trimmed.dropFirst("tmux:".count))"
+        }
+        if lowered.hasPrefix("kitty:") {
+            return "Kitty terminal \(trimmed.dropFirst("kitty:".count))"
+        }
+        if lowered.hasPrefix("wezterm:") {
+            return "WezTerm pane \(trimmed.dropFirst("wezterm:".count))"
+        }
+        return trimmed
     }
 }
 

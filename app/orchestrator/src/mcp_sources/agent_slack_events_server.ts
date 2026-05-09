@@ -50,13 +50,24 @@ export function createAgentSlackEventsServer(options: AgentSlackServerOptions = 
       description: "Read Slack messages through local agent-slack CLI and return Slack-like eventloopOS poll items.",
       inputSchema: {
         cursor: z.string().optional(),
+        command: z.string().optional(),
+        query: z.string().optional(),
+        workspace: z.string().optional(),
+        channels: z.union([z.string(), z.array(z.string())]).optional(),
+        user: z.string().optional(),
+        after: z.string().optional(),
+        before: z.string().optional(),
+        limit: z.number().int().positive().optional(),
+        max_content_chars: z.number().int().positive().optional(),
+        timeout_ms: z.number().int().positive().optional(),
+        max_buffer_bytes: z.number().int().positive().optional(),
       },
       annotations: {
         readOnlyHint: true,
       },
     },
     async (args): Promise<CallToolResult> => {
-      const result = await searchAgentSlackMessages(searchOptionsWithCursor(searchOptionsFromEnv(env), args.cursor), runner);
+      const result = await searchAgentSlackMessages(searchOptionsWithCursor(searchOptionsFromEnvAndToolArgs(env, args), args.cursor), runner);
       return {
         structuredContent: result,
         content: [
@@ -108,6 +119,30 @@ export function searchOptionsFromEnv(env: NodeJS.ProcessEnv): AgentSlackSearchOp
     maxContentChars: positiveInt(env.EVENTLOOPOS_AGENT_SLACK_MAX_CONTENT_CHARS, 1200),
     timeoutMs: positiveInt(env.EVENTLOOPOS_AGENT_SLACK_TIMEOUT_MS, 10_000),
     maxBufferBytes: positiveInt(env.EVENTLOOPOS_AGENT_SLACK_MAX_BUFFER_BYTES, 1_000_000),
+  };
+}
+
+export function searchOptionsFromEnvAndToolArgs(
+  env: NodeJS.ProcessEnv,
+  args: Record<string, unknown> = {},
+): AgentSlackSearchOptions {
+  const query = optionalString(args.query) ?? env.EVENTLOOPOS_AGENT_SLACK_QUERY?.trim();
+  if (!query) {
+    throw new Error("agent-slack polling requires query in poll.args.query or EVENTLOOPOS_AGENT_SLACK_QUERY");
+  }
+
+  return {
+    command: optionalString(args.command) ?? (env.EVENTLOOPOS_AGENT_SLACK_COMMAND?.trim() || "agent-slack"),
+    query,
+    workspace: optionalString(args.workspace) ?? optionalEnv(env.EVENTLOOPOS_AGENT_SLACK_WORKSPACE),
+    channels: channelsFromToolArg(args.channels) ?? splitList(env.EVENTLOOPOS_AGENT_SLACK_CHANNELS),
+    user: optionalString(args.user) ?? optionalEnv(env.EVENTLOOPOS_AGENT_SLACK_USER),
+    after: optionalString(args.after) ?? optionalEnv(env.EVENTLOOPOS_AGENT_SLACK_AFTER),
+    before: optionalString(args.before) ?? optionalEnv(env.EVENTLOOPOS_AGENT_SLACK_BEFORE),
+    limit: positiveIntFromUnknown(args.limit) ?? positiveInt(env.EVENTLOOPOS_AGENT_SLACK_LIMIT, 20),
+    maxContentChars: positiveIntFromUnknown(args.max_content_chars) ?? positiveInt(env.EVENTLOOPOS_AGENT_SLACK_MAX_CONTENT_CHARS, 1200),
+    timeoutMs: positiveIntFromUnknown(args.timeout_ms) ?? positiveInt(env.EVENTLOOPOS_AGENT_SLACK_TIMEOUT_MS, 10_000),
+    maxBufferBytes: positiveIntFromUnknown(args.max_buffer_bytes) ?? positiveInt(env.EVENTLOOPOS_AGENT_SLACK_MAX_BUFFER_BYTES, 1_000_000),
   };
 }
 
@@ -276,6 +311,18 @@ function splitList(input: string | undefined): string[] {
   return input?.split(",").map((item) => item.trim()).filter(Boolean) ?? [];
 }
 
+function channelsFromToolArg(input: unknown): string[] | undefined {
+  if (typeof input === "string") return splitList(input);
+  if (Array.isArray(input)) {
+    return input.flatMap((item) => typeof item === "string" && item.trim() ? [item.trim()] : []);
+  }
+  return undefined;
+}
+
+function optionalString(input: unknown): string | undefined {
+  return typeof input === "string" && input.trim() ? input.trim() : undefined;
+}
+
 function optionalEnv(input: string | undefined): string | undefined {
   const value = input?.trim();
   return value || undefined;
@@ -285,6 +332,11 @@ function positiveInt(input: string | undefined, fallback: number): number {
   if (!input) return fallback;
   const value = Number(input);
   return Number.isInteger(value) && value > 0 ? value : fallback;
+}
+
+function positiveIntFromUnknown(input: unknown): number | undefined {
+  const value = typeof input === "number" ? input : typeof input === "string" ? Number(input) : NaN;
+  return Number.isInteger(value) && value > 0 ? value : undefined;
 }
 
 function stableHash(parts: string[]): string {

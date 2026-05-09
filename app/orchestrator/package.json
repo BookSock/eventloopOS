@@ -34,6 +34,8 @@
     "task:messages": "pnpm run build && node dist/src/task_sessions/task_session_cli.js messages",
     "master:send": "pnpm run build && node dist/src/master/master_command_cli.js",
     "onboarding:scan": "pnpm run build && node dist/src/onboarding/onboarding_scan_cli.js",
+    "onboarding:agent": "pnpm run build && node dist/src/onboarding/onboarding_scan_cli.js --format agent",
+    "onboarding:apply": "pnpm run build && node dist/src/onboarding/onboarding_scan_cli.js apply",
     "test": "pnpm run build && node --test dist/test/**/*.test.js dist/src/**/*.test.js src/agents/codex/*.test.mjs src/task_sessions/*.test.mjs",
     "test:db": "pnpm run build && node --test dist/test/db*.test.js",
     "test:db:docker": "bin/dev-postgres test",

@@ -320,6 +320,41 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(lineage.counts.taskMessages, 1)
     }
 
+    func testHTTPQueueClientExcludesCurrentPacketWhenLeasingNext() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/queue/lease-next")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: Any])
+            XCTAssertEqual(body["lease_owner"] as? String, "mac_queue_app")
+            XCTAssertEqual(body["lease_ms"] as? Int, 60_000)
+            XCTAssertEqual(body["exclude_queue_item_id"] as? String, "qit_blog_feedback")
+            return """
+            {
+              "item": {
+                "id": "qit_ci_failed",
+                "review_packet_id": "pkt_ci_failed",
+                "task_id": "task_ci",
+                "priority_score": 800,
+                "created_at": "2026-05-06T12:00:00.000Z",
+                "review_packet": {
+                  "id": "pkt_ci_failed",
+                  "title": "CI failed",
+                  "summary": "Fix failing build.",
+                  "recommended_action": {"type": "mark_done", "label": "Done"},
+                  "context": []
+                }
+              },
+              "request_id": "req_next"
+            }
+            """
+        }
+
+        let packet = try await client.next(after: "qit_blog_feedback")
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertEqual(packet?.id, "qit_ci_failed")
+    }
+
     func testHTTPQueueClientFetchesTaskSessions() async throws {
         let (client, recorder) = makeHTTPClient { _ in
             """
@@ -376,6 +411,374 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(binding.taskSessionId, "task_session_blog")
         XCTAssertEqual(binding.taskId, "task_blog_feedback")
         XCTAssertEqual(binding.session?.taskId, "task_blog_feedback")
+    }
+
+    func testHTTPQueueClientSavesTaskWorkspaceSnapshot() async throws {
+        var capturedBody: [String: Any]?
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/tasks/task_blog_feedback/workspace-snapshot")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: Any])
+            capturedBody = body
+            XCTAssertEqual(body["actor_id"] as? String, "mac_queue_app")
+            XCTAssertEqual(body["source_queue_item_id"] as? String, "qit_blog_feedback")
+            return """
+            {
+              "ok": true,
+              "workspace_snapshot": {
+                "id": "twsp_task_blog_feedback",
+                "task_id": "task_blog_feedback",
+                "snapshot": {
+                  "backend": "aerospace",
+                  "windows": [],
+                  "activeWorkspace": "eventloop-blog"
+                },
+                "captured_at": "2026-05-06T12:00:00Z",
+                "updated_at": "2026-05-06T12:00:00Z"
+              },
+              "request_id": "req_save_workspace"
+            }
+            """
+        }
+
+        let result = try await client.saveTaskWorkspaceSnapshot(
+            taskId: "task_blog_feedback",
+            workspaceSnapshot: WorkspaceSnapshot(
+                windows: [WorkspaceWindow(id: 91, app: "Ghostty", title: "Blog", workspace: "eventloop-blog")],
+                activeWorkspace: "eventloop-blog",
+                focusedWindowId: 91
+            ),
+            sourceQueueItemId: "qit_blog_feedback"
+        )
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        let workspaceSnapshot = try XCTUnwrap(capturedBody?["workspace_snapshot"] as? [String: Any])
+        XCTAssertEqual(workspaceSnapshot["activeWorkspace"] as? String, "eventloop-blog")
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.requestId, "req_save_workspace")
+    }
+
+    func testHTTPQueueClientSendsMasterCommand() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/voice/commands")
+            XCTAssertNotNil(request.value(forHTTPHeaderField: "Idempotency-Key"))
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: String])
+            XCTAssertEqual(body["transcript"], "Make launch blog higher priority")
+            XCTAssertEqual(body["task_hint"], "task_blog_feedback")
+            XCTAssertEqual(body["idempotency_key"], body["source_id"])
+            return """
+            {
+              "ok": true,
+              "event": {"id": "evt_master_1"},
+              "route_decision": {
+                "action": "send_to_task",
+                "target_task_id": "task_blog_feedback",
+                "target_task_session_id": "task_session_blog"
+              },
+              "request_id": "req_master_1"
+            }
+            """
+        }
+
+        let result = try await client.sendMasterCommand(
+            text: "Make launch blog higher priority",
+            taskHint: "task_blog_feedback"
+        )
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.requestId, "req_master_1")
+        XCTAssertEqual(result.eventId, "evt_master_1")
+        XCTAssertEqual(result.routeAction, "send_to_task")
+        XCTAssertEqual(result.targetTaskId, "task_blog_feedback")
+        XCTAssertEqual(result.targetTaskSessionId, "task_session_blog")
+        XCTAssertNil(result.queuedPacket)
+    }
+
+    func testHTTPQueueClientDecodesMasterCommandQueuedPaper() async throws {
+        let (client, _) = makeHTTPClient { _ in
+            """
+            {
+              "ok": true,
+              "event": {"id": "evt_master_queued"},
+              "route_decision": {
+                "action": "create_queue_item",
+                "target_task_id": "task_master_note"
+              },
+              "queue_item": {
+                "id": "qit_master_note",
+                "review_packet_id": "pkt_master_note",
+                "task_id": "task_master_note",
+                "priority_score": 760,
+                "priority_reasons": ["master_command"],
+                "created_at": "2026-05-06T12:00:00.000Z",
+                "review_packet": {
+                  "id": "pkt_master_note",
+                  "title": "Review master note",
+                  "summary": "Master command needs human review.",
+                  "primary_source": "master",
+                  "risk_level": "medium",
+                  "confidence": "medium",
+                  "risk_tags": [],
+                  "context": [],
+                  "evidence": [],
+                  "recommended_action": {
+                    "label": "Work this paper, then Done / Next",
+                    "type": "mark_done"
+                  }
+                }
+              },
+              "request_id": "req_master_queued"
+            }
+            """
+        }
+
+        let result = try await client.sendMasterCommand(text: "Start paper for this note")
+
+        XCTAssertEqual(result.routeAction, "create_queue_item")
+        XCTAssertEqual(result.queuedPacket?.id, "qit_master_note")
+        XCTAssertEqual(result.queuedPacket?.taskId, "task_master_note")
+        XCTAssertEqual(result.queuedPacket?.title, "Review master note")
+    }
+
+    func testHTTPQueueClientStartsMasterTask() async throws {
+        var capturedRequestBody: [String: Any]?
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/task-sessions")
+            XCTAssertNotNil(request.value(forHTTPHeaderField: "Idempotency-Key"))
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: Any])
+            capturedRequestBody = body
+            XCTAssertEqual(body["task_id"] as? String, "task_blog_launch")
+            XCTAssertEqual(body["cwd"] as? String, "/repo")
+            XCTAssertEqual(body["model"] as? String, "gpt-5.3-codex")
+            XCTAssertEqual(body["idempotency_key"] as? String, request.value(forHTTPHeaderField: "Idempotency-Key"))
+            XCTAssertTrue((body["prompt"] as? String)?.contains("Draft blog launch paper") == true)
+            return """
+            {
+              "ok": true,
+              "started": {
+                "ok": true,
+                "task_session_id": "task_session_blog_launch",
+                "task_id": "task_blog_launch",
+                "session": {
+                  "id": "task_session_blog_launch",
+                  "task_id": "task_blog_launch",
+                  "provider": "codex",
+                  "status": "idle",
+                  "name": "Blog launch"
+                }
+              },
+              "request_id": "req_start_1"
+            }
+            """
+        }
+
+        let started = try await client.startMasterTask(
+            text: "Draft blog launch paper",
+            taskHint: "Blog Launch",
+            cwd: "/repo",
+            model: "gpt-5.3-codex",
+            workspaceSnapshot: WorkspaceSnapshot(
+                windows: [WorkspaceWindow(id: 501, app: "Google Chrome", title: "Blog draft", workspace: "blog")],
+                activeWorkspace: "blog",
+                focusedWindowId: 501
+            )
+        )
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        let body = try XCTUnwrap(capturedRequestBody)
+        XCTAssertEqual(body["queue_paper"] as? Bool, true)
+        let workspaceSnapshot = try XCTUnwrap(body["workspace_snapshot"] as? [String: Any])
+        XCTAssertEqual(workspaceSnapshot["activeWorkspace"] as? String ?? workspaceSnapshot["active_workspace"] as? String, "blog")
+        XCTAssertTrue(started.ok)
+        XCTAssertEqual(started.taskSessionId, "task_session_blog_launch")
+        XCTAssertEqual(started.taskId, "task_blog_launch")
+        XCTAssertEqual(started.session?.provider, "codex")
+    }
+
+    func testHTTPQueueClientFetchesOnboardingScan() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/onboarding/scan")
+            return """
+            {
+              "ok": true,
+              "captured_at": "2026-05-06T12:00:00Z",
+              "active_workspace": "eventloop-blog",
+              "focused_window_id": 91,
+              "summary": {
+                "window_count": 2,
+                "grouped_window_count": 2,
+                "ungrouped_window_count": 0,
+                "task_session_count": 1,
+                "browser_context_count": 1,
+                "proposal_count": 1
+              },
+              "proposals": [
+                {
+                  "id": "onboard_blog",
+                  "task_id": "task_blog_feedback",
+                  "title": "Blog Feedback",
+                  "confidence": "high",
+                  "reason": "window title contains [task:...]",
+                  "windows": [
+                    {"id": 91, "app": "Ghostty", "title": "[task:blog feedback] codex", "workspace": "eventloop-blog", "task_hint": "blog feedback"}
+                  ],
+                  "browser_contexts": [
+                    {
+                      "id": "browser_tab:7",
+                      "title": "Blog draft",
+                      "url": "https://example.test/blog",
+                      "task_id": "task_blog_feedback",
+                      "window_id": "92",
+                      "tab_id": "7",
+                      "captured_at": "2026-05-06T12:00:00Z",
+                      "restore_confidence": "high"
+                    }
+                  ],
+                  "task_sessions": [
+                    {"id": "task_session_blog", "task_id": "task_blog_feedback", "provider": "codex", "status": "idle"}
+                  ],
+                  "suggested_next_action": "Approve this task context."
+                }
+              ],
+              "ungrouped_windows": [],
+              "browser_contexts": [],
+              "task_sessions": [],
+              "warnings": [],
+              "request_id": "req_scan"
+            }
+            """
+        }
+
+        let scan = try await client.fetchOnboardingScan()
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertEqual(scan.activeWorkspace, "eventloop-blog")
+        XCTAssertEqual(scan.summary.proposalCount, 1)
+        XCTAssertEqual(scan.proposals.first?.taskId, "task_blog_feedback")
+        XCTAssertEqual(scan.proposals.first?.windows.first?.taskHint, "blog feedback")
+        XCTAssertEqual(scan.proposals.first?.browserContexts.first?.tabId, "7")
+    }
+
+    func testHTTPQueueClientApprovesOnboardingProposal() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/onboarding/approvals")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: Any])
+            XCTAssertEqual(body["actor_id"] as? String, "mac_queue_app")
+            XCTAssertEqual(body["proposal_id"] as? String, "onboard_blog")
+            XCTAssertEqual(body["queue_paper"] as? Bool, true)
+            return """
+            {
+              "ok": true,
+              "task_id": "task_blog_feedback",
+              "proposal_id": "onboard_blog",
+              "bindings": [
+                {
+                  "ok": true,
+                  "task_session_id": "task_session_blog",
+                  "task_id": "task_blog_feedback"
+                }
+              ],
+              "browser_context_bindings": [
+                {
+                  "browser_context_id": "browser_tab:77",
+                  "event_id": "evt_onboarding_context_bind_task_blog_browser_tab_77",
+                  "task_id": "task_blog_feedback"
+                }
+              ],
+              "queue_item": {
+                "id": "qit_onboarding_task_blog_feedback",
+                "review_packet_id": "pkt_onboarding_task_blog_feedback",
+                "task_id": "task_blog_feedback",
+                "state": "ready",
+                "priority_score": 700
+              },
+              "warnings": [],
+              "request_id": "req_approve"
+            }
+            """
+        }
+
+        let result = try await client.approveOnboardingProposal(id: "onboard_blog", queuePaper: true)
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.taskId, "task_blog_feedback")
+        XCTAssertEqual(result.proposalId, "onboard_blog")
+        XCTAssertEqual(result.bindings.first?.taskSessionId, "task_session_blog")
+        XCTAssertEqual(result.browserContextBindings.first?.browserContextId, "browser_tab:77")
+        XCTAssertEqual(result.queuedPaper?.id, "qit_onboarding_task_blog_feedback")
+        XCTAssertEqual(result.queuedPaper?.state, "ready")
+    }
+
+    func testHTTPQueueClientFetchesReadingQueue() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/reading-queue")
+            return """
+            {
+              "contexts": [
+                {
+                  "id": "browser_tab:1",
+                  "title": "How agents reshape OS",
+                  "url": "https://example.test/agents-os",
+                  "captured_at": "2026-05-09T11:55:00Z",
+                  "event_id": "evt_capture_tab_1",
+                  "source": "browser"
+                }
+              ],
+              "count": 1,
+              "request_id": "req_reading_list"
+            }
+            """
+        }
+
+        let result = try await client.fetchReadingQueue()
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.contexts.first?.id, "browser_tab:1")
+        XCTAssertEqual(result.contexts.first?.url, "https://example.test/agents-os")
+    }
+
+    func testHTTPQueueClientPromotesReadingQueueContexts() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/reading-queue/promote")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: Any])
+            XCTAssertEqual(body["actor_id"] as? String, "mac_queue_app")
+            XCTAssertEqual(body["context_ids"] as? [String], ["browser_tab:1"])
+            return """
+            {
+              "ok": true,
+              "promoted": [
+                {
+                  "context_id": "browser_tab:1",
+                  "queue_item_id": "qit_reading_queue_browser_tab_1",
+                  "review_packet_id": "pkt_reading_queue_browser_tab_1",
+                  "event_id": "evt_reading_queue_browser_tab_1",
+                  "idempotent": false
+                }
+              ],
+              "promoted_count": 1,
+              "missing_context_ids": [],
+              "request_id": "req_reading_promote"
+            }
+            """
+        }
+
+        let result = try await client.promoteReadingQueueContexts(ids: ["browser_tab:1"])
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.promotedCount, 1)
+        XCTAssertEqual(result.promoted.first?.contextId, "browser_tab:1")
+        XCTAssertEqual(result.promoted.first?.queueItemId, "qit_reading_queue_browser_tab_1")
+        XCTAssertFalse(result.promoted.first?.idempotent ?? true)
     }
 
     func testHTTPQueueClientDefersPacket() async throws {

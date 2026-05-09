@@ -29,6 +29,25 @@ label {
   align-items: center;
 }
 
+.secondary-row {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+.hint-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.hint-grid label {
+  margin: 0;
+}
+
 input,
 textarea {
   min-width: 0;

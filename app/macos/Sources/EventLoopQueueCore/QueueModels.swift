@@ -9,6 +9,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
     public let decisionNeeded: String
     public let source: String
     public let priority: Int
+    public let priorityReasons: [String]
     public let riskLevel: String
     public let confidence: String
     public let riskTags: [String]
@@ -28,6 +29,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
         decisionNeeded: String = "",
         source: String,
         priority: Int,
+        priorityReasons: [String] = [],
         riskLevel: String = "medium",
         confidence: String = "medium",
         riskTags: [String] = [],
@@ -46,6 +48,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
         self.decisionNeeded = decisionNeeded
         self.source = source
         self.priority = priority
+        self.priorityReasons = priorityReasons
         self.riskLevel = riskLevel
         self.confidence = confidence
         self.riskTags = riskTags
@@ -66,6 +69,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
         case decisionNeeded
         case source
         case priority
+        case priorityReasons
         case riskLevel
         case confidence
         case riskTags
@@ -88,6 +92,7 @@ public struct ReviewPacket: Codable, Equatable, Identifiable, Sendable {
         self.decisionNeeded = try container.decodeIfPresent(String.self, forKey: .decisionNeeded) ?? ""
         self.source = try container.decode(String.self, forKey: .source)
         self.priority = try container.decode(Int.self, forKey: .priority)
+        self.priorityReasons = try container.decodeIfPresent([String].self, forKey: .priorityReasons) ?? []
         self.riskLevel = try container.decodeIfPresent(String.self, forKey: .riskLevel) ?? "medium"
         self.confidence = try container.decodeIfPresent(String.self, forKey: .confidence) ?? "medium"
         self.riskTags = try container.decodeIfPresent([String].self, forKey: .riskTags) ?? []
@@ -303,6 +308,7 @@ public struct TaskSession: Codable, Equatable, Identifiable, Sendable {
     public let name: String?
     public let preview: String?
     public let cwd: String?
+    public let terminalRef: String?
 
     public init(
         id: String,
@@ -311,7 +317,8 @@ public struct TaskSession: Codable, Equatable, Identifiable, Sendable {
         status: String,
         name: String? = nil,
         preview: String? = nil,
-        cwd: String? = nil
+        cwd: String? = nil,
+        terminalRef: String? = nil
     ) {
         self.id = id
         self.taskId = taskId
@@ -320,6 +327,7 @@ public struct TaskSession: Codable, Equatable, Identifiable, Sendable {
         self.name = name
         self.preview = preview
         self.cwd = cwd
+        self.terminalRef = terminalRef
     }
 
     enum CodingKeys: String, CodingKey {
@@ -330,6 +338,7 @@ public struct TaskSession: Codable, Equatable, Identifiable, Sendable {
         case name
         case preview
         case cwd
+        case terminalRef = "terminal_ref"
     }
 }
 
@@ -379,6 +388,563 @@ public enum TaskBindingState: Equatable, Sendable {
     case loaded
     case bound(TaskBinding)
     case failed(String)
+}
+
+public struct MasterCommandResult: Decodable, Equatable, Sendable {
+    public let ok: Bool
+    public let requestId: String?
+    public let eventId: String?
+    public let routeAction: String?
+    public let targetTaskId: String?
+    public let targetTaskSessionId: String?
+    public let queuedPacket: ReviewPacket?
+
+    public init(
+        ok: Bool,
+        requestId: String? = nil,
+        eventId: String? = nil,
+        routeAction: String? = nil,
+        targetTaskId: String? = nil,
+        targetTaskSessionId: String? = nil,
+        queuedPacket: ReviewPacket? = nil
+    ) {
+        self.ok = ok
+        self.requestId = requestId
+        self.eventId = eventId
+        self.routeAction = routeAction
+        self.targetTaskId = targetTaskId
+        self.targetTaskSessionId = targetTaskSessionId
+        self.queuedPacket = queuedPacket
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case requestId = "request_id"
+        case event
+        case routeDecision = "route_decision"
+        case queueItem = "queue_item"
+    }
+
+    enum EventCodingKeys: String, CodingKey {
+        case id
+    }
+
+    enum RouteDecisionCodingKeys: String, CodingKey {
+        case action
+        case targetTaskId = "target_task_id"
+        case targetTaskSessionId = "target_task_session_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.ok = try container.decodeIfPresent(Bool.self, forKey: .ok) ?? true
+        self.requestId = try container.decodeIfPresent(String.self, forKey: .requestId)
+
+        if let event = try? container.nestedContainer(keyedBy: EventCodingKeys.self, forKey: .event) {
+            self.eventId = try event.decodeIfPresent(String.self, forKey: .id)
+        } else {
+            self.eventId = nil
+        }
+
+        if let routeDecision = try? container.nestedContainer(keyedBy: RouteDecisionCodingKeys.self, forKey: .routeDecision) {
+            self.routeAction = try routeDecision.decodeIfPresent(String.self, forKey: .action)
+            self.targetTaskId = try routeDecision.decodeIfPresent(String.self, forKey: .targetTaskId)
+            self.targetTaskSessionId = try routeDecision.decodeIfPresent(String.self, forKey: .targetTaskSessionId)
+        } else {
+            self.routeAction = nil
+            self.targetTaskId = nil
+            self.targetTaskSessionId = nil
+        }
+
+        self.queuedPacket = try container.decodeIfPresent(QueueItemDTO.self, forKey: .queueItem)?.packet
+    }
+}
+
+public struct TaskWorkspaceSnapshotSaveResult: Decodable, Equatable, Sendable {
+    public let ok: Bool
+    public let requestId: String?
+
+    public init(ok: Bool, requestId: String? = nil) {
+        self.ok = ok
+        self.requestId = requestId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case requestId = "request_id"
+    }
+}
+
+public struct TaskSessionStartEnvelope: Decodable, Equatable, Sendable {
+    public let ok: Bool
+    public let started: TaskSessionStartResult
+    public let requestId: String?
+
+    public init(ok: Bool, started: TaskSessionStartResult, requestId: String? = nil) {
+        self.ok = ok
+        self.started = started
+        self.requestId = requestId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case started
+        case requestId = "request_id"
+    }
+}
+
+public struct TaskSessionStartResult: Decodable, Equatable, Sendable {
+    public let ok: Bool
+    public let taskSessionId: String?
+    public let taskId: String
+    public let session: TaskSession?
+
+    public init(ok: Bool, taskSessionId: String? = nil, taskId: String, session: TaskSession? = nil) {
+        self.ok = ok
+        self.taskSessionId = taskSessionId
+        self.taskId = taskId
+        self.session = session
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case taskSessionId = "task_session_id"
+        case taskId = "task_id"
+        case session
+    }
+}
+
+public enum MasterCommandState: Equatable, Sendable {
+    case idle
+    case sending
+    case routed(MasterCommandResult)
+    case started(TaskSessionStartResult)
+    case failed(String)
+}
+
+public struct OnboardingScan: Decodable, Equatable, Sendable {
+    public let ok: Bool
+    public let capturedAt: Date
+    public let activeWorkspace: String?
+    public let focusedWindowId: Int?
+    public let summary: OnboardingScanSummary
+    public let proposals: [OnboardingTaskProposal]
+    public let ungroupedWindows: [OnboardingWindow]
+    public let browserContexts: [OnboardingBrowserContext]
+    public let taskSessions: [TaskSession]
+    public let warnings: [String]
+
+    public init(
+        ok: Bool,
+        capturedAt: Date,
+        activeWorkspace: String? = nil,
+        focusedWindowId: Int? = nil,
+        summary: OnboardingScanSummary,
+        proposals: [OnboardingTaskProposal],
+        ungroupedWindows: [OnboardingWindow] = [],
+        browserContexts: [OnboardingBrowserContext] = [],
+        taskSessions: [TaskSession] = [],
+        warnings: [String] = []
+    ) {
+        self.ok = ok
+        self.capturedAt = capturedAt
+        self.activeWorkspace = activeWorkspace
+        self.focusedWindowId = focusedWindowId
+        self.summary = summary
+        self.proposals = proposals
+        self.ungroupedWindows = ungroupedWindows
+        self.browserContexts = browserContexts
+        self.taskSessions = taskSessions
+        self.warnings = warnings
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case capturedAt = "captured_at"
+        case activeWorkspace = "active_workspace"
+        case focusedWindowId = "focused_window_id"
+        case summary
+        case proposals
+        case ungroupedWindows = "ungrouped_windows"
+        case browserContexts = "browser_contexts"
+        case taskSessions = "task_sessions"
+        case warnings
+    }
+}
+
+public struct OnboardingScanSummary: Decodable, Equatable, Sendable {
+    public let windowCount: Int
+    public let groupedWindowCount: Int
+    public let ungroupedWindowCount: Int
+    public let taskSessionCount: Int
+    public let browserContextCount: Int
+    public let proposalCount: Int
+
+    public init(
+        windowCount: Int,
+        groupedWindowCount: Int,
+        ungroupedWindowCount: Int,
+        taskSessionCount: Int,
+        browserContextCount: Int,
+        proposalCount: Int
+    ) {
+        self.windowCount = windowCount
+        self.groupedWindowCount = groupedWindowCount
+        self.ungroupedWindowCount = ungroupedWindowCount
+        self.taskSessionCount = taskSessionCount
+        self.browserContextCount = browserContextCount
+        self.proposalCount = proposalCount
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case windowCount = "window_count"
+        case groupedWindowCount = "grouped_window_count"
+        case ungroupedWindowCount = "ungrouped_window_count"
+        case taskSessionCount = "task_session_count"
+        case browserContextCount = "browser_context_count"
+        case proposalCount = "proposal_count"
+    }
+}
+
+public struct OnboardingTaskProposal: Decodable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let taskId: String
+    public let title: String
+    public let confidence: String
+    public let reason: String
+    public let windows: [OnboardingWindow]
+    public let browserContexts: [OnboardingBrowserContext]
+    public let taskSessions: [TaskSession]
+    public let suggestedNextAction: String
+
+    public init(
+        id: String,
+        taskId: String,
+        title: String,
+        confidence: String,
+        reason: String,
+        windows: [OnboardingWindow],
+        browserContexts: [OnboardingBrowserContext] = [],
+        taskSessions: [TaskSession] = [],
+        suggestedNextAction: String
+    ) {
+        self.id = id
+        self.taskId = taskId
+        self.title = title
+        self.confidence = confidence
+        self.reason = reason
+        self.windows = windows
+        self.browserContexts = browserContexts
+        self.taskSessions = taskSessions
+        self.suggestedNextAction = suggestedNextAction
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case taskId = "task_id"
+        case title
+        case confidence
+        case reason
+        case windows
+        case browserContexts = "browser_contexts"
+        case taskSessions = "task_sessions"
+        case suggestedNextAction = "suggested_next_action"
+    }
+}
+
+public struct OnboardingWindow: Decodable, Equatable, Identifiable, Sendable {
+    public let id: Int
+    public let app: String
+    public let title: String
+    public let workspace: String
+    public let taskHint: String?
+
+    public init(id: Int, app: String, title: String, workspace: String, taskHint: String? = nil) {
+        self.id = id
+        self.app = app
+        self.title = title
+        self.workspace = workspace
+        self.taskHint = taskHint
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case app
+        case title
+        case workspace
+        case taskHint = "task_hint"
+    }
+}
+
+public struct OnboardingBrowserContext: Decodable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let title: String
+    public let url: String?
+    public let taskId: String?
+    public let windowId: String?
+    public let tabId: String?
+    public let capturedAt: Date
+    public let restoreConfidence: String
+
+    public init(
+        id: String,
+        title: String,
+        url: String? = nil,
+        taskId: String? = nil,
+        windowId: String? = nil,
+        tabId: String? = nil,
+        capturedAt: Date,
+        restoreConfidence: String
+    ) {
+        self.id = id
+        self.title = title
+        self.url = url
+        self.taskId = taskId
+        self.windowId = windowId
+        self.tabId = tabId
+        self.capturedAt = capturedAt
+        self.restoreConfidence = restoreConfidence
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case url
+        case taskId = "task_id"
+        case windowId = "window_id"
+        case tabId = "tab_id"
+        case capturedAt = "captured_at"
+        case restoreConfidence = "restore_confidence"
+    }
+}
+
+public struct OnboardingApprovalResult: Decodable, Equatable, Sendable {
+    public let ok: Bool
+    public let taskId: String
+    public let proposalId: String?
+    public let bindings: [TaskBinding]
+    public let browserContextBindings: [OnboardingBrowserContextBinding]
+    public let queuedPaper: OnboardingQueuedPaper?
+    public let warnings: [String]
+    public let requestId: String?
+
+    public init(
+        ok: Bool,
+        taskId: String,
+        proposalId: String? = nil,
+        bindings: [TaskBinding] = [],
+        browserContextBindings: [OnboardingBrowserContextBinding] = [],
+        queuedPaper: OnboardingQueuedPaper? = nil,
+        warnings: [String] = [],
+        requestId: String? = nil
+    ) {
+        self.ok = ok
+        self.taskId = taskId
+        self.proposalId = proposalId
+        self.bindings = bindings
+        self.browserContextBindings = browserContextBindings
+        self.queuedPaper = queuedPaper
+        self.warnings = warnings
+        self.requestId = requestId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case taskId = "task_id"
+        case proposalId = "proposal_id"
+        case bindings
+        case browserContextBindings = "browser_context_bindings"
+        case queuedPaper = "queue_item"
+        case warnings
+        case requestId = "request_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.ok = try container.decode(Bool.self, forKey: .ok)
+        self.taskId = try container.decode(String.self, forKey: .taskId)
+        self.proposalId = try container.decodeIfPresent(String.self, forKey: .proposalId)
+        self.bindings = try container.decodeIfPresent([TaskBinding].self, forKey: .bindings) ?? []
+        self.browserContextBindings = try container.decodeIfPresent([OnboardingBrowserContextBinding].self, forKey: .browserContextBindings) ?? []
+        self.queuedPaper = try container.decodeIfPresent(OnboardingQueuedPaper.self, forKey: .queuedPaper)
+        self.warnings = try container.decodeIfPresent([String].self, forKey: .warnings) ?? []
+        self.requestId = try container.decodeIfPresent(String.self, forKey: .requestId)
+    }
+}
+
+public struct OnboardingQueuedPaper: Decodable, Equatable, Sendable {
+    public let id: String
+    public let reviewPacketId: String?
+    public let taskId: String?
+    public let state: String?
+    public let priorityScore: Int?
+
+    public init(
+        id: String,
+        reviewPacketId: String? = nil,
+        taskId: String? = nil,
+        state: String? = nil,
+        priorityScore: Int? = nil
+    ) {
+        self.id = id
+        self.reviewPacketId = reviewPacketId
+        self.taskId = taskId
+        self.state = state
+        self.priorityScore = priorityScore
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case reviewPacketId = "review_packet_id"
+        case taskId = "task_id"
+        case state
+        case priorityScore = "priority_score"
+    }
+}
+
+public struct OnboardingBrowserContextBinding: Decodable, Equatable, Sendable {
+    public let browserContextId: String
+    public let eventId: String
+    public let taskId: String
+
+    public init(browserContextId: String, eventId: String, taskId: String) {
+        self.browserContextId = browserContextId
+        self.eventId = eventId
+        self.taskId = taskId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case browserContextId = "browser_context_id"
+        case eventId = "event_id"
+        case taskId = "task_id"
+    }
+}
+
+public enum OnboardingState: Equatable, Sendable {
+    case idle
+    case scanning
+    case loaded(OnboardingScan)
+    case approving(String)
+    case approved(OnboardingApprovalResult)
+    case failed(String)
+}
+
+public struct ReadingQueueContext: Decodable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let title: String
+    public let url: String?
+    public let capturedAt: Date
+    public let eventId: String
+    public let source: String
+
+    public init(
+        id: String,
+        title: String,
+        url: String? = nil,
+        capturedAt: Date,
+        eventId: String,
+        source: String
+    ) {
+        self.id = id
+        self.title = title
+        self.url = url
+        self.capturedAt = capturedAt
+        self.eventId = eventId
+        self.source = source
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case title
+        case url
+        case capturedAt = "captured_at"
+        case eventId = "event_id"
+        case source
+    }
+}
+
+public struct ReadingQueueListResult: Decodable, Equatable, Sendable {
+    public let contexts: [ReadingQueueContext]
+    public let count: Int
+    public let requestId: String?
+
+    public init(contexts: [ReadingQueueContext] = [], count: Int = 0, requestId: String? = nil) {
+        self.contexts = contexts
+        self.count = count
+        self.requestId = requestId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case contexts
+        case count
+        case requestId = "request_id"
+    }
+}
+
+public struct ReadingQueuePromotion: Decodable, Equatable, Sendable {
+    public let contextId: String
+    public let queueItemId: String?
+    public let reviewPacketId: String?
+    public let eventId: String
+    public let idempotent: Bool
+
+    public init(contextId: String, queueItemId: String? = nil, reviewPacketId: String? = nil, eventId: String, idempotent: Bool) {
+        self.contextId = contextId
+        self.queueItemId = queueItemId
+        self.reviewPacketId = reviewPacketId
+        self.eventId = eventId
+        self.idempotent = idempotent
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case contextId = "context_id"
+        case queueItemId = "queue_item_id"
+        case reviewPacketId = "review_packet_id"
+        case eventId = "event_id"
+        case idempotent
+    }
+}
+
+public struct ReadingQueuePromoteResult: Decodable, Equatable, Sendable {
+    public let ok: Bool
+    public let promoted: [ReadingQueuePromotion]
+    public let promotedCount: Int
+    public let missingContextIds: [String]
+    public let requestId: String?
+
+    public init(ok: Bool, promoted: [ReadingQueuePromotion] = [], promotedCount: Int = 0, missingContextIds: [String] = [], requestId: String? = nil) {
+        self.ok = ok
+        self.promoted = promoted
+        self.promotedCount = promotedCount
+        self.missingContextIds = missingContextIds
+        self.requestId = requestId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case promoted
+        case promotedCount = "promoted_count"
+        case missingContextIds = "missing_context_ids"
+        case requestId = "request_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.ok = try container.decodeIfPresent(Bool.self, forKey: .ok) ?? true
+        self.promoted = try container.decodeIfPresent([ReadingQueuePromotion].self, forKey: .promoted) ?? []
+        self.promotedCount = try container.decodeIfPresent(Int.self, forKey: .promotedCount) ?? promoted.count
+        self.missingContextIds = try container.decodeIfPresent([String].self, forKey: .missingContextIds) ?? []
+        self.requestId = try container.decodeIfPresent(String.self, forKey: .requestId)
+    }
+}
+
+public enum QueueAuxiliarySheet: String, Identifiable, Equatable, Sendable {
+    case masterCommand
+    case onboarding
+
+    public var id: String {
+        rawValue
+    }
 }
 
 public struct ContextRestorePlanEnvelope: Decodable, Equatable, Sendable {
@@ -777,6 +1343,7 @@ struct QueueItemDTO: Codable, Equatable, Sendable {
     let reviewPacketId: String
     let taskId: String?
     let priorityScore: Int
+    let priorityReasons: [String]?
     let createdAt: Date
     let reviewPacket: ReviewPacketDTO
 
@@ -785,6 +1352,7 @@ struct QueueItemDTO: Codable, Equatable, Sendable {
         case reviewPacketId = "review_packet_id"
         case taskId = "task_id"
         case priorityScore = "priority_score"
+        case priorityReasons = "priority_reasons"
         case createdAt = "created_at"
         case reviewPacket = "review_packet"
     }
@@ -799,6 +1367,7 @@ struct QueueItemDTO: Codable, Equatable, Sendable {
             decisionNeeded: reviewPacket.decisionNeeded ?? "",
             source: reviewPacket.primarySource,
             priority: priorityScore,
+            priorityReasons: priorityReasons ?? [],
             riskLevel: reviewPacket.riskLevel ?? "medium",
             confidence: reviewPacket.confidence ?? "medium",
             riskTags: reviewPacket.riskTags ?? [],

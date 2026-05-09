@@ -1,5 +1,6 @@
 import type { Observability } from "../observability.js";
 import type { GatewayStore } from "../gateway_store.js";
+import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import {
   taskMessageRecordToApiMessage,
   type DurableTaskMessageStatus,
@@ -8,6 +9,9 @@ import {
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import { taskSessionMatchesTask } from "../task_sessions/session_selection.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
+import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
+import { parseWorkspaceSnapshot } from "../workspace/controller.js";
+import type { WorkspaceSnapshot } from "../workspace/aerospace.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
 
@@ -55,9 +59,27 @@ export async function handleTaskSessionsRoute(input: {
     if (!parsed.ok) return schemaError(parsed.message);
 
     return handleStartTaskSessionRoute({
+      store: input.store,
       taskSessions: input.taskSessions,
+      observability: input.observability,
       body: parsed.value,
       idempotencyKey: input.idempotencyKey,
+      now: input.now,
+      requestId: input.requestId,
+    });
+  }
+
+  const taskWorkspaceSnapshotMatch = input.pathname.match(/^\/tasks\/([^/]+)\/workspace-snapshot$/);
+  if (input.method === "POST" && taskWorkspaceSnapshotMatch) {
+    const parsed = await input.readJsonBody();
+    if (!parsed.ok) return schemaError(parsed.message);
+
+    return handleSaveTaskWorkspaceSnapshotRoute({
+      store: input.store,
+      observability: input.observability,
+      taskId: decodeURIComponent(taskWorkspaceSnapshotMatch[1] ?? ""),
+      body: parsed.value,
+      now: input.now,
       requestId: input.requestId,
     });
   }
@@ -102,6 +124,55 @@ export async function handleTaskSessionsRoute(input: {
   }
 
   return undefined;
+}
+
+async function handleSaveTaskWorkspaceSnapshotRoute(input: {
+  store: GatewayStore;
+  observability?: Observability;
+  taskId: string;
+  body: unknown;
+  now: Date;
+  requestId: string;
+}): Promise<RouteResult> {
+  const validation = validateTaskWorkspaceSnapshotRequest(input.body);
+  if (!validation.ok) return schemaError(validation.message);
+  const taskId = normalizeTaskId(input.taskId);
+  if (!taskId) return schemaError("task id is required");
+
+  const record = await input.store.saveTaskWorkspaceSnapshot({
+    taskId,
+    snapshot: validation.workspaceSnapshot,
+    capturedAt: input.now,
+    sourceQueueItemId: validation.sourceQueueItemId,
+    actorId: validation.actorId,
+  });
+
+  await input.observability?.incrementCounter("task_workspace_snapshots_saved_total");
+  await input.observability?.recordActivity({
+    type: "task_workspace_snapshot_saved",
+    occurred_at: record.updated_at,
+    actor: "human",
+    task_id: taskId,
+    queue_item_id: validation.sourceQueueItemId,
+    status: "ok",
+    summary: `Task workspace saved: ${taskId}`,
+    details: sanitizeActivityDetails({
+      actor_id: validation.actorId,
+      window_count: record.snapshot.windows.length,
+      active_workspace: record.snapshot.activeWorkspace,
+      focused_window_id: record.snapshot.focusedWindowId,
+    }),
+  });
+
+  return {
+    ok: true,
+    status: 200,
+    body: {
+      ok: true,
+      workspace_snapshot: record,
+      request_id: input.requestId,
+    },
+  };
 }
 
 export async function handleListTaskMessagesRoute(input: {
@@ -257,9 +328,12 @@ export async function handleGetTaskSessionRoute(input: {
 }
 
 export async function handleStartTaskSessionRoute(input: {
+  store: GatewayStore;
   taskSessions?: TaskSessionController;
+  observability?: Observability;
   body: unknown;
   idempotencyKey?: string;
+  now: Date;
   requestId: string;
 }): Promise<RouteResult> {
   if (!input.taskSessions?.startTaskSession) {
@@ -299,12 +373,39 @@ export async function handleStartTaskSessionRoute(input: {
     };
   }
 
+  const workspaceRecord = validation.workspaceSnapshot
+    ? await input.store.saveTaskWorkspaceSnapshot({
+      taskId: validation.taskId,
+      snapshot: validation.workspaceSnapshot,
+      capturedAt: input.now,
+      actorId: "master_command",
+    })
+    : undefined;
+  const queuedPaper = validation.queuePaper
+    ? await input.store.ingestEventAsReviewPacket(
+      taskStartEvent({
+        taskId: validation.taskId,
+        prompt: validation.prompt,
+        idempotencyKey: validation.idempotencyKey,
+        now: input.now,
+      }),
+      input.now,
+    )
+    : undefined;
+
+  if (queuedPaper?.queue_item) {
+    await input.observability?.incrementCounter("master_task_start_queue_papers_total");
+  }
+
   return {
     ok: true,
     status: 202,
     body: {
       ok: true,
       started,
+      workspace_snapshot: workspaceRecord,
+      queue_item: queuedPaper?.queue_item,
+      review_packet: queuedPaper?.review_packet,
       request_id: input.requestId,
     },
   };
@@ -400,6 +501,7 @@ export async function handleTaskBindingRoute(input: {
   const binding = await input.taskSessions.bindTaskSession({
     task_session_id: input.taskSessionId,
     task_id: validation.taskId,
+    ...(validation.terminalRef ? { terminal_ref: validation.terminalRef } : {}),
   });
 
   if (isRecord(binding) && binding.ok === false) {
@@ -548,6 +650,8 @@ function validateTaskStartRequest(
   prompt: string;
   cwd?: string;
   model?: string;
+  queuePaper: boolean;
+  workspaceSnapshot?: WorkspaceSnapshot;
   idempotencyKey: string;
 } | { ok: false; message: string } {
   if (!isRecord(input)) {
@@ -571,6 +675,18 @@ function validateTaskStartRequest(
 
   const cwd = typeof input.cwd === "string" && input.cwd.trim() ? input.cwd.trim() : undefined;
   const model = typeof input.model === "string" && input.model.trim() ? input.model.trim() : undefined;
+  const queuePaper = input.queue_paper === true;
+  let workspaceSnapshot: WorkspaceSnapshot | undefined;
+  if (input.workspace_snapshot !== undefined && input.workspace_snapshot !== null) {
+    try {
+      workspaceSnapshot = parseWorkspaceSnapshot(input.workspace_snapshot);
+    } catch (error) {
+      return {
+        ok: false,
+        message: `workspace_snapshot is invalid: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
 
   return {
     ok: true,
@@ -578,11 +694,98 @@ function validateTaskStartRequest(
     prompt,
     cwd,
     model,
+    queuePaper,
+    workspaceSnapshot,
     idempotencyKey,
   };
 }
 
-function validateTaskBindingRequest(input: unknown): { ok: true; taskId: string } | { ok: false; message: string } {
+function taskStartEvent(input: {
+  taskId: string;
+  prompt: string;
+  idempotencyKey: string;
+  now: Date;
+}): McpEvent {
+  const nowIso = input.now.toISOString();
+  const eventSlug = stableSlug(`${input.taskId}_${input.idempotencyKey}`);
+  const title = input.taskId.replace(/^task_/, "").replaceAll("_", " ");
+  return {
+    id: `evt_master_task_start_${eventSlug}`,
+    source: "master",
+    source_id: `master:start:${input.idempotencyKey}`,
+    idempotency_key: `master:start:paper:${input.idempotencyKey}`,
+    occurred_at: nowIso,
+    received_at: nowIso,
+    actor: { id: "master_command", type: "human" },
+    task_hint: input.taskId.replace(/^task_/, ""),
+    type: "manual.review_requested",
+    title: `Start ${title}`,
+    summary: input.prompt,
+    raw_ref: {
+      id: `raw_master_task_start_${eventSlug}`,
+      uri: `master://task-start/${input.taskId}`,
+      media_type: "text/plain",
+    },
+    links: [],
+    resources: [{
+      id: `ctx_master_task_start_${eventSlug}`,
+      kind: "manual_note",
+      title: `Master command for ${title}`,
+      source: "master",
+      captured_at: nowIso,
+      restore_confidence: "medium",
+      details: {
+        task_id: input.taskId,
+      },
+    }],
+  };
+}
+
+function stableSlug(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 120) || "unknown";
+}
+
+function normalizeTaskId(value: string): string | undefined {
+  const taskId = value.trim();
+  if (!taskId || taskId.length > 200) return undefined;
+  if (!/^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$/.test(taskId)) return undefined;
+  return taskId;
+}
+
+function validateTaskWorkspaceSnapshotRequest(input: unknown): {
+  ok: true;
+  workspaceSnapshot: WorkspaceSnapshot;
+  actorId: string;
+  sourceQueueItemId?: string;
+} | { ok: false; message: string } {
+  if (!isRecord(input)) {
+    return { ok: false, message: "task workspace snapshot request must be an object" };
+  }
+
+  const rawSnapshot = input.workspace_snapshot ?? input.workspaceSnapshot;
+  if (rawSnapshot === undefined || rawSnapshot === null) {
+    return { ok: false, message: "workspace_snapshot is required" };
+  }
+
+  let workspaceSnapshot: WorkspaceSnapshot;
+  try {
+    workspaceSnapshot = parseWorkspaceSnapshot(rawSnapshot);
+  } catch (error) {
+    return {
+      ok: false,
+      message: `workspace_snapshot is invalid: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+
+  return {
+    ok: true,
+    workspaceSnapshot,
+    actorId: typeof input.actor_id === "string" && input.actor_id ? input.actor_id : "unknown",
+    sourceQueueItemId: typeof input.source_queue_item_id === "string" && input.source_queue_item_id ? input.source_queue_item_id : undefined,
+  };
+}
+
+function validateTaskBindingRequest(input: unknown): { ok: true; taskId: string; terminalRef?: string } | { ok: false; message: string } {
   if (!isRecord(input)) {
     return { ok: false, message: "task binding request must be an object" };
   }
@@ -598,9 +801,28 @@ function validateTaskBindingRequest(input: unknown): { ok: true; taskId: string 
     return { ok: false, message: "task_id must start with task_ and contain only letters, numbers, underscores, or hyphens" };
   }
 
+  let terminalRef: string | undefined;
+  if (input.terminal_ref !== undefined && input.terminal_ref !== null) {
+    if (typeof input.terminal_ref !== "string") {
+      return { ok: false, message: "terminal_ref must be a string" };
+    }
+    const trimmed = input.terminal_ref.trim();
+    if (trimmed.length === 0) {
+      return { ok: false, message: "terminal_ref must be non-empty when provided" };
+    }
+    if (trimmed.length > 200) {
+      return { ok: false, message: "terminal_ref must be 200 characters or fewer" };
+    }
+    if (!/^(ghostty|tmux|kitty|wezterm):/i.test(trimmed)) {
+      return { ok: false, message: "terminal_ref must start with ghostty:, tmux:, kitty:, or wezterm:" };
+    }
+    terminalRef = trimmed;
+  }
+
   return {
     ok: true,
     taskId,
+    terminalRef,
   };
 }
 

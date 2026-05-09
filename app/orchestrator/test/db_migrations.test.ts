@@ -15,6 +15,7 @@ describe("Postgres migrations", () => {
       "0005_mcp_poll_states.sql",
       "0006_task_messages.sql",
       "0007_agent_runs.sql",
+      "0008_task_workspace_snapshots.sql",
     ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
@@ -39,6 +40,9 @@ describe("Postgres migrations", () => {
     assert.match(sql, /task_messages_task_session_id_idx/);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS agent_runs/);
     assert.match(sql, /agent_runs_task_status_idx/);
+    assert.match(sql, /CREATE TABLE task_workspace_snapshots/);
+    assert.match(sql, /task_id text PRIMARY KEY/);
+    assert.match(sql, /snapshot jsonb NOT NULL/);
     assert.match(sql, /queue_items_ready_rank_idx/);
     assert.match(sql, /queue_items_stale_lease_idx/);
   });

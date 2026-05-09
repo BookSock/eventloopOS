@@ -23,6 +23,16 @@
           spellcheck="false"
           placeholder="https://github.com&#10;https://*.slack.com"
         ></textarea>
+        <div class="hint-grid">
+          <label for="task-hint">Task hint</label>
+          <input id="task-hint" name="taskHint" type="text" spellcheck="false" placeholder="reading queue or blog launch" />
+          <label for="project-hint">Project hint</label>
+          <input id="project-hint" name="projectHint" type="text" spellcheck="false" placeholder="optional project" />
+        </div>
+        <div class="row secondary-row">
+          <button id="capture-active-tab" type="button">Capture current tab</button>
+          <button id="capture-tab-registry" type="button">Capture tabs</button>
+        </div>
         <p id="status" role="status" aria-live="polite"></p>
       </form>
     </main>

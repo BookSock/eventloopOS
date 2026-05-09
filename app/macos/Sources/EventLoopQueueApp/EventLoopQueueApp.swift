@@ -4,7 +4,9 @@ import SwiftUI
 
 @main
 struct EventLoopQueueApp: App {
+    @NSApplicationDelegateAdaptor(QueueAppDelegate.self) private var appDelegate
     @StateObject private var viewModel: QueueViewModel
+    @Environment(\.openWindow) private var openWindow
     private let globalHotKeyController: GlobalHotKeyController
     private static let queueWindowID = "eventloop-queue-window"
 
@@ -26,8 +28,13 @@ struct EventLoopQueueApp: App {
                 Task {
                     await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
                 }
+            },
+            masterCommand: {
+                NSApp.activate(ignoringOtherApps: true)
+                NotificationCenter.default.post(name: .eventLoopQueueMasterCommandRequested, object: nil)
             }
         )
+        appDelegate.viewModel = viewModel
         globalHotKeyController.registerHotKeys()
     }
 
@@ -119,8 +126,54 @@ struct EventLoopQueueApp: App {
                 }
                 .disabled(!viewModel.canRestoreManualWorkspace)
                 .accessibilityIdentifier("queue-command-restore-manual-workspace")
+
+                Divider()
+
+                Button("Master Command") {
+                    openWindow(id: Self.queueWindowID)
+                    viewModel.presentMasterCommand()
+                }
+                .keyboardShortcut("k", modifiers: [.command, .option, .shift])
+                .accessibilityIdentifier("queue-command-master-command")
+
+                Button("Scan Desk") {
+                    openWindow(id: Self.queueWindowID)
+                    viewModel.presentOnboarding()
+                    Task {
+                        await viewModel.scanOnboarding()
+                    }
+                }
+                .accessibilityIdentifier("queue-command-scan-desk")
             }
         }
+    }
+}
+
+@MainActor
+final class QueueAppDelegate: NSObject, NSApplicationDelegate {
+    weak var viewModel: QueueViewModel?
+    private var terminationRestoreInFlight = false
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !terminationRestoreInFlight, viewModel?.canRestoreManualWorkspace == true else {
+            return .terminateNow
+        }
+
+        terminationRestoreInFlight = true
+        Task { @MainActor in
+            await restoreManualWorkspaceBeforeTermination()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    @discardableResult
+    func restoreManualWorkspaceBeforeTermination() async -> Bool {
+        guard let viewModel, viewModel.canRestoreManualWorkspace else {
+            return false
+        }
+        await viewModel.confirmManualWorkspaceRestore()
+        return true
     }
 }
 
@@ -187,6 +240,24 @@ private struct QueueMenuView: View {
                 }
             }
             .accessibilityIdentifier("queue-menu-refresh")
+
+            Button("Master Command") {
+                openWindow(id: windowID)
+                viewModel.presentMasterCommand()
+            }
+            .keyboardShortcut("k", modifiers: [.command, .option, .shift])
+            .accessibilityIdentifier("queue-menu-master-command")
+
+            Button("Scan Desk") {
+                openWindow(id: windowID)
+                viewModel.presentOnboarding()
+                Task {
+                    await viewModel.scanOnboarding()
+                }
+            }
+            .accessibilityIdentifier("queue-menu-scan-desk")
+
+            Divider()
 
             Button("Pull Next Paper") {
                 Task {
@@ -274,5 +345,13 @@ private struct QueueMenuView: View {
         .task(id: viewModel.selectedTaskId) {
             await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .eventLoopQueueMasterCommandRequested)) { _ in
+            openWindow(id: windowID)
+            viewModel.presentMasterCommand()
+        }
     }
+}
+
+private extension Notification.Name {
+    static let eventLoopQueueMasterCommandRequested = Notification.Name("eventLoopQueueMasterCommandRequested")
 }

@@ -6,6 +6,7 @@ import {
   terminateProcessByExecutablePath,
   waitForExit,
 } from "./smoke-app-bundle.mjs";
+import { spawn } from "node:child_process";
 
 if (process.platform !== "darwin") {
   console.log("macOS queue UI smoke skipped: requires darwin");
@@ -18,7 +19,11 @@ if (process.env.EVENTLOOPOS_ENABLE_MACOS_UI_SMOKE !== "1") {
 }
 
 try {
-  const bundle = await buildPackagedQueueAppBundle();
+  const bundle = await buildPackagedQueueAppBundle({
+    executableName: "EventLoopQueueSmoke",
+    bundleIdentifier: "dev.eventloopos.queue.smoke.ui",
+    bundleName: "eventloopOS Queue Smoke",
+  });
   const child = openQueueApp(bundle.appBundle, {
     appArgs: ["--test-mode"],
     env: {
@@ -35,7 +40,7 @@ try {
 
   try {
     await waitForProcess(bundle.executablePath, 8_000);
-    const proof = await runUiProof();
+    const proof = await runUiProof(bundle.processName);
     await terminateProcessByExecutablePath(bundle.executablePath);
     await waitForExit(child, 3_000);
     console.log(JSON.stringify({ ok: true, ...proof }, null, 2));
@@ -50,13 +55,13 @@ try {
   process.exitCode = 1;
 }
 
-async function runUiProof() {
+async function runUiProof(processName) {
   const script = `
 on waitForMenuBarExtra()
   repeat with attempt from 1 to 80
     tell application "System Events"
-      if exists process "EventLoopQueueApp" then
-        tell process "EventLoopQueueApp"
+      if exists process "${processName}" then
+        tell process "${processName}"
           if (count of menu bars) is greater than or equal to 2 then return
         end tell
       end if
@@ -69,7 +74,7 @@ end waitForMenuBarExtra
 on menuItemNames()
   waitForMenuBarExtra()
   tell application "System Events"
-    tell process "EventLoopQueueApp"
+    tell process "${processName}"
       tell menu bar item 1 of menu bar 2
         click
         delay 0.2
@@ -85,7 +90,7 @@ on waitForEnabledMenuItem(expectedValue)
   repeat with attempt from 1 to 40
     waitForMenuBarExtra()
     tell application "System Events"
-      tell process "EventLoopQueueApp"
+      tell process "${processName}"
         tell menu bar item 1 of menu bar 2
           click
           delay 0.2
@@ -104,6 +109,78 @@ on waitForEnabledMenuItem(expectedValue)
   error "menu item never enabled: " & expectedValue
 end waitForEnabledMenuItem
 
+on clickMenuItemNamed(itemName)
+  waitForMenuBarExtra()
+  tell application "System Events"
+    tell process "${processName}"
+      tell menu bar item 1 of menu bar 2
+        click
+        delay 0.2
+        click menu item itemName of menu 1
+      end tell
+    end tell
+  end tell
+end clickMenuItemNamed
+
+on waitForOnboardingProposalActions()
+  repeat with attempt from 1 to 80
+    tell application "System Events"
+      if exists process "${processName}" then
+        tell process "${processName}"
+          if (count of windows) is greater than 0 then
+            try
+              if (count of buttons of scroll area 1 of group 1 of sheet 1 of window 1) is greater than 0 then return
+            end try
+          end if
+        end tell
+      end if
+    end tell
+    delay 0.1
+  end repeat
+  error "onboarding proposal actions never appeared"
+end waitForOnboardingProposalActions
+
+on clickFirstOnboardingApproveAction()
+  waitForOnboardingProposalActions()
+  tell application "System Events"
+    tell process "${processName}"
+      click button 1 of scroll area 1 of group 1 of sheet 1 of window 1
+    end tell
+  end tell
+end clickFirstOnboardingApproveAction
+
+on clickOnboardingDone()
+  tell application "System Events"
+    tell process "${processName}"
+      click button 3 of group 1 of sheet 1 of window 1
+    end tell
+  end tell
+end clickOnboardingDone
+
+on waitForWindowTextContains(expectedText)
+  repeat with attempt from 1 to 80
+    tell application "System Events"
+      if exists process "${processName}" then
+        tell process "${processName}"
+          if (count of windows) is greater than 0 then
+            set allText to ""
+            try
+              repeat with textItem in (static texts of group 1 of sheet 1 of window 1)
+                try
+                  set allText to allText & " " & (value of textItem as string)
+                end try
+              end repeat
+            end try
+            if allText contains expectedText then return
+          end if
+        end tell
+      end if
+    end tell
+    delay 0.1
+  end repeat
+  error "window text never appeared: " & expectedText
+end waitForWindowTextContains
+
 on assertContains(valuesList, expectedValue)
   if valuesList does not contain expectedValue then
     error "missing menu item: " & expectedValue & " in " & (valuesList as string)
@@ -116,9 +193,11 @@ assertContains(initialItems, "Enter Manual Mode")
 assertContains(initialItems, "Restore Queue Workspace")
 assertContains(initialItems, "Pull Next Paper")
 assertContains(initialItems, "Run Recommended Action")
+assertContains(initialItems, "Master Command")
+assertContains(initialItems, "Scan Desk")
 
 tell application "System Events"
-  tell process "EventLoopQueueApp"
+  tell process "${processName}"
     click menu item "Pull Next Paper" of menu 1 of menu bar item 1 of menu bar 2
   end tell
 end tell
@@ -128,7 +207,7 @@ waitForEnabledMenuItem("Approve revised angle or ask for another pass.")
 waitForEnabledMenuItem("Restore Queue Workspace")
 
 tell application "System Events"
-  tell process "EventLoopQueueApp"
+  tell process "${processName}"
     click menu item "Restore Queue Workspace" of menu 1 of menu bar item 1 of menu bar 2
   end tell
 end tell
@@ -137,24 +216,31 @@ set queueRestoreItems to menuItemNames()
 assertContains(queueRestoreItems, "Workspace restored: 0 commands")
 
 tell application "System Events"
-  tell process "EventLoopQueueApp"
+  tell process "${processName}"
     click menu item "Open Queue" of menu 1 of menu bar item 1 of menu bar 2
   end tell
 end tell
 delay 0.8
 
 tell application "System Events"
-  tell process "EventLoopQueueApp"
+  tell process "${processName}"
     if (count of windows) is 0 then error "queue window did not open"
     set queueWindowName to name of window 1
   end tell
 end tell
 
+clickMenuItemNamed("Scan Desk")
+waitForOnboardingProposalActions()
+clickFirstOnboardingApproveAction()
+waitForWindowTextContains("Queued paper qit_onboarding_task_blog_feedback")
+clickOnboardingDone()
+delay 0.3
+
 set reopenItems to menuItemNames()
 assertContains(reopenItems, "Enter Manual Mode")
 assertContains(reopenItems, "Skip / Next Item")
 tell application "System Events"
-  tell process "EventLoopQueueApp"
+  tell process "${processName}"
     click menu item "Skip / Next Item" of menu 1 of menu bar item 1 of menu bar 2
   end tell
 end tell
@@ -163,7 +249,7 @@ set skippedItems to menuItemNames()
 assertContains(skippedItems, "CI failed on routing PR")
 
 tell application "System Events"
-  tell process "EventLoopQueueApp"
+  tell process "${processName}"
     click menu item "Enter Manual Mode" of menu 1 of menu bar item 1 of menu bar 2
   end tell
 end tell
@@ -173,7 +259,7 @@ assertContains(manualItems, "Return to Event Loop")
 assertContains(manualItems, "Restore Manual Workspace")
 
 tell application "System Events"
-  tell process "EventLoopQueueApp"
+  tell process "${processName}"
     click menu item "Return to Event Loop" of menu 1 of menu bar item 1 of menu bar 2
   end tell
 end tell
@@ -183,7 +269,7 @@ assertContains(returnedItems, "Enter Manual Mode")
 assertContains(returnedItems, "Manual workspace saved: 0 windows")
 
 tell application "System Events"
-  tell process "EventLoopQueueApp"
+  tell process "${processName}"
     click menu item "Restore Manual Workspace" of menu 1 of menu bar item 1 of menu bar 2
   end tell
 end tell
@@ -193,21 +279,23 @@ assertContains(restoredItems, "Workspace restored: 0 commands")
 assertContains(restoredItems, "Return to Event Loop")
 
 tell application "System Events"
-  tell process "EventLoopQueueApp"
+  tell process "${processName}"
     click menu item "Return to Event Loop" of menu 1 of menu bar item 1 of menu bar 2
   end tell
 end tell
 delay 0.5
 set finalItems to menuItemNames()
 assertContains(finalItems, "Enter Manual Mode")
+assertContains(finalItems, "Master Command")
+assertContains(finalItems, "Scan Desk")
 
 return queueWindowName
 `;
 
-  const result = await spawnChecked("osascript", ["-e", script]);
+  const result = await spawnCheckedWithTimeout("osascript", ["-e", script], 30_000);
   return {
     window_name: result.stdout.trim(),
-    mode_toggle_proof: "Restore Queue Workspace executed with receipt; Skip / Next Item changed selection; menu item changed Enter Manual Mode -> Return to Event Loop -> Enter Manual Mode; Restore Manual Workspace executed with receipt",
+    mode_toggle_proof: "Restore Queue Workspace executed with receipt; Scan Desk approved and queued onboarding paper; Skip / Next Item changed selection; menu item changed Enter Manual Mode -> Return to Event Loop -> Enter Manual Mode; Restore Manual Workspace executed with receipt",
   };
 }
 
@@ -234,4 +322,50 @@ async function tryTerminate(executablePath, child) {
 
 async function sleep(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function spawnCheckedWithTimeout(file, args, timeoutMs) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.kill("SIGKILL");
+      reject(new Error(`${file} ${args.join(" ")} timed out after ${timeoutMs}ms\n${stdout}${stderr}`));
+    }, timeoutMs);
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.on("exit", (code, signal) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      clearTimeout(timer);
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}\n${stdout}${stderr}`));
+    });
+  });
 }

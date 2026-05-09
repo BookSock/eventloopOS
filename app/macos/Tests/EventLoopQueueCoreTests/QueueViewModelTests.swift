@@ -51,6 +51,74 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(workspaceClient.restorePlanSnapshots, [SeededQueue.blogFeedbackWorkspace])
     }
 
+    func testPullNextPaperRequestsBrowserContextRestore() async {
+        let browserContext = ReviewContextResource(
+            id: "browser_tab_77",
+            kind: "browser_tab",
+            title: "Blog draft",
+            url: "https://example.test/blog-draft",
+            source: "chrome-extension",
+            restoreConfidence: "high",
+            windowId: "4",
+            tabId: "77"
+        )
+        let packet = ReviewPacket(
+            id: "packet-blog",
+            taskId: "task_blog",
+            title: "Blog paper",
+            summary: "Review blog.",
+            source: "manual://blog",
+            priority: 90,
+            contextResources: [browserContext],
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(packets: [packet])
+        let viewModel = QueueViewModel(client: client, workspaceClient: FakeWorkspaceClient())
+
+        await viewModel.pullNextPaper()
+        await viewModel.pullNextPaper()
+
+        XCTAssertEqual(client.requestedContextRestoreResources, [browserContext])
+        XCTAssertEqual(client.requestedContextRestoreIdempotencyKeys.count, 1)
+        XCTAssertTrue(client.requestedContextRestoreIdempotencyKeys[0].hasPrefix("mac_auto_context_restore_browser_tab_77_"))
+    }
+
+    func testSelectedPaperDetailRequestsBrowserContextRestore() async {
+        let browserContext = ReviewContextResource(
+            id: "browser_tab_88",
+            kind: "browser_tab",
+            title: "Launch notes",
+            url: "https://example.test/launch-notes",
+            source: "chrome-extension",
+            restoreConfidence: "high",
+            windowId: "5",
+            tabId: "88"
+        )
+        let packet = ReviewPacket(
+            id: "packet-launch",
+            taskId: "task_launch",
+            title: "Launch paper",
+            summary: "Review launch notes.",
+            source: "manual://launch",
+            priority: 90,
+            contextResources: [browserContext],
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(packets: [packet])
+        let viewModel = QueueViewModel(client: client, workspaceClient: FakeWorkspaceClient())
+
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-launch")
+        await viewModel.prepareSelectedPacketDetail()
+        await viewModel.prepareSelectedPacketDetail()
+
+        XCTAssertEqual(client.requestedContextRestoreResources, [browserContext])
+        XCTAssertEqual(client.requestedContextRestoreIdempotencyKeys.count, 1)
+        XCTAssertTrue(client.requestedContextRestoreIdempotencyKeys[0].hasPrefix("mac_auto_context_restore_browser_tab_88_"))
+    }
+
     func testFirstPullFromEventLoopCapturesManualWorkspaceBaselineOnce() async {
         let baselineSnapshot = WorkspaceSnapshot(
             windows: [WorkspaceWindow(id: 77, app: "Ghostty", title: "normal shell", workspace: "normal")],
@@ -113,6 +181,60 @@ final class QueueViewModelTests: XCTestCase {
         viewModel.select(packetId: "missing")
 
         XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+    }
+
+    func testSwitchToPaperSavesCurrentWorkspaceAndRestoresNextPaper() async {
+        let currentSnapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 51, app: "Ghostty", title: "Blog agent", workspace: "eventloop-blog")
+            ],
+            activeWorkspace: "eventloop-blog",
+            focusedWindowId: 51
+        )
+        let nextSnapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 61, app: "Google Chrome", title: "Inbox", workspace: "eventloop-email")
+            ],
+            activeWorkspace: "eventloop-email",
+            focusedWindowId: 61
+        )
+        let packets = [
+            ReviewPacket(
+                id: "packet-blog",
+                taskId: "task_blog",
+                title: "Blog paper",
+                summary: "Review blog.",
+                source: "manual://blog",
+                priority: 90,
+                recommendedAction: "Review",
+                createdAt: Date(timeIntervalSince1970: 0),
+                workspaceSnapshot: currentSnapshot
+            ),
+            ReviewPacket(
+                id: "packet-email",
+                taskId: "task_email",
+                title: "Email paper",
+                summary: "Review email.",
+                source: "manual://email",
+                priority: 80,
+                recommendedAction: "Review",
+                createdAt: Date(timeIntervalSince1970: 1),
+                workspaceSnapshot: nextSnapshot
+            ),
+        ]
+        let client = FakeQueueClient(packets: packets)
+        let workspaceClient = FakeWorkspaceClient(captureSnapshot: currentSnapshot)
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+        await viewModel.pullNextPaper()
+
+        await viewModel.switchToPaper(packetId: "packet-email")
+
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.count, 1)
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.taskId, "task_blog")
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.sourceQueueItemId, "packet-blog")
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.workspaceSnapshot, currentSnapshot)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-email")
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [currentSnapshot, nextSnapshot])
     }
 
     func testSelectionChangeClearsTaskBindingStatus() async {
@@ -253,6 +375,84 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
     }
 
+    func testDoneAndNextRestoresNextTaskWorkspace() async {
+        let firstSnapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 91, app: "Ghostty", title: "codex blog", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog",
+            focusedWindowId: 91
+        )
+        let secondSnapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 101, app: "Google Chrome", title: "customer reply", workspace: "eventloop-email")],
+            activeWorkspace: "eventloop-email",
+            focusedWindowId: 101
+        )
+        let packets = [
+            ReviewPacket(
+                id: "packet-blog",
+                taskId: "task_blog",
+                title: "Blog paper",
+                summary: "Review blog.",
+                source: "manual://blog",
+                priority: 90,
+                recommendedAction: "Review",
+                createdAt: Date(timeIntervalSince1970: 0),
+                workspaceSnapshot: firstSnapshot
+            ),
+            ReviewPacket(
+                id: "packet-email",
+                taskId: "task_email",
+                title: "Email paper",
+                summary: "Review email.",
+                source: "manual://email",
+                priority: 80,
+                recommendedAction: "Review",
+                createdAt: Date(timeIntervalSince1970: 1),
+                workspaceSnapshot: secondSnapshot
+            ),
+        ]
+        let plan = WorkspaceRestorePlan(
+            commands: [WorkspaceCommand(command: "aerospace", args: ["workspace", "eventloop-email"])],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: firstSnapshot,
+            planEnvelope: WorkspaceRestorePlanEnvelope(plan: plan, executeSupported: false)
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: packets),
+            workspaceClient: workspaceClient
+        )
+
+        await viewModel.pullNextPaper()
+        await viewModel.doneAndNext()
+
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-email")
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [firstSnapshot, secondSnapshot])
+        XCTAssertEqual(viewModel.workspaceRestoreState, .planned(plan))
+    }
+
+    func testDoneAndNextSavesCurrentTaskWorkspaceSnapshot() async {
+        let taskSnapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 91, app: "Ghostty", title: "codex blog work", workspace: "eventloop-blog"),
+                WorkspaceWindow(id: 92, app: "Google Chrome", title: "Blog draft", workspace: "eventloop-blog")
+            ],
+            activeWorkspace: "eventloop-blog",
+            focusedWindowId: 91
+        )
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let workspaceClient = FakeWorkspaceClient(captureSnapshot: taskSnapshot)
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+        await viewModel.pullNextPaper()
+
+        await viewModel.doneAndNext()
+
+        XCTAssertEqual(client.completedPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(client.completedPacketWorkspaceSnapshots, [taskSnapshot])
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, 2)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+    }
+
     func testDeferSelectedPacketAdvances() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
@@ -294,6 +494,105 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(client.leasedPacketIds, ["packet-blog-feedback", "packet-ci-failed"])
         XCTAssertEqual(viewModel.packets.map(\.id), ["packet-blog-feedback", "packet-ci-failed", "packet-external-send"])
         XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+    }
+
+    func testMoveToNextRestoresNextTaskWorkspace() async {
+        let firstSnapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 91, app: "Ghostty", title: "codex blog", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+        let secondSnapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 101, app: "Google Chrome", title: "email", workspace: "eventloop-email")],
+            activeWorkspace: "eventloop-email"
+        )
+        let packets = [
+            ReviewPacket(
+                id: "packet-blog",
+                taskId: "task_blog",
+                title: "Blog paper",
+                summary: "Review blog.",
+                source: "manual://blog",
+                priority: 90,
+                recommendedAction: "Review",
+                createdAt: Date(timeIntervalSince1970: 0),
+                workspaceSnapshot: firstSnapshot
+            ),
+            ReviewPacket(
+                id: "packet-email",
+                taskId: "task_email",
+                title: "Email paper",
+                summary: "Review email.",
+                source: "manual://email",
+                priority: 80,
+                recommendedAction: "Review",
+                createdAt: Date(timeIntervalSince1970: 1),
+                workspaceSnapshot: secondSnapshot
+            ),
+        ]
+        let workspaceClient = FakeWorkspaceClient()
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: packets),
+            workspaceClient: workspaceClient
+        )
+        await viewModel.pullNextPaper()
+
+        await viewModel.moveToNext()
+
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-email")
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [firstSnapshot, secondSnapshot])
+    }
+
+    func testMoveToNextSavesCurrentTaskWorkspaceSnapshotBeforeSwitching() async {
+        let currentSnapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 51, app: "Ghostty", title: "Blog agent", workspace: "eventloop-blog")
+            ],
+            activeWorkspace: "eventloop-blog",
+            focusedWindowId: 51
+        )
+        let nextSnapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 61, app: "Google Chrome", title: "Inbox", workspace: "eventloop-email")
+            ],
+            activeWorkspace: "eventloop-email",
+            focusedWindowId: 61
+        )
+        let packets = [
+            ReviewPacket(
+                id: "packet-blog",
+                taskId: "task_blog",
+                title: "Blog paper",
+                summary: "Review blog.",
+                source: "manual://blog",
+                priority: 90,
+                recommendedAction: "Review",
+                createdAt: Date(timeIntervalSince1970: 0),
+                workspaceSnapshot: currentSnapshot
+            ),
+            ReviewPacket(
+                id: "packet-email",
+                taskId: "task_email",
+                title: "Email paper",
+                summary: "Review email.",
+                source: "manual://email",
+                priority: 80,
+                recommendedAction: "Review",
+                createdAt: Date(timeIntervalSince1970: 1),
+                workspaceSnapshot: nextSnapshot
+            ),
+        ]
+        let client = FakeQueueClient(packets: packets)
+        let workspaceClient = FakeWorkspaceClient(captureSnapshot: currentSnapshot)
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+        await viewModel.pullNextPaper()
+
+        await viewModel.moveToNext()
+
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.count, 1)
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.taskId, "task_blog")
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.sourceQueueItemId, "packet-blog")
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.workspaceSnapshot, currentSnapshot)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-email")
     }
 
     func testMoveToNextKeepsSelectionWhenNoNextPacketIsAvailable() async {
@@ -476,6 +775,13 @@ final class QueueViewModelTests: XCTestCase {
     }
 
     func testBindSelectedPacketToTaskSessionUsesSelectedTaskId() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 401, app: "Ghostty", title: "Codex blog thread", workspace: "eventloop-blog")
+            ],
+            activeWorkspace: "eventloop-blog",
+            focusedWindowId: 401
+        )
         let packet = ReviewPacket(
             id: "packet-route",
             taskId: "task_blog_feedback",
@@ -493,7 +799,8 @@ final class QueueViewModelTests: XCTestCase {
                 TaskSession(id: "task_session_unbound", provider: "fake", status: "idle", name: "Unbound thread")
             ]
         )
-        let viewModel = QueueViewModel(client: client)
+        let workspaceClient = FakeWorkspaceClient(captureSnapshot: snapshot)
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
         await viewModel.loadQueue()
         viewModel.select(packetId: "packet-route")
 
@@ -517,6 +824,325 @@ final class QueueViewModelTests: XCTestCase {
                 )
             ))
         )
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.count, 1)
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.taskId, "task_blog_feedback")
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.sourceQueueItemId, "packet-route")
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.workspaceSnapshot, snapshot)
+    }
+
+    func testSendMasterCommandUsesSelectedTaskAsDefaultHint() async {
+        let packet = ReviewPacket(
+            id: "packet-route",
+            taskId: "task_blog_feedback",
+            title: "Route feedback",
+            summary: "Human approved agent handoff.",
+            source: "manual://review",
+            priority: 90,
+            recommendedAction: "Route to task agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(packets: [packet])
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+
+        await viewModel.sendMasterCommand(text: "Launch blog is now highest priority")
+
+        XCTAssertEqual(client.sentMasterCommands.count, 1)
+        XCTAssertEqual(client.sentMasterCommands.first?.text, "Launch blog is now highest priority")
+        XCTAssertEqual(client.sentMasterCommands.first?.taskHint, "task_blog_feedback")
+        guard case let .routed(result) = viewModel.masterCommandState else {
+            return XCTFail("expected routed state")
+        }
+        XCTAssertEqual(result.targetTaskId, "task_blog_feedback")
+        XCTAssertEqual(viewModel.state, .loaded)
+    }
+
+    func testSendMasterCommandSelectsQueuedPaperWhenHumanReviewCreated() async {
+        let queuedPacket = ReviewPacket(
+            id: "packet-master-note",
+            taskId: "task_master_note",
+            title: "Review master note",
+            summary: "Master command needs human review.",
+            source: "master",
+            priority: 760,
+            recommendedAction: "Work this paper, then Done / Next",
+            recommendedActionType: "mark_done",
+            createdAt: Date(timeIntervalSince1970: 1_778_070_000)
+        )
+        let client = FakeQueueClient(
+            packets: [],
+            masterCommandResult: MasterCommandResult(
+                ok: true,
+                requestId: "req_master_queued",
+                eventId: "evt_master_queued",
+                routeAction: "create_queue_item",
+                targetTaskId: "task_master_note",
+                queuedPacket: queuedPacket
+            )
+        )
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.sendMasterCommand(text: "Start a paper for this note")
+
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-master-note")
+        XCTAssertEqual(viewModel.selectedPacket?.title, "Review master note")
+        guard case let .routed(result) = viewModel.masterCommandState else {
+            return XCTFail("expected routed state")
+        }
+        XCTAssertEqual(result.queuedPacket, queuedPacket)
+    }
+
+    func testStartMasterTaskCreatesTaskSessionAndRefreshesSessions() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 301, app: "Google Chrome", title: "Launch email", workspace: "eventloop-launch")
+            ],
+            activeWorkspace: "eventloop-launch",
+            focusedWindowId: 301
+        )
+        let client = FakeQueueClient(packets: [])
+        let workspaceClient = FakeWorkspaceClient(captureSnapshot: snapshot)
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+
+        await viewModel.startMasterTask(
+            text: "Draft email to launch partners",
+            taskHint: "Launch Partners",
+            cwd: "/repo",
+            model: "gpt-5.3-codex"
+        )
+
+        XCTAssertEqual(client.startedMasterTasks.count, 1)
+        XCTAssertEqual(client.startedMasterTasks.first?.text, "Draft email to launch partners")
+        XCTAssertEqual(client.startedMasterTasks.first?.taskHint, "Launch Partners")
+        XCTAssertEqual(client.startedMasterTasks.first?.cwd, "/repo")
+        XCTAssertEqual(client.startedMasterTasks.first?.model, "gpt-5.3-codex")
+        guard case let .started(started) = viewModel.masterCommandState else {
+            return XCTFail("expected started state")
+        }
+        XCTAssertEqual(started.taskId, "task_launch_partners")
+        XCTAssertEqual(viewModel.taskSessions.last?.taskId, "task_launch_partners")
+        XCTAssertEqual(client.startedMasterTasks.first?.workspaceSnapshot, snapshot)
+        XCTAssertEqual(viewModel.selectedPacket?.taskId, "task_launch_partners")
+        XCTAssertEqual(viewModel.selectedPacket?.workspaceSnapshot, snapshot)
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [snapshot])
+    }
+
+    func testBumpQueuePaperPriorityCallsClientAndRefreshes() async {
+        let packet = ReviewPacket(
+            id: "qit_blog",
+            taskId: "task_blog",
+            title: "Blog feedback",
+            summary: "Need decision",
+            source: "slack",
+            priority: 500,
+            recommendedAction: "Send back",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(packets: [packet])
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.refreshQueue()
+
+        await viewModel.bumpQueuePaperPriority(packetId: "qit_blog", delta: 250, reason: "user_priority_bump")
+
+        XCTAssertEqual(viewModel.masterCommandState, .idle)
+        XCTAssertEqual(viewModel.selectedPacket?.priority, 750)
+        XCTAssertTrue(viewModel.selectedPacket?.priorityReasons.contains("user_priority_bump") ?? false)
+    }
+
+    func testPromoteReadingQueueAddsQueuePapers() async {
+        let client = FakeQueueClient(packets: [])
+        client.setReadingQueueContexts([
+            ReadingQueueContext(
+                id: "browser_tab:1",
+                title: "Agents reshape OS",
+                url: "https://example.test/agents",
+                capturedAt: Date(timeIntervalSince1970: 0),
+                eventId: "evt_capture_1",
+                source: "browser"
+            )
+        ])
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.refreshQueue()
+
+        await viewModel.promoteReadingQueue()
+
+        XCTAssertEqual(viewModel.masterCommandState, .idle)
+        XCTAssertTrue(viewModel.packets.contains(where: { $0.taskId == "task_reading_queue" }))
+        XCTAssertEqual(viewModel.selectedPacket?.taskId, "task_reading_queue")
+    }
+
+    func testBindSelectedTerminalRefForwardsToClient() async {
+        let packet = ReviewPacket(
+            id: "qit_blog",
+            taskId: "task_blog",
+            title: "Blog feedback",
+            summary: "Need decision",
+            source: "slack",
+            priority: 500,
+            recommendedAction: "Send back",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(
+            packets: [packet],
+            taskSessions: [
+                TaskSession(id: "codex_thread_blog", taskId: "task_blog", provider: "codex", status: "idle")
+            ]
+        )
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.refreshQueue()
+        viewModel.selectedPacketID = "qit_blog"
+        await viewModel.loadTaskSessions()
+
+        await viewModel.bindSelectedTerminalRef("ghostty:front")
+
+        let session = viewModel.taskSessions.first(where: { $0.id == "codex_thread_blog" })
+        XCTAssertEqual(session?.terminalRef, "ghostty:front")
+        if case let .bound(binding) = viewModel.taskBindingState {
+            XCTAssertEqual(binding.taskSessionId, "codex_thread_blog")
+        } else {
+            XCTFail("expected bound state")
+        }
+    }
+
+    func testMasterCommandRejectsBlankText() async {
+        let viewModel = QueueViewModel(client: FakeQueueClient(packets: []))
+
+        await viewModel.sendMasterCommand(text: "   ")
+
+        XCTAssertEqual(viewModel.masterCommandState, .failed("Master command text is required"))
+    }
+
+    func testAuxiliarySheetsCanBePresentedFromMenuCommands() {
+        let viewModel = QueueViewModel(client: FakeQueueClient(packets: []))
+
+        viewModel.presentMasterCommand()
+        XCTAssertEqual(viewModel.auxiliarySheet, .masterCommand)
+
+        viewModel.presentOnboarding()
+        XCTAssertEqual(viewModel.auxiliarySheet, .onboarding)
+
+        viewModel.dismissAuxiliarySheet()
+        XCTAssertNil(viewModel.auxiliarySheet)
+    }
+
+    func testScanOnboardingLoadsCurrentDeskProposals() async {
+        let client = FakeQueueClient(packets: [])
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.scanOnboarding()
+
+        guard case let .loaded(scan) = viewModel.onboardingState else {
+            return XCTFail("expected loaded onboarding state")
+        }
+        XCTAssertEqual(scan.summary.proposalCount, 1)
+        XCTAssertEqual(scan.proposals.first?.taskId, "task_blog_feedback")
+        XCTAssertEqual(scan.proposals.first?.windows.count, 2)
+    }
+
+    func testApproveOnboardingProposalBindsSessionsAndRefreshes() async {
+        let client = FakeQueueClient(
+            packets: [],
+            taskSessions: [
+                TaskSession(id: "task_session_blog", provider: "fake", status: "idle", name: "Blog thread")
+            ]
+        )
+        let scan = OnboardingScan(
+            ok: true,
+            capturedAt: Date(timeIntervalSince1970: 1_778_070_000),
+            summary: OnboardingScanSummary(
+                windowCount: 1,
+                groupedWindowCount: 1,
+                ungroupedWindowCount: 0,
+                taskSessionCount: 1,
+                browserContextCount: 0,
+                proposalCount: 1
+            ),
+            proposals: [
+                OnboardingTaskProposal(
+                    id: "onboard_blog",
+                    taskId: "task_blog_feedback",
+                    title: "Blog Feedback",
+                    confidence: "high",
+                    reason: "window title contains [task:...]",
+                    windows: [
+                        OnboardingWindow(id: 91, app: "Ghostty", title: "[task:blog feedback] codex", workspace: "eventloop-blog")
+                    ],
+                    taskSessions: [
+                        TaskSession(id: "task_session_blog", provider: "fake", status: "idle", name: "Blog thread")
+                    ],
+                    suggestedNextAction: "Approve this task context."
+                )
+            ]
+        )
+        client.replaceOnboardingScan(scan)
+        let workspaceClient = FakeWorkspaceClient()
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+
+        await viewModel.approveOnboardingProposal(id: "onboard_blog", queuePaper: true)
+
+        XCTAssertEqual(client.approvedOnboardingProposalIds, ["onboard_blog"])
+        guard case let .approved(result) = viewModel.onboardingState else {
+            return XCTFail("expected approved onboarding state")
+        }
+        XCTAssertEqual(result.taskId, "task_blog_feedback")
+        XCTAssertEqual(result.bindings.first?.taskSessionId, "task_session_blog")
+        XCTAssertEqual(result.queuedPaper?.id, "qit_onboarding_task_blog_feedback")
+        XCTAssertEqual(viewModel.taskSessions.first?.taskId, "task_blog_feedback")
+        XCTAssertTrue(viewModel.packets.contains { $0.id == "qit_onboarding_task_blog_feedback" })
+        XCTAssertEqual(viewModel.selectedPacketID, "qit_onboarding_task_blog_feedback")
+        XCTAssertEqual(viewModel.selectedPacket?.workspaceSnapshot?.activeWorkspace, "eventloop-blog")
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots.first?.activeWorkspace, "eventloop-blog")
+    }
+
+    func testApproveAllOnboardingProposalsQueuesWorkbenchPapers() async {
+        let scan = OnboardingScan(
+            ok: true,
+            capturedAt: Date(timeIntervalSince1970: 1_778_070_000),
+            activeWorkspace: "desk",
+            focusedWindowId: 101,
+            summary: OnboardingScanSummary(
+                windowCount: 2,
+                groupedWindowCount: 2,
+                ungroupedWindowCount: 0,
+                taskSessionCount: 0,
+                browserContextCount: 0,
+                proposalCount: 2
+            ),
+            proposals: [
+                OnboardingTaskProposal(
+                    id: "onboard_blog",
+                    taskId: "task_blog",
+                    title: "Blog",
+                    confidence: "medium",
+                    reason: "window title",
+                    windows: [OnboardingWindow(id: 101, app: "Ghostty", title: "Blog", workspace: "blog")],
+                    suggestedNextAction: "Approve this task context."
+                ),
+                OnboardingTaskProposal(
+                    id: "onboard_email",
+                    taskId: "task_email",
+                    title: "Email",
+                    confidence: "medium",
+                    reason: "window title",
+                    windows: [OnboardingWindow(id: 102, app: "Google Chrome", title: "Email", workspace: "email")],
+                    suggestedNextAction: "Approve this task context."
+                )
+            ]
+        )
+        let client = FakeQueueClient(packets: [])
+        client.replaceOnboardingScan(scan)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.scanOnboarding()
+
+        await viewModel.approveAllOnboardingProposals(queuePaper: true)
+
+        XCTAssertEqual(client.approvedOnboardingProposalIds, ["onboard_blog", "onboard_email"])
+        XCTAssertEqual(viewModel.packets.map(\.taskId), ["task_blog", "task_email"])
+        XCTAssertEqual(viewModel.selectedPacketID, "qit_onboarding_task_blog")
+        XCTAssertEqual(viewModel.selectedWorkspaceSnapshot?.windows.map(\.id), [101])
     }
 
     func testRenewSelectedLeaseKeepsSelectionLoaded() async {
@@ -637,8 +1263,9 @@ final class QueueViewModelTests: XCTestCase {
                 idempotencyKey: "idem_fake"
             )
         )
+        let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(
-            client: FakeQueueClient(packets: SeededQueue.packets),
+            client: client,
             workspaceClient: workspaceClient
         )
 
@@ -648,7 +1275,10 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.mode, .manual)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
         XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
-        XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, 2)
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.taskId, "task_blog_feedback")
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.sourceQueueItemId, "packet-blog-feedback")
+        XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.workspaceSnapshot, snapshot)
         XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [snapshot])
     }
 
@@ -783,6 +1413,43 @@ final class QueueViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .planned(plan))
         XCTAssertEqual(workspaceClient.restorePlanSnapshots, [snapshot])
+    }
+
+    func testEventLoopModeExecutesWorkspaceRestoreWhenBackendAllowsExecution() async {
+        let plan = WorkspaceRestorePlan(
+            commands: [WorkspaceCommand(command: "aerospace", args: ["workspace", "eventloop-blog"])],
+            skipped: []
+        )
+        let receipt = WorkspaceRestoreReceipt(
+            commands: [WorkspaceExecutedCommand(command: "aerospace", args: ["workspace", "eventloop-blog"], stdout: "ok")],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            planEnvelope: WorkspaceRestorePlanEnvelope(plan: plan, executeSupported: true),
+            restoreEnvelope: WorkspaceRestoreExecutionEnvelope(
+                ok: true,
+                plan: plan,
+                receipt: receipt,
+                executeSupported: true,
+                idempotencyKey: "idem_fake"
+            )
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+
+        await viewModel.prepareWorkspaceRestore(snapshot: snapshot)
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [snapshot])
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [snapshot])
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+        XCTAssertTrue(workspaceClient.restoreIdempotencyKeys[0].hasPrefix("mac_workspace_restore_"))
     }
 
     func testSelectedWorkspaceRestoreRequiresPacketSnapshot() async {

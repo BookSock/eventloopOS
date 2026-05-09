@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createExtensionController, urlsMatch } from "../src/extension-controller.js";
+import { createExtensionController, tabByCapturedId, urlsMatch } from "../src/extension-controller.js";
 import { createMockNativeBridge } from "../src/mock-native-bridge.js";
 
 const fixtureResource = {
@@ -61,6 +61,47 @@ test("restore focuses existing tab by URL match and restores scroll", async () =
   assert.equal(chromeApi.calls.restoreMessages[0].page.scroll.y, 900);
   assert.equal(chromeApi.calls.restoreMessages[0].page.quote.text, fixtureResource.text_quote);
   assert.equal(chromeApi.calls.restoreMessages[0].page.quote.selector_hint, fixtureResource.selector_hint);
+});
+
+test("restore prefers captured tab id before URL fallback", async () => {
+  const chromeApi = fakeChrome({
+    tabs: [
+      { id: 88, url: fixtureResource.url, title: "Duplicate URL", windowId: 22 },
+      { id: 7, url: `${fixtureResource.url}#section`, title: fixtureResource.title, windowId: 11 }
+    ]
+  });
+  const controller = createExtensionController({
+    chromeApi,
+    nativeBridge: createMockNativeBridge()
+  });
+
+  const result = await controller.restore(fixtureResource);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.tabId, 7);
+  assert.deepEqual(chromeApi.calls.tabsUpdate, [{ id: 7, update: { active: true } }]);
+  assert.deepEqual(chromeApi.calls.windowsUpdate, [{ id: 11, update: { focused: true } }]);
+  assert.equal(chromeApi.calls.tabsCreate.length, 0);
+});
+
+test("restore ignores stale captured tab id when URL no longer matches", async () => {
+  const chromeApi = fakeChrome({
+    tabs: [
+      { id: 7, url: "https://example.test/other", title: "Different page", windowId: 11 },
+      { id: 88, url: fixtureResource.url, title: fixtureResource.title, windowId: 22 }
+    ]
+  });
+  const controller = createExtensionController({
+    chromeApi,
+    nativeBridge: createMockNativeBridge()
+  });
+
+  const result = await controller.restore(fixtureResource);
+
+  assert.equal(result.ok, true);
+  assert.equal(result.tabId, 88);
+  assert.deepEqual(chromeApi.calls.tabsUpdate, [{ id: 88, update: { active: true } }]);
+  assert.deepEqual(chromeApi.calls.windowsUpdate, [{ id: 22, update: { focused: true } }]);
 });
 
 test("restore opens missing tab and restores scroll", async () => {
@@ -148,6 +189,17 @@ test("restore injects content script when page listener is missing", async () =>
 test("urlsMatch ignores hash and preserves query", () => {
   assert.equal(urlsMatch("https://example.test/a?b=1#top", "https://example.test/a?b=1"), true);
   assert.equal(urlsMatch("https://example.test/a?b=2", "https://example.test/a?b=1"), false);
+});
+
+test("tabByCapturedId requires live tab id and matching URL", () => {
+  const tabs = [
+    { id: 7, url: "https://example.test/a#top" },
+    { id: 8, url: "https://example.test/b" }
+  ];
+
+  assert.deepEqual(tabByCapturedId(tabs, "7", "https://example.test/a"), tabs[0]);
+  assert.equal(tabByCapturedId(tabs, "7", "https://example.test/b"), undefined);
+  assert.equal(tabByCapturedId(tabs, "nope", "https://example.test/a"), undefined);
 });
 
 function fakeChrome({ tabs, contentScriptReady = true }) {

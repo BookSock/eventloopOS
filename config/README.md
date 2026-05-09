@@ -51,12 +51,12 @@ Script stdout must be JSON shaped like `{"items":[...],"nextCursor":"optional"}`
 
 For local script sources, put script-specific env vars in `server.envAllowlist`. The orchestrator passes only those names into the child MCP server, and the script server passes that filtered env to the script. Cursor state is sent to the script as `cursor` in poll args plus any configured `EVENTLOOPOS_SCRIPT_EVENTS_CURSOR_ARG` / `EVENTLOOPOS_SCRIPT_EVENTS_CURSOR_ENV`.
 
+When one config has multiple script sources, prefer per-source `poll.args.script_command` and `poll.args.script_args` so Gmail, todo, and other scripts can run independently in the same dogfood process.
+
 Todo files can use the bundled script source:
 
 ```sh
 pnpm --filter @eventloopos/orchestrator build
-EVENTLOOPOS_SCRIPT_EVENTS_COMMAND=node \
-EVENTLOOPOS_SCRIPT_EVENTS_ARGS='["../../scripts/poll-todo-md.mjs"]' \
 EVENTLOOPOS_TODO_MD_PATHS='/path/to/first/todo.md,/path/to/second/todo.md' \
 ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.todo-md.example.json \
 pnpm --filter @eventloopos/orchestrator start
@@ -68,8 +68,6 @@ Gmail unread polling can use the bundled script source with the local `gws` CLI:
 
 ```sh
 pnpm --filter @eventloopos/orchestrator build
-EVENTLOOPOS_SCRIPT_EVENTS_COMMAND=node \
-EVENTLOOPOS_SCRIPT_EVENTS_ARGS='["../../scripts/poll-gmail-unread.mjs"]' \
 EVENTLOOPOS_GMAIL_COMMAND=gws \
 EVENTLOOPOS_GMAIL_QUERY='in:inbox is:unread newer_than:7d' \
 ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.gmail-gws.example.json \
@@ -84,6 +82,21 @@ Optional Gmail env:
 - `EVENTLOOPOS_GMAIL_PROJECT_HINT` / `EVENTLOOPOS_GMAIL_TASK_HINT` for routing.
 
 The Gmail script calls only `gmail.users.messages.list` and `gmail.users.messages.get` with `format: "metadata"` and emits generic events with Gmail links. Keep account-specific config in `EVENTLOOPOS_GMAIL_CONFIG_DIR` or your shell env, not in tracked examples.
+
+For personal dogfood with Slack, Gmail, and todo polling together, start from the combined read-only template:
+
+```sh
+cp config/mcp-sources.dogfood.example.json config/mcp-sources.json
+pnpm --filter @eventloopos/orchestrator build
+EVENTLOOPOS_AGENT_SLACK_QUERY='from:friend OR launch OR blog' \
+EVENTLOOPOS_GMAIL_COMMAND=gws \
+EVENTLOOPOS_GMAIL_QUERY='in:inbox is:unread newer_than:7d' \
+EVENTLOOPOS_TODO_MD_PATHS='/path/to/todo.md,/path/to/other/todo.md' \
+EVENTLOOPOS_DOGFOOD_MCP_POLL=1 \
+pnpm run dev:dogfood
+```
+
+The combined template keeps all three sources read-only and blocks write tools. Tighten Slack/Gmail queries first, then use `pnpm run mcp:preview` before enabling the poll loop if you want to inspect source shape.
 
 Inspect configured sources before routing:
 
@@ -101,11 +114,10 @@ Route once when preview looks sane:
 pnpm run mcp:route-once local_events_source
 ```
 
-For dogfood with Jason's local Slack setup, use the read-only `agent-slack` wrapper:
+For dogfood with a local Slack setup, use the read-only `agent-slack` wrapper. Put stable source-specific defaults in `poll.args` so one config file can carry several Slack searches without shell env juggling:
 
 ```sh
 pnpm --filter @eventloopos/orchestrator build
-EVENTLOOPOS_AGENT_SLACK_QUERY='blog OR launch' \
 ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.agent-slack.example.json \
 pnpm --filter @eventloopos/orchestrator start
 ```
@@ -113,21 +125,21 @@ pnpm --filter @eventloopos/orchestrator start
 Then in another shell:
 
 ```sh
-EVENTLOOPOS_AGENT_SLACK_QUERY='blog OR launch' \
 ORCHESTRATOR_MCP_SOURCES_PATH=config/mcp-sources.agent-slack.example.json \
 pnpm --filter @eventloopos/orchestrator run poll:mcp:once
 ```
 
-Optional filters:
+Supported `poll.args` keys mirror the env vars and override them per source:
 
-- `EVENTLOOPOS_AGENT_SLACK_WORKSPACE`
-- `EVENTLOOPOS_AGENT_SLACK_CHANNELS` as comma-separated channel IDs/names.
-- `EVENTLOOPOS_AGENT_SLACK_USER`
-- `EVENTLOOPOS_AGENT_SLACK_AFTER` / `EVENTLOOPOS_AGENT_SLACK_BEFORE` as dates.
-- `EVENTLOOPOS_AGENT_SLACK_LIMIT`
-- `EVENTLOOPOS_AGENT_SLACK_MAX_CONTENT_CHARS`
+- `query`
+- `workspace`
+- `channels` as an array or comma-separated string
+- `user`
+- `after` / `before` as dates
+- `limit`
+- `max_content_chars`
 
-The wrapper shells out to `agent-slack search messages`, returns only Slack-like read items, and maps them through `slack_message_to_event`. It does not expose Slack send/edit/delete/draft tools to the orchestrator. Keep query/channel filters tight; broad Slack search can be noisy and may return old messages that cursor dedupe then ignores. This config allowlists `PATH`, `HOME`, `XDG_CONFIG_HOME`, and `XDG_RUNTIME_DIR` so the local `agent-slack` binary and local auth files can be found by the child MCP process.
+The wrapper shells out to `agent-slack search messages`, returns only Slack-like read items, and maps them through `slack_message_to_event`. It does not expose Slack send/edit/delete/draft tools to the orchestrator. Keep query/channel filters tight; broad Slack search can be noisy and may return old messages that cursor dedupe then ignores. This config allowlists `PATH`, `HOME`, `XDG_CONFIG_HOME`, and `XDG_RUNTIME_DIR` so the local `agent-slack` binary and local auth files can be found by the child MCP process. Env vars like `EVENTLOOPOS_AGENT_SLACK_QUERY` still work when you want temporary overrides.
 
 If `EVENTLOOPOS_AGENT_SLACK_AFTER` is unset, the wrapper maps the orchestrator MCP cursor to `agent-slack --after YYYY-MM-DD`. Slack timestamps are more precise than date filters, so same-day messages can be refetched; event idempotency and cursor dedupe remain the exact duplicate guard.
 

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   parseScriptEventsOutput,
   pollScriptEvents,
+  scriptOptionsFromEnvAndToolArgs,
   scriptOptionsFromEnv,
   type ScriptEventsExecFile,
 } from "./script_events_server.js";
@@ -16,6 +17,11 @@ describe("script events MCP source", () => {
       items: [{ id: "2" }],
       nextCursor: "2",
     });
+    assert.deepEqual(parseScriptEventsOutput(`Command notice before JSON\n${JSON.stringify({ items: [{ id: "3" }] })}\n`), {
+      items: [{ id: "3" }],
+    });
+    assert.throws(() => parseScriptEventsOutput(JSON.stringify({ items: "bad" })), /items array/);
+    assert.throws(() => parseScriptEventsOutput("Command failed before JSON"), /did not contain JSON/);
   });
 
   it("runs configured script with cursor arg and env", async () => {
@@ -64,5 +70,23 @@ describe("script events MCP source", () => {
     assert.deepEqual(options.args, ["scripts/gmail.js", "--query", "is:unread"]);
     assert.equal(options.cursorArg, "--cursor");
     assert.equal(options.cursorEnv, "EVENT_CURSOR");
+  });
+
+  it("lets poll args override script command and args per source", () => {
+    const options = scriptOptionsFromEnvAndToolArgs({
+      EVENTLOOPOS_SCRIPT_EVENTS_COMMAND: "node",
+      EVENTLOOPOS_SCRIPT_EVENTS_ARGS: "[\"scripts/gmail.js\"]",
+      EVENTLOOPOS_SCRIPT_EVENTS_CURSOR_ARG: "--cursor",
+    }, {
+      script_command: "python3",
+      script_args: ["scripts/todo.py", "--path", "todo.md"],
+      cursor_arg: "--since",
+      cursor_env: "TODO_CURSOR",
+    });
+
+    assert.equal(options.command, "python3");
+    assert.deepEqual(options.args, ["scripts/todo.py", "--path", "todo.md"]);
+    assert.equal(options.cursorArg, "--since");
+    assert.equal(options.cursorEnv, "TODO_CURSOR");
   });
 });

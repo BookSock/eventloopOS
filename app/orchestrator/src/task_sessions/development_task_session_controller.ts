@@ -161,7 +161,7 @@ export class DevelopmentTaskSessionController {
     return message;
   }
 
-  bindTaskSession(input: { task_session_id: string; task_id: string }): DevelopmentTaskBinding {
+  bindTaskSession(input: { task_session_id: string; task_id: string; terminal_ref?: string }): DevelopmentTaskBinding {
     const session = this.sessions.get(input.task_session_id);
     if (!session) {
       return {
@@ -178,6 +178,7 @@ export class DevelopmentTaskSessionController {
       task_id: input.task_id,
       last_seen_at: now,
       updated_at: now,
+      ...(input.terminal_ref !== undefined ? { terminal_ref: input.terminal_ref } : {}),
     };
     this.sessions.set(updated.id, updated);
     return {

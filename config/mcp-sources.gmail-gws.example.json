@@ -27,7 +27,10 @@
       },
       "poll": {
         "tool": "poll_script",
-        "args": {},
+        "args": {
+          "script_command": "node",
+          "script_args": ["../../scripts/poll-gmail-unread.mjs"]
+        },
         "timeoutMs": 15000
       },
       "cursor": {

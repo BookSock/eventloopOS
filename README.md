@@ -72,7 +72,7 @@ Full local Mac proof:
 pnpm proof:live
 ```
 
-This is the real-host lane. It requires macOS, AeroSpace (`brew install --cask nikitabobko/tap/aerospace`), Codex CLI, and a runnable Chromium/Playwright browser stack for native browser capture/restore. It writes `artifacts/proof-live-manifest.json`, `artifacts/live-smoke/<run-id>/manifest.json`, `artifacts/onboarding-live/<run-id>/manifest.json`, and per-command logs under `artifacts/proof-agent/<run-id>/`. Use this when claiming the Mac app, live orchestrator, onboarding scan, AeroSpace readiness, and browser/native-host path work on a real machine.
+This is the real-host lane. It requires macOS, AeroSpace (`brew install --cask nikitabobko/tap/aerospace`), Codex CLI, and a runnable Chromium/Playwright browser stack for native browser capture/restore. It writes `artifacts/proof-live-manifest.json`, `artifacts/live-smoke/<run-id>/manifest.json`, `artifacts/onboarding-live/<run-id>/manifest.json`, and per-command logs under `artifacts/proof-agent/<run-id>/`. Use this when claiming the Mac app, live orchestrator, onboarding scan/approval, AeroSpace readiness, and browser/native-host path work on a real machine.
 
 `proof:live` also runs the real Codex completion + workspace proof. That proof starts a Codex task from the master command, opens a visible Ghostty TUI on the same Codex app-server thread, routes a Slack-like event into that existing thread, detects a completed Codex turn, queues human review, approves it back into the same thread, and runs isolated AeroSpace window restore.
 
@@ -112,7 +112,7 @@ Full local smoke adds installed Chromium extension/native host capture against t
 pnpm run test:e2e:live:full
 ```
 
-Live proof covers seeded queue, MCP source discovery, MCP poll-and-route, Slack-specific and generic MCP source poll -> route -> done, poll-all MCP sweep -> route -> done, Slack/MCP task-hinted events injecting into an existing task session without creating a human queue item, voice transcript -> task-session followup routing, AgentRun `waiting_approval` -> review packet -> queue item intake, live onboarding scan over current Mac windows plus Codex task runtime discovery, passive browser context `store_only`, ranked browser context search, provider deeplink normalization for Slack/GitHub/Notion/Google Docs/Figma/browser URLs, context restore-plan generation, leased browser restore-request claim/done/failure-retry flow, ranked task-attached browser context search, task-session discovery + idempotent followup, task-session binding, bind-gated recommended handoff, native-host forwarding, browser runtime capture/restore messages with quote highlight receipts, workspace status/capture/restore-plan contracts, workspace snapshot context through the queue API, workspace status/restore-disabled smoke in the live harness, and macOS manual-mode queue state with `Cmd-Option-Shift-M` global hotkey wiring. The macOS view model auto-renews queue leases, auto-refreshes context restore-request status, plans selected workspace restores, shows packet decision/risk/context/evidence detail with open links, and skips workspace restore planning while manual mode is active.
+Live proof covers seeded queue, MCP source discovery, MCP poll-and-route, Slack-specific and generic MCP source poll -> route -> done, poll-all MCP sweep -> route -> done, Slack/MCP task-hinted events injecting into an existing task session without creating a human queue item, voice transcript -> task-session followup routing, AgentRun `waiting_approval` -> review packet -> queue item intake, live onboarding scan over current Mac windows plus Codex task runtime discovery, onboarding approval that saves selected windows into task workspace memory and queues the first paper for that workbench, browser-tab context inheritance for later papers, passive browser context `store_only`, ranked browser context search, provider deeplink normalization for Slack/GitHub/Notion/Google Docs/Figma/browser URLs, context restore-plan generation, leased browser restore-request claim/done/failure-retry flow, ranked task-attached browser context search, task-session discovery + idempotent followup, task-session binding, bind-gated recommended handoff, native-host forwarding, browser runtime capture/restore messages with quote highlight receipts, workspace status/capture/restore-plan contracts, workspace snapshot context through the queue API, workspace status/restore-disabled smoke in the live harness, and macOS manual-mode queue state with `Cmd-Option-Shift-M` global hotkey wiring. The macOS view model auto-renews queue leases, auto-refreshes context restore-request status, plans selected workspace restores, shows packet decision/risk/context/evidence detail with open links, and skips workspace restore planning while manual mode is active.
 
 Run `pnpm run dev:doctor:preflight` to build the orchestrator and check local tools before the stack is running. Run `pnpm run dev:doctor` after dogfood launch for the strict readiness check. Doctor reports orchestrator health, AeroSpace daemon, Docker daemon, browser Playwright extension E2E readiness, optional MCP source config, optional voice transcript command readiness, and Codex app-server.
 
@@ -132,7 +132,37 @@ Personal dogfood stack:
 pnpm run dev:dogfood
 ```
 
-This requires AeroSpace (`brew install --cask nikitabobko/tap/aerospace`), starts dev Postgres, builds and runs the orchestrator with Codex app-server task sessions, uses AeroSpace in disabled-execute mode, auto-loads `config/mcp-sources.json` when present, and launches the Mac queue app against the local orchestrator. Press `Ctrl-C` in the terminal to stop the app, orchestrator, optional poll loop, and dev Postgres. Set `EVENTLOOPOS_DOGFOOD_POSTGRES=0` for empty in-memory mode. Set `EVENTLOOPOS_DOGFOOD_MCP_POLL=1` to run the MCP poll loop while dogfooding. Set `EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=0` only for queue/router hacking without workspace restore.
+This requires AeroSpace (`brew install --cask nikitabobko/tap/aerospace`), starts dev Postgres, builds and runs the orchestrator with Codex app-server task sessions, uses AeroSpace in disabled-execute mode, auto-loads `config/mcp-sources.json` when present, and launches the Mac queue app against the local orchestrator. Press `Ctrl-C` in the terminal to stop the app, orchestrator, optional poll loop, and dev Postgres. When the queue app terminates with a saved manual workspace, it asks the workspace backend to restore that layout before quitting. Set `EVENTLOOPOS_DOGFOOD_POSTGRES=0` for empty in-memory mode. Set `EVENTLOOPOS_DOGFOOD_MCP_POLL=1` to run the MCP poll loop while dogfooding. Set `EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=0` only for queue/router hacking without workspace restore.
+
+The queue app now has two dogfood control surfaces beyond the paper actions:
+
+- **Master** opens a command sheet that can route a note through `/voice/commands` or start a new task session through `/task-sessions`. Use `Cmd-Option-Shift-K` from any app to summon it.
+- **Scan Desk** opens onboarding proposals from `/onboarding/scan` and approves selected task groups through `/onboarding/approvals`, saving proposed windows into task workspace memory, binding proposed task sessions, and optionally creating the first queue paper for the approved workbench.
+
+To let Codex or Claude Code onboard a clone, first start dogfood or any orchestrator, then run:
+
+```sh
+pnpm run onboarding:agent
+```
+
+This prints an agent-readable setup brief: local readiness checks, integration preview commands, current window/task-session grouping proposals, and exact next actions for binding tasks and routing one source event.
+
+Approve a proposed group directly when the brief lists a proposal id:
+
+```sh
+pnpm run onboarding:apply -- --proposal onboard_abc123 --queue-paper
+```
+
+The approval path saves the proposal's selected windows into task workspace memory and binds any proposed task sessions unless explicit `--window-id` or `--session` overrides are provided. Add `--queue-paper` when onboarding should also place the approved workbench into the intake stack immediately.
+
+Dogfood supports named local profiles so a stable stack and an experimental stack do not fight over the same ports or Postgres container:
+
+```sh
+pnpm run dev:dogfood
+EVENTLOOPOS_DOGFOOD_PROFILE=experiment pnpm run dev:dogfood
+```
+
+Non-default profiles derive separate orchestrator/Postgres defaults, use a profile-specific Docker container, and write Codex thread bindings to `var/codex-task-map.<profile>.json` instead of the default `config/codex-task-map.json`. Set `EVENTLOOPOS_DOGFOOD_QUEUE_APP=0` when running a background experimental daemon without a second queue app or global hotkey registration. You can also pin everything explicitly with `EVENTLOOPOS_ORCHESTRATOR_URL`, `EVENTLOOPOS_POSTGRES_PORT`, `EVENTLOOPOS_POSTGRES_CONTAINER`, and `ORCHESTRATOR_CODEX_TASK_MAP_PATH`.
 
 For Codex dogfood, the launcher starts a shared websocket `codex app-server` by default and prints its `ws://` URL. Use `codex --remote <printed-ws-url> resume <thread-id>` in Ghostty when you want a visible TUI attached to the same thread eventloopOS controls. Set `EVENTLOOPOS_DOGFOOD_SHARED_CODEX_APP_SERVER=0` to use the private stdio app-server path.
 
@@ -247,6 +277,8 @@ Chrome native host install:
 ```sh
 pnpm --filter @eventloopos/native-host exec ./bin/install-chrome-host --browser chrome
 ```
+
+After loading the unpacked extension, open its Options page, set the orchestrator URL, add allowlisted origins, optionally fill **Task hint** / **Project hint**, then click **Capture current tab** or **Capture tabs**. **Capture current tab** binds the active tab to that task and captures page scroll/selected text when available. **Capture tabs** sends read-only tab registry records for all allowed tabs. Blank hints make captured tabs available for onboarding grouping or reading queue proposals. A task hint attaches captured tabs directly to that task. Restore prefers the captured Chrome tab id when it is still alive and falls back to URL match otherwise. It does not read disallowed origins and does not click/type in pages.
 
 The dev extension ID is stable from `app/browser-extension/manifest.json`; pass an explicit extension ID only when using a different signed build. Use `--browser chromium` for local Chromium/Playwright smoke, or `--browser chrome-for-testing` for Google Chrome for Testing. The opt-in real browser native messaging smoke installs a temporary Chromium host manifest, launches the unpacked extension, captures a tab through `chrome.runtime.sendNativeMessage`, forwards it through the native host to the orchestrator fixture, then restores the previous manifest:
 

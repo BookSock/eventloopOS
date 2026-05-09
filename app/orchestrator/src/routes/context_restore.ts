@@ -276,6 +276,56 @@ export function buildContextRestorePlan(resource: Record<string, unknown>): Reco
     };
   }
 
+  if (resource.kind === "slack_thread") {
+    const slackUrl = url ?? buildSlackUrl(resource);
+    if (slackUrl) {
+      return {
+        kind: "open_slack_thread",
+        side_effect: "local",
+        execute_supported: false,
+        url: slackUrl,
+        anchor: pickRecord(resource.details, ["thread_ts", "message_ts", "channel_id", "workspace_id", "team_id"]),
+      };
+    }
+  }
+
+  if (resource.kind === "gmail_thread" || resource.kind === "email") {
+    const emailUrl = url ?? buildGmailUrl(resource);
+    if (emailUrl) {
+      return {
+        kind: "open_email",
+        side_effect: "local",
+        execute_supported: false,
+        url: emailUrl,
+        anchor: pickRecord(resource.details, ["thread_id", "message_id", "account", "subject_hash"]),
+      };
+    }
+  }
+
+  if (resource.kind === "notion_page") {
+    if (url) {
+      return {
+        kind: "open_notion_page",
+        side_effect: "local",
+        execute_supported: false,
+        url,
+        anchor: pickRecord(resource.details, ["page_id", "block_id", "database_id"]),
+      };
+    }
+  }
+
+  if (resource.kind === "google_doc" || resource.kind === "doc_anchor") {
+    if (url) {
+      return {
+        kind: "open_doc_anchor",
+        side_effect: "local",
+        execute_supported: false,
+        url,
+        anchor: pickRecord(resource.details, ["doc_id", "heading_id", "comment_id", "selection_quote"]),
+      };
+    }
+  }
+
   if (url) {
     return {
       kind: "open_url",
@@ -298,6 +348,38 @@ export function buildContextRestorePlan(resource: Record<string, unknown>): Reco
   }
 
   return undefined;
+}
+
+function buildSlackUrl(resource: Record<string, unknown>): string | undefined {
+  const details = isRecord(resource.details) ? resource.details : {};
+  const team = stringFromRecord(details, "team_domain") ?? stringFromRecord(details, "workspace_domain");
+  const channel = stringFromRecord(details, "channel_id");
+  const ts = stringFromRecord(details, "message_ts") ?? stringFromRecord(details, "thread_ts");
+  if (team && channel && ts) {
+    const tsCompact = ts.replace(".", "").replace(/[^0-9]/g, "");
+    return `https://${team}.slack.com/archives/${channel}/p${tsCompact}`;
+  }
+  return undefined;
+}
+
+function buildGmailUrl(resource: Record<string, unknown>): string | undefined {
+  const details = isRecord(resource.details) ? resource.details : {};
+  const threadId = stringFromRecord(details, "thread_id") ?? stringFromRecord(details, "message_id");
+  if (threadId) {
+    return `https://mail.google.com/mail/u/0/#all/${threadId}`;
+  }
+  return undefined;
+}
+
+function pickRecord(details: unknown, keys: string[]): Record<string, unknown> | undefined {
+  if (!isRecord(details)) return undefined;
+  const out: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (details[key] !== undefined && details[key] !== null) {
+      out[key] = details[key];
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function parseContextRestoreClaimRequest(

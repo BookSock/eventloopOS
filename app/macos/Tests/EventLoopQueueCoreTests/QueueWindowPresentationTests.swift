@@ -101,6 +101,22 @@ final class QueueWindowPresentationTests: XCTestCase {
         XCTAssertEqual(summary.detail, "Editing launch paragraph")
     }
 
+    func testTaskSessionTargetPresentationIncludesTerminalBindingLabel() {
+        let summary = TaskSessionTargetPresentation(
+            session: TaskSession(
+                id: "codex_thread_term",
+                taskId: "task_blog_feedback",
+                provider: "codex",
+                status: "running",
+                name: "Blog launch agent",
+                terminalRef: "ghostty:front"
+            )
+        )
+
+        XCTAssertEqual(summary.terminalLabel, "Ghostty (front window)")
+        XCTAssertTrue(summary.identityLabel.contains("Ghostty (front window)"))
+    }
+
     func testTaskSessionTargetPresentationFallsBackToCwdWhenNoPreview() {
         let summary = TaskSessionTargetPresentation(
             session: TaskSession(

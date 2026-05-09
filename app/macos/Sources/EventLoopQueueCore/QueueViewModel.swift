@@ -30,12 +30,16 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var queueLineageState: QueueLineageState
     @Published public private(set) var taskSessions: [TaskSession]
     @Published public private(set) var taskBindingState: TaskBindingState
+    @Published public private(set) var masterCommandState: MasterCommandState
+    @Published public private(set) var onboardingState: OnboardingState
+    @Published public var auxiliarySheet: QueueAuxiliarySheet?
 
     private let client: any QueueClient
     private let workspaceClient: any WorkspaceClient
     private var queueRefreshTask: Task<Void, Never>?
     private var leaseRenewalTask: Task<Void, Never>?
     private var contextRestoreRefreshTask: Task<Void, Never>?
+    private var autoRestoredContextPacketIds = Set<String>()
 
     public init(
         client: any QueueClient,
@@ -56,6 +60,9 @@ public final class QueueViewModel: ObservableObject {
         self.queueLineageState = .idle
         self.taskSessions = []
         self.taskBindingState = .idle
+        self.masterCommandState = .idle
+        self.onboardingState = .idle
+        self.auxiliarySheet = nil
     }
 
     deinit {
@@ -182,6 +189,27 @@ public final class QueueViewModel: ObservableObject {
         selectedPacketID = packetId
     }
 
+    public func switchToPaper(packetId: String) async {
+        guard packets.contains(where: { $0.id == packetId }) else {
+            return
+        }
+        guard selectedPacketID != packetId else {
+            return
+        }
+
+        do {
+            try await saveSelectedTaskWorkspaceSnapshotIfNeeded()
+        } catch {
+            state = .failed(error.localizedDescription)
+            return
+        }
+
+        selectedPacketID = packetId
+        await loadTaskSessionsForSelectedPacketIfNeeded()
+        await prepareSelectedWorkspaceRestore()
+        await requestSelectedBrowserContextRestoresIfNeeded()
+    }
+
     public func enterManualMode() {
         mode = .manual
         shouldRestoreWorkspace = false
@@ -208,6 +236,31 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    private func captureSelectedTaskWorkspaceSnapshot() async -> WorkspaceSnapshot? {
+        guard selectedTaskId != nil else {
+            return nil
+        }
+        do {
+            return try await workspaceClient.capture()
+        } catch {
+            return nil
+        }
+    }
+
+    private func saveSelectedTaskWorkspaceSnapshotIfNeeded() async throws {
+        guard let taskId = selectedTaskId else {
+            return
+        }
+        guard let workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot() else {
+            return
+        }
+        _ = try await client.saveTaskWorkspaceSnapshot(
+            taskId: taskId,
+            workspaceSnapshot: workspaceSnapshot,
+            sourceQueueItemId: selectedPacketID
+        )
+    }
+
     public func returnToEventLoopMode() {
         mode = .eventLoop
         shouldRestoreWorkspace = true
@@ -231,6 +284,11 @@ public final class QueueViewModel: ObservableObject {
 
     public func toggleManualModeAndPrepareWorkspaceRestoreIfNeeded() async {
         if mode == .eventLoop {
+            do {
+                try await saveSelectedTaskWorkspaceSnapshotIfNeeded()
+            } catch {
+                state = .failed(error.localizedDescription)
+            }
             enterManualMode()
             if manualWorkspaceSnapshot != nil {
                 await confirmManualWorkspaceRestore()
@@ -273,16 +331,18 @@ public final class QueueViewModel: ObservableObject {
 
         await loadTaskSessionsForSelectedPacketIfNeeded()
         await prepareSelectedWorkspaceRestore()
+        await requestSelectedBrowserContextRestoresIfNeeded()
     }
 
     public func doneAndNext() async {
         guard let packetId = selectedPacketID else {
             return
         }
+        let workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot()
 
         state = .loading
         do {
-            _ = try await client.complete(packetId: packetId)
+            _ = try await client.complete(packetId: packetId, workspaceSnapshot: workspaceSnapshot)
             try await loadNextAfterQueueAction()
         } catch {
             state = .failed(error.localizedDescription)
@@ -293,10 +353,11 @@ public final class QueueViewModel: ObservableObject {
         guard let packetId = selectedPacketID else {
             return
         }
+        let workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot()
 
         state = .loading
         do {
-            _ = try await client.deferPacket(packetId: packetId, until: dueAt)
+            _ = try await client.deferPacket(packetId: packetId, until: dueAt, workspaceSnapshot: workspaceSnapshot)
             try await loadNextAfterQueueAction()
         } catch {
             state = .failed(error.localizedDescription)
@@ -311,10 +372,11 @@ public final class QueueViewModel: ObservableObject {
         guard let packetId = selectedPacketID else {
             return
         }
+        let workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot()
 
         state = .loading
         do {
-            _ = try await client.ignorePacket(packetId: packetId)
+            _ = try await client.ignorePacket(packetId: packetId, workspaceSnapshot: workspaceSnapshot)
             try await loadNextAfterQueueAction()
         } catch {
             state = .failed(error.localizedDescription)
@@ -329,10 +391,11 @@ public final class QueueViewModel: ObservableObject {
             taskBindingState = .failed(selectedRecommendedActionBlockReason ?? "Recommended action is not ready")
             return
         }
+        let workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot()
 
         state = .loading
         do {
-            _ = try await client.executeRecommendedAction(packetId: packetId)
+            _ = try await client.executeRecommendedAction(packetId: packetId, workspaceSnapshot: workspaceSnapshot)
             try await loadNextAfterQueueAction()
         } catch {
             state = .failed(error.localizedDescription)
@@ -344,6 +407,9 @@ public final class QueueViewModel: ObservableObject {
         packets = try await client.fetchQueue()
         selectedPacketID = leasedPacket?.id ?? packets.first?.id
         state = .loaded
+        await loadTaskSessionsForSelectedPacketIfNeeded()
+        await prepareSelectedWorkspaceRestore()
+        await requestSelectedBrowserContextRestoresIfNeeded()
     }
 
     public func loadTaskSessions() async {
@@ -366,6 +432,7 @@ public final class QueueViewModel: ObservableObject {
 
     public func prepareSelectedPacketDetail() async {
         await prepareSelectedWorkspaceRestore()
+        await requestSelectedBrowserContextRestoresIfNeeded()
         await loadLineageForSelectedPacket()
     }
 
@@ -400,9 +467,207 @@ public final class QueueViewModel: ObservableObject {
         do {
             let binding = try await client.bindTaskSession(sessionId: taskSessionId, taskId: taskId)
             taskSessions = try await client.fetchTaskSessions()
+            do {
+                try await saveSelectedTaskWorkspaceSnapshotIfNeeded()
+            } catch {
+                workspaceRestoreState = .failed(error.localizedDescription)
+            }
             taskBindingState = .bound(binding)
         } catch {
             taskBindingState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func sendMasterCommand(text: String, taskHint: String? = nil) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            masterCommandState = .failed("Master command text is required")
+            return
+        }
+
+        masterCommandState = .sending
+        do {
+            let result = try await client.sendMasterCommand(
+                text: trimmed,
+                taskHint: normalizedTaskHint(taskHint) ?? selectedTaskId
+            )
+            masterCommandState = .routed(result)
+            await refreshQueue()
+            await loadTaskSessions()
+            if let queuedPacket = result.queuedPacket {
+                if !packets.contains(where: { $0.id == queuedPacket.id }) {
+                    packets.append(queuedPacket)
+                    packets.sort { $0.priority > $1.priority }
+                }
+                selectedPacketID = queuedPacket.id
+                await loadTaskSessionsForSelectedPacketIfNeeded()
+                await prepareSelectedWorkspaceRestore()
+                await requestSelectedBrowserContextRestoresIfNeeded()
+            }
+        } catch {
+            masterCommandState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func startMasterTask(
+        text: String,
+        taskHint: String? = nil,
+        cwd: String? = nil,
+        model: String? = nil
+    ) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            masterCommandState = .failed("Master task prompt is required")
+            return
+        }
+
+        masterCommandState = .sending
+        var workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot()
+        if workspaceSnapshot == nil {
+            workspaceSnapshot = try? await workspaceClient.capture()
+        }
+        do {
+            let started = try await client.startMasterTask(
+                text: trimmed,
+                taskHint: normalizedTaskHint(taskHint),
+                cwd: normalizedTaskHint(cwd),
+                model: normalizedTaskHint(model),
+                workspaceSnapshot: workspaceSnapshot
+            )
+            masterCommandState = .started(started)
+            await loadTaskSessions()
+            await refreshQueue()
+            if let startedPaper = packets.first(where: { $0.taskId == started.taskId }) {
+                selectedPacketID = startedPaper.id
+            }
+            await prepareSelectedWorkspaceRestore()
+            await requestSelectedBrowserContextRestoresIfNeeded()
+        } catch {
+            masterCommandState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func bumpQueuePaperPriority(packetId: String, delta: Int, reason: String? = nil) async {
+        masterCommandState = .sending
+        do {
+            _ = try await client.bumpQueueItemPriority(
+                packetId: packetId,
+                delta: delta,
+                score: nil,
+                reason: reason ?? "manual_priority_bump"
+            )
+            masterCommandState = .idle
+            await refreshQueue()
+            selectedPacketID = packetId
+        } catch {
+            masterCommandState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func promoteReadingQueue(contextIds: [String] = []) async {
+        masterCommandState = .sending
+        do {
+            let result = try await client.promoteReadingQueueContexts(ids: contextIds)
+            masterCommandState = .idle
+            await refreshQueue()
+            if let firstNew = result.promoted.first(where: { !$0.idempotent && $0.queueItemId != nil })?.queueItemId {
+                selectedPacketID = firstNew
+            }
+        } catch {
+            masterCommandState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func bindSelectedTerminalRef(_ terminalRef: String) async {
+        guard let session = selectedTaskSessions.first ?? taskSessions.first(where: { $0.taskId == selectedTaskId }) else {
+            taskBindingState = .failed("No bound task session for this paper.")
+            return
+        }
+        guard let taskId = session.taskId ?? selectedTaskId else {
+            taskBindingState = .failed("No task id resolved for this session.")
+            return
+        }
+        taskBindingState = .loading
+        do {
+            let binding = try await client.bindTaskSession(sessionId: session.id, taskId: taskId, terminalRef: terminalRef)
+            if let refreshed = try? await client.fetchTaskSessions() {
+                taskSessions = refreshed
+            }
+            taskBindingState = .bound(binding)
+        } catch {
+            taskBindingState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func presentMasterCommand() {
+        auxiliarySheet = .masterCommand
+    }
+
+    public func presentOnboarding() {
+        auxiliarySheet = .onboarding
+    }
+
+    public func dismissAuxiliarySheet() {
+        auxiliarySheet = nil
+    }
+
+    public func scanOnboarding() async {
+        onboardingState = .scanning
+        do {
+            let scan = try await client.fetchOnboardingScan()
+            onboardingState = .loaded(scan)
+        } catch {
+            onboardingState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func approveOnboardingProposal(id: String, queuePaper: Bool = false) async {
+        onboardingState = .approving(id)
+        do {
+            let result = try await client.approveOnboardingProposal(id: id, queuePaper: queuePaper)
+            onboardingState = .approved(result)
+            await loadTaskSessions()
+            await refreshQueue()
+            if let queuedPaperId = result.queuedPaper?.id, packets.contains(where: { $0.id == queuedPaperId }) {
+                selectedPacketID = queuedPaperId
+            }
+            await prepareSelectedWorkspaceRestore()
+            await requestSelectedBrowserContextRestoresIfNeeded()
+        } catch {
+            onboardingState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func approveAllOnboardingProposals(queuePaper: Bool = true) async {
+        guard case let .loaded(scan) = onboardingState else {
+            onboardingState = .failed("Load an onboarding scan before approving all proposals")
+            return
+        }
+        guard !scan.proposals.isEmpty else {
+            onboardingState = .failed("No onboarding proposals to approve")
+            return
+        }
+
+        onboardingState = .approving("all")
+        do {
+            var results: [OnboardingApprovalResult] = []
+            for proposal in scan.proposals {
+                let result = try await client.approveOnboardingProposal(id: proposal.id, queuePaper: queuePaper)
+                results.append(result)
+            }
+            await loadTaskSessions()
+            await refreshQueue()
+            if let firstQueuedPaperId = results.compactMap(\.queuedPaper?.id).first,
+               packets.contains(where: { $0.id == firstQueuedPaperId }) {
+                selectedPacketID = firstQueuedPaperId
+            }
+            if let last = results.last {
+                onboardingState = .approved(last)
+            }
+            await prepareSelectedWorkspaceRestore()
+            await requestSelectedBrowserContextRestoresIfNeeded()
+        } catch {
+            onboardingState = .failed(error.localizedDescription)
         }
     }
 
@@ -489,6 +754,14 @@ public final class QueueViewModel: ObservableObject {
         do {
             let response = try await workspaceClient.restorePlan(snapshot: snapshot, currentWindows: nil)
             workspaceRestoreState = .planned(response.plan)
+            if response.executeSupported && !response.plan.commands.isEmpty {
+                let executed = try await workspaceClient.restore(
+                    snapshot: snapshot,
+                    currentWindows: nil,
+                    idempotencyKey: "mac_workspace_restore_\(UUID().uuidString)"
+                )
+                workspaceRestoreState = .executed(executed.receipt)
+            }
         } catch {
             workspaceRestoreState = .failed(error.localizedDescription)
         }
@@ -560,12 +833,15 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
-    public func requestContextRestore(resource: ReviewContextResource) async {
+    public func requestContextRestore(
+        resource: ReviewContextResource,
+        idempotencyKeyPrefix: String = "mac_context_restore"
+    ) async {
         contextRestoreState = .planning(resource)
         do {
             let restoreRequest = try await client.requestContextRestore(
                 resource: resource,
-                idempotencyKey: "mac_context_restore_\(resource.id)_\(UUID().uuidString)"
+                idempotencyKey: "\(idempotencyKeyPrefix)_\(resource.id)_\(UUID().uuidString)"
             )
             contextRestoreState = .requested(resource, restoreRequest)
         } catch {
@@ -598,11 +874,43 @@ public final class QueueViewModel: ObservableObject {
 
     public func moveToNext() async {
         do {
+            try await saveSelectedTaskWorkspaceSnapshotIfNeeded()
             if let nextPacket = try await client.next(after: selectedPacketID) {
                 selectedPacketID = nextPacket.id
+                await loadTaskSessionsForSelectedPacketIfNeeded()
+                await prepareSelectedWorkspaceRestore()
+                await requestSelectedBrowserContextRestoresIfNeeded()
             }
         } catch {
             state = .failed(error.localizedDescription)
         }
+    }
+
+    private func requestSelectedBrowserContextRestoresIfNeeded() async {
+        guard shouldRestoreWorkspace, let packet = selectedPacket else {
+            return
+        }
+        guard !autoRestoredContextPacketIds.contains(packet.id) else {
+            return
+        }
+        let resources = packet.contextResources.filter { resource in
+            resource.kind == "browser_tab" && resource.url != nil
+        }
+        guard !resources.isEmpty else {
+            return
+        }
+
+        autoRestoredContextPacketIds.insert(packet.id)
+        for resource in resources {
+            await requestContextRestore(
+                resource: resource,
+                idempotencyKeyPrefix: "mac_auto_context_restore"
+            )
+        }
+    }
+
+    private func normalizedTaskHint(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed?.isEmpty == false ? trimmed : nil
     }
 }

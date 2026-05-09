@@ -3,8 +3,13 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 
-const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377";
+const profile = sanitizeProfile(process.env.EVENTLOOPOS_DOGFOOD_PROFILE ?? "default");
+const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? defaultOrchestratorUrl(profile);
+const orchestratorEndpoint = parseHttpEndpoint(orchestratorUrl);
+const postgresPort = process.env.EVENTLOOPOS_POSTGRES_PORT ?? defaultPostgresPort(profile);
+const postgresContainer = process.env.EVENTLOOPOS_POSTGRES_CONTAINER ?? defaultPostgresContainer(profile);
 const usePostgres = process.env.EVENTLOOPOS_DOGFOOD_POSTGRES !== "0";
+const launchQueueApp = process.env.EVENTLOOPOS_DOGFOOD_QUEUE_APP !== "0";
 const smokeMs = parseOptionalPositiveInteger(process.env.EVENTLOOPOS_DOGFOOD_SMOKE_MS);
 const emptySeedFixture = "fixtures/empty-review-packets.json";
 const children = [];
@@ -27,9 +32,12 @@ try {
 
   const orchestrator = spawnChild("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "start"], {
     DATABASE_URL: databaseUrl,
+    EVENTLOOPOS_DOGFOOD_PROFILE: profile,
+    ORCHESTRATOR_HOST: process.env.ORCHESTRATOR_HOST ?? orchestratorEndpoint.host,
+    ORCHESTRATOR_PORT: process.env.ORCHESTRATOR_PORT ?? String(orchestratorEndpoint.port),
     ORCHESTRATOR_TASK_SESSIONS: taskSessionModes,
     ORCHESTRATOR_CODEX_APP_SERVER_URL: process.env.ORCHESTRATOR_CODEX_APP_SERVER_URL ?? codexAppServerUrl,
-    ORCHESTRATOR_CODEX_TASK_MAP_PATH: process.env.ORCHESTRATOR_CODEX_TASK_MAP_PATH ?? "config/codex-task-map.json",
+    ORCHESTRATOR_CODEX_TASK_MAP_PATH: process.env.ORCHESTRATOR_CODEX_TASK_MAP_PATH ?? defaultCodexTaskMapPath(profile),
     ORCHESTRATOR_MCP_SOURCES: process.env.ORCHESTRATOR_MCP_SOURCES ?? defaultMcpSourcesMode(),
     ORCHESTRATOR_MCP_SOURCES_PATH: process.env.ORCHESTRATOR_MCP_SOURCES_PATH ?? defaultMcpSourcesPath(),
     ORCHESTRATOR_SEED_FIXTURE: process.env.ORCHESTRATOR_SEED_FIXTURE ?? (usePostgres ? undefined : emptySeedFixture),
@@ -40,18 +48,28 @@ try {
 
   maybeStartPollLoop();
 
-  const app = spawnChild("pnpm", ["run", "run:queue-app"], {
-    EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl,
-    EVENTLOOPOS_QUEUE_APP_RUN_SMOKE_MS: smokeMs === undefined ? undefined : String(smokeMs),
-  });
+  const app = launchQueueApp
+    ? spawnChild("pnpm", ["run", "run:queue-app"], {
+      EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl,
+      EVENTLOOPOS_QUEUE_APP_RUN_SMOKE_MS: smokeMs === undefined ? undefined : String(smokeMs),
+    })
+    : undefined;
 
   process.stdout.write(`eventloopOS dogfood stack ready at ${orchestratorUrl}\n`);
+  process.stdout.write(`Dogfood profile: ${profile}\n`);
+  if (usePostgres) {
+    process.stdout.write(`Dev Postgres: ${postgresContainer} on 127.0.0.1:${postgresPort}\n`);
+  }
   if (codexAppServerUrl) {
     process.stdout.write(`Shared Codex app-server: ${codexAppServerUrl}\n`);
     process.stdout.write("Open visible Codex threads with: codex --remote <url> resume <thread-id>\n");
   }
-  process.stdout.write("Queue app is running. Ctrl-C here stops app, orchestrator, poll loop, and dev Postgres.\n");
-  const appCode = await waitForExit(app);
+  if (launchQueueApp) {
+    process.stdout.write("Queue app is running. Ctrl-C here stops app, orchestrator, poll loop, and dev Postgres.\n");
+  } else {
+    process.stdout.write("Queue app disabled for this stack. Ctrl-C here stops orchestrator, poll loop, and dev Postgres.\n");
+  }
+  const appCode = app ? await waitForExit(app) : await waitForExit(orchestrator);
   await cleanup();
   process.exitCode = appCode ?? 0;
 } catch (error) {
@@ -78,7 +96,7 @@ async function requireAerospace() {
 }
 
 async function startPostgres() {
-  const result = await runChecked("pnpm", ["run", "dev:postgres:up"]);
+  const result = await runChecked("pnpm", ["run", "dev:postgres:up"], { env: postgresEnv() });
   startedPostgres = true;
   const url = result.stdout.trim().split(/\r?\n/).at(-1);
   if (!url?.startsWith("postgres://")) {
@@ -188,7 +206,7 @@ async function runChecked(command, args, options = {}) {
   return await new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: process.cwd(),
-      env: process.env,
+      env: removeUndefined({ ...process.env, ...options.env }),
       stdio: ["ignore", "pipe", "pipe"],
     });
     let stdout = "";
@@ -232,7 +250,7 @@ async function cleanup() {
   }
   await Promise.all(children.map((child) => child.exitCode === null ? waitForExit(child) : undefined));
   if (startedPostgres) {
-    await runChecked("pnpm", ["run", "dev:postgres:down"]).catch((error) => {
+    await runChecked("pnpm", ["run", "dev:postgres:down"], { env: postgresEnv() }).catch((error) => {
       process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     });
     startedPostgres = false;
@@ -242,6 +260,62 @@ async function cleanup() {
 
 function removeUndefined(input) {
   return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
+}
+
+function postgresEnv() {
+  return {
+    EVENTLOOPOS_POSTGRES_CONTAINER: postgresContainer,
+    EVENTLOOPOS_POSTGRES_PORT: postgresPort,
+  };
+}
+
+function defaultOrchestratorUrl(selectedProfile) {
+  return `http://127.0.0.1:${defaultOrchestratorPort(selectedProfile)}`;
+}
+
+function defaultOrchestratorPort(selectedProfile) {
+  if (selectedProfile === "default") return 4377;
+  return 4377 + (hashString(selectedProfile) % 1000);
+}
+
+function defaultPostgresPort(selectedProfile) {
+  if (selectedProfile === "default") return "55432";
+  return String(55432 + (hashString(selectedProfile) % 1000));
+}
+
+function defaultPostgresContainer(selectedProfile) {
+  if (selectedProfile === "default") return "eventloopos-postgres";
+  return `eventloopos-postgres-${selectedProfile}`;
+}
+
+function defaultCodexTaskMapPath(selectedProfile) {
+  if (selectedProfile === "default") return "config/codex-task-map.json";
+  return `var/codex-task-map.${selectedProfile}.json`;
+}
+
+function parseHttpEndpoint(value) {
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error(`EVENTLOOPOS_ORCHESTRATOR_URL must be http(s): ${value}`);
+  }
+  const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`invalid orchestrator port in ${value}`);
+  }
+  return { host: url.hostname, port };
+}
+
+function sanitizeProfile(value) {
+  const sanitized = value.trim().toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-+|-+$/g, "");
+  return sanitized || "default";
+}
+
+function hashString(value) {
+  let hash = 0;
+  for (const char of value) {
+    hash = ((hash * 31) + char.charCodeAt(0)) >>> 0;
+  }
+  return hash;
 }
 
 async function sleep(ms) {

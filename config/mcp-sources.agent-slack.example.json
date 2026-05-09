@@ -27,7 +27,10 @@
       },
       "poll": {
         "tool": "search_messages",
-        "args": {},
+        "args": {
+          "query": "from:@person",
+          "limit": 20
+        },
         "timeoutMs": 10000
       },
       "cursor": {

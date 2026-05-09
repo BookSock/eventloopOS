@@ -52,7 +52,7 @@ export class CompositeTaskSessionController implements TaskSessionController {
     return owner.runtime.controller.sendFollowupMessage(input);
   }
 
-  async bindTaskSession(input: { task_session_id: string; task_id: string }): Promise<TaskRuntimeBinding> {
+  async bindTaskSession(input: { task_session_id: string; task_id: string; terminal_ref?: string }): Promise<TaskRuntimeBinding> {
     const owner = await this.ownerForSession(input.task_session_id);
     if (!owner) {
       return {

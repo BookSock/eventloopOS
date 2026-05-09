@@ -91,5 +91,6 @@ export type TaskSessionController = {
   bindTaskSession?: (input: {
     task_session_id: string;
     task_id: string;
+    terminal_ref?: string;
   }) => Promise<TaskRuntimeBinding> | TaskRuntimeBinding;
 };

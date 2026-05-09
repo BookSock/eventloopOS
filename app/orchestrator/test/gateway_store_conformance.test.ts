@@ -152,9 +152,56 @@ function runGatewayStoreContract(
         assert.deepEqual(readyAfterDue.map((item) => item.id), ["qit_evt_gateway_queue"]);
         assert.equal(readyAfterDue[0]?.state, "ready");
 
+        const beforeBump = await harness.store.listQueue();
+        const beforePriority = beforeBump.find((item) => item.id === "qit_evt_gateway_queue")?.priority_score ?? 0;
+        const bumped = await harness.store.bumpQueueItemPriority(
+          "qit_evt_gateway_queue",
+          { delta: 250, reason: "user_priority_bump" },
+          now,
+        );
+        assert.equal(bumped?.priority_score, beforePriority + 250);
+        assert.ok(bumped?.priority_reasons.includes("user_priority_bump"));
+
         const ignored = await harness.store.ignoreQueueItem("qit_evt_gateway_queue", "user_jason", now);
         assert.equal(ignored?.state, "dead");
         assert.equal(await harness.store.leaseNextQueueItem("worker_after_ignore", now, 1_000), undefined);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    it("saves latest task workspace snapshot and attaches it to future queue items", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        await harness.store.saveTaskWorkspaceSnapshot({
+          taskId: "task_blog",
+          snapshot: {
+            backend: "aerospace",
+            activeWorkspace: "blog-workspace",
+            focusedWindowId: 42,
+            windows: [
+              { id: 42, app: "Ghostty", title: "codex blog", workspace: "blog-workspace" },
+            ],
+          },
+          capturedAt: now,
+          sourceQueueItemId: "qit_previous_blog",
+          actorId: "mac_queue_app",
+        });
+        const event = makeEvent("evt_gateway_task_workspace", "idem_gateway_task_workspace", {
+          title: "Blog queue item should restore workspace",
+          task_hint: "blog",
+        });
+        await harness.store.ingestEventAsReviewPacket(event, now);
+
+        const item = await harness.store.leaseNextQueueItem("worker_a", now, 1_000);
+        const workspaceContext = item?.review_packet.context.find((resource) => resource.kind === "workspace_snapshot");
+
+        assert.equal(item?.task_id, "task_blog");
+        assert.equal(workspaceContext?.source, "task_workspace_memory");
+        assert.equal(workspaceContext?.snapshot?.activeWorkspace, "blog-workspace");
+        assert.equal(workspaceContext?.snapshot?.windows[0]?.id, 42);
       } finally {
         await harness.cleanup();
       }
@@ -559,6 +606,7 @@ async function clearPostgresTestData(store: PostgresQueueStore): Promise<void> {
   await store.pool.query(`
     TRUNCATE
       metric_counters,
+      task_workspace_snapshots,
       mcp_poll_states,
       task_messages,
       activity_events,

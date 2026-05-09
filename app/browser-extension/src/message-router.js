@@ -6,6 +6,13 @@ export function handleRuntimeMessage(controller, message, sendResponse, options 
     return true;
   }
 
+  if (message?.type === "eventloop.captureTabRegistry") {
+    controller.captureTabRegistry(message.route_hints).then(sendResponse, (error) => {
+      sendResponse({ ok: false, error: error.message });
+    });
+    return true;
+  }
+
   if (message?.type === "eventloop.restore") {
     controller.restore(message.resource).then(sendResponse);
     return true;

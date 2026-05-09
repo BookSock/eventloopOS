@@ -217,7 +217,7 @@ export class CodexNativeThreadController implements TaskSessionController {
     }
   }
 
-  async bindTaskSession(input: { task_session_id: string; task_id: string }): Promise<{
+  async bindTaskSession(input: { task_session_id: string; task_id: string; terminal_ref?: string }): Promise<{
     ok: boolean;
     task_session_id: string;
     task_id: string;

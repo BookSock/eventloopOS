@@ -96,6 +96,63 @@ test("capture route hints ignore non-string values", async () => {
   assert.equal(nativeBridge.sent[0].payload.project_hint, undefined);
 });
 
+test("captures tab registry for all allowed tabs without reading page content", async () => {
+  const chromeApi = fakeChrome({
+    tabs: [
+      { id: 21, url: "file:///fixture/a.html", title: "Article A", active: false, windowId: 3, pinned: true },
+      { id: 22, url: "http://127.0.0.1:4173/b.html", title: "Article B", active: true, windowId: 3 },
+      { id: 23, url: "https://mail.google.com/mail/u/0", title: "Mail", active: false, windowId: 4 }
+    ],
+    pageByTabId: new Map()
+  });
+  const nativeBridge = createMockNativeBridge();
+  const controller = createExtensionController({
+    chromeApi,
+    nativeBridge,
+    now: () => new Date("2026-05-06T12:00:00.000Z")
+  });
+
+  const result = await controller.captureTabRegistry({ task_hint: "reading queue" });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.attempted_count, 2);
+  assert.equal(result.captured_count, 2);
+  assert.equal(result.failed_count, 0);
+  assert.equal(result.skipped_count, 1);
+  assert.equal(chromeApi.calls.sendMessages.length, 0);
+  assert.equal(nativeBridge.sent.length, 2);
+  assert.deepEqual(result.captured.map((item) => item.resource.id), ["browser_tab:21", "browser_tab:22"]);
+  assert.equal(result.captured[0].resource.restore_confidence, "medium");
+  assert.equal(result.captured[0].resource.window_id, "3");
+  assert.equal(result.captured[0].resource.tab_id, "21");
+  assert.equal(result.captured[0].resource.details.registry_capture, true);
+  assert.equal(nativeBridge.sent[0].payload.task_hint, "reading queue");
+  assert.equal(nativeBridge.sent[0].idempotency_key, "browser_registry:21:2026-05-06T12:00:00.000Z");
+  assert.equal(result.skipped[0].error.code, "origin_not_allowed");
+});
+
+test("tab registry capture reports native forwarding failures separately", async () => {
+  const chromeApi = fakeChrome({
+    tabs: [{ id: 31, url: "file:///fixture/a.html", title: "Article A", active: false, windowId: 3 }],
+    pageByTabId: new Map()
+  });
+  const nativeBridge = createMockNativeBridge({
+    responses: [{ ok: false, error: { code: "native_host_failed", message: "host down" } }]
+  });
+  const controller = createExtensionController({
+    chromeApi,
+    nativeBridge,
+    now: () => new Date("2026-05-06T12:00:00.000Z")
+  });
+
+  const result = await controller.captureTabRegistry();
+
+  assert.equal(result.attempted_count, 1);
+  assert.equal(result.captured_count, 0);
+  assert.equal(result.failed_count, 1);
+  assert.equal(result.captured[0].nativeResponse.ok, false);
+});
+
 test("capture skips disallowed active tab without reading page or native forwarding", async () => {
   const chromeApi = fakeChrome({
     tabs: [{ id: 11, url: "https://mail.google.com/mail/u/0", title: "Mail", active: true, windowId: 5 }],

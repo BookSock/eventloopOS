@@ -5,18 +5,22 @@ final class GlobalHotKeyController: @unchecked Sendable {
     private static let signature = OSType(0x45564C51) // EVLQ
     private static let pullNextPaperHotKeyID = UInt32(1)
     private static let toggleManualModeHotKeyID = UInt32(2)
+    private static let masterCommandHotKeyID = UInt32(3)
 
     private var hotKeyRefs: [EventHotKeyRef] = []
     private var eventHandlerRef: EventHandlerRef?
     private let pullNextPaper: @MainActor @Sendable () -> Void
     private let toggleManualMode: @MainActor @Sendable () -> Void
+    private let masterCommand: @MainActor @Sendable () -> Void
 
     init(
         pullNextPaper: @escaping @MainActor @Sendable () -> Void,
-        toggleManualMode: @escaping @MainActor @Sendable () -> Void
+        toggleManualMode: @escaping @MainActor @Sendable () -> Void,
+        masterCommand: @escaping @MainActor @Sendable () -> Void
     ) {
         self.pullNextPaper = pullNextPaper
         self.toggleManualMode = toggleManualMode
+        self.masterCommand = masterCommand
     }
 
     deinit {
@@ -83,6 +87,11 @@ final class GlobalHotKeyController: @unchecked Sendable {
             modifiers: UInt32(cmdKey | optionKey | shiftKey),
             id: Self.toggleManualModeHotKeyID
         )
+        registerHotKey(
+            keyCode: UInt32(kVK_ANSI_K),
+            modifiers: UInt32(cmdKey | optionKey | shiftKey),
+            id: Self.masterCommandHotKeyID
+        )
     }
 
     private func action(for hotKeyID: UInt32) -> (@MainActor @Sendable () -> Void)? {
@@ -91,6 +100,8 @@ final class GlobalHotKeyController: @unchecked Sendable {
             return pullNextPaper
         case Self.toggleManualModeHotKeyID:
             return toggleManualMode
+        case Self.masterCommandHotKeyID:
+            return masterCommand
         default:
             return nil
         }

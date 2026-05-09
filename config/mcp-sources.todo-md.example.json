@@ -19,7 +19,10 @@
       },
       "poll": {
         "tool": "poll_script",
-        "args": {},
+        "args": {
+          "script_command": "node",
+          "script_args": ["../../scripts/poll-todo-md.mjs"]
+        },
         "timeoutMs": 10000
       },
       "cursor": {

@@ -285,6 +285,37 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("excludes current queue item when leasing next", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const leaseServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+    });
+    await new Promise<void>((resolve) => leaseServer.listen(0, "127.0.0.1", resolve));
+    const address = leaseServer.address() as AddressInfo;
+    const leaseBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const leaseResponse = await fetch(`${leaseBaseUrl}/queue/lease-next`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          lease_owner: "mac_queue_app",
+          lease_ms: 30_000,
+          exclude_queue_item_id: "qit_seed_review",
+        }),
+      });
+      const leaseBody = await leaseResponse.json() as { item: unknown };
+
+      assert.equal(leaseResponse.status, 200);
+      assert.equal(leaseBody.item, null);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        leaseServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("marks queue item done and advances queue", async () => {
     const response = await fetch(`${baseUrl}/queue/qit_seed_review/done`, {
       method: "POST",
@@ -319,6 +350,152 @@ describe("orchestrator gateway API", () => {
     const nextResponse = await fetch(`${baseUrl}/queue/next`);
     const nextBody = await nextResponse.json() as { item: unknown };
     assert.equal(nextBody.item, null);
+  });
+
+  it("saves task workspace on queue completion and attaches it to later items for that task", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const workspaceServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+    });
+    await new Promise<void>((resolve) => workspaceServer.listen(0, "127.0.0.1", resolve));
+    const address = workspaceServer.address() as AddressInfo;
+    const workspaceBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const firstEvent = {
+        id: "evt_workspace_memory_first",
+        source: "manual",
+        source_id: "manual:first",
+        idempotency_key: "manual:first",
+        occurred_at: "2026-05-06T12:00:00.000Z",
+        received_at: "2026-05-06T12:00:00.000Z",
+        actor: { id: "user_jason", type: "human" },
+        task_hint: "blog",
+        type: "manual.review_requested",
+        title: "First blog review",
+        summary: "Save workspace when done.",
+        raw_ref: { id: "raw_first", uri: "manual://first" },
+        links: [],
+        resources: [],
+      };
+      const firstResponse = await fetch(`${workspaceBaseUrl}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(firstEvent),
+      });
+      const firstBody = await firstResponse.json() as { queue_item: { id: string } };
+      assert.equal(firstResponse.status, 202);
+
+      const doneResponse = await fetch(`${workspaceBaseUrl}/queue/${firstBody.queue_item.id}/done`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          action: "done",
+          actor_id: "mac_queue_app",
+          workspace_snapshot: {
+            backend: "aerospace",
+            activeWorkspace: "blog-workspace",
+            focusedWindowId: 42,
+            windows: [
+              { id: 42, app: "Ghostty", title: "codex blog", workspace: "blog-workspace" },
+            ],
+          },
+        }),
+      });
+      assert.equal(doneResponse.status, 200);
+
+      const secondResponse = await fetch(`${workspaceBaseUrl}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...firstEvent,
+          id: "evt_workspace_memory_second",
+          source_id: "manual:second",
+          idempotency_key: "manual:second",
+          title: "Second blog review",
+          summary: "Should inherit latest task workspace.",
+          raw_ref: { id: "raw_second", uri: "manual://second" },
+        }),
+      });
+      const secondBody = await secondResponse.json() as {
+        queue_item: {
+          review_packet: {
+            context: Array<{
+              kind: string;
+              source?: string;
+              snapshot?: {
+                activeWorkspace?: string;
+                focusedWindowId?: number;
+                windows: Array<{ id: number; workspace: string }>;
+              };
+            }>;
+          };
+        };
+      };
+      const workspaceContext = secondBody.queue_item.review_packet.context.find((resource) => resource.kind === "workspace_snapshot");
+
+      assert.equal(secondResponse.status, 202);
+      assert.equal(workspaceContext?.source, "task_workspace_memory");
+      assert.equal(workspaceContext?.snapshot?.activeWorkspace, "blog-workspace");
+      assert.equal(workspaceContext?.snapshot?.windows[0]?.workspace, "blog-workspace");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        workspaceServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("saves task workspace without changing queue state for skip-next navigation", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const server = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    const baseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${baseUrl}/tasks/task_blog/workspace-snapshot`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          actor_id: "mac_queue_app",
+          source_queue_item_id: "qit_blog_skip",
+          workspace_snapshot: {
+            backend: "aerospace",
+            activeWorkspace: "blog-workspace",
+            focusedWindowId: 42,
+            windows: [
+              { id: 42, app: "Ghostty", title: "codex blog", workspace: "blog-workspace" },
+            ],
+          },
+        }),
+      });
+      const body = await response.json() as {
+        ok: boolean;
+        workspace_snapshot: {
+          task_id: string;
+          source_queue_item_id?: string;
+          snapshot: {
+            activeWorkspace?: string;
+            windows: Array<{ id: number }>;
+          };
+        };
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(body.ok, true);
+      assert.equal(body.workspace_snapshot.task_id, "task_blog");
+      assert.equal(body.workspace_snapshot.source_queue_item_id, "qit_blog_skip");
+      assert.equal(body.workspace_snapshot.snapshot.activeWorkspace, "blog-workspace");
+      assert.equal(body.workspace_snapshot.snapshot.windows[0]?.id, 42);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   });
 
   it("defers and ignores queue items with visible activity", async () => {
@@ -367,6 +544,23 @@ describe("orchestrator gateway API", () => {
       assert.equal(afterDueBody.item.id, "qit_seed_review");
       assert.equal(afterDueBody.item.state, "ready");
 
+      const beforeBumpResponse = await fetch(`${queueBaseUrl}/queue`);
+      const beforeBumpBody = await beforeBumpResponse.json() as { items: Array<{ id: string; priority_score: number }> };
+      const previousPriority = beforeBumpBody.items.find((item) => item.id === "qit_seed_review")?.priority_score ?? 0;
+      const bumpResponse = await fetch(`${queueBaseUrl}/queue/qit_seed_review/priority`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ delta: 200, reason: "user_priority_bump", actor_id: "user_jason" }),
+      });
+      const bumpBody = await bumpResponse.json() as {
+        ok: boolean;
+        item: { id: string; priority_score: number; priority_reasons: string[] };
+      };
+      assert.equal(bumpResponse.status, 200);
+      assert.equal(bumpBody.ok, true);
+      assert.equal(bumpBody.item.priority_score, previousPriority + 200);
+      assert.ok(bumpBody.item.priority_reasons.includes("user_priority_bump"));
+
       const ignoreResponse = await fetch(`${queueBaseUrl}/queue/qit_seed_review/ignore`, {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -384,8 +578,10 @@ describe("orchestrator gateway API", () => {
       const metrics = await observability.snapshot();
       assert.equal(metrics.counters.queue_items_deferred_total, 1);
       assert.equal(metrics.counters.queue_items_ignored_total, 1);
-      assert.deepEqual((await observability.listActivity(2)).map((event) => event.type), [
+      assert.equal(metrics.counters.queue_items_priority_bumped_total, 1);
+      assert.deepEqual((await observability.listActivity(3)).map((event) => event.type), [
         "queue_item_ignored",
+        "queue_item_priority_bumped",
         "queue_item_deferred",
       ]);
     } finally {
@@ -1155,6 +1351,57 @@ describe("orchestrator gateway API", () => {
       assert.equal(fileRestorePlanBody.restore_plan.line, 12);
       assert.equal(fileRestorePlanBody.restore_plan.column, 4);
 
+      const slackRestorePlanResponse = await fetch(`${routeBaseUrl}/contexts/restore-plan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          resource: {
+            id: "ctx_slack_thread",
+            kind: "slack_thread",
+            title: "Slack thread",
+            url: "https://acme.slack.com/archives/C123/p1234567890123456",
+            details: {
+              workspace_id: "T123",
+              team_domain: "acme",
+              channel_id: "C123",
+              thread_ts: "1234567890.123456",
+            },
+          },
+        }),
+      });
+      assert.equal(slackRestorePlanResponse.status, 200);
+      const slackRestorePlanBody = await slackRestorePlanResponse.json() as {
+        restore_plan: { kind: string; url: string; anchor?: { thread_ts?: string; channel_id?: string } };
+      };
+      assert.equal(slackRestorePlanBody.restore_plan.kind, "open_slack_thread");
+      assert.equal(slackRestorePlanBody.restore_plan.anchor?.thread_ts, "1234567890.123456");
+      assert.equal(slackRestorePlanBody.restore_plan.anchor?.channel_id, "C123");
+
+      const docRestorePlanResponse = await fetch(`${routeBaseUrl}/contexts/restore-plan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          resource: {
+            id: "ctx_google_doc",
+            kind: "google_doc",
+            title: "Blog launch doc",
+            url: "https://docs.google.com/document/d/abc123/edit",
+            details: {
+              doc_id: "abc123",
+              heading_id: "h.angle1",
+              selection_quote: "Should we ship Tuesday?",
+            },
+          },
+        }),
+      });
+      assert.equal(docRestorePlanResponse.status, 200);
+      const docRestorePlanBody = await docRestorePlanResponse.json() as {
+        restore_plan: { kind: string; anchor?: { heading_id?: string; selection_quote?: string } };
+      };
+      assert.equal(docRestorePlanBody.restore_plan.kind, "open_doc_anchor");
+      assert.equal(docRestorePlanBody.restore_plan.anchor?.heading_id, "h.angle1");
+      assert.equal(docRestorePlanBody.restore_plan.anchor?.selection_quote, "Should we ship Tuesday?");
+
       const unsupportedRestorePlanResponse = await fetch(`${routeBaseUrl}/contexts/restore-plan`, {
         method: "POST",
         headers: {
@@ -1789,6 +2036,92 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("starts a master task with an intake paper and workspace snapshot", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const taskServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      taskSessions: {
+        startTaskSession(input) {
+          return {
+            ok: true,
+            task_session_id: "task_session_launch_email",
+            task_id: input.task_id,
+            session: {
+              id: "task_session_launch_email",
+              task_id: input.task_id,
+              provider: "codex",
+              status: "running",
+            },
+          };
+        },
+        listSessions() {
+          return [];
+        },
+        sendFollowupMessage() {
+          throw new Error("not used");
+        },
+      },
+    });
+    await new Promise<void>((resolve) => taskServer.listen(0, "127.0.0.1", resolve));
+    const address = taskServer.address() as AddressInfo;
+    const taskBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${taskBaseUrl}/task-sessions`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem_master_start_launch_email",
+        },
+        body: JSON.stringify({
+          task_id: "task_launch_email",
+          prompt: "Draft launch email and ask me before sending.",
+          idempotency_key: "idem_master_start_launch_email",
+          queue_paper: true,
+          workspace_snapshot: {
+            backend: "aerospace",
+            windows: [
+              { id: 501, app: "Google Chrome", title: "Superhuman", workspace: "mail" },
+            ],
+            activeWorkspace: "mail",
+            focusedWindowId: 501,
+          },
+        }),
+      });
+      const body = await response.json() as {
+        started: { task_id: string };
+        queue_item?: { task_id?: string; priority_reasons?: string[] };
+        review_packet?: { title?: string; context?: Array<{ kind: string; snapshot?: unknown }> };
+        workspace_snapshot?: { task_id: string; snapshot: { windows: Array<{ id: number }> } };
+      };
+
+      assert.equal(response.status, 202);
+      assert.equal(body.started.task_id, "task_launch_email");
+      assert.equal(body.queue_item?.task_id, "task_launch_email");
+      assert.equal(body.workspace_snapshot?.task_id, "task_launch_email");
+      assert.deepEqual(body.workspace_snapshot?.snapshot.windows.map((window) => window.id), [501]);
+
+      const queueResponse = await fetch(`${taskBaseUrl}/queue`);
+      const queueBody = await queueResponse.json() as {
+        items: Array<{
+          task_id?: string;
+          review_packet: {
+            context: Array<{ kind: string; snapshot?: { windows?: Array<{ id: number }> } }>;
+          };
+        }>;
+      };
+      const queued = queueBody.items.find((item) => item.task_id === "task_launch_email");
+      const workspaceContext = queued?.review_packet.context.find((context) => context.kind === "workspace_snapshot");
+      assert.notEqual(queued, undefined);
+      assert.equal(workspaceContext?.snapshot?.windows?.[0]?.id, 501);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("records failed task followups for after-the-fact debugging", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const observability = createInMemoryObservability();
@@ -2166,6 +2499,204 @@ describe("orchestrator gateway API", () => {
     } finally {
       await new Promise<void>((resolve, reject) => {
         taskServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("approves onboarding task context by saving windows and binding task sessions", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const bindings: unknown[] = [];
+    const onboardingServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+      workspace: {
+        status() {
+          return { available: true, backend: "aerospace" };
+        },
+        capture() {
+          return {
+            backend: "aerospace",
+            activeWorkspace: "blog-workspace",
+            focusedWindowId: 101,
+            windows: [
+              { id: 101, app: "Ghostty", title: "[task:blog] codex", workspace: "blog-workspace" },
+              { id: 102, app: "Google Chrome", title: "Blog draft", workspace: "blog-web" },
+              { id: 999, app: "Slack", title: "Other", workspace: "chat" },
+            ],
+          };
+        },
+        planRestore() {
+          throw new Error("not used");
+        },
+      },
+      taskSessions: {
+        listSessions() {
+          return [{ id: "codex_thread_blog", task_id: "task_blog", provider: "codex", status: "idle" }];
+        },
+        sendFollowupMessage() {
+          throw new Error("not used");
+        },
+        bindTaskSession(input) {
+          bindings.push(input);
+          return {
+            ok: true,
+            task_session_id: input.task_session_id,
+            task_id: input.task_id,
+          };
+        },
+      },
+    });
+    await new Promise<void>((resolve) => onboardingServer.listen(0, "127.0.0.1", resolve));
+    const address = onboardingServer.address() as AddressInfo;
+    const onboardingBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      await store.recordEventRoute({
+        id: "evt_onboarding_blog_browser_tab",
+        source: "browser",
+        source_id: "browser:onboarding-blog-tab",
+        idempotency_key: "browser:onboarding-blog-tab",
+        occurred_at: "2026-05-06T12:00:30.000Z",
+        received_at: "2026-05-06T12:00:30.000Z",
+        actor: { id: "chrome_extension", type: "system" },
+        type: "browser.context_captured",
+        title: "Blog draft tab",
+        summary: "Captured browser tab before onboarding approval.",
+        raw_ref: { id: "raw_onboarding_blog_browser_tab", uri: "browser://tabs/77", media_type: "application/json" },
+        links: [],
+        resources: [
+          {
+            id: "browser_tab:77",
+            kind: "browser_tab",
+            title: "Blog draft",
+            url: "https://example.test/blog-draft",
+            source: "chrome-extension",
+            captured_at: "2026-05-06T12:00:30.000Z",
+            restore_confidence: "high",
+            window_id: "102",
+            tab_id: "77",
+          },
+        ],
+      }, {
+        id: "rte_onboarding_blog_browser_tab",
+        event_id: "evt_onboarding_blog_browser_tab",
+        action: "store_only",
+        confidence: "medium",
+        evidence: [],
+        created_at: "2026-05-06T12:00:30.000Z",
+      }, new Date("2026-05-06T12:00:30.000Z"));
+
+      const scanResponse = await fetch(`${onboardingBaseUrl}/onboarding/scan`);
+      const scanBody = await scanResponse.json() as {
+        proposals: Array<{ id: string; task_id: string; browser_contexts: Array<{ id: string }> }>;
+      };
+      const blogProposal = scanBody.proposals.find((proposal) => proposal.task_id === "task_blog");
+      assert.equal(scanResponse.status, 200);
+      assert.ok(blogProposal);
+      assert.deepEqual(blogProposal.browser_contexts.map((context) => context.id), ["browser_tab:77"]);
+
+      const response = await fetch(`${onboardingBaseUrl}/onboarding/approvals`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          proposal_id: blogProposal.id,
+          queue_paper: true,
+          actor_id: "test_user",
+        }),
+      });
+      const body = await response.json() as {
+        ok: boolean;
+        task_id: string;
+        workspace_snapshot: {
+          task_id: string;
+          snapshot: {
+            activeWorkspace?: string;
+            focusedWindowId?: number;
+            windows: Array<{ id: number; workspace: string }>;
+          };
+        };
+        bindings: Array<{ task_session_id: string; task_id: string }>;
+        browser_context_bindings: Array<{ browser_context_id: string; event_id: string; task_id: string }>;
+        queue_item?: {
+          id: string;
+          task_id: string;
+          state: string;
+          review_packet: {
+            title: string;
+            decision_needed: string;
+            risk_tags: string[];
+            recommended_action: { type: string; label: string; requires_confirmation: boolean; side_effect: string };
+            context: Array<{ id?: string; kind: string; source?: string; url?: string; snapshot?: { windows: Array<{ id: number }> } }>;
+          };
+        };
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(body.ok, true);
+      assert.equal(body.task_id, "task_blog");
+      assert.equal((body as { proposal_id?: string }).proposal_id, blogProposal.id);
+      assert.equal(body.workspace_snapshot.task_id, "task_blog");
+      assert.deepEqual(body.workspace_snapshot.snapshot.windows.map((window) => window.id), [101, 102]);
+      assert.equal(body.workspace_snapshot.snapshot.activeWorkspace, "blog-workspace");
+      assert.equal(body.workspace_snapshot.snapshot.focusedWindowId, 101);
+      assert.deepEqual(bindings, [{ task_session_id: "codex_thread_blog", task_id: "task_blog" }]);
+      assert.deepEqual(body.bindings, [{ ok: true, task_session_id: "codex_thread_blog", task_id: "task_blog" }]);
+      assert.equal(body.browser_context_bindings.length, 1);
+      assert.equal(body.browser_context_bindings[0]?.browser_context_id, "browser_tab:77");
+      assert.equal(body.browser_context_bindings[0]?.task_id, "task_blog");
+      assert.equal(body.queue_item?.task_id, "task_blog");
+      assert.equal(body.queue_item?.state, "ready");
+      assert.equal(body.queue_item?.review_packet.title, "Review Blog workbench");
+      assert.equal(body.queue_item?.review_packet.decision_needed, "Review this approved workbench. Do the work, send instructions to the agent if needed, then Done / Next.");
+      assert.deepEqual(body.queue_item?.review_packet.risk_tags, ["onboarding_workbench"]);
+      assert.equal(body.queue_item?.review_packet.recommended_action.type, "mark_done");
+      assert.equal(body.queue_item?.review_packet.recommended_action.label, "Work this paper, then Done / Next");
+      assert.equal(body.queue_item?.review_packet.recommended_action.requires_confirmation, false);
+      assert.equal(body.queue_item?.review_packet.recommended_action.side_effect, "none");
+      const queuedWorkspaceContext = body.queue_item?.review_packet.context.find((context) => context.kind === "workspace_snapshot");
+      assert.deepEqual(queuedWorkspaceContext?.snapshot?.windows.map((window) => window.id), [101, 102]);
+      const queuedBrowserContext = body.queue_item?.review_packet.context.find((context) => context.kind === "browser_tab");
+      assert.equal(queuedBrowserContext?.id, "browser_tab:77");
+      assert.equal(queuedBrowserContext?.url, "https://example.test/blog-draft");
+
+      const nextEventResponse = await fetch(`${onboardingBaseUrl}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "evt_onboarding_blog_followup",
+          source: "manual",
+          source_id: "manual:onboarding-blog-followup",
+          idempotency_key: "manual:onboarding-blog-followup",
+          occurred_at: "2026-05-06T12:01:00.000Z",
+          received_at: "2026-05-06T12:01:00.000Z",
+          actor: { id: "user_jason", type: "human" },
+          task_hint: "blog",
+          type: "manual.review_requested",
+          title: "Blog followup",
+          summary: "Should carry approved onboarding workspace.",
+          raw_ref: { id: "raw_onboarding_blog_followup", uri: "manual://onboarding-blog-followup" },
+          links: [],
+          resources: [],
+        }),
+      });
+      const nextEventBody = await nextEventResponse.json() as {
+        queue_item: {
+          review_packet: {
+            context: Array<{ id?: string; kind: string; source?: string; url?: string; snapshot?: { windows: Array<{ id: number }> } }>;
+          };
+        };
+      };
+      assert.equal(nextEventResponse.status, 202);
+      const workspaceContext = nextEventBody.queue_item.review_packet.context.find((context) => context.kind === "workspace_snapshot");
+      assert.equal(workspaceContext?.source, "task_workspace_memory");
+      assert.deepEqual(workspaceContext?.snapshot?.windows.map((window) => window.id), [101, 102]);
+      const browserTabContext = nextEventBody.queue_item.review_packet.context.find((context) => context.kind === "browser_tab");
+      assert.equal(browserTabContext?.id, "browser_tab:77");
+      assert.equal(browserTabContext?.url, "https://example.test/blog-draft");
+      assert.equal(browserTabContext?.source, "chrome-extension");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        onboardingServer.close((error) => (error ? reject(error) : resolve()));
       });
     }
   });
@@ -3781,8 +4312,19 @@ describe("orchestrator gateway API", () => {
         preview: Array<{
           source: string;
           type: string;
-          task_hint: string;
+          has_task_hint: boolean;
+          has_project_hint: boolean;
+          actor: {
+            type: string;
+            name_present: boolean;
+            id?: string;
+            name?: string;
+          };
           first_link_host: string;
+          id?: string;
+          source_id?: string;
+          project_hint?: string;
+          task_hint?: string;
           title?: string;
           summary?: string;
         }>;
@@ -3793,8 +4335,17 @@ describe("orchestrator gateway API", () => {
       assert.equal(previewBody.duplicates_ignored, 0);
       assert.equal(previewBody.preview[0].source, "slack");
       assert.equal(previewBody.preview[0].type, "slack.message");
-      assert.equal(previewBody.preview[0].task_hint, "blog feedback");
+      assert.equal(previewBody.preview[0].has_task_hint, true);
+      assert.equal(previewBody.preview[0].has_project_hint, true);
+      assert.equal(previewBody.preview[0].actor.type, "human");
+      assert.equal(previewBody.preview[0].actor.name_present, true);
       assert.equal(previewBody.preview[0].first_link_host, "slack.example.com");
+      assert.equal(previewBody.preview[0].id, undefined);
+      assert.equal(previewBody.preview[0].source_id, undefined);
+      assert.equal(previewBody.preview[0].project_hint, undefined);
+      assert.equal(previewBody.preview[0].task_hint, undefined);
+      assert.equal(previewBody.preview[0].actor.id, undefined);
+      assert.equal(previewBody.preview[0].actor.name, undefined);
       assert.equal(previewBody.preview[0].title, undefined);
       assert.equal(previewBody.preview[0].summary, undefined);
 

@@ -1,4 +1,4 @@
-import { buildContextResource, buildRestoreResult, contextResourceToPageContext, normalizeContextResource } from "./protocol.js";
+import { buildContextResource, buildRestoreResult, buildTabRegistryResource, contextResourceToPageContext, normalizeContextResource } from "./protocol.js";
 import { callChrome } from "./chrome-promises.js";
 import { DEFAULT_ALLOWED_ORIGINS, isUrlAllowedByOrigins } from "./extension-config.js";
 
@@ -40,6 +40,50 @@ export function createExtensionController({ chromeApi, nativeBridge, configStore
     return { resource, nativeResponse };
   }
 
+  async function captureTabRegistry(routeHints = {}) {
+    const tabs = await callChrome(chromeApi.tabs.query.bind(chromeApi.tabs), {});
+    const capturedAt = now().toISOString();
+    const normalizedRouteHints = normalizeRouteHints(routeHints);
+    const captured = [];
+    const skipped = [];
+
+    for (const tab of tabs) {
+      if (!tab?.id) {
+        skipped.push({ reason: "missing_tab_id", title: tab?.title ?? null, url: tab?.url ?? null });
+        continue;
+      }
+      if (!(await isAllowedUrl(tab.url))) {
+        skipped.push({
+          tabId: tab.id,
+          title: tab.title,
+          url: tab.url,
+          error: disallowedOriginError(tab.url, "tab registry")
+        });
+        continue;
+      }
+
+      const resource = buildTabRegistryResource({ tab, capturedAt });
+      const nativeResponse = await nativeBridge.send({
+        type: "eventloop.contextCaptured",
+        resource,
+        idempotency_key: `browser_registry:${resource.tab_id ?? resource.id}:${capturedAt}`,
+        ...normalizedRouteHints
+      });
+      captured.push({ resource, nativeResponse });
+    }
+
+    return {
+      ok: true,
+      captured_at: capturedAt,
+      attempted_count: captured.length,
+      captured_count: captured.filter((item) => item.nativeResponse?.ok === true).length,
+      failed_count: captured.filter((item) => item.nativeResponse?.ok === false).length,
+      skipped_count: skipped.length,
+      captured,
+      skipped
+    };
+  }
+
   async function restore(resource) {
     try {
       const normalizedResource = normalizeContextResource(resource);
@@ -60,7 +104,8 @@ export function createExtensionController({ chromeApi, nativeBridge, configStore
       }
 
       const tabs = await callChrome(chromeApi.tabs.query.bind(chromeApi.tabs), {});
-      let tab = tabs.find((candidate) => urlsMatch(candidate.url, url));
+      let tab = tabByCapturedId(tabs, normalizedResource.tab_id, url);
+      tab ??= tabs.find((candidate) => urlsMatch(candidate.url, url));
 
       if (tab) {
         await callChrome(chromeApi.tabs.update.bind(chromeApi.tabs), tab.id, { active: true });
@@ -127,7 +172,7 @@ export function createExtensionController({ chromeApi, nativeBridge, configStore
     });
   }
 
-  return { captureActiveTab, restore };
+  return { captureActiveTab, captureTabRegistry, restore };
 }
 
 function disallowedOriginError(url, action) {
@@ -171,4 +216,19 @@ export function urlsMatch(left, right) {
   } catch {
     return left === right;
   }
+}
+
+export function tabByCapturedId(tabs, tabId, expectedUrl) {
+  const parsedTabId = Number(tabId);
+  if (!Number.isInteger(parsedTabId) || parsedTabId <= 0) {
+    return undefined;
+  }
+  const tab = tabs.find((candidate) => candidate.id === parsedTabId);
+  if (!tab) {
+    return undefined;
+  }
+  if (expectedUrl && !urlsMatch(tab.url, expectedUrl)) {
+    return undefined;
+  }
+  return tab;
 }

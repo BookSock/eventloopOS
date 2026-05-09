@@ -66,7 +66,45 @@ describe("PostgresQueueStore", () => {
       { id: "0005_mcp_poll_states.sql" },
       { id: "0006_task_messages.sql" },
       { id: "0007_agent_runs.sql" },
+      { id: "0008_task_workspace_snapshots.sql" },
     ]);
+  });
+
+  it("persists latest task workspace snapshot", async (t) => {
+    if (!store) {
+      t.skip(skipReason);
+      return;
+    }
+
+    const first = await store.saveTaskWorkspaceSnapshot({
+      taskId: "task_blog",
+      snapshot: {
+        backend: "aerospace",
+        activeWorkspace: "blog-a",
+        focusedWindowId: 1,
+        windows: [{ id: 1, app: "Ghostty", title: "codex", workspace: "blog-a" }],
+      },
+      capturedAt: new Date("2026-05-06T12:00:00.000Z"),
+      sourceQueueItemId: "qit_a",
+      actorId: "mac_queue_app",
+    });
+    const second = await store.saveTaskWorkspaceSnapshot({
+      taskId: "task_blog",
+      snapshot: {
+        backend: "aerospace",
+        activeWorkspace: "blog-b",
+        focusedWindowId: 2,
+        windows: [{ id: 2, app: "Google Chrome", title: "draft", workspace: "blog-b" }],
+      },
+      capturedAt: new Date("2026-05-06T12:05:00.000Z"),
+      sourceQueueItemId: "qit_b",
+      actorId: "mac_queue_app",
+    });
+    const fetched = await store.getLatestTaskWorkspaceSnapshot("task_blog");
+
+    assert.equal(first.snapshot.activeWorkspace, "blog-a");
+    assert.deepEqual(fetched, second);
+    assert.equal(fetched?.snapshot.windows[0]?.workspace, "blog-b");
   });
 
   it("persists MCP poll cursor state", async (t) => {
@@ -640,6 +678,7 @@ async function clearTestData(store: PostgresQueueStore) {
   await store.pool.query(`
     TRUNCATE
       metric_counters,
+      task_workspace_snapshots,
       mcp_poll_states,
       task_messages,
       activity_events,

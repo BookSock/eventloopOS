@@ -11,6 +11,7 @@ import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js"
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import { bestTaskSessionForTask } from "../task_sessions/session_selection.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
+import { parseWorkspaceSnapshot } from "../workspace/controller.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
 
@@ -53,7 +54,7 @@ export async function handleQueueRoute(input: {
     if (!validation.ok) return schemaError(validation.message);
 
     return ok(200, {
-      item: await input.store.leaseNextQueueItem(validation.leaseOwner, input.now, validation.leaseMs) ?? null,
+      item: await input.store.leaseNextQueueItem(validation.leaseOwner, input.now, validation.leaseMs, validation.excludeQueueItemId) ?? null,
       request_id: input.requestId,
     });
   }
@@ -123,6 +124,10 @@ export async function handleQueueRoute(input: {
 
     const queueItemId = decodeURIComponent(doneMatch[1] ?? "");
     const actorId = typeof parsed.value.actor_id === "string" ? parsed.value.actor_id : "unknown";
+    const existingItem = await findQueueItem(input.store, queueItemId);
+    if (!existingItem) return error(404, "not_found", `queue item ${queueItemId} was not found`);
+    const workspaceSave = await saveTaskWorkspaceSnapshotFromQueueAction(input, existingItem, parsed.value, actorId);
+    if (!workspaceSave.ok) return schemaError(workspaceSave.message);
     const item = await input.store.markQueueItemDone(queueItemId, actorId, input.now);
     if (!item) return error(404, "not_found", `queue item ${queueItemId} was not found`);
     await recordQueueDone(input.observability, item);
@@ -146,10 +151,15 @@ export async function handleQueueRoute(input: {
   if (input.method === "POST" && deferMatch) {
     const parsed = await input.readJsonBody();
     if (!parsed.ok) return schemaError(parsed.message);
+    if (!isRecord(parsed.value)) return schemaError("defer request must be an object");
     const validation = validateQueueDeferRequest(parsed.value, input.now);
     if (!validation.ok) return schemaError(validation.message);
 
     const queueItemId = decodeURIComponent(deferMatch[1] ?? "");
+    const existingItem = await findQueueItem(input.store, queueItemId);
+    if (!existingItem) return error(404, "not_found", `queue item ${queueItemId} was not found`);
+    const workspaceSave = await saveTaskWorkspaceSnapshotFromQueueAction(input, existingItem, parsed.value, validation.actorId);
+    if (!workspaceSave.ok) return schemaError(workspaceSave.message);
     const item = await input.store.deferQueueItem(queueItemId, validation.actorId, validation.dueAt, input.now);
     if (!item) return error(404, "not_found", `queue item ${queueItemId} was not found`);
     await input.observability.incrementCounter("queue_items_deferred_total");
@@ -187,10 +197,15 @@ export async function handleQueueRoute(input: {
   if (input.method === "POST" && ignoreMatch) {
     const parsed = await input.readJsonBody();
     if (!parsed.ok) return schemaError(parsed.message);
+    if (!isRecord(parsed.value)) return schemaError("ignore request must be an object");
     const validation = validateQueueIgnoreRequest(parsed.value);
     if (!validation.ok) return schemaError(validation.message);
 
     const queueItemId = decodeURIComponent(ignoreMatch[1] ?? "");
+    const existingItem = await findQueueItem(input.store, queueItemId);
+    if (!existingItem) return error(404, "not_found", `queue item ${queueItemId} was not found`);
+    const workspaceSave = await saveTaskWorkspaceSnapshotFromQueueAction(input, existingItem, parsed.value, validation.actorId);
+    if (!workspaceSave.ok) return schemaError(workspaceSave.message);
     const item = await input.store.ignoreQueueItem(queueItemId, validation.actorId, input.now);
     if (!item) return error(404, "not_found", `queue item ${queueItemId} was not found`);
     await input.observability.incrementCounter("queue_items_ignored_total");
@@ -226,12 +241,15 @@ export async function handleQueueRoute(input: {
   if (input.method === "POST" && recommendedActionMatch) {
     const parsed = await input.readJsonBody();
     if (!parsed.ok) return schemaError(parsed.message);
+    if (!isRecord(parsed.value)) return schemaError("recommended action request must be an object");
     const validation = validateQueueActionRequest(parsed.value);
     if (!validation.ok) return schemaError(validation.message);
 
     const queueItemId = decodeURIComponent(recommendedActionMatch[1] ?? "");
     const item = await findQueueItem(input.store, queueItemId);
     if (!item) return error(404, "not_found", `queue item ${queueItemId} was not found`);
+    const workspaceSave = await saveTaskWorkspaceSnapshotFromQueueAction(input, item, parsed.value, validation.actorId);
+    if (!workspaceSave.ok) return schemaError(workspaceSave.message);
 
     const actionResult = await executeQueueAction(input, item, item.review_packet.recommended_action);
     if (!actionResult.ok) {
@@ -259,7 +277,80 @@ export async function handleQueueRoute(input: {
     return schemaError("POST /queue request schema is not implemented in v0");
   }
 
+  const priorityMatch = input.pathname.match(/^\/queue\/([^/]+)\/priority$/);
+  if (input.method === "POST" && priorityMatch) {
+    const queueItemId = decodeURIComponent(priorityMatch[1] ?? "");
+    const parsed = await input.readJsonBody();
+    if (!parsed.ok) return schemaError(parsed.message);
+    const validation = validateQueuePriorityRequest(parsed.value);
+    if (!validation.ok) return schemaError(validation.message);
+
+    const updated = await input.store.bumpQueueItemPriority(queueItemId, {
+      delta: validation.delta,
+      score: validation.score,
+      reason: validation.reason,
+    }, input.now);
+    if (!updated) return error(404, "not_found", `queue item ${queueItemId} was not found`);
+
+    await input.observability.incrementCounter("queue_items_priority_bumped_total");
+    await input.observability.recordActivity({
+      type: "queue_item_priority_bumped",
+      occurred_at: input.now.toISOString(),
+      actor: "human",
+      task_id: updated.task_id,
+      queue_item_id: updated.id,
+      status: "ok",
+      summary: `Queue item priority updated for ${updated.review_packet.title}.`,
+      details: sanitizeActivityDetails({
+        review_packet_id: updated.review_packet_id,
+        priority_score: updated.priority_score,
+        delta: validation.delta,
+        score: validation.score,
+        reason: validation.reason ?? "manual_priority_bump",
+        actor_id: validation.actorId,
+      }),
+    });
+
+    return ok(200, {
+      ok: true,
+      item: updated,
+      request_id: input.requestId,
+    });
+  }
+
   return undefined;
+}
+
+function validateQueuePriorityRequest(input: unknown): {
+  ok: true;
+  delta?: number;
+  score?: number;
+  reason?: string;
+  actorId: string;
+} | { ok: false; message: string } {
+  if (!isRecord(input)) return { ok: false, message: "priority request must be an object" };
+  const delta = input.delta;
+  const score = input.score;
+  if (delta === undefined && score === undefined) {
+    return { ok: false, message: "priority request must include delta or score" };
+  }
+  if (delta !== undefined && (typeof delta !== "number" || !Number.isFinite(delta))) {
+    return { ok: false, message: "priority delta must be a finite number" };
+  }
+  if (score !== undefined && (typeof score !== "number" || !Number.isFinite(score) || score < 0)) {
+    return { ok: false, message: "priority score must be a non-negative finite number" };
+  }
+  const reasonValue = input.reason;
+  const reason = typeof reasonValue === "string" && reasonValue.trim() ? reasonValue.trim().slice(0, 80) : undefined;
+  const actorValue = input.actor_id;
+  const actorId = typeof actorValue === "string" && actorValue.trim() ? actorValue.trim() : "queue_priority";
+  return {
+    ok: true,
+    delta: typeof delta === "number" ? delta : undefined,
+    score: typeof score === "number" ? score : undefined,
+    reason,
+    actorId,
+  };
 }
 
 async function recordQueueDone(
@@ -282,6 +373,62 @@ async function recordQueueDone(
       action_result: extra?.actionResult,
     }),
   });
+}
+
+async function saveTaskWorkspaceSnapshotFromQueueAction(
+  input: {
+    store: GatewayStore;
+    observability: Observability;
+    now: Date;
+  },
+  item: QueueItemWithPacket,
+  body: Record<string, unknown>,
+  actorId: string,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const parsed = parseOptionalWorkspaceSnapshotBody(body);
+  if (!parsed.ok) return parsed;
+  if (!parsed.snapshot) return { ok: true };
+  if (!item.task_id) return { ok: true };
+
+  const record = await input.store.saveTaskWorkspaceSnapshot({
+    taskId: item.task_id,
+    snapshot: parsed.snapshot,
+    capturedAt: input.now,
+    sourceQueueItemId: item.id,
+    actorId,
+  });
+  await input.observability.incrementCounter("task_workspace_snapshots_saved_total");
+  await input.observability.recordActivity({
+    type: "task_workspace_snapshot_saved",
+    occurred_at: record.updated_at,
+    actor: "human",
+    task_id: item.task_id,
+    queue_item_id: item.id,
+    status: "ok",
+    summary: `Task workspace saved: ${item.task_id}`,
+    details: sanitizeActivityDetails({
+      review_packet_id: item.review_packet_id,
+      window_count: record.snapshot.windows.length,
+      active_workspace: record.snapshot.activeWorkspace,
+      focused_window_id: record.snapshot.focusedWindowId,
+    }),
+  });
+  return { ok: true };
+}
+
+function parseOptionalWorkspaceSnapshotBody(
+  body: Record<string, unknown>,
+): { ok: true; snapshot?: ReturnType<typeof parseWorkspaceSnapshot> } | { ok: false; message: string } {
+  const raw = body.workspace_snapshot ?? body.workspaceSnapshot;
+  if (raw === undefined || raw === null) return { ok: true };
+  try {
+    return { ok: true, snapshot: parseWorkspaceSnapshot(raw) };
+  } catch (error) {
+    return {
+      ok: false,
+      message: `workspace_snapshot is invalid: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
 }
 
 function validateQueueQuery(url: URL): { ok: true; state?: QueueState } | { ok: false; message: string } {
@@ -322,7 +469,7 @@ function validateQueueDeferRequest(input: unknown, now: Date): { ok: true; actor
 function parseQueueLeaseRequest(
   input: Record<string, unknown>,
   requireOwner: boolean,
-): { ok: true; leaseOwner: string; leaseMs: number } | { ok: false; message: string } {
+): { ok: true; leaseOwner: string; leaseMs: number; excludeQueueItemId?: string } | { ok: false; message: string } {
   const leaseOwner = typeof input.lease_owner === "string" && input.lease_owner
     ? input.lease_owner
     : requireOwner ? "" : "unknown";
@@ -336,8 +483,11 @@ function parseQueueLeaseRequest(
   if (leaseMs <= 0 || leaseMs > 30 * 60_000) {
     return { ok: false, message: "lease_ms must be between 1 and 1800000" };
   }
+  const excludeQueueItemId = typeof input.exclude_queue_item_id === "string" && input.exclude_queue_item_id.trim()
+    ? input.exclude_queue_item_id.trim()
+    : undefined;
 
-  return { ok: true, leaseOwner, leaseMs };
+  return { ok: true, leaseOwner, leaseMs, excludeQueueItemId };
 }
 
 function validateQueueIgnoreRequest(input: unknown): { ok: true; actorId: string } | { ok: false; message: string } {

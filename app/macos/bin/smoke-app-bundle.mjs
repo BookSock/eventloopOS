@@ -3,15 +3,25 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-const bundleIdentifier = "dev.eventloopos.queue.smoke";
+const defaultBundleIdentifier = "dev.eventloopos.queue.smoke";
+const defaultExecutableName = "EventLoopQueueApp";
+const defaultBundleName = "eventloopOS Queue";
 
-export async function buildPackagedQueueAppBundle() {
+export async function buildPackagedQueueAppBundle(options = {}) {
+  const executableName = options.executableName ?? defaultExecutableName;
+  const bundleIdentifier = options.bundleIdentifier ?? defaultBundleIdentifier;
+  const bundleName = options.bundleName ?? defaultBundleName;
   await spawnChecked("swift", ["build", "--product", "EventLoopQueueApp"]);
   const binPath = (await spawnChecked("swift", ["build", "--show-bin-path"])).stdout.trim();
-  const appBundle = await packageAppBundle(path.join(binPath, "EventLoopQueueApp"));
+  const appBundle = await packageAppBundle(path.join(binPath, "EventLoopQueueApp"), {
+    executableName,
+    bundleIdentifier,
+    bundleName,
+  });
   return {
     appBundle,
-    executablePath: path.join(appBundle, "Contents", "MacOS", "EventLoopQueueApp"),
+    executablePath: path.join(appBundle, "Contents", "MacOS", executableName),
+    processName: executableName,
     cleanup: async () => {
       await rm(path.dirname(appBundle), { recursive: true, force: true });
     },
@@ -90,28 +100,28 @@ export async function waitForExit(child, timeoutMs) {
   });
 }
 
-async function packageAppBundle(executablePath) {
+async function packageAppBundle(executablePath, options) {
   const bundleRoot = await mkdtemp(path.join(tmpdir(), "eventloopos-queue-app-"));
-  const appBundle = path.join(bundleRoot, "EventLoopQueueApp.app");
+  const appBundle = path.join(bundleRoot, `${options.executableName}.app`);
   const contentsDir = path.join(appBundle, "Contents");
   const macosDir = path.join(contentsDir, "MacOS");
   await mkdir(macosDir, { recursive: true });
-  await cp(executablePath, path.join(macosDir, "EventLoopQueueApp"));
-  await writeFile(path.join(contentsDir, "Info.plist"), infoPlist(), "utf8");
+  await cp(executablePath, path.join(macosDir, options.executableName));
+  await writeFile(path.join(contentsDir, "Info.plist"), infoPlist(options), "utf8");
   return appBundle;
 }
 
-function infoPlist() {
+function infoPlist(options) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>CFBundleExecutable</key>
-  <string>EventLoopQueueApp</string>
+  <string>${escapePlist(options.executableName)}</string>
   <key>CFBundleIdentifier</key>
-  <string>${bundleIdentifier}</string>
+  <string>${escapePlist(options.bundleIdentifier)}</string>
   <key>CFBundleName</key>
-  <string>eventloopOS Queue</string>
+  <string>${escapePlist(options.bundleName)}</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
@@ -125,4 +135,13 @@ function infoPlist() {
 </dict>
 </plist>
 `;
+}
+
+function escapePlist(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
 }

@@ -91,7 +91,7 @@ Use the live proof only on a real Mac with AeroSpace running and the browser sta
 pnpm proof:live
 ```
 
-It fails during preflight when macOS, AeroSpace, Codex, or native browser setup is missing. It writes `artifacts/proof-live-manifest.json`, `artifacts/live-smoke/<run-id>/manifest.json`, `artifacts/onboarding-live/<run-id>/manifest.json`, and per-command logs under `artifacts/proof-agent/<run-id>/`.
+It fails during preflight when macOS, AeroSpace, Codex, or native browser setup is missing. It writes `artifacts/proof-live-manifest.json`, `artifacts/live-smoke/<run-id>/manifest.json`, `artifacts/onboarding-live/<run-id>/manifest.json`, and per-command logs under `artifacts/proof-agent/<run-id>/`. The onboarding manifest now proves scan -> approve selected Mac windows into a task -> queue the first paper for that workbench -> attach a browser-tab context -> create a later paper that inherits both task desk and tab context.
 
 If Playwright browser dependencies are missing, install them before running browser proof lanes:
 
@@ -115,7 +115,15 @@ Start the local dogfood stack:
 pnpm run dev:dogfood
 ```
 
-This starts dev Postgres through Docker, verifies AeroSpace, starts a shared Codex app-server, builds the orchestrator, and launches the Mac queue app. It does not require Slack, Gmail, GitHub, or Chrome. By default, workspace restore execution is disabled until a restore is explicitly confirmed. Press `Ctrl-C` in the terminal to stop the stack.
+This starts dev Postgres through Docker, verifies AeroSpace, starts a shared Codex app-server, builds the orchestrator, and launches the Mac queue app. It does not require Slack, Gmail, GitHub, or Chrome. By default, workspace restore execution is disabled until a restore is explicitly confirmed. Press `Ctrl-C` in the terminal to stop the stack. When the queue app quits with a saved manual workspace, it asks the workspace backend to restore that layout before terminating.
+
+In the queue app:
+
+- **Pull Next Paper** leases the highest-priority ready paper and prepares its saved workspace.
+- **Done / Next**, **Send to Agent**, **Defer**, and **Ignore** save the selected task's current workspace before advancing the stack.
+- **Manual Mode** pauses workspace automation so you can use the Mac normally. **Restore Manual Workspace** moves back to the saved manual layout.
+- **Master** opens a command sheet for routing a note through `/voice/commands` or starting a new task session through `/task-sessions`. Use `Cmd-Option-Shift-K` from any app to summon it.
+- **Scan Desk** calls `/onboarding/scan`, shows proposed task groups from current windows, browser tabs, and task sessions, and lets you approve a proposal through `/onboarding/approvals`.
 
 When `codex_app_server` task sessions are enabled, `dev:dogfood` starts a shared websocket `codex app-server` and points the orchestrator at it. That lets a visible Ghostty/Codex TUI and eventloopOS use the same native thread:
 
@@ -124,6 +132,38 @@ codex --remote <printed-ws-url> resume <thread-id>
 ```
 
 Set `EVENTLOOPOS_DOGFOOD_SHARED_CODEX_APP_SERVER=0` to fall back to the orchestrator's private stdio app-server.
+
+Use a named dogfood profile when testing an experimental checkout beside a stable checkout:
+
+```sh
+EVENTLOOPOS_DOGFOOD_PROFILE=experiment pnpm run dev:dogfood
+```
+
+Non-default profiles use separate default orchestrator/Postgres ports, a separate Docker container name, and `var/codex-task-map.<profile>.json` for Codex thread bindings. If you want a background daemon only, without another menu bar app or global hotkeys, run:
+
+```sh
+EVENTLOOPOS_DOGFOOD_PROFILE=experiment EVENTLOOPOS_DOGFOOD_QUEUE_APP=0 pnpm run dev:dogfood
+```
+
+You can also set `EVENTLOOPOS_ORCHESTRATOR_URL`, `EVENTLOOPOS_POSTGRES_PORT`, `EVENTLOOPOS_POSTGRES_CONTAINER`, and `ORCHESTRATOR_CODEX_TASK_MAP_PATH` yourself when you need exact paths or ports.
+
+After a dogfood stack is running, ask a local Codex or Claude Code agent to onboard the system with:
+
+```sh
+pnpm run onboarding:agent
+```
+
+It prints an agent-readable setup brief with readiness commands, current window/task-session grouping proposals, integration preview commands, and suggested next actions.
+
+When a proposed group looks right, approve it without hand-copying every window id:
+
+```sh
+pnpm run onboarding:apply -- --proposal onboard_abc123 --queue-paper
+```
+
+The Mac app's **Scan Desk** button is the UI path for the same scan and proposal approval flow. Use **Approve + Queue** when the accepted workbench should appear in the intake stack immediately.
+
+For browser tabs, install the Chrome native host and load the unpacked extension first. Then open the extension Options page, set the orchestrator URL, add allowed origins, and optionally fill **Task hint** / **Project hint**. Click **Capture current tab** to bind the active tab to that task, including page scroll/selected text when available. Click **Capture tabs** to register all allowed tabs in bulk. Blank hints let onboarding group tabs or create a reading queue proposal. A task hint attaches captured tabs directly to that task. Browser restore prefers the captured Chrome tab id when it is still alive and falls back to URL match otherwise.
 
 Use in-memory state only for a throwaway run:
 
@@ -187,6 +227,14 @@ If the friend wants to connect local integrations, have Codex copy an example co
 ```sh
 cp config/mcp-sources.example.json config/mcp-sources.json
 ```
+
+For the first real dogfood setup, the most useful private config is usually the combined read-only source template:
+
+```sh
+cp config/mcp-sources.dogfood.example.json config/mcp-sources.json
+```
+
+Then set env vars for only the sources you want enabled: `EVENTLOOPOS_AGENT_SLACK_QUERY` for local `agent-slack`, `EVENTLOOPOS_GMAIL_*` plus `gws` for Gmail metadata polling, and `EVENTLOOPOS_TODO_MD_PATHS` for todo files. Run `pnpm run mcp:preview` before `EVENTLOOPOS_DOGFOOD_MCP_POLL=1 pnpm run dev:dogfood` so the queue does not fill with noisy old messages.
 
 ## Optional Chrome extension
 

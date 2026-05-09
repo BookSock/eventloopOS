@@ -11,6 +11,7 @@ import type {
   QueueItemWithPacket,
   QueueState,
   ReviewPacket,
+  WorkspaceSnapshot,
 } from "./contracts.js";
 import type { McpPollStateSnapshot } from "./integrations/mcp_poll/persistent_cursor_store.js";
 import type { McpEvent } from "./integrations/mcp_poll/types.js";
@@ -80,6 +81,16 @@ export type InMemoryStore = {
   workspaceRestoreReceipts?: Map<string, WorkspaceRestoreReceiptRecord>;
   mcpPollStates?: Map<string, McpPollStateSnapshot>;
   taskMessagesByIdempotencyKey?: Map<string, DurableTaskMessageRecord>;
+  taskWorkspaceSnapshots?: Map<string, TaskWorkspaceSnapshotRecord>;
+};
+
+export type TaskWorkspaceSnapshotRecord = {
+  task_id: string;
+  snapshot: WorkspaceSnapshot;
+  captured_at: string;
+  updated_at: string;
+  source_queue_item_id?: string;
+  actor_id?: string;
 };
 
 export type RouteDecision = {
@@ -166,11 +177,12 @@ export function leaseNextQueueItem(
   leaseOwner: string,
   now: Date,
   leaseMs = 60_000,
+  excludeQueueItemId?: string,
 ): QueueItemWithPacket | undefined {
   reapExpiredLeases(store, now);
   reapDueDeferredItems(store, now);
   const item = store.queue
-    .filter((candidate) => candidate.state === "ready" && isQueueItemDue(candidate, now))
+    .filter((candidate) => candidate.state === "ready" && candidate.id !== excludeQueueItemId && isQueueItemDue(candidate, now))
     .sort((left, right) => {
       if (right.priority_score !== left.priority_score) {
         return right.priority_score - left.priority_score;
@@ -235,6 +247,29 @@ export function ignoreQueueItem(
   item.lease_owner = undefined;
   item.lease_expires_at = undefined;
   item.updated_at = now.toISOString();
+  return attachPacket(store, item);
+}
+
+export function bumpQueueItemPriority(
+  store: InMemoryStore,
+  queueItemId: string,
+  input: { delta?: number; score?: number; reason?: string },
+  now: Date,
+): QueueItemWithPacket | undefined {
+  const item = store.queue.find((candidate) => candidate.id === queueItemId);
+  if (!item) return undefined;
+  const before = item.priority_score;
+  const next = typeof input.score === "number" && Number.isFinite(input.score)
+    ? Math.round(input.score)
+    : before + Math.round(input.delta ?? 0);
+  item.priority_score = Math.max(0, Math.min(10_000, next));
+  if (item.priority_score !== before) {
+    const reasonTag = input.reason ?? "manual_priority_bump";
+    if (!item.priority_reasons.includes(reasonTag)) {
+      item.priority_reasons = [...item.priority_reasons, reasonTag];
+    }
+    item.updated_at = now.toISOString();
+  }
   return attachPacket(store, item);
 }
 
@@ -401,6 +436,35 @@ export function getStoredEventByIdempotencyKey(
   return store.eventsByIdempotencyKey.get(eventIdempotencyKey(source, idempotencyKey));
 }
 
+export function getLatestTaskWorkspaceSnapshot(store: InMemoryStore, taskId: string): TaskWorkspaceSnapshotRecord | undefined {
+  return store.taskWorkspaceSnapshots?.get(taskId);
+}
+
+export function saveTaskWorkspaceSnapshot(
+  store: InMemoryStore,
+  input: {
+    taskId: string;
+    snapshot: WorkspaceSnapshot;
+    capturedAt: Date;
+    sourceQueueItemId?: string;
+    actorId?: string;
+  },
+): TaskWorkspaceSnapshotRecord {
+  const snapshots = store.taskWorkspaceSnapshots ?? new Map<string, TaskWorkspaceSnapshotRecord>();
+  store.taskWorkspaceSnapshots = snapshots;
+  const timestamp = input.capturedAt.toISOString();
+  const record: TaskWorkspaceSnapshotRecord = {
+    task_id: input.taskId,
+    snapshot: input.snapshot,
+    captured_at: timestamp,
+    updated_at: timestamp,
+    source_queue_item_id: input.sourceQueueItemId,
+    actor_id: input.actorId,
+  };
+  snapshots.set(input.taskId, record);
+  return record;
+}
+
 export function buildReviewArtifactsFromEvent(
   event: McpEvent,
   now: Date,
@@ -507,12 +571,13 @@ function createReviewPacketFromEvent(
 ): ReviewPacket {
   const stableEventId = stableId(event.id);
   const taskId = taskIdForHint(event.task_hint);
+  const isOnboardingWorkbenchPaper = event.source === "onboarding" && event.type === "manual.review_requested";
   const recommendedAction: Action = {
     id: `act_${stableEventId}_review`,
-    type: "resume_agent",
-    label: "Route to task agent",
-    requires_confirmation: true,
-    side_effect: "local",
+    type: isOnboardingWorkbenchPaper ? "mark_done" : "resume_agent",
+    label: isOnboardingWorkbenchPaper ? "Work this paper, then Done / Next" : "Route to task agent",
+    requires_confirmation: !isOnboardingWorkbenchPaper,
+    side_effect: isOnboardingWorkbenchPaper ? "none" : "local",
     payload: {
       event_id: event.id,
       task_hint: event.task_hint,
@@ -528,8 +593,8 @@ function createReviewPacketFromEvent(
     summary: event.summary || event.title,
     decision_needed: decisionNeededForRoute(routeDecision),
     risk_level: "medium",
-    confidence: routeDecision.confidence,
-    risk_tags: ["external_send"],
+    confidence: isOnboardingWorkbenchPaper ? "high" : routeDecision.confidence,
+    risk_tags: isOnboardingWorkbenchPaper ? ["onboarding_workbench"] : ["external_send"],
     evidence,
     context: event.resources.map(resourceFromEvent),
     recommended_action: recommendedAction,
@@ -716,6 +781,9 @@ function untrustedRouteTextForEvent(event: McpEvent): string {
 }
 
 function decisionNeededForRoute(routeDecision: RouteDecision): string {
+  if (routeDecision.action === "ask_human_now" && routeDecision.event_id.startsWith("evt_onboarding_queue_")) {
+    return "Review this approved workbench. Do the work, send instructions to the agent if needed, then Done / Next.";
+  }
   if (routeDecision.action === "create_review_packet") {
     return "Review prepared work and decide next action.";
   }

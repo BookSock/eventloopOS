@@ -11,6 +11,7 @@ import { handleMcpSourcesRoute, type McpSourceRegistry } from "./routes/mcp_sour
 import { handleActivityRoute, handleMetricsRoute } from "./routes/observability.js";
 import { handleOnboardingRoute } from "./routes/onboarding.js";
 import { handleQueueRoute } from "./routes/queue.js";
+import { handleReadingQueueRoute } from "./routes/reading_queue.js";
 import { handleTaskSessionsRoute } from "./routes/task_sessions.js";
 import { handleWorkspaceRoute } from "./routes/workspace.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
@@ -131,11 +132,34 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         );
       }
 
+      const readingQueueRoute = await handleReadingQueueRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        readJsonBody: () => readJsonBody(request),
+        store: options.store,
+        observability,
+        now: now(),
+        requestId: context.requestId,
+      });
+      if (readingQueueRoute) {
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "reading_queue",
+          readingQueueRoute,
+          startedAt,
+        );
+      }
+
       const onboardingRoute = await handleOnboardingRoute({
         method: request.method,
         pathname: context.url.pathname,
+        readJsonBody: () => readJsonBody(request),
+        store: options.store,
         workspace: options.workspace,
         taskSessions: options.taskSessions,
+        observability,
         now: now(),
         requestId: context.requestId,
       });

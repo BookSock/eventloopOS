@@ -256,18 +256,15 @@ export async function handleMcpSourcesRoute(input: {
 function summarizeMcpEventForPreview(event: McpEvent): Record<string, unknown> {
   const firstLink = event.links[0]?.url;
   return {
-    id: event.id,
     source: event.source,
-    source_id: event.source_id,
     type: event.type,
     occurred_at: event.occurred_at,
     actor: {
-      id: event.actor.id,
       type: event.actor.type,
-      name: event.actor.name,
+      name_present: Boolean(event.actor.name),
     },
-    project_hint: event.project_hint,
-    task_hint: event.task_hint,
+    has_project_hint: Boolean(event.project_hint),
+    has_task_hint: Boolean(event.task_hint),
     links: event.links.length,
     resources: event.resources.length,
     first_link_host: firstLink ? hostForUrl(firstLink) : undefined,

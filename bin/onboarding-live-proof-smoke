@@ -20,6 +20,7 @@ const manifest = {
   orchestrator_url: undefined,
   summary: undefined,
   proposals: [],
+  approved_task: undefined,
   task_session_count: undefined,
   steps: [],
   passed: false,
@@ -56,7 +57,7 @@ try {
     manifest.proposals = redacted.proposals;
     manifest.task_session_count = redacted.task_session_count;
     writeManifest();
-    return redacted;
+    return body;
   });
 
   await step("verify Codex task runtime is visible", async () => {
@@ -74,6 +75,129 @@ try {
         task_id: session.task_id,
         status: session.status,
       })),
+    };
+  });
+
+  const approval = await step("approve proposed task workspace", async () => {
+    const proposal = firstProposalWithWindows(scan);
+    const windowIds = proposal.windows.slice(0, 4).map((window) => window.id);
+    const response = await postJson("/onboarding/approvals", {
+      proposal_id: proposal.id,
+      window_ids: windowIds,
+      task_session_ids: [],
+      queue_paper: true,
+      actor_id: "onboarding_live_proof",
+    });
+    assert(response.ok === true, `onboarding approval failed: ${JSON.stringify(response)}`);
+    assert(response.task_id === proposal.task_id, `approved task mismatch: ${response.task_id} !== ${proposal.task_id}`);
+    assert(response.proposal_id === proposal.id, `approved proposal mismatch: ${response.proposal_id} !== ${proposal.id}`);
+    const savedWindowIds = (response.workspace_snapshot?.snapshot?.windows ?? []).map((window) => window.id).sort(numberSort);
+    assert(JSON.stringify(savedWindowIds) === JSON.stringify([...windowIds].sort(numberSort)), `approved window ids not saved: ${JSON.stringify(savedWindowIds)} !== ${JSON.stringify(windowIds)}`);
+    assert(response.queue_item, `expected onboarding approval to queue first paper, got ${JSON.stringify(response)}`);
+    assert(response.queue_item.task_id === proposal.task_id, `queued onboarding paper task mismatch: ${response.queue_item.task_id} !== ${proposal.task_id}`);
+    const queuedContexts = response.queue_item.review_packet?.context ?? [];
+    const queuedWorkspaceContext = queuedContexts.find((context) => context.kind === "workspace_snapshot" && context.source === "task_workspace_memory");
+    assert(queuedWorkspaceContext, `expected queued onboarding paper to include task workspace memory, got ${JSON.stringify(queuedContexts)}`);
+    const queuedWindowIds = (queuedWorkspaceContext.snapshot?.windows ?? []).map((window) => window.id).sort(numberSort);
+    assert(JSON.stringify(queuedWindowIds) === JSON.stringify([...windowIds].sort(numberSort)), `queued onboarding paper did not inherit approved desk: ${JSON.stringify(queuedWindowIds)} !== ${JSON.stringify(windowIds)}`);
+    manifest.approved_task = {
+      task_id: proposal.task_id,
+      title: proposal.title,
+      window_ids: windowIds,
+      window_count: windowIds.length,
+      queued_paper_id: response.queue_item.id,
+    };
+    writeManifest();
+    return manifest.approved_task;
+  });
+
+  const browserContext = await step("attach browser tab context to approved task", async () => {
+    const now = new Date().toISOString();
+    const firstWindowId = approval.window_ids[0];
+    const resource = {
+      id: `browser_tab:onboarding_live:${stableId(runId)}`,
+      kind: "browser_tab",
+      title: `Onboarding live tab for ${approval.task_id}`,
+      url: `https://example.test/eventloopos/onboarding-live/${encodeURIComponent(runId)}`,
+      source: "chrome-extension",
+      captured_at: now,
+      restore_confidence: "high",
+      window_id: firstWindowId == null ? undefined : String(firstWindowId),
+      tab_id: `onboarding-live-${stableId(runId)}`,
+    };
+    const response = await postJson("/events", {
+      event: {
+        id: `evt_onboarding_live_browser_${stableId(runId)}`,
+        source: "browser",
+        source_id: `browser:onboarding-live:${runId}`,
+        idempotency_key: `browser:onboarding-live:${runId}`,
+        occurred_at: now,
+        received_at: now,
+        actor: {
+          id: "onboarding_live_proof",
+          type: "system",
+        },
+        task_hint: approval.task_id.replace(/^task_/, "").replaceAll("_", " "),
+        type: "browser.context_captured",
+        title: resource.title,
+        summary: "Synthetic browser tab context for onboarding live proof.",
+        raw_ref: {
+          id: `raw_onboarding_live_browser_${stableId(runId)}`,
+          uri: resource.url,
+          media_type: "application/json",
+        },
+        links: [],
+        resources: [resource],
+      },
+    });
+    assert(response.ok === true, `browser context route failed: ${JSON.stringify(response)}`);
+    assert(response.route_decision?.action === "attach_to_task", `browser context should attach to task, got ${JSON.stringify(response.route_decision)}`);
+    assert(response.route_decision?.target_task_id === approval.task_id, `browser context target mismatch: ${response.route_decision?.target_task_id} !== ${approval.task_id}`);
+    return resource;
+  });
+
+  await step("prove future paper inherits approved task desk", async () => {
+    const now = new Date().toISOString();
+    const event = {
+      id: `evt_onboarding_live_${stableId(runId)}`,
+      source: "manual",
+      source_id: `manual:onboarding-live:${runId}`,
+      idempotency_key: `manual:onboarding-live:${runId}`,
+      occurred_at: now,
+      received_at: now,
+      actor: {
+        id: "onboarding_live_proof",
+        type: "system",
+      },
+      task_hint: approval.task_id.replace(/^task_/, "").replaceAll("_", " "),
+      type: "manual.review_requested",
+      title: `Onboarding live followup for ${approval.task_id}`,
+      summary: "Proof event should become queue paper with approved task workspace memory.",
+      raw_ref: {
+        id: `raw_onboarding_live_${stableId(runId)}`,
+        uri: `manual://onboarding-live/${encodeURIComponent(runId)}`,
+        media_type: "application/json",
+      },
+      links: [],
+      resources: [],
+    };
+    const response = await postJson("/events", { event });
+    assert(response.ok === true, `event route failed: ${JSON.stringify(response)}`);
+    assert(response.queue_item, `expected queue item for manual review event, got ${JSON.stringify(response)}`);
+    const contexts = response.queue_item?.review_packet?.context ?? [];
+    const workspaceContext = contexts.find((context) => context.kind === "workspace_snapshot" && context.source === "task_workspace_memory");
+    assert(workspaceContext, `expected task workspace memory context, got ${JSON.stringify(contexts)}`);
+    const inheritedWindowIds = (workspaceContext.snapshot?.windows ?? []).map((window) => window.id).sort(numberSort);
+    assert(JSON.stringify(inheritedWindowIds) === JSON.stringify([...approval.window_ids].sort(numberSort)), `future paper did not inherit approved desk: ${JSON.stringify(inheritedWindowIds)} !== ${JSON.stringify(approval.window_ids)}`);
+    const tabContext = contexts.find((context) => context.kind === "browser_tab" && context.id === browserContext.id);
+    assert(tabContext, `expected future paper to inherit task browser tab ${browserContext.id}, got ${JSON.stringify(contexts)}`);
+    assert(tabContext.url === browserContext.url, `inherited tab URL mismatch: ${tabContext.url} !== ${browserContext.url}`);
+    return {
+      queue_item_id: response.queue_item.id,
+      review_packet_id: response.review_packet?.id ?? response.queue_item.review_packet_id,
+      task_id: response.queue_item.task_id,
+      inherited_window_ids: inheritedWindowIds,
+      inherited_browser_tab_id: tabContext.id,
     };
   });
 
@@ -140,6 +264,12 @@ async function step(name, run) {
   }
 }
 
+function firstProposalWithWindows(scan) {
+  const proposal = (scan.proposals ?? []).find((candidate) => Array.isArray(candidate.windows) && candidate.windows.length > 0);
+  assert(proposal, `expected at least one onboarding proposal with windows, got ${JSON.stringify(redactScan(scan))}`);
+  return proposal;
+}
+
 function redactScan(body) {
   const proposals = (body.proposals ?? []).map((proposal) => ({
     id: proposal.id,
@@ -148,6 +278,7 @@ function redactScan(body) {
     confidence: proposal.confidence,
     reason: proposal.reason,
     window_count: Array.isArray(proposal.windows) ? proposal.windows.length : 0,
+    browser_context_count: Array.isArray(proposal.browser_contexts) ? proposal.browser_contexts.length : 0,
     task_session_count: Array.isArray(proposal.task_sessions) ? proposal.task_sessions.length : 0,
   }));
   return {
@@ -183,6 +314,28 @@ async function getJson(path) {
     throw new Error(`GET ${path} failed ${response.status}: ${JSON.stringify(body)}`);
   }
   return body;
+}
+
+async function postJson(path, payload) {
+  const response = await fetch(new URL(path, manifest.orchestrator_url), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  const body = text ? JSON.parse(text) : {};
+  if (!response.ok) {
+    throw new Error(`POST ${path} failed ${response.status}: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+function stableId(input) {
+  return String(input).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "unknown";
+}
+
+function numberSort(left, right) {
+  return left - right;
 }
 
 async function spawnChecked(command, args, env = process.env) {

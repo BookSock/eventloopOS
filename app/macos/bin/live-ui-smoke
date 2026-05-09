@@ -44,7 +44,11 @@ try {
     throw new Error(`expected 1 ready queue item before app launch, got ${initialReady.count}`);
   }
 
-  bundle = await buildPackagedQueueAppBundle();
+  bundle = await buildPackagedQueueAppBundle({
+    executableName: "EventLoopQueueLiveSmoke",
+    bundleIdentifier: "dev.eventloopos.queue.smoke.live-ui",
+    bundleName: "eventloopOS Queue Live Smoke",
+  });
   app = openQueueApp(bundle.appBundle, {
     appArgs: ["--orchestrator-url", baseUrl],
     env: {
@@ -54,7 +58,7 @@ try {
   const appOutput = captureOutput(app);
 
   await waitForProcess(bundle.executablePath, 8_000);
-  const uiProof = await runLiveUiProof();
+  const uiProof = await runLiveUiProof(bundle.processName);
 
   const doneQueue = await waitForDoneQueueItem(baseUrl);
   const activity = await waitForActivity(baseUrl, "queue_item_done");
@@ -86,13 +90,13 @@ try {
   }
 }
 
-async function runLiveUiProof() {
+async function runLiveUiProof(processName) {
   const script = `
 on waitForMenuBarExtra()
   repeat with attempt from 1 to 80
     tell application "System Events"
-      if exists process "EventLoopQueueApp" then
-        tell process "EventLoopQueueApp"
+      if exists process "${processName}" then
+        tell process "${processName}"
           if (count of menu bars) is greater than or equal to 2 then return
         end tell
       end if
@@ -105,7 +109,7 @@ end waitForMenuBarExtra
 on menuItemNames()
   waitForMenuBarExtra()
   tell application "System Events"
-    tell process "EventLoopQueueApp"
+    tell process "${processName}"
       tell menu bar item 1 of menu bar 2
         click
         delay 0.2
@@ -129,7 +133,7 @@ end waitForMenuItem
 on clickMenuItem(itemName)
   waitForMenuBarExtra()
   tell application "System Events"
-    tell process "EventLoopQueueApp"
+    tell process "${processName}"
       tell menu bar item 1 of menu bar 2
         click
         delay 0.2
@@ -140,6 +144,8 @@ on clickMenuItem(itemName)
 end clickMenuItem
 
 waitForMenuItem("Pull Next Paper")
+waitForMenuItem("Master Command")
+waitForMenuItem("Scan Desk")
 clickMenuItem("Pull Next Paper")
 delay 0.4
 waitForMenuItem("Review seeded agent change")

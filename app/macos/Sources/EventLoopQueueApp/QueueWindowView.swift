@@ -9,12 +9,34 @@ struct QueueWindowView: View {
         QueueWindowSidebarSummary(packets: viewModel.packets, state: viewModel.state)
     }
 
+    private var auxiliarySheetBinding: Binding<QueueAuxiliarySheet?> {
+        Binding {
+            viewModel.auxiliarySheet
+        } set: { value in
+            viewModel.auxiliarySheet = value
+        }
+    }
+
     private var showWorkspaceRestoreConfirmation: Binding<Bool> {
         Binding {
             workspaceRestoreCandidate != nil
         } set: { isPresented in
             if !isPresented {
                 workspaceRestoreCandidate = nil
+            }
+        }
+    }
+
+    private var selectedPaperBinding: Binding<String?> {
+        Binding {
+            viewModel.selectedPacketID
+        } set: { packetId in
+            guard let packetId else {
+                viewModel.selectedPacketID = nil
+                return
+            }
+            Task {
+                await viewModel.switchToPaper(packetId: packetId)
             }
         }
     }
@@ -30,7 +52,7 @@ struct QueueWindowView: View {
                     }
                     .accessibilityIdentifier("queue-sidebar-placeholder")
                 } else {
-                    List(selection: $viewModel.selectedPacketID) {
+                    List(selection: selectedPaperBinding) {
                         ForEach(viewModel.packets) { packet in
                             QueueRow(packet: packet)
                                 .tag(packet.id)
@@ -80,6 +102,34 @@ struct QueueWindowView: View {
                     }
                     .disabled(!viewModel.canRestoreManualWorkspace)
                     .accessibilityIdentifier("queue-restore-manual-workspace-button")
+
+                    Button {
+                        viewModel.presentMasterCommand()
+                    } label: {
+                        Label("Master", systemImage: "command")
+                    }
+                    .accessibilityIdentifier("queue-master-command-button")
+                    .keyboardShortcut("k", modifiers: [.command, .option, .shift])
+
+                    Button {
+                        viewModel.presentOnboarding()
+                        Task {
+                            await viewModel.scanOnboarding()
+                        }
+                    } label: {
+                        Label("Scan Desk", systemImage: "rectangle.stack.badge.person.crop")
+                    }
+                    .accessibilityIdentifier("queue-onboarding-button")
+
+                    Button {
+                        Task {
+                            await viewModel.promoteReadingQueue()
+                        }
+                    } label: {
+                        Label("Promote Reading Tabs", systemImage: "tray.and.arrow.down")
+                    }
+                    .help("Turn captured Chrome tabs without a task into queue papers.")
+                    .accessibilityIdentifier("queue-promote-reading-button")
 
                     Button {
                         Task {
@@ -146,6 +196,10 @@ struct QueueWindowView: View {
                 Task {
                     await viewModel.bindSelectedPacket(toTaskSessionId: taskSessionId)
                 }
+            } bindTerminalRef: { terminalRef in
+                Task {
+                    await viewModel.bindSelectedTerminalRef(terminalRef)
+                }
             }
         }
         .overlay(alignment: .bottomLeading) {
@@ -174,6 +228,48 @@ struct QueueWindowView: View {
             Button("Cancel", role: .cancel) {}
         } message: { _ in
             Text("eventloopOS will ask the local orchestrator to execute the restore plan for the selected queue context.")
+        }
+        .sheet(item: auxiliarySheetBinding) { sheet in
+            switch sheet {
+            case .masterCommand:
+                MasterCommandSheet(
+                    defaultTaskHint: viewModel.selectedTaskId ?? "",
+                    state: viewModel.masterCommandState,
+                    packets: viewModel.packets,
+                    defaultRerankPacketId: viewModel.selectedPacketID
+                ) { text, taskHint in
+                    Task {
+                        await viewModel.sendMasterCommand(text: text, taskHint: taskHint)
+                    }
+                } startTask: { text, taskHint, cwd, model in
+                    Task {
+                        await viewModel.startMasterTask(text: text, taskHint: taskHint, cwd: cwd, model: model)
+                    }
+                } rerank: { packetId, delta in
+                    Task {
+                        await viewModel.bumpQueuePaperPriority(packetId: packetId, delta: delta, reason: "master_command_rerank")
+                    }
+                }
+            case .onboarding:
+                OnboardingSheet(
+                    state: viewModel.onboardingState,
+                    rescan: {
+                        Task {
+                            await viewModel.scanOnboarding()
+                        }
+                    },
+                    approve: { proposalId, queuePaper in
+                        Task {
+                            await viewModel.approveOnboardingProposal(id: proposalId, queuePaper: queuePaper)
+                        }
+                    },
+                    approveAll: { queuePaper in
+                        Task {
+                            await viewModel.approveAllOnboardingProposals(queuePaper: queuePaper)
+                        }
+                    }
+                )
+            }
         }
         .overlay(alignment: .topTrailing) {
             if viewModel.isManualMode {
@@ -204,6 +300,509 @@ struct QueueWindowView: View {
             viewModel.stopAutomaticLeaseRenewal()
             viewModel.stopAutomaticContextRestoreRefresh()
         }
+    }
+}
+
+private struct OnboardingSheet: View {
+    let state: OnboardingState
+    let rescan: () -> Void
+    let approve: (String, Bool) -> Void
+    let approveAll: (Bool) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Scan Desk")
+                        .font(.title2.weight(.semibold))
+                    Text("Review proposed task workbenches from current windows, tabs, and task sessions.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("onboarding-close-button")
+            }
+
+            switch state {
+            case .idle:
+                OnboardingEmptyState(title: "No scan yet", subtitle: "Scan current desk to propose task groups.", systemImage: "rectangle.stack")
+            case .scanning:
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Scanning current desk")
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("onboarding-scanning")
+            case let .loaded(scan):
+                OnboardingScanView(scan: scan, approve: approve, approveAll: approveAll)
+            case let .approving(proposalId):
+                HStack(spacing: 10) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Approving \(proposalId)")
+                        .foregroundStyle(.secondary)
+                }
+                .accessibilityIdentifier("onboarding-approving")
+            case let .approved(result):
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Approved \(result.taskId)", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .accessibilityIdentifier("onboarding-approved")
+                    if !result.bindings.isEmpty {
+                        Text("\(result.bindings.count) task sessions bound.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if !result.browserContextBindings.isEmpty {
+                        Text("\(result.browserContextBindings.count) browser tabs bound.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if let queuedPaper = result.queuedPaper {
+                        Text("Queued paper \(queuedPaper.id).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    if !result.warnings.isEmpty {
+                        FlowText(items: result.warnings)
+                    }
+                }
+            case let .failed(message):
+                VStack(alignment: .leading, spacing: 8) {
+                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .accessibilityIdentifier("onboarding-failed")
+                    Button {
+                        rescan()
+                    } label: {
+                        Label("Retry Scan", systemImage: "arrow.clockwise")
+                    }
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button {
+                    rescan()
+                } label: {
+                    Label("Rescan", systemImage: "arrow.clockwise")
+                }
+                .disabled(state == .scanning)
+                .accessibilityIdentifier("onboarding-rescan-button")
+                Button("Done") {
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 680, height: 560)
+        .accessibilityIdentifier("onboarding-sheet")
+    }
+}
+
+private struct OnboardingScanView: View {
+    let scan: OnboardingScan
+    let approve: (String, Bool) -> Void
+    let approveAll: (Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 8) {
+                HStack(spacing: 8) {
+                    PacketPill(label: "\(scan.summary.proposalCount) groups", accessibilityID: "onboarding-proposal-count")
+                    PacketPill(label: "\(scan.summary.windowCount) windows", accessibilityID: "onboarding-window-count")
+                    PacketPill(label: "\(scan.summary.browserContextCount) tabs", accessibilityID: "onboarding-tab-count")
+                    PacketPill(label: "\(scan.summary.taskSessionCount) sessions", accessibilityID: "onboarding-session-count")
+                }
+                Spacer()
+                Button {
+                    approveAll(true)
+                } label: {
+                    Label("Approve All + Queue", systemImage: "tray.and.arrow.down.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(scan.proposals.isEmpty)
+                .accessibilityIdentifier("onboarding-approve-all-queue-button")
+            }
+
+            if !scan.warnings.isEmpty {
+                FlowText(items: scan.warnings)
+                    .accessibilityIdentifier("onboarding-warnings")
+            }
+
+            if scan.proposals.isEmpty {
+                OnboardingEmptyState(title: "No task groups found", subtitle: "Add [task:name] to window titles or bind sessions first.", systemImage: "tray")
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(scan.proposals) { proposal in
+                            OnboardingProposalRow(
+                                proposal: proposal,
+                                approve: {
+                                    approve(proposal.id, false)
+                                },
+                                approveAndQueue: {
+                                    approve(proposal.id, true)
+                                }
+                            )
+                        }
+                    }
+                }
+                .accessibilityIdentifier("onboarding-proposal-list")
+            }
+        }
+    }
+}
+
+private struct OnboardingProposalRow: View {
+    let proposal: OnboardingTaskProposal
+    let approve: () -> Void
+    let approveAndQueue: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(proposal.title)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(proposal.taskId)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                PacketPill(label: proposal.confidence, accessibilityID: "onboarding-proposal-confidence-\(proposal.id)")
+                Button {
+                    approveAndQueue()
+                } label: {
+                    Label("Approve + Queue", systemImage: "tray.and.arrow.down")
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("onboarding-approve-queue-\(proposal.id)")
+                Button {
+                    approve()
+                } label: {
+                    Label("Approve", systemImage: "checkmark.circle")
+                }
+                .accessibilityIdentifier("onboarding-approve-\(proposal.id)")
+            }
+            Text(proposal.reason)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            HStack(spacing: 10) {
+                Label("\(proposal.windows.count) windows", systemImage: "macwindow")
+                Label("\(proposal.browserContexts.count) tabs", systemImage: "globe")
+                Label("\(proposal.taskSessions.count) sessions", systemImage: "terminal")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            let previewLines = onboardingProposalPreviewLines(for: proposal)
+            if !previewLines.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(previewLines, id: \.self) { line in
+                        Text(line)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                    }
+                }
+                .accessibilityIdentifier("onboarding-proposal-preview-\(proposal.id)")
+            }
+        }
+        .padding(10)
+        .background(.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .accessibilityIdentifier("onboarding-proposal-\(proposal.id)")
+    }
+}
+
+private struct OnboardingEmptyState: View {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.largeTitle)
+                .foregroundStyle(.secondary)
+            Text(title)
+                .font(.headline)
+            Text(subtitle)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("onboarding-empty-state")
+    }
+}
+
+private enum MasterCommandSheetMode: String, CaseIterable, Identifiable {
+    case route
+    case startTask
+    case rerank
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .route:
+            "Route to Master"
+        case .startTask:
+            "Start Task"
+        case .rerank:
+            "Rerank"
+        }
+    }
+}
+
+private struct MasterCommandSheet: View {
+    let defaultTaskHint: String
+    let state: MasterCommandState
+    let packets: [ReviewPacket]
+    let defaultRerankPacketId: String?
+    let route: (String, String?) -> Void
+    let startTask: (String, String?, String?, String?) -> Void
+    let rerank: (String, Int) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var mode: MasterCommandSheetMode = .route
+    @State private var text: String = ""
+    @State private var taskHint: String
+    @State private var cwd: String = ""
+    @State private var model: String = ""
+    @State private var rerankPacketId: String
+    @State private var rerankDelta: Int = 200
+
+    init(
+        defaultTaskHint: String,
+        state: MasterCommandState,
+        packets: [ReviewPacket] = [],
+        defaultRerankPacketId: String? = nil,
+        route: @escaping (String, String?) -> Void,
+        startTask: @escaping (String, String?, String?, String?) -> Void,
+        rerank: @escaping (String, Int) -> Void = { _, _ in }
+    ) {
+        self.defaultTaskHint = defaultTaskHint
+        self.state = state
+        self.packets = packets
+        self.defaultRerankPacketId = defaultRerankPacketId
+        self.route = route
+        self.startTask = startTask
+        self.rerank = rerank
+        _taskHint = State(initialValue: defaultTaskHint)
+        _rerankPacketId = State(initialValue: defaultRerankPacketId ?? packets.first?.id ?? "")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Master Command")
+                        .font(.title2.weight(.semibold))
+                    Text("Route a note to the master agent or start a new task session.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("master-command-close-button")
+            }
+
+            Picker("Mode", selection: $mode) {
+                ForEach(MasterCommandSheetMode.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityIdentifier("master-command-mode-picker")
+
+            if mode != .rerank {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Message")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: $text)
+                        .font(.body)
+                        .frame(minHeight: 110)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(.secondary.opacity(0.25))
+                        )
+                        .accessibilityIdentifier("master-command-text-editor")
+                }
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(mode == .route ? "Task Hint" : "Task Name")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    TextField(mode == .route ? "Current task or routing hint" : "New task name", text: $taskHint)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("master-command-task-hint-field")
+                }
+            }
+
+            if mode == .startTask {
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Working Directory")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("Optional", text: $cwd)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("master-command-cwd-field")
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Model")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        TextField("Optional", text: $model)
+                            .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("master-command-model-field")
+                    }
+                }
+            }
+
+            if mode == .rerank {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Paper")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    Picker("Paper", selection: $rerankPacketId) {
+                        ForEach(packets, id: \.id) { packet in
+                            Text("\(packet.priority) — \(packet.title)").tag(packet.id)
+                        }
+                    }
+                    .accessibilityIdentifier("master-command-rerank-packet-picker")
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Priority delta")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Button("-100") { rerankDelta -= 100 }
+                            .accessibilityIdentifier("master-command-rerank-delta-minus")
+                        Stepper(value: $rerankDelta, in: -1000...1000, step: 50) {
+                            Text("\(rerankDelta >= 0 ? "+" : "")\(rerankDelta)")
+                                .monospacedDigit()
+                                .accessibilityIdentifier("master-command-rerank-delta-value")
+                        }
+                        Button("+100") { rerankDelta += 100 }
+                            .accessibilityIdentifier("master-command-rerank-delta-plus")
+                    }
+                }
+            }
+
+            MasterCommandStatusView(state: state)
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                Button(submitLabel) {
+                    switch mode {
+                    case .route:
+                        route(text, optional(taskHint))
+                    case .startTask:
+                        startTask(text, optional(taskHint), optional(cwd), optional(model))
+                    case .rerank:
+                        guard !rerankPacketId.isEmpty, rerankDelta != 0 else { return }
+                        rerank(rerankPacketId, rerankDelta)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(submitDisabled)
+                .accessibilityIdentifier("master-command-submit-button")
+            }
+        }
+        .padding(20)
+        .frame(width: 520)
+        .accessibilityIdentifier("master-command-sheet")
+    }
+
+    private func optional(_ value: String) -> String? {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private var submitLabel: String {
+        switch mode {
+        case .route: return "Route"
+        case .startTask: return "Start Task"
+        case .rerank: return "Bump priority"
+        }
+    }
+
+    private var submitDisabled: Bool {
+        if state == .sending { return true }
+        switch mode {
+        case .route, .startTask:
+            return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .rerank:
+            return rerankPacketId.isEmpty || rerankDelta == 0
+        }
+    }
+}
+
+private struct MasterCommandStatusView: View {
+    let state: MasterCommandState
+
+    var body: some View {
+        switch state {
+        case .idle:
+            EmptyView()
+        case .sending:
+            Label("Sending", systemImage: "hourglass")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("master-command-status-sending")
+        case let .routed(result):
+            Label(masterCommandRoutedText(result), systemImage: "checkmark.circle.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+                .accessibilityIdentifier("master-command-status-routed")
+        case let .started(started):
+            Label("Started \(started.taskSessionId ?? started.taskId)", systemImage: "terminal.fill")
+                .font(.caption)
+                .foregroundStyle(.green)
+                .accessibilityIdentifier("master-command-status-started")
+        case let .failed(message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .accessibilityIdentifier("master-command-status-failed")
+        }
+    }
+
+    private func masterCommandRoutedText(_ result: MasterCommandResult) -> String {
+        if let targetTaskId = result.targetTaskId {
+            return "Routed to \(targetTaskId)"
+        }
+        if let routeAction = result.routeAction {
+            return "Routed: \(routeAction)"
+        }
+        return "Routed"
     }
 }
 
@@ -259,6 +858,7 @@ private struct PacketDetail: View {
     let loadTaskSessions: () -> Void
     let loadLineage: () -> Void
     let bindTaskSession: (String) -> Void
+    let bindTerminalRef: (String) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -301,9 +901,22 @@ private struct PacketDetail: View {
                                 .accessibilityIdentifier("packet-decision-needed")
                         }
 
+                        DetailSection(title: "Why This Paper", systemImage: "tray.full") {
+                            Text(whyThisPaperSummary(for: packet))
+                                .accessibilityIdentifier("packet-why-this-paper")
+                        }
+
                         DetailSection(title: "Action", systemImage: "checkmark.circle") {
-                            Text(packet.recommendedAction)
-                                .accessibilityIdentifier("packet-recommended-action")
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(packet.recommendedAction)
+                                    .accessibilityIdentifier("packet-recommended-action")
+                                if let consequence = actionConsequence(for: packet, selectedTaskSessions: selectedTaskSessions) {
+                                    Text(consequence)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .accessibilityIdentifier("packet-action-consequence")
+                                }
+                            }
                         }
 
                         if let taskId = packet.taskId {
@@ -314,7 +927,8 @@ private struct PacketDetail: View {
                                     selectedTaskSessions: selectedTaskSessions,
                                     state: taskBindingState,
                                     loadTaskSessions: loadTaskSessions,
-                                    bindTaskSession: bindTaskSession
+                                    bindTaskSession: bindTaskSession,
+                                    bindTerminalRef: bindTerminalRef
                                 )
                             }
                         }
@@ -399,6 +1013,7 @@ private struct PacketDetail: View {
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
                         .disabled(!canExecuteRecommendedAction)
+                        .help(actionConsequence(for: packet, selectedTaskSessions: selectedTaskSessions) ?? "Send recommended follow-up to bound agent.")
                         .accessibilityIdentifier("queue-execute-recommended-action-button")
                     }
                     Button {
@@ -407,6 +1022,7 @@ private struct PacketDetail: View {
                         Label("Defer 1h", systemImage: "clock")
                     }
                     .controlSize(.large)
+                    .help("Hide this paper for one hour, then it returns to the queue.")
                     .accessibilityIdentifier("queue-defer-one-hour-button")
 
                     Button(role: .destructive) {
@@ -415,6 +1031,7 @@ private struct PacketDetail: View {
                         Label("Ignore", systemImage: "trash")
                     }
                     .controlSize(.large)
+                    .help("Drop this paper from the queue. It will not return.")
                     .accessibilityIdentifier("queue-ignore-button")
 
                     Button {
@@ -423,6 +1040,7 @@ private struct PacketDetail: View {
                         Label("Skip / Next", systemImage: "arrow.right.circle")
                     }
                     .controlSize(.large)
+                    .help("Leave this paper in the queue and pull the next paper.")
                     .accessibilityIdentifier("queue-skip-next-button")
 
                     Button {
@@ -432,6 +1050,7 @@ private struct PacketDetail: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                    .help("Save this workspace for the task, mark this paper done, then pull the next paper.")
                     .accessibilityIdentifier("queue-done-next-button")
                 }
             } else {
@@ -479,6 +1098,13 @@ private struct QueueLineageSection: View {
                         PacketPill(label: "\(lineage.counts.events) events", accessibilityID: "queue-lineage-event-count")
                         PacketPill(label: "\(lineage.counts.activity) activity", accessibilityID: "queue-lineage-activity-count")
                         PacketPill(label: "\(lineage.counts.taskMessages) messages", accessibilityID: "queue-lineage-message-count")
+                    }
+                    if let summary = recentLineageSummary(for: lineage) {
+                        Text(summary)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.primary)
+                            .lineLimit(3)
+                            .accessibilityIdentifier("queue-lineage-recent-summary")
                     }
                     if let event = lineage.events.first {
                         Text(event.title)
@@ -704,6 +1330,25 @@ private struct TaskSessionBindingSection: View {
     let state: TaskBindingState
     let loadTaskSessions: () -> Void
     let bindTaskSession: (String) -> Void
+    let bindTerminalRef: ((String) -> Void)?
+
+    init(
+        taskId: String,
+        taskSessions: [TaskSession],
+        selectedTaskSessions: [TaskSession],
+        state: TaskBindingState,
+        loadTaskSessions: @escaping () -> Void,
+        bindTaskSession: @escaping (String) -> Void,
+        bindTerminalRef: ((String) -> Void)? = nil
+    ) {
+        self.taskId = taskId
+        self.taskSessions = taskSessions
+        self.selectedTaskSessions = selectedTaskSessions
+        self.state = state
+        self.loadTaskSessions = loadTaskSessions
+        self.bindTaskSession = bindTaskSession
+        self.bindTerminalRef = bindTerminalRef
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -740,6 +1385,17 @@ private struct TaskSessionBindingSection: View {
                 }
                 .disabled(taskSessions.isEmpty)
                 .accessibilityIdentifier("packet-bind-task-session-menu")
+
+                if let bindTerminalRef, !selectedTaskSessions.isEmpty {
+                    Menu {
+                        Button("Front Ghostty window") { bindTerminalRef("ghostty:front") }
+                        Button("tmux pane :0") { bindTerminalRef("tmux:%0") }
+                    } label: {
+                        Label("Bind Terminal", systemImage: "terminal.fill")
+                    }
+                    .help("Send-to-Agent will keystroke into this terminal.")
+                    .accessibilityIdentifier("packet-bind-terminal-menu")
+                }
             }
 
             switch state {
@@ -805,6 +1461,80 @@ private struct TaskSessionTargetCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .accessibilityIdentifier("packet-bound-task-session")
     }
+}
+
+func actionConsequence(for packet: ReviewPacket, selectedTaskSessions: [TaskSession]) -> String? {
+    switch packet.recommendedActionType {
+    case "resume_agent":
+        if let session = selectedTaskSessions.first {
+            let presentation = TaskSessionTargetPresentation(session: session)
+            return "Send to Agent will forward this packet to \(presentation.provider): \(presentation.title), save the current workspace, mark this paper done, then pull the next paper."
+        }
+        return "Send to Agent is blocked until a task session is bound. Done / Next will save this workspace and move on without sending agent follow-up."
+    case "mark_done":
+        return "Done / Next will save this workspace for the task and move to the next paper."
+    default:
+        return nil
+    }
+}
+
+func recentLineageSummary(for lineage: QueueLineage) -> String? {
+    let eventSummary = lineage.events.first.map { event in
+        "Latest event: \(event.summary.isEmpty ? event.title : event.summary)"
+    }
+    let activitySummary = lineage.activity.first.map { activity in
+        "Last action: \(activity.summary)"
+    }
+    let messageSummary = lineage.taskMessages.first.map { message in
+        "Agent handoff: \(message.status) to \(message.taskSessionId)"
+    }
+
+    let parts = [eventSummary, activitySummary, messageSummary].compactMap { $0 }
+    guard !parts.isEmpty else {
+        return nil
+    }
+    return parts.joined(separator: " ")
+}
+
+func onboardingProposalPreviewLines(for proposal: OnboardingTaskProposal, limit: Int = 5) -> [String] {
+    var lines: [String] = []
+
+    for window in proposal.windows {
+        lines.append("Window: \(window.app) - \(window.title)")
+    }
+    for context in proposal.browserContexts {
+        if let url = context.url {
+            lines.append("Tab: \(context.title) - \(url)")
+        } else {
+            lines.append("Tab: \(context.title)")
+        }
+    }
+    for session in proposal.taskSessions {
+        let label = session.name ?? session.preview ?? session.cwd ?? session.id
+        lines.append("Session: \(session.provider) \(session.status) - \(label)")
+    }
+
+    guard lines.count > limit else {
+        return lines
+    }
+    return Array(lines.prefix(limit)) + ["+\(lines.count - limit) more"]
+}
+
+func whyThisPaperSummary(for packet: ReviewPacket) -> String {
+    var parts: [String] = []
+    parts.append("Source: \(packet.source).")
+    if let taskId = packet.taskId {
+        parts.append("Task: \(taskId).")
+    }
+    if !packet.priorityReasons.isEmpty {
+        parts.append("Priority: \(packet.priorityReasons.joined(separator: ", ")).")
+    } else {
+        parts.append("Priority score: \(packet.priority).")
+    }
+    if !packet.contextResources.isEmpty {
+        parts.append("Context: \(packet.contextResources.count) resource(s).")
+    }
+    return parts.joined(separator: " ")
 }
 
 private struct SendBackTargetBanner: View {

@@ -44,6 +44,29 @@ test("runtime message router captures active tab with route hints", async () => 
   assert.deepEqual(responses, [{ resource: { id: "browser_tab:9" }, nativeResponse: { ok: true } }]);
 });
 
+test("runtime message router captures tab registry with route hints", async () => {
+  const routeHints = { task_hint: "reading" };
+  const responses = [];
+  const controller = {
+    captureTabRegistry: async (input) => {
+      assert.deepEqual(input, routeHints);
+      return { ok: true, captured_count: 2 };
+    }
+  };
+
+  const handled = handleRuntimeMessage(
+    controller,
+    { type: "eventloop.captureTabRegistry", route_hints: routeHints },
+    (response) => {
+      responses.push(response);
+    }
+  );
+  await flushMicrotasks();
+
+  assert.equal(handled, true);
+  assert.deepEqual(responses, [{ ok: true, captured_count: 2 }]);
+});
+
 test("runtime message router returns false for unknown messages", () => {
   const handled = handleRuntimeMessage({}, { type: "eventloop.unknown" }, () => {});
 
