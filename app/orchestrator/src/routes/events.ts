@@ -6,6 +6,7 @@ import { injectEventIntoTaskSessionIfPossible } from "../routing/task_session_in
 import type { RouteDecision } from "../store.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
+import { classifyVoiceIntent, pickRerankCandidate } from "../voice/intent_classifier.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
 
@@ -48,6 +49,65 @@ export async function handleEventsRoute(input: {
 
     const voiceValidation = validateVoiceCommandRequest(parsed.value, input.idempotencyKey, input.now.toISOString());
     if (!voiceValidation.ok) return schemaError(voiceValidation.message);
+
+    const transcriptValue = isRecord(parsed.value) && typeof parsed.value.transcript === "string" ? parsed.value.transcript : "";
+    const intent = classifyVoiceIntent(transcriptValue);
+    if (intent.kind === "rerank") {
+      const queue = await input.store.listQueue("ready", input.now);
+      const match = pickRerankCandidate(intent, queue);
+      if (match) {
+        const updated = await input.store.bumpQueueItemPriority(match.item.id, {
+          delta: intent.delta,
+          score: intent.score,
+          reason: `voice_rerank_${intent.direction}`,
+        }, input.now);
+        if (updated) {
+          await input.observability.incrementCounter("voice_rerank_total");
+          await input.observability.recordActivity({
+            type: "voice_rerank",
+            occurred_at: input.now.toISOString(),
+            actor: "human",
+            task_id: updated.task_id,
+            queue_item_id: updated.id,
+            status: "ok",
+            summary: `Voice rerank ${intent.direction}: ${updated.review_packet.title}`,
+            details: sanitizeActivityDetails({
+              transcript: intent.transcript,
+              target: intent.target,
+              direction: intent.direction,
+              delta: intent.delta,
+              score: intent.score,
+              priority_score: updated.priority_score,
+              match_score: match.score,
+            }),
+          });
+          return ok(200, {
+            ok: true,
+            intent: "rerank",
+            direction: intent.direction,
+            target: intent.target,
+            queue_item_id: updated.id,
+            priority_score: updated.priority_score,
+            item: updated,
+            request_id: input.requestId,
+          });
+        }
+      }
+      // Fall through to note routing if no match found, but record telemetry.
+      await input.observability.incrementCounter("voice_rerank_no_match_total");
+      await input.observability.recordActivity({
+        type: "voice_rerank_no_match",
+        occurred_at: input.now.toISOString(),
+        actor: "human",
+        status: "ok",
+        summary: `Voice rerank had no matching paper for "${intent.target}".`,
+        details: sanitizeActivityDetails({
+          transcript: intent.transcript,
+          target: intent.target,
+          direction: intent.direction,
+        }),
+      });
+    }
 
     const routed = await routeEventThroughGateway(input, voiceValidation.event, input.now);
 

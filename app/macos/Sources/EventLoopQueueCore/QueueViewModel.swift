@@ -7,6 +7,18 @@ public enum ManualWorkspaceCaptureState: Equatable, Sendable {
     case failed(String)
 }
 
+public enum VoiceCaptureState: Equatable, Sendable {
+    case unavailable
+    case idle
+    case listening
+    case captured(String)
+    case failed(String)
+}
+
+public protocol VoiceTranscriptionService: Sendable {
+    func transcribeOneUtterance() async throws -> String
+}
+
 @MainActor
 public final class QueueViewModel: ObservableObject {
     @Published public private(set) var packets: [ReviewPacket]
@@ -33,9 +45,11 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var masterCommandState: MasterCommandState
     @Published public private(set) var onboardingState: OnboardingState
     @Published public var auxiliarySheet: QueueAuxiliarySheet?
+    @Published public private(set) var voiceCaptureState: VoiceCaptureState
 
     private let client: any QueueClient
     private let workspaceClient: any WorkspaceClient
+    private let voiceTranscriptionService: VoiceTranscriptionService?
     private var queueRefreshTask: Task<Void, Never>?
     private var leaseRenewalTask: Task<Void, Never>?
     private var contextRestoreRefreshTask: Task<Void, Never>?
@@ -44,10 +58,12 @@ public final class QueueViewModel: ObservableObject {
     public init(
         client: any QueueClient,
         workspaceClient: any WorkspaceClient = NoOpWorkspaceClient(),
-        initialPackets: [ReviewPacket] = []
+        initialPackets: [ReviewPacket] = [],
+        voiceTranscriptionService: VoiceTranscriptionService? = nil
     ) {
         self.client = client
         self.workspaceClient = workspaceClient
+        self.voiceTranscriptionService = voiceTranscriptionService
         self.packets = initialPackets
         self.selectedPacketID = initialPackets.first?.id
         self.state = .idle
@@ -63,6 +79,7 @@ public final class QueueViewModel: ObservableObject {
         self.masterCommandState = .idle
         self.onboardingState = .idle
         self.auxiliarySheet = nil
+        self.voiceCaptureState = voiceTranscriptionService == nil ? .unavailable : .idle
     }
 
     deinit {
@@ -597,6 +614,31 @@ public final class QueueViewModel: ObservableObject {
         } catch {
             taskBindingState = .failed(error.localizedDescription)
         }
+    }
+
+    public func startVoiceCapture() async -> String? {
+        guard let service = voiceTranscriptionService else {
+            voiceCaptureState = .unavailable
+            return nil
+        }
+        voiceCaptureState = .listening
+        do {
+            let transcript = try await service.transcribeOneUtterance()
+            let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                voiceCaptureState = .failed("Voice capture returned no text.")
+                return nil
+            }
+            voiceCaptureState = .captured(trimmed)
+            return trimmed
+        } catch {
+            voiceCaptureState = .failed(error.localizedDescription)
+            return nil
+        }
+    }
+
+    public func resetVoiceCapture() {
+        voiceCaptureState = voiceTranscriptionService == nil ? .unavailable : .idle
     }
 
     public func presentMasterCommand() {

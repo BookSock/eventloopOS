@@ -38,7 +38,21 @@ function capturePageContext(win, doc) {
 }
 
 function restorePageContext(pageContext, win) {
+  const anchorResult = scrollToProviderAnchor(pageContext, win);
   if (!pageContext?.scroll) {
+    if (anchorResult.ok) {
+      return {
+        ok: true,
+        restoredScroll: true,
+        restoredHighlight: false,
+        highlightStrategy: anchorResult.strategy,
+        anchorStrategy: anchorResult.strategy,
+        scroll: {
+          x: Math.round(win.scrollX),
+          y: Math.round(win.scrollY)
+        }
+      };
+    }
     return { ok: false, error: "missing_scroll" };
   }
 
@@ -55,11 +69,69 @@ function restorePageContext(pageContext, win) {
     restoredScroll: true,
     restoredHighlight: highlight.ok,
     highlightStrategy: highlight.strategy,
+    anchorStrategy: anchorResult.strategy,
     scroll: {
       x: Math.round(win.scrollX),
       y: Math.round(win.scrollY)
     }
   };
+}
+
+function scrollToProviderAnchor(pageContext, win) {
+  const planKind = pageContext?.plan_kind;
+  const anchor = pageContext?.anchor;
+  const doc = win.document;
+  if (!planKind || !anchor || !doc) {
+    return { ok: false, strategy: "no_anchor" };
+  }
+
+  if (planKind === "open_slack_thread" && typeof anchor.message_ts === "string") {
+    const candidate = doc.querySelector(`[data-item-key*="${cssEscape(anchor.message_ts)}"]`)
+      ?? doc.querySelector(`[data-ts="${cssEscape(anchor.message_ts)}"]`);
+    if (candidate?.scrollIntoView) {
+      candidate.scrollIntoView({ block: "center", behavior: "instant" });
+      return { ok: true, strategy: "slack_message_ts" };
+    }
+    return { ok: false, strategy: "slack_message_not_found" };
+  }
+
+  if (planKind === "open_email" && typeof anchor.message_id === "string") {
+    const candidate = doc.querySelector(`[data-message-id="${cssEscape(anchor.message_id)}"]`);
+    if (candidate?.scrollIntoView) {
+      candidate.scrollIntoView({ block: "center", behavior: "instant" });
+      return { ok: true, strategy: "gmail_message_id" };
+    }
+    return { ok: false, strategy: "gmail_message_not_found" };
+  }
+
+  if (planKind === "open_doc_anchor" && typeof anchor.heading_id === "string") {
+    const candidate = doc.querySelector(`[id="${cssEscape(anchor.heading_id)}"]`)
+      ?? doc.querySelector(`[name="${cssEscape(anchor.heading_id)}"]`);
+    if (candidate?.scrollIntoView) {
+      candidate.scrollIntoView({ block: "center", behavior: "instant" });
+      return { ok: true, strategy: "doc_heading_id" };
+    }
+    return { ok: false, strategy: "doc_heading_not_found" };
+  }
+
+  if (planKind === "open_notion_page" && typeof anchor.block_id === "string") {
+    const candidate = doc.querySelector(`[data-block-id="${cssEscape(anchor.block_id)}"]`);
+    if (candidate?.scrollIntoView) {
+      candidate.scrollIntoView({ block: "center", behavior: "instant" });
+      return { ok: true, strategy: "notion_block_id" };
+    }
+    return { ok: false, strategy: "notion_block_not_found" };
+  }
+
+  return { ok: false, strategy: "unknown_anchor" };
+}
+
+function cssEscape(value) {
+  if (typeof value !== "string") return "";
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(value);
+  }
+  return value.replace(/(["\\])/g, "\\$1");
 }
 
 function highlightRestoredQuote(quote, doc) {

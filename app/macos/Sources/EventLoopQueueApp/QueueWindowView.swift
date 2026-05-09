@@ -236,7 +236,8 @@ struct QueueWindowView: View {
                     defaultTaskHint: viewModel.selectedTaskId ?? "",
                     state: viewModel.masterCommandState,
                     packets: viewModel.packets,
-                    defaultRerankPacketId: viewModel.selectedPacketID
+                    defaultRerankPacketId: viewModel.selectedPacketID,
+                    voiceState: viewModel.voiceCaptureState
                 ) { text, taskHint in
                     Task {
                         await viewModel.sendMasterCommand(text: text, taskHint: taskHint)
@@ -249,6 +250,8 @@ struct QueueWindowView: View {
                     Task {
                         await viewModel.bumpQueuePaperPriority(packetId: packetId, delta: delta, reason: "master_command_rerank")
                     }
+                } startVoiceCapture: {
+                    await viewModel.startVoiceCapture()
                 }
             case .onboarding:
                 OnboardingSheet(
@@ -574,9 +577,11 @@ private struct MasterCommandSheet: View {
     let state: MasterCommandState
     let packets: [ReviewPacket]
     let defaultRerankPacketId: String?
+    let voiceState: VoiceCaptureState
     let route: (String, String?) -> Void
     let startTask: (String, String?, String?, String?) -> Void
     let rerank: (String, Int) -> Void
+    let startVoiceCapture: () async -> String?
 
     @Environment(\.dismiss) private var dismiss
     @State private var mode: MasterCommandSheetMode = .route
@@ -592,17 +597,21 @@ private struct MasterCommandSheet: View {
         state: MasterCommandState,
         packets: [ReviewPacket] = [],
         defaultRerankPacketId: String? = nil,
+        voiceState: VoiceCaptureState = .unavailable,
         route: @escaping (String, String?) -> Void,
         startTask: @escaping (String, String?, String?, String?) -> Void,
-        rerank: @escaping (String, Int) -> Void = { _, _ in }
+        rerank: @escaping (String, Int) -> Void = { _, _ in },
+        startVoiceCapture: @escaping () async -> String? = { nil }
     ) {
         self.defaultTaskHint = defaultTaskHint
         self.state = state
         self.packets = packets
         self.defaultRerankPacketId = defaultRerankPacketId
+        self.voiceState = voiceState
         self.route = route
         self.startTask = startTask
         self.rerank = rerank
+        self.startVoiceCapture = startVoiceCapture
         _taskHint = State(initialValue: defaultTaskHint)
         _rerankPacketId = State(initialValue: defaultRerankPacketId ?? packets.first?.id ?? "")
     }
@@ -637,9 +646,28 @@ private struct MasterCommandSheet: View {
 
             if mode != .rerank {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Message")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    HStack {
+                        Text("Message")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if voiceState != .unavailable {
+                            Button {
+                                Task {
+                                    if let transcript = await startVoiceCapture() {
+                                        text = text.isEmpty ? transcript : "\(text) \(transcript)"
+                                    }
+                                }
+                            } label: {
+                                Label(voiceButtonLabel, systemImage: voiceButtonSystemImage)
+                                    .labelStyle(.titleAndIcon)
+                            }
+                            .controlSize(.small)
+                            .disabled(voiceState == .listening)
+                            .help(voiceButtonHelp)
+                            .accessibilityIdentifier("master-command-voice-button")
+                        }
+                    }
                     TextEditor(text: $text)
                         .font(.body)
                         .frame(minHeight: 110)
@@ -648,6 +676,7 @@ private struct MasterCommandSheet: View {
                                 .stroke(.secondary.opacity(0.25))
                         )
                         .accessibilityIdentifier("master-command-text-editor")
+                    voiceStatusView
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
@@ -761,6 +790,57 @@ private struct MasterCommandSheet: View {
             return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .rerank:
             return rerankPacketId.isEmpty || rerankDelta == 0
+        }
+    }
+
+    private var voiceButtonLabel: String {
+        switch voiceState {
+        case .listening: return "Listening…"
+        case .captured: return "Re-record"
+        case .failed: return "Retry voice"
+        case .idle, .unavailable: return "Voice"
+        }
+    }
+
+    private var voiceButtonSystemImage: String {
+        switch voiceState {
+        case .listening: return "waveform.circle"
+        case .captured: return "mic.fill"
+        case .failed: return "exclamationmark.triangle"
+        case .idle, .unavailable: return "mic"
+        }
+    }
+
+    private var voiceButtonHelp: String {
+        switch voiceState {
+        case .unavailable:
+            return "Voice transcription is not configured."
+        case .idle:
+            return "Record a short voice note and append it to the message."
+        case .listening:
+            return "Listening for your voice command…"
+        case .captured:
+            return "Voice transcript captured. Press to record again."
+        case .failed:
+            return "Voice capture failed. Press to try again."
+        }
+    }
+
+    @ViewBuilder
+    private var voiceStatusView: some View {
+        switch voiceState {
+        case .listening:
+            Label("Listening for voice command…", systemImage: "waveform")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("master-command-voice-status-listening")
+        case let .failed(message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .foregroundStyle(.red)
+                .accessibilityIdentifier("master-command-voice-status-failed")
+        case .captured, .idle, .unavailable:
+            EmptyView()
         }
     }
 }

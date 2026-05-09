@@ -50,11 +50,12 @@ export async function handleContextRestoreRoute(input: {
     if (!validation.ok) return schemaError(validation.message);
     const plan = buildContextRestorePlan(validation.resource);
     if (!plan) return error(422, "context_restore_unsupported", "context resource is not restorable");
-    if (plan.kind !== "browser_extension_message") {
+    const browserPlan = wrapPlanForBrowserExtension(plan, validation.resource);
+    if (!browserPlan) {
       return error(
         422,
         "context_restore_not_browser_extension",
-        "context restore request polling only supports browser extension messages",
+        "context restore request polling only supports browser-handled plans",
       );
     }
 
@@ -62,7 +63,7 @@ export async function handleContextRestoreRoute(input: {
       id: `ctx_restore_${randomUUID()}`,
       idempotency_key: input.idempotencyKey,
       resource: validation.resource,
-      restore_plan: plan,
+      restore_plan: browserPlan,
     }, input.now);
     const restoreInfo = restoreResourceInfo(created.record.resource);
     await input.observability.incrementCounter("restore_requests_created_total", created.inserted ? 1 : 0);
@@ -369,6 +370,42 @@ function buildGmailUrl(resource: Record<string, unknown>): string | undefined {
     return `https://mail.google.com/mail/u/0/#all/${threadId}`;
   }
   return undefined;
+}
+
+const BROWSER_RESTORE_PLAN_KINDS = new Set([
+  "browser_extension_message",
+  "open_slack_thread",
+  "open_email",
+  "open_notion_page",
+  "open_doc_anchor",
+]);
+
+function wrapPlanForBrowserExtension(
+  plan: Record<string, unknown>,
+  resource: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const kind = typeof plan.kind === "string" ? plan.kind : undefined;
+  if (!kind || !BROWSER_RESTORE_PLAN_KINDS.has(kind)) return undefined;
+  if (kind === "browser_extension_message") return plan;
+
+  const anchor = isRecord(plan.anchor) ? plan.anchor : undefined;
+  const url = typeof plan.url === "string" ? plan.url : undefined;
+  return {
+    kind: "browser_extension_message",
+    side_effect: "local",
+    execute_supported: false,
+    target: "eventloopOS browser extension runtime",
+    plan_kind: kind,
+    message: {
+      type: "eventloop.restore",
+      resource: {
+        ...resource,
+        ...(url ? { url } : {}),
+        anchor,
+        plan_kind: kind,
+      },
+    },
+  };
 }
 
 function pickRecord(details: unknown, keys: string[]): Record<string, unknown> | undefined {

@@ -1411,6 +1411,51 @@ describe("orchestrator gateway API", () => {
       });
       assert.equal(unsupportedRestorePlanResponse.status, 422);
 
+      const slackRestoreRequestResponse = await fetch(`${routeBaseUrl}/contexts/restore-requests`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": "idem_slack_thread_restore" },
+        body: JSON.stringify({
+          resource: {
+            id: "ctx_slack_thread_for_request",
+            kind: "slack_thread",
+            title: "Slack thread",
+            url: "https://acme.slack.com/archives/C123/p1234567890123456",
+            details: {
+              workspace_id: "T123",
+              channel_id: "C123",
+              thread_ts: "1234567890.123456",
+              message_ts: "1234567890.123456",
+              team_domain: "acme",
+            },
+          },
+        }),
+      });
+      assert.equal(slackRestoreRequestResponse.status, 202);
+      const slackRestoreRequestBody = await slackRestoreRequestResponse.json() as {
+        restore_request: {
+          id: string;
+          restore_plan: {
+            kind: string;
+            plan_kind?: string;
+            message: { type: string; resource: { plan_kind?: string; anchor?: { thread_ts?: string } } };
+          };
+        };
+      };
+      assert.equal(slackRestoreRequestBody.restore_request.restore_plan.kind, "browser_extension_message");
+      assert.equal(slackRestoreRequestBody.restore_request.restore_plan.plan_kind, "open_slack_thread");
+      assert.equal(slackRestoreRequestBody.restore_request.restore_plan.message.resource.plan_kind, "open_slack_thread");
+      assert.equal(slackRestoreRequestBody.restore_request.restore_plan.message.resource.anchor?.thread_ts, "1234567890.123456");
+
+      const slackRestoreDoneResponse = await fetch(
+        `${routeBaseUrl}/contexts/restore-requests/${slackRestoreRequestBody.restore_request.id}/done`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ result: { ok: true, anchorStrategy: "slack_message_ts" } }),
+        },
+      );
+      assert.equal(slackRestoreDoneResponse.status, 200);
+
       const olderTitleMatchEvent = {
         ...event,
         id: "evt_browser_ctx_pricing_note",
@@ -4163,6 +4208,49 @@ describe("orchestrator gateway API", () => {
     } finally {
       await new Promise<void>((resolve, reject) => {
         voiceServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("reranks queue paper priority when voice command matches a rerank intent", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const rerankServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T12:00:00.000Z"),
+    });
+    await new Promise<void>((resolve) => rerankServer.listen(0, "127.0.0.1", resolve));
+    const address = rerankServer.address() as AddressInfo;
+    const rerankBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const queueBefore = await fetch(`${rerankBaseUrl}/queue`).then((response) => response.json()) as {
+        items: Array<{ id: string; task_id?: string; priority_score: number; review_packet?: { title?: string } }>;
+      };
+      const blogItem = queueBefore.items.find((item) => /blog/i.test(item.task_id ?? "") || /blog/i.test(item.review_packet?.title ?? ""));
+      assert.ok(blogItem, "expected seeded queue to include a blog packet");
+
+      const response = await fetch(`${rerankBaseUrl}/voice/commands`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": "idem_voice_rerank_blog" },
+        body: JSON.stringify({ transcript: "raise priority of seed blog" }),
+      });
+      const body = await response.json() as {
+        ok: boolean;
+        intent?: string;
+        direction?: string;
+        target?: string;
+        priority_score?: number;
+        item?: { id: string; priority_score: number; priority_reasons: string[] };
+      };
+      assert.equal(response.status, 200);
+      assert.equal(body.intent, "rerank");
+      assert.equal(body.direction, "up");
+      assert.equal(body.item?.id, blogItem.id);
+      assert.equal(body.item?.priority_score, blogItem.priority_score + 250);
+      assert.ok(body.item?.priority_reasons.includes("voice_rerank_up"));
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        rerankServer.close((error) => (error ? reject(error) : resolve()));
       });
     }
   });

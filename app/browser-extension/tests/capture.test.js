@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { capturePageContext, restorePageContext } from "../src/capture-page.js";
-import { buildContextResource, normalizeContextResource, validateContextResource } from "../src/protocol.js";
+import { buildContextResource, contextResourceToPageContext, normalizeContextResource, validateContextResource } from "../src/protocol.js";
 import { createExtensionController } from "../src/extension-controller.js";
 import { createMockNativeBridge } from "../src/mock-native-bridge.js";
 
@@ -293,6 +293,46 @@ test("normalizes legacy browser.tab resource to shared browser_tab shape", () =>
     selector_hint: "[data-context-quote]"
   });
   assert.deepEqual(normalizeContextResource(normalized), normalized);
+});
+
+test("contextResourceToPageContext propagates plan_kind and anchor for slack thread", () => {
+  const resource = {
+    id: "ctx_slack_thread_1",
+    kind: "slack_thread",
+    title: "Slack thread",
+    url: "https://acme.slack.com/archives/C123/p1234567890123456",
+    plan_kind: "open_slack_thread",
+    anchor: {
+      thread_ts: "1234567890.123456",
+      channel_id: "C123",
+    },
+  };
+
+  const pageContext = contextResourceToPageContext(resource);
+
+  assert.equal(pageContext.plan_kind, "open_slack_thread");
+  assert.equal(pageContext.anchor.thread_ts, "1234567890.123456");
+  assert.equal(pageContext.anchor.channel_id, "C123");
+});
+
+test("contextResourceToPageContext fills quote.text from anchor selection_quote", () => {
+  const resource = {
+    id: "ctx_doc_anchor_1",
+    kind: "google_doc",
+    title: "Blog launch doc",
+    url: "https://docs.google.com/document/d/abc123/edit",
+    plan_kind: "open_doc_anchor",
+    anchor: {
+      doc_id: "abc123",
+      heading_id: "h.angle1",
+      selection_quote: "Should we ship Tuesday?",
+    },
+  };
+
+  const pageContext = contextResourceToPageContext(resource);
+
+  assert.equal(pageContext.plan_kind, "open_doc_anchor");
+  assert.equal(pageContext.quote.text, "Should we ship Tuesday?");
 });
 
 test("restorePageContext scrolls page-like window", () => {

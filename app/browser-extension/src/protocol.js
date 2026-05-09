@@ -119,9 +119,13 @@ export function contextResourceToPageContext(resource) {
   }
 
   const normalized = normalizeContextResource(resource);
+  const planKind = resource?.plan_kind ?? resource?.kind;
+  const anchor = resource?.anchor && typeof resource.anchor === "object" ? resource.anchor : undefined;
   return {
     url: normalized.url,
     title: normalized.title,
+    plan_kind: planKind,
+    anchor,
     scroll: {
       x: 0,
       y: normalized.scroll_y ?? 0,
@@ -130,7 +134,7 @@ export function contextResourceToPageContext(resource) {
     },
     quote: {
       strategy: normalized.selector_hint ? "selector-hint" : "text-quote",
-      text: normalized.text_quote ?? "",
+      text: normalized.text_quote ?? anchor?.selection_quote ?? "",
       selector_hint: normalized.selector_hint
     }
   };

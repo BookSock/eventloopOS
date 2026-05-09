@@ -1007,6 +1007,53 @@ final class QueueViewModelTests: XCTestCase {
         }
     }
 
+    func testVoiceCaptureUnavailableWhenNoServiceInjected() async {
+        let viewModel = QueueViewModel(client: FakeQueueClient(packets: []))
+        XCTAssertEqual(viewModel.voiceCaptureState, .unavailable)
+        let result = await viewModel.startVoiceCapture()
+        XCTAssertNil(result)
+        XCTAssertEqual(viewModel.voiceCaptureState, .unavailable)
+    }
+
+    func testVoiceCaptureCallsServiceAndReturnsTranscript() async {
+        actor StubService: VoiceTranscriptionService {
+            func transcribeOneUtterance() async throws -> String {
+                "raise priority of seed blog"
+            }
+        }
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: []),
+            voiceTranscriptionService: StubService()
+        )
+        XCTAssertEqual(viewModel.voiceCaptureState, .idle)
+        let transcript = await viewModel.startVoiceCapture()
+        XCTAssertEqual(transcript, "raise priority of seed blog")
+        if case let .captured(value) = viewModel.voiceCaptureState {
+            XCTAssertEqual(value, "raise priority of seed blog")
+        } else {
+            XCTFail("expected captured state")
+        }
+    }
+
+    func testVoiceCaptureSurfacesFailureMessage() async {
+        struct FailingService: VoiceTranscriptionService {
+            func transcribeOneUtterance() async throws -> String {
+                throw NSError(domain: "voice", code: 1, userInfo: [NSLocalizedDescriptionKey: "no microphone"])
+            }
+        }
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: []),
+            voiceTranscriptionService: FailingService()
+        )
+        let transcript = await viewModel.startVoiceCapture()
+        XCTAssertNil(transcript)
+        if case let .failed(message) = viewModel.voiceCaptureState {
+            XCTAssertEqual(message, "no microphone")
+        } else {
+            XCTFail("expected failed state")
+        }
+    }
+
     func testMasterCommandRejectsBlankText() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: []))
 
