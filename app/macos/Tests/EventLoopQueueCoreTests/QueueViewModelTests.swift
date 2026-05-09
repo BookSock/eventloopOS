@@ -1069,7 +1069,81 @@ final class QueueViewModelTests: XCTestCase {
 
         await viewModel.confirmPendingTerminalSendAndProceed()
         XCTAssertNil(viewModel.pendingTerminalSendConfirmation)
-        XCTAssertTrue(viewModel.isTerminalSendConfirmed)
+        XCTAssertTrue(viewModel.isTerminalSendConfirmed(forRef: "ghostty:front"))
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testThisSessionScopeOnlyAppliesUntilRestart() async {
+        let suiteName = "eventLoopOSTerminalSendTest_\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let packet = ReviewPacket(
+            id: "qit_term_session",
+            taskId: "task_term_session",
+            title: "Session scope",
+            summary: "send",
+            source: "test",
+            priority: 500,
+            recommendedAction: "Send",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(
+            packets: [packet],
+            taskSessions: [
+                TaskSession(id: "session_term_session", taskId: "task_term_session", provider: "codex", status: "idle", terminalRef: "ghostty:front")
+            ]
+        )
+        let viewModel = QueueViewModel(client: client, userDefaults: defaults)
+        await viewModel.refreshQueue()
+        viewModel.selectedPacketID = "qit_term_session"
+        await viewModel.loadTaskSessions()
+
+        await viewModel.executeRecommendedActionAndNext()
+        XCTAssertNotNil(viewModel.pendingTerminalSendConfirmation)
+        await viewModel.confirmPendingTerminalSendAndProceed(scope: .thisSession)
+
+        XCTAssertTrue(viewModel.isTerminalSendConfirmed(forRef: "ghostty:front"))
+        XCTAssertFalse(viewModel.rememberedTerminalRefs.contains("ghostty:front"))
+        // Persistence flag stays off — scope did not write to defaults.
+        XCTAssertFalse(defaults.bool(forKey: "eventLoopOS.terminalSendConfirmed.v1"))
+
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testRememberForRefPersistsTerminalRefAcrossInstances() async {
+        let suiteName = "eventLoopOSTerminalSendTest_\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let packet = ReviewPacket(
+            id: "qit_term_remember",
+            taskId: "task_term_remember",
+            title: "Remember scope",
+            summary: "send",
+            source: "test",
+            priority: 500,
+            recommendedAction: "Send",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(
+            packets: [packet],
+            taskSessions: [
+                TaskSession(id: "session_term_remember", taskId: "task_term_remember", provider: "codex", status: "idle", terminalRef: "ghostty:front")
+            ]
+        )
+        let viewModel = QueueViewModel(client: client, userDefaults: defaults)
+        await viewModel.refreshQueue()
+        viewModel.selectedPacketID = "qit_term_remember"
+        await viewModel.loadTaskSessions()
+
+        await viewModel.executeRecommendedActionAndNext()
+        await viewModel.confirmPendingTerminalSendAndProceed(scope: .rememberForRef)
+
+        // Build a fresh viewmodel that shares the same UserDefaults — should treat
+        // the terminal_ref as already confirmed.
+        let viewModel2 = QueueViewModel(client: FakeQueueClient(packets: []), userDefaults: defaults)
+        XCTAssertTrue(viewModel2.rememberedTerminalRefs.contains("ghostty:front"))
+        XCTAssertTrue(viewModel2.isTerminalSendConfirmed(forRef: "ghostty:front"))
 
         defaults.removePersistentDomain(forName: suiteName)
     }

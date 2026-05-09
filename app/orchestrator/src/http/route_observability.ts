@@ -74,6 +74,7 @@ export function routeNameForPath(method: string | undefined, pathname: string): 
     [/^\/master\/fan-out$/, "master_fan_out"],
     [/^\/agents\/codex\/auto-bind$/, "agents_codex_auto_bind"],
     [/^\/agents\/codex\/inspect\/[^/]+$/, "agents_codex_inspect"],
+    [/^\/agents\/claude\/inspect\/[^/]+$/, "agents_claude_inspect"],
     [/^\/review-packets\/[^/]+$/, "review_packet_get"],
   ];
   const route = entries.find(([pattern]) => pattern.test(pathname))?.[1];

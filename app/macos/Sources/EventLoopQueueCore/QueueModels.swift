@@ -829,6 +829,65 @@ public enum OnboardingState: Equatable, Sendable {
     case failed(String)
 }
 
+public struct CodexAutoBindResult: Decodable, Equatable, Sendable {
+    public let scannedWindowCount: Int
+    public let matchedCount: Int
+    public let bound: [Bound]
+    public let skipped: [Skipped]
+
+    public struct Bound: Decodable, Equatable, Sendable {
+        public let taskId: String
+        public let taskSessionId: String
+        public let terminalRef: String
+        public let windowId: Int
+        public let windowApp: String
+
+        enum CodingKeys: String, CodingKey {
+            case taskId = "task_id"
+            case taskSessionId = "task_session_id"
+            case terminalRef = "terminal_ref"
+            case windowId = "window_id"
+            case windowApp = "window_app"
+        }
+    }
+
+    public struct Skipped: Decodable, Equatable, Sendable {
+        public let taskId: String?
+        public let windowId: Int?
+        public let windowTitle: String?
+        public let reason: String
+
+        enum CodingKeys: String, CodingKey {
+            case taskId = "task_id"
+            case windowId = "window_id"
+            case windowTitle = "window_title"
+            case reason
+        }
+    }
+
+    public init(scannedWindowCount: Int = 0, matchedCount: Int = 0, bound: [Bound] = [], skipped: [Skipped] = []) {
+        self.scannedWindowCount = scannedWindowCount
+        self.matchedCount = matchedCount
+        self.bound = bound
+        self.skipped = skipped
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case scannedWindowCount = "scanned_window_count"
+        case matchedCount = "matched_count"
+        case bound
+        case skipped
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.scannedWindowCount = try container.decodeIfPresent(Int.self, forKey: .scannedWindowCount) ?? 0
+        self.matchedCount = try container.decodeIfPresent(Int.self, forKey: .matchedCount) ?? 0
+        self.bound = try container.decodeIfPresent([Bound].self, forKey: .bound) ?? []
+        self.skipped = try container.decodeIfPresent([Skipped].self, forKey: .skipped) ?? []
+    }
+}
+
 public struct ActivityEvent: Decodable, Equatable, Identifiable, Sendable {
     public let id: String
     public let type: String

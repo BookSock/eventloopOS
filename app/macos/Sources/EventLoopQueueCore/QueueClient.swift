@@ -25,6 +25,7 @@ public protocol QueueClient: Sendable {
     func bumpQueueItemPriority(packetId: String, delta: Int?, score: Int?, reason: String?) async throws -> QueueActionResult
     func masterFanOut(message: String, taskHintSubstring: String?, taskIdPattern: String?, taskIds: [String], dryRun: Bool, idempotencyKey: String) async throws -> MasterFanOutResult
     func fetchActivity(limit: Int) async throws -> ActivityFeedResult
+    func runCodexAutoBind() async throws -> CodexAutoBindResult
 }
 
 public extension QueueClient {
@@ -413,6 +414,17 @@ public struct HTTPQueueClient: QueueClient {
         return try decoder.decode(ActivityFeedResult.self, from: data)
     }
 
+    public func runCodexAutoBind() async throws -> CodexAutoBindResult {
+        let url = baseURL.appending(path: "agents/codex/auto-bind")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = "{}".data(using: .utf8)
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(CodexAutoBindResult.self, from: data)
+    }
+
     public func autoPromoteReadingQueue(minAgeSeconds: Int) async throws -> ReadingQueuePromoteResult {
         let url = baseURL.appending(path: "reading-queue/auto-promote")
         var request = URLRequest(url: url)
@@ -703,6 +715,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var approvedOnboardingIds: [String] = []
     private var readingQueueContexts: [ReadingQueueContext] = []
     private var fakeActivityEvents: [ActivityEvent] = []
+    private var fakeAutoBindRunCount: Int = 0
     private let masterCommandResult: MasterCommandResult?
 
     public init(
@@ -1314,6 +1327,22 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public func setFakeActivity(_ events: [ActivityEvent]) {
         lock.withLock { fakeActivityEvents = events }
+    }
+
+    public func runCodexAutoBind() async throws -> CodexAutoBindResult {
+        lock.withLock {
+            fakeAutoBindRunCount += 1
+            return CodexAutoBindResult(
+                scannedWindowCount: 0,
+                matchedCount: 0,
+                bound: [],
+                skipped: []
+            )
+        }
+    }
+
+    public var autoBindRunCount: Int {
+        lock.withLock { fakeAutoBindRunCount }
     }
 
     public func promoteReadingQueueContexts(ids: [String]) async throws -> ReadingQueuePromoteResult {

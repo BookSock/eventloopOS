@@ -1,5 +1,6 @@
 import { autoBindCodexFromWindows } from "../agents/codex/auto_bind.js";
 import { inspectCodexSession } from "../agents/codex/session_inspector.js";
+import { inspectClaudeSession } from "../agents/claude/session_inspector.js";
 import type { Observability } from "../observability.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
 import type { WorkspaceController } from "../workspace/controller.js";
@@ -31,6 +32,14 @@ export async function handleAgentsRoute(input: {
     const threadId = decodeURIComponent(inspectMatch[1] ?? "");
     if (!threadId) return error(400, "schema_error", "thread_id is required");
     const inspection = await inspectCodexSession(threadId, { now: input.now });
+    return ok(200, { ...inspection, request_id: input.requestId });
+  }
+
+  const claudeInspectMatch = input.pathname.match(/^\/agents\/claude\/inspect\/([^/]+)$/);
+  if (input.method === "GET" && claudeInspectMatch) {
+    const sessionId = decodeURIComponent(claudeInspectMatch[1] ?? "");
+    if (!sessionId) return error(400, "schema_error", "session_id is required");
+    const inspection = await inspectClaudeSession(sessionId, { now: input.now });
     return ok(200, { ...inspection, request_id: input.requestId });
   }
 

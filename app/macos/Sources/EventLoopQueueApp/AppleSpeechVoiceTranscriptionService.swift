@@ -6,7 +6,7 @@ import Speech
 public final class AppleSpeechVoiceTranscriptionService: VoiceTranscriptionService, @unchecked Sendable {
     private let recognizer: SFSpeechRecognizer
     private let audioEngine: AVAudioEngine
-    private let maxRecordingSeconds: Double
+    public let maxRecordingSeconds: Double
 
     public init?(locale: Locale = .current, maxRecordingSeconds: Double = 6.0) {
         guard let recognizer = SFSpeechRecognizer(locale: locale) else { return nil }

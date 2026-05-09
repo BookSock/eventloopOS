@@ -20,3 +20,34 @@ export function activeTabCaptureStatusMessage(response) {
 export function tabRegistryCaptureStatusMessage(response) {
   return `Captured ${response?.captured_count ?? 0}/${response?.attempted_count ?? 0} tabs; failed ${response?.failed_count ?? 0}; skipped ${response?.skipped_count ?? 0}`;
 }
+
+export const PROVIDER_PRESET_ORIGINS = [
+  "https://*.slack.com/*",
+  "https://app.slack.com/*",
+  "https://mail.google.com/*",
+  "https://docs.google.com/*",
+  "https://www.notion.so/*",
+  "https://*.notion.site/*",
+  "https://github.com/*",
+  "https://linear.app/*",
+];
+
+export function mergeProviderPresetOrigins(textValue) {
+  const lines = (textValue ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  const seen = new Set(lines);
+  const added = [];
+  for (const preset of PROVIDER_PRESET_ORIGINS) {
+    if (!seen.has(preset)) {
+      lines.push(preset);
+      seen.add(preset);
+      added.push(preset);
+    }
+  }
+  return {
+    value: lines.join("\n"),
+    added,
+  };
+}

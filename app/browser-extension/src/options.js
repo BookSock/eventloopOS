@@ -1,5 +1,5 @@
 import { createExtensionConfig } from "./extension-config.js";
-import { activeTabCaptureStatusMessage, routeHintsFromInputs, tabRegistryCaptureStatusMessage } from "./options-helpers.js";
+import { activeTabCaptureStatusMessage, mergeProviderPresetOrigins, routeHintsFromInputs, tabRegistryCaptureStatusMessage } from "./options-helpers.js";
 
 const config = createExtensionConfig({ storageArea: chrome.storage?.local });
 
@@ -11,6 +11,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   const projectHintInput = document.querySelector("#project-hint");
   const captureActiveTabButton = document.querySelector("#capture-active-tab");
   const captureTabsButton = document.querySelector("#capture-tab-registry");
+  const applyPresetsButton = document.querySelector("#apply-provider-presets");
   const status = document.querySelector("#status");
 
   try {
@@ -44,6 +45,23 @@ document.addEventListener("DOMContentLoaded", async () => {
         throw new Error(response.error?.message ?? response.error ?? "active tab capture failed");
       }
       setStatus(status, response?.skipped ? "error" : "saved", activeTabCaptureStatusMessage(response));
+    } catch (error) {
+      setStatus(status, "error", error.message);
+    }
+  });
+
+  applyPresetsButton.addEventListener("click", () => {
+    try {
+      const merged = mergeProviderPresetOrigins(allowedOriginsInput.value);
+      allowedOriginsInput.value = merged.value;
+      const newCount = merged.added.length;
+      setStatus(
+        status,
+        newCount === 0 ? "saved" : "pending",
+        newCount === 0
+          ? "Provider presets already present"
+          : `Added ${newCount} provider preset${newCount === 1 ? "" : "s"} — press Save to apply.`
+      );
     } catch (error) {
       setStatus(status, "error", error.message);
     }

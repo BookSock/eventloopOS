@@ -48,6 +48,12 @@ public struct PendingTerminalSendConfirmation: Equatable, Sendable {
     }
 }
 
+public enum TerminalSendConfirmScope: Equatable, Sendable {
+    case oneShot
+    case thisSession
+    case rememberForRef
+}
+
 public enum VoiceCaptureState: Equatable, Sendable {
     case unavailable
     case idle
@@ -58,6 +64,11 @@ public enum VoiceCaptureState: Equatable, Sendable {
 
 public protocol VoiceTranscriptionService: Sendable {
     func transcribeOneUtterance() async throws -> String
+    var maxRecordingSeconds: Double { get }
+}
+
+public extension VoiceTranscriptionService {
+    var maxRecordingSeconds: Double { 6.0 }
 }
 
 @MainActor
@@ -91,19 +102,27 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var onboardingState: OnboardingState
     @Published public var auxiliarySheet: QueueAuxiliarySheet?
     @Published public private(set) var voiceCaptureState: VoiceCaptureState
+    @Published public private(set) var voiceCaptureStartedAt: Date?
+    @Published public private(set) var voiceCaptureMaxSeconds: Double = 6.0
     @Published public private(set) var readingQueueUnboundCount: Int = 0
     @Published public var pendingTerminalSendConfirmation: PendingTerminalSendConfirmation?
     @Published public private(set) var activityEvents: [ActivityEvent] = []
+    @Published public private(set) var autoBindContinuousEnabled: Bool = false
+    @Published public private(set) var lastAutoBindResult: CodexAutoBindResult?
 
     private static let terminalSendConfirmedDefaultsKey = "eventLoopOS.terminalSendConfirmed.v1"
+    private static let terminalSendRememberedRefsKey = "eventLoopOS.terminalSendRememberedRefs.v1"
 
     private let client: any QueueClient
     private let workspaceClient: any WorkspaceClient
     private let voiceTranscriptionService: VoiceTranscriptionService?
     private let userDefaults: UserDefaults
+    private var terminalSendThisSessionConfirmed: Set<String> = []
     private var queueRefreshTask: Task<Void, Never>?
     private var leaseRenewalTask: Task<Void, Never>?
     private var contextRestoreRefreshTask: Task<Void, Never>?
+    private var activityRefreshTask: Task<Void, Never>?
+    private var autoBindLoopTask: Task<Void, Never>?
     private var autoRestoredContextPacketIds = Set<String>()
 
     public init(
@@ -139,6 +158,8 @@ public final class QueueViewModel: ObservableObject {
         queueRefreshTask?.cancel()
         leaseRenewalTask?.cancel()
         contextRestoreRefreshTask?.cancel()
+        activityRefreshTask?.cancel()
+        autoBindLoopTask?.cancel()
     }
 
     public func changeBadge(for packet: ReviewPacket) -> PacketChangeBadge {
@@ -485,7 +506,7 @@ public final class QueueViewModel: ObservableObject {
 
         if let session = selectedTaskSessions.first,
            let terminalRef = session.terminalRef,
-           !isTerminalSendConfirmed {
+           !isTerminalSendConfirmed(forRef: terminalRef) {
             pendingTerminalSendConfirmation = PendingTerminalSendConfirmation(
                 packetId: packetId,
                 terminalRef: terminalRef,
@@ -497,9 +518,21 @@ public final class QueueViewModel: ObservableObject {
         await runRecommendedActionAfterChecks(packetId: packetId)
     }
 
-    public func confirmPendingTerminalSendAndProceed() async {
+    public func confirmPendingTerminalSendAndProceed(scope: TerminalSendConfirmScope = .rememberForRef) async {
         guard let pending = pendingTerminalSendConfirmation else { return }
-        userDefaults.set(true, forKey: Self.terminalSendConfirmedDefaultsKey)
+        switch scope {
+        case .oneShot:
+            // Allow this single send only; do not persist.
+            break
+        case .thisSession:
+            terminalSendThisSessionConfirmed.insert(pending.terminalRef)
+        case .rememberForRef:
+            var remembered = rememberedTerminalRefs
+            remembered.insert(pending.terminalRef)
+            userDefaults.set(Array(remembered), forKey: Self.terminalSendRememberedRefsKey)
+            // Keep the legacy global flag aligned for backwards compat.
+            userDefaults.set(true, forKey: Self.terminalSendConfirmedDefaultsKey)
+        }
         pendingTerminalSendConfirmation = nil
         await runRecommendedActionAfterChecks(packetId: pending.packetId)
     }
@@ -508,12 +541,22 @@ public final class QueueViewModel: ObservableObject {
         pendingTerminalSendConfirmation = nil
     }
 
-    public var isTerminalSendConfirmed: Bool {
-        userDefaults.bool(forKey: Self.terminalSendConfirmedDefaultsKey)
+    public func isTerminalSendConfirmed(forRef terminalRef: String) -> Bool {
+        if userDefaults.bool(forKey: Self.terminalSendConfirmedDefaultsKey) { return true }
+        if terminalSendThisSessionConfirmed.contains(terminalRef) { return true }
+        if rememberedTerminalRefs.contains(terminalRef) { return true }
+        return false
+    }
+
+    public var rememberedTerminalRefs: Set<String> {
+        let stored = userDefaults.array(forKey: Self.terminalSendRememberedRefsKey) as? [String] ?? []
+        return Set(stored)
     }
 
     public func resetTerminalSendConfirmation() {
         userDefaults.removeObject(forKey: Self.terminalSendConfirmedDefaultsKey)
+        userDefaults.removeObject(forKey: Self.terminalSendRememberedRefsKey)
+        terminalSendThisSessionConfirmed.removeAll()
     }
 
     private func runRecommendedActionAfterChecks(packetId: String) async {
@@ -789,6 +832,11 @@ public final class QueueViewModel: ObservableObject {
             return nil
         }
         voiceCaptureState = .listening
+        voiceCaptureStartedAt = Date()
+        voiceCaptureMaxSeconds = service.maxRecordingSeconds
+        defer {
+            voiceCaptureStartedAt = nil
+        }
         do {
             let transcript = try await service.transcribeOneUtterance()
             let trimmed = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -819,10 +867,71 @@ public final class QueueViewModel: ObservableObject {
     public func presentActivity() {
         auxiliarySheet = .activity
         Task { await refreshActivity() }
+        startAutomaticActivityRefresh()
+    }
+
+    public func dismissActivitySheetIfNeeded() {
+        stopAutomaticActivityRefresh()
+    }
+
+    public func startAutomaticActivityRefresh(intervalNanoseconds: UInt64 = 5_000_000_000) {
+        stopAutomaticActivityRefresh()
+        activityRefreshTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: intervalNanoseconds)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled, let self else { return }
+                guard self.auxiliarySheet == .activity else {
+                    self.activityRefreshTask = nil
+                    return
+                }
+                await self.refreshActivity()
+            }
+        }
+    }
+
+    public func stopAutomaticActivityRefresh() {
+        activityRefreshTask?.cancel()
+        activityRefreshTask = nil
+    }
+
+    public func runCodexAutoBindOnce() async {
+        do {
+            let result = try await client.runCodexAutoBind()
+            lastAutoBindResult = result
+            await loadTaskSessions()
+        } catch {
+            taskBindingState = .failed("Auto-bind failed: \(error.localizedDescription)")
+        }
+    }
+
+    public func setAutoBindContinuous(_ enabled: Bool, intervalNanoseconds: UInt64 = 30_000_000_000) {
+        if enabled == autoBindContinuousEnabled { return }
+        autoBindContinuousEnabled = enabled
+        autoBindLoopTask?.cancel()
+        autoBindLoopTask = nil
+        guard enabled else { return }
+        autoBindLoopTask = Task { @MainActor [weak self] in
+            await self?.runCodexAutoBindOnce()
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(nanoseconds: intervalNanoseconds)
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled, let self else { return }
+                guard self.autoBindContinuousEnabled else { return }
+                await self.runCodexAutoBindOnce()
+            }
+        }
     }
 
     public func dismissAuxiliarySheet() {
         auxiliarySheet = nil
+        stopAutomaticActivityRefresh()
     }
 
     public func scanOnboarding() async {

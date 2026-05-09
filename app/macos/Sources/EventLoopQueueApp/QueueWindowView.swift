@@ -153,6 +153,25 @@ struct QueueWindowView: View {
                     .help("See recent system activity: fan-outs, terminal sends, voice reranks, restores.")
                     .accessibilityIdentifier("queue-activity-button")
 
+                    Menu {
+                        Button("Auto-bind once") {
+                            Task { await viewModel.runCodexAutoBindOnce() }
+                        }
+                        .accessibilityIdentifier("queue-autobind-once-button")
+                        Toggle("Auto-bind continuously", isOn: Binding(
+                            get: { viewModel.autoBindContinuousEnabled },
+                            set: { viewModel.setAutoBindContinuous($0) }
+                        ))
+                        .accessibilityIdentifier("queue-autobind-toggle")
+                    } label: {
+                        Label(
+                            viewModel.autoBindContinuousEnabled ? "Auto-bind: on" : "Auto-bind",
+                            systemImage: viewModel.autoBindContinuousEnabled ? "link.circle.fill" : "link.circle"
+                        )
+                    }
+                    .help("Bind Ghostty windows whose title contains [task:foo] to matching task sessions.")
+                    .accessibilityIdentifier("queue-autobind-menu")
+
                     Button {
                         Task {
                             await viewModel.refreshQueue()
@@ -256,18 +275,30 @@ struct QueueWindowView: View {
             isPresented: pendingTerminalSendBinding,
             presenting: viewModel.pendingTerminalSendConfirmation
         ) { pending in
-            Button("Send to \(pending.terminalRef)") {
+            Button("Send once") {
                 Task {
-                    await viewModel.confirmPendingTerminalSendAndProceed()
+                    await viewModel.confirmPendingTerminalSendAndProceed(scope: .oneShot)
                 }
             }
-            .accessibilityIdentifier("queue-terminal-send-confirm-button")
+            .accessibilityIdentifier("queue-terminal-send-once-button")
+            Button("Send and remember for this session") {
+                Task {
+                    await viewModel.confirmPendingTerminalSendAndProceed(scope: .thisSession)
+                }
+            }
+            .accessibilityIdentifier("queue-terminal-send-session-button")
+            Button("Always for \(pending.terminalRef)") {
+                Task {
+                    await viewModel.confirmPendingTerminalSendAndProceed(scope: .rememberForRef)
+                }
+            }
+            .accessibilityIdentifier("queue-terminal-send-remember-button")
             Button("Cancel", role: .cancel) {
                 viewModel.cancelPendingTerminalSend()
             }
             .accessibilityIdentifier("queue-terminal-send-cancel-button")
         } message: { pending in
-            Text("eventloopOS will type the followup into \(pending.terminalRef) (session \(pending.sessionId)). After confirming, this prompt won't appear again. Set EVENTLOOPOS_TERMINAL_SEND=0 to disable system-wide.")
+            Text("eventloopOS will type the followup into \(pending.terminalRef) (session \(pending.sessionId)). Pick whether to remember this choice.")
         }
         .sheet(item: auxiliarySheetBinding) { sheet in
             switch sheet {
@@ -277,7 +308,9 @@ struct QueueWindowView: View {
                     state: viewModel.masterCommandState,
                     packets: viewModel.packets,
                     defaultRerankPacketId: viewModel.selectedPacketID,
-                    voiceState: viewModel.voiceCaptureState
+                    voiceState: viewModel.voiceCaptureState,
+                    voiceCaptureStartedAt: viewModel.voiceCaptureStartedAt,
+                    voiceCaptureMaxSeconds: viewModel.voiceCaptureMaxSeconds
                 ) { text, taskHint in
                     Task {
                         await viewModel.sendMasterCommand(text: text, taskHint: taskHint)
@@ -771,6 +804,8 @@ private struct MasterCommandSheet: View {
     let startVoiceCapture: () async -> String?
     let previewFanOut: (String, String) async -> MasterFanOutResult?
     let executeFanOut: (String, String) async -> MasterFanOutResult?
+    let voiceCaptureStartedAt: Date?
+    let voiceCaptureMaxSeconds: Double
 
     @Environment(\.dismiss) private var dismiss
     @State private var mode: MasterCommandSheetMode = .route
@@ -789,6 +824,8 @@ private struct MasterCommandSheet: View {
         packets: [ReviewPacket] = [],
         defaultRerankPacketId: String? = nil,
         voiceState: VoiceCaptureState = .unavailable,
+        voiceCaptureStartedAt: Date? = nil,
+        voiceCaptureMaxSeconds: Double = 6.0,
         route: @escaping (String, String?) -> Void,
         startTask: @escaping (String, String?, String?, String?) -> Void,
         rerank: @escaping (String, Int) -> Void = { _, _ in },
@@ -801,6 +838,8 @@ private struct MasterCommandSheet: View {
         self.packets = packets
         self.defaultRerankPacketId = defaultRerankPacketId
         self.voiceState = voiceState
+        self.voiceCaptureStartedAt = voiceCaptureStartedAt
+        self.voiceCaptureMaxSeconds = voiceCaptureMaxSeconds
         self.route = route
         self.startTask = startTask
         self.rerank = rerank
@@ -1082,10 +1121,11 @@ private struct MasterCommandSheet: View {
     private var voiceStatusView: some View {
         switch voiceState {
         case .listening:
-            Label("Listening for voice command…", systemImage: "waveform")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("master-command-voice-status-listening")
+            VoiceListeningIndicator(
+                startedAt: voiceCaptureStartedAt,
+                maxSeconds: voiceCaptureMaxSeconds
+            )
+            .accessibilityIdentifier("master-command-voice-status-listening")
         case let .failed(message):
             Label(message, systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
@@ -1093,6 +1133,50 @@ private struct MasterCommandSheet: View {
                 .accessibilityIdentifier("master-command-voice-status-failed")
         case .captured, .idle, .unavailable:
             EmptyView()
+        }
+    }
+}
+
+private struct VoiceListeningIndicator: View {
+    let startedAt: Date?
+    let maxSeconds: Double
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 0.1)) { context in
+            let elapsed = max(0, startedAt.map { context.date.timeIntervalSince($0) } ?? 0)
+            let remaining = max(0, maxSeconds - elapsed)
+            let progress = maxSeconds > 0 ? min(1.0, elapsed / maxSeconds) : 0
+            HStack(spacing: 8) {
+                WaveformDots(elapsed: elapsed)
+                    .frame(width: 56)
+                    .accessibilityIdentifier("master-command-voice-waveform")
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Listening…")
+                        .font(.caption.weight(.semibold))
+                    Text(String(format: "%.1fs left", remaining))
+                        .font(.caption2.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+                    .frame(maxWidth: 120)
+            }
+        }
+    }
+}
+
+private struct WaveformDots: View {
+    let elapsed: Double
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<5, id: \.self) { index in
+                let phase = elapsed * 4 + Double(index) * 0.7
+                let height: CGFloat = 6 + CGFloat(abs(sin(phase))) * 14
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(Color.purple.opacity(0.7))
+                    .frame(width: 5, height: height)
+            }
         }
     }
 }
