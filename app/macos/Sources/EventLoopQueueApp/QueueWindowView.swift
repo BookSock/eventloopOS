@@ -54,7 +54,7 @@ struct QueueWindowView: View {
                 } else {
                     List(selection: selectedPaperBinding) {
                         ForEach(viewModel.packets) { packet in
-                            QueueRow(packet: packet)
+                            QueueRow(packet: packet, badge: viewModel.changeBadge(for: packet))
                                 .tag(packet.id)
                                 .accessibilityIdentifier("queue-row-\(packet.id)")
                         }
@@ -252,6 +252,22 @@ struct QueueWindowView: View {
                     }
                 } startVoiceCapture: {
                     await viewModel.startVoiceCapture()
+                } previewFanOut: { message, selector in
+                    let key = "broadcast_preview_\(Date().timeIntervalSince1970)_\(UUID().uuidString)"
+                    return await viewModel.previewFanOut(
+                        message: message,
+                        taskHintSubstring: selector,
+                        taskIdPattern: nil,
+                        idempotencyKey: key
+                    )
+                } executeFanOut: { message, selector in
+                    let key = "broadcast_\(UUID().uuidString)"
+                    return await viewModel.executeFanOut(
+                        message: message,
+                        taskHintSubstring: selector,
+                        taskIdPattern: nil,
+                        idempotencyKey: key
+                    )
                 }
             case .onboarding:
                 OnboardingSheet(
@@ -557,6 +573,7 @@ private enum MasterCommandSheetMode: String, CaseIterable, Identifiable {
     case route
     case startTask
     case rerank
+    case broadcast
 
     var id: String { rawValue }
 
@@ -568,6 +585,8 @@ private enum MasterCommandSheetMode: String, CaseIterable, Identifiable {
             "Start Task"
         case .rerank:
             "Rerank"
+        case .broadcast:
+            "Broadcast"
         }
     }
 }
@@ -582,6 +601,8 @@ private struct MasterCommandSheet: View {
     let startTask: (String, String?, String?, String?) -> Void
     let rerank: (String, Int) -> Void
     let startVoiceCapture: () async -> String?
+    let previewFanOut: (String, String) async -> MasterFanOutResult?
+    let executeFanOut: (String, String) async -> MasterFanOutResult?
 
     @Environment(\.dismiss) private var dismiss
     @State private var mode: MasterCommandSheetMode = .route
@@ -591,6 +612,8 @@ private struct MasterCommandSheet: View {
     @State private var model: String = ""
     @State private var rerankPacketId: String
     @State private var rerankDelta: Int = 200
+    @State private var broadcastSelector: String = ""
+    @State private var broadcastPreview: MasterFanOutResult?
 
     init(
         defaultTaskHint: String,
@@ -601,7 +624,9 @@ private struct MasterCommandSheet: View {
         route: @escaping (String, String?) -> Void,
         startTask: @escaping (String, String?, String?, String?) -> Void,
         rerank: @escaping (String, Int) -> Void = { _, _ in },
-        startVoiceCapture: @escaping () async -> String? = { nil }
+        startVoiceCapture: @escaping () async -> String? = { nil },
+        previewFanOut: @escaping (String, String) async -> MasterFanOutResult? = { _, _ in nil },
+        executeFanOut: @escaping (String, String) async -> MasterFanOutResult? = { _, _ in nil }
     ) {
         self.defaultTaskHint = defaultTaskHint
         self.state = state
@@ -612,6 +637,8 @@ private struct MasterCommandSheet: View {
         self.startTask = startTask
         self.rerank = rerank
         self.startVoiceCapture = startVoiceCapture
+        self.previewFanOut = previewFanOut
+        self.executeFanOut = executeFanOut
         _taskHint = State(initialValue: defaultTaskHint)
         _rerankPacketId = State(initialValue: defaultRerankPacketId ?? packets.first?.id ?? "")
     }
@@ -710,6 +737,52 @@ private struct MasterCommandSheet: View {
                 }
             }
 
+            if mode == .broadcast {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Selector (substring or task_id pattern)")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                    TextField("e.g. blog or recruiting", text: $broadcastSelector)
+                        .textFieldStyle(.roundedBorder)
+                        .accessibilityIdentifier("master-command-broadcast-selector")
+                }
+                if let preview = broadcastPreview {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Matched \(preview.matchedCount) task(s)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        ForEach(preview.preview.prefix(6), id: \.taskId) { match in
+                            HStack(spacing: 6) {
+                                Image(systemName: match.taskSessionId != nil ? "link.circle.fill" : "link.circle")
+                                    .foregroundStyle(match.taskSessionId != nil ? .green : .orange)
+                                Text(match.taskId).font(.caption.monospaced())
+                                if let title = match.matchedPacketTitle {
+                                    Text(title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
+                            .accessibilityIdentifier("master-command-broadcast-preview-row-\(match.taskId)")
+                        }
+                        if preview.matchedCount > 6 {
+                            Text("+\(preview.matchedCount - 6) more")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(8)
+                    .background(.secondary.opacity(0.08))
+                    .cornerRadius(6)
+                }
+                Button("Preview matches") {
+                    Task {
+                        let trimmedSelector = broadcastSelector.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmedSelector.isEmpty else { return }
+                        broadcastPreview = await previewFanOut(text, trimmedSelector)
+                    }
+                }
+                .disabled(broadcastSelector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityIdentifier("master-command-broadcast-preview-button")
+            }
+
             if mode == .rerank {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Paper")
@@ -757,6 +830,13 @@ private struct MasterCommandSheet: View {
                     case .rerank:
                         guard !rerankPacketId.isEmpty, rerankDelta != 0 else { return }
                         rerank(rerankPacketId, rerankDelta)
+                    case .broadcast:
+                        let trimmedSelector = broadcastSelector.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                              !trimmedSelector.isEmpty else { return }
+                        Task {
+                            broadcastPreview = await executeFanOut(text, trimmedSelector)
+                        }
                     }
                 }
                 .buttonStyle(.borderedProminent)
@@ -780,6 +860,7 @@ private struct MasterCommandSheet: View {
         case .route: return "Route"
         case .startTask: return "Start Task"
         case .rerank: return "Bump priority"
+        case .broadcast: return "Broadcast"
         }
     }
 
@@ -790,6 +871,9 @@ private struct MasterCommandSheet: View {
             return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .rerank:
             return rerankPacketId.isEmpty || rerankDelta == 0
+        case .broadcast:
+            return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || broadcastSelector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
@@ -888,6 +972,12 @@ private struct MasterCommandStatusView: View {
 
 private struct QueueRow: View {
     let packet: ReviewPacket
+    let badge: PacketChangeBadge
+
+    init(packet: ReviewPacket, badge: PacketChangeBadge = .none) {
+        self.packet = packet
+        self.badge = badge
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -904,6 +994,7 @@ private struct QueueRow: View {
                     .background(.secondary.opacity(0.14))
                     .clipShape(RoundedRectangle(cornerRadius: 4))
             }
+            changeBadgeView
             Text(packet.source)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -915,6 +1006,39 @@ private struct QueueRow: View {
                 .accessibilityIdentifier("queue-row-identity-\(packet.id)")
         }
         .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var changeBadgeView: some View {
+        switch badge {
+        case .none:
+            EmptyView()
+        case .new:
+            Label("New", systemImage: "sparkles")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.blue)
+                .accessibilityIdentifier("queue-row-badge-new-\(packet.id)")
+        case let .priorityIncreased(by):
+            Label("+\(by) priority", systemImage: "arrow.up.circle.fill")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.orange)
+                .accessibilityIdentifier("queue-row-badge-up-\(packet.id)")
+        case let .priorityDecreased(by):
+            Label("-\(by) priority", systemImage: "arrow.down.circle")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.gray)
+                .accessibilityIdentifier("queue-row-badge-down-\(packet.id)")
+        case .priorityReasonsChanged:
+            Label("Reason changed", systemImage: "arrow.triangle.2.circlepath")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.indigo)
+                .accessibilityIdentifier("queue-row-badge-reasons-\(packet.id)")
+        case let .contextChanged(addedResources):
+            Label("+\(addedResources) context", systemImage: "plus.circle.fill")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.green)
+                .accessibilityIdentifier("queue-row-badge-context-\(packet.id)")
+        }
     }
 }
 

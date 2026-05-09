@@ -26,6 +26,53 @@ export async function handleReadingQueueRoute(input: {
     });
   }
 
+  if (input.method === "POST" && input.pathname === "/reading-queue/auto-promote") {
+    const parsed = await input.readJsonBody();
+    if (!parsed.ok) return schemaError(parsed.message);
+    const validation = validateAutoPromoteRequest(parsed.value);
+    if (!validation.ok) return schemaError(validation.message);
+
+    const allUnbound = await listUnboundBrowserContexts(input.store);
+    const ageThreshold = input.now.getTime() - validation.minAgeSeconds * 1000;
+    const aged = allUnbound.filter((entry) => {
+      const captured = Date.parse(entry.captured_at);
+      return Number.isFinite(captured) && captured <= ageThreshold;
+    });
+
+    const promoted: Array<{ context_id: string; queue_item_id?: string; review_packet_id?: string; event_id: string; idempotent: boolean }> = [];
+    for (const entry of aged) {
+      const result = await promoteEntryToQueuePaper(input, entry, validation.actorId);
+      promoted.push(result);
+    }
+
+    const newlyPromoted = promoted.filter((entry) => !entry.idempotent).length;
+    await input.observability?.incrementCounter("reading_queue_auto_promotions_total", newlyPromoted || undefined);
+    await input.observability?.recordActivity({
+      type: "reading_queue_auto_promoted",
+      occurred_at: input.now.toISOString(),
+      actor: "system",
+      task_id: READING_QUEUE_TASK_ID,
+      status: "ok",
+      summary: `Auto-promoted ${newlyPromoted} reading-queue tab${newlyPromoted === 1 ? "" : "s"} (age >= ${validation.minAgeSeconds}s).`,
+      details: sanitizeActivityDetails({
+        evaluated_count: allUnbound.length,
+        aged_count: aged.length,
+        promoted_count: newlyPromoted,
+        idempotent_count: promoted.length - newlyPromoted,
+        min_age_seconds: validation.minAgeSeconds,
+      }),
+    });
+
+    return ok(200, {
+      ok: true,
+      evaluated_count: allUnbound.length,
+      aged_count: aged.length,
+      promoted_count: newlyPromoted,
+      promoted,
+      request_id: input.requestId,
+    });
+  }
+
   if (input.method === "POST" && input.pathname === "/reading-queue/promote") {
     const parsed = await input.readJsonBody();
     if (!parsed.ok) return schemaError(parsed.message);
@@ -155,6 +202,22 @@ async function promoteEntryToQueuePaper(
     review_packet_id: stored.review_packet?.id,
     event_id: stored.event.id,
     idempotent: Boolean(existing),
+  };
+}
+
+function validateAutoPromoteRequest(input: unknown): { ok: true; minAgeSeconds: number; actorId: string } | { ok: false; message: string } {
+  const record = isRecord(input) ? input : {};
+  let minAgeSeconds = 300;
+  if (record.min_age_seconds !== undefined && record.min_age_seconds !== null) {
+    if (typeof record.min_age_seconds !== "number" || !Number.isFinite(record.min_age_seconds) || record.min_age_seconds < 0) {
+      return { ok: false, message: "min_age_seconds must be a non-negative number" };
+    }
+    minAgeSeconds = Math.floor(record.min_age_seconds);
+  }
+  return {
+    ok: true,
+    minAgeSeconds,
+    actorId: readOptionalString(record.actor_id) ?? "reading-queue-autopromote",
   };
 }
 

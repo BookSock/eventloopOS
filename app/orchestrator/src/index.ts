@@ -19,6 +19,7 @@ import { CodexNativeThreadController } from "./task_sessions/codex_native_thread
 import { CompositeTaskSessionController, type CompositeTaskSessionRuntime } from "./task_sessions/composite_task_session_controller.js";
 import { CodexTaskMapResolver } from "./task_sessions/codex_task_map.js";
 import { createSeededDevelopmentTaskSessions } from "./task_sessions/development_task_session_controller.js";
+import { terminalSendEnabledFromEnv, type TerminalSendCommand, type TerminalSendExecutor } from "./task_sessions/terminal_send.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
 import { AerospaceWorkspaceController } from "./workspace/controller.js";
 
@@ -34,6 +35,11 @@ const taskSessionRuntime = createTaskSessionRuntime();
 const taskSessions = taskSessionRuntime?.controller;
 const mcpSources = await createMcpSourceRegistry();
 const workspace = config.value.workspace === "aerospace" ? new AerospaceWorkspaceController(execFilePromise) : undefined;
+const terminalSendExecutor: TerminalSendExecutor = (command: TerminalSendCommand) =>
+  new Promise((resolve, reject) => {
+    execFile(command.file, command.args, (error) => (error ? reject(error) : resolve()));
+  });
+
 const server = createGatewayServer({
   store: gatewayRuntime.store,
   taskSessions,
@@ -41,6 +47,8 @@ const server = createGatewayServer({
   workspace,
   workspaceExecuteEnabled: config.value.workspaceExecute === "enabled",
   observability: gatewayRuntime.observability,
+  terminalSendExecutor,
+  terminalSendEnabled: terminalSendEnabledFromEnv(process.env),
 });
 
 server.listen(config.value.port, config.value.host, () => {

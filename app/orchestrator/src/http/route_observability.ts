@@ -53,6 +53,7 @@ export function routeNameForPath(method: string | undefined, pathname: string): 
     [/^\/onboarding\/approvals$/, "onboarding_approvals"],
     [/^\/reading-queue$/, "reading_queue"],
     [/^\/reading-queue\/promote$/, "reading_queue_promote"],
+    [/^\/reading-queue\/auto-promote$/, "reading_queue_auto_promote"],
     [/^\/mcp\/poll$/, "mcp_poll"],
     [/^\/mcp-sources$/, "mcp_sources"],
     [/^\/mcp-sources\/poll-all-and-route$/, "mcp_sources_poll_all_and_route"],
@@ -70,6 +71,7 @@ export function routeNameForPath(method: string | undefined, pathname: string): 
     [/^\/events$/, "events"],
     [/^\/events\/[^/]+$/, "event_get"],
     [/^\/voice\/commands$/, "voice_commands"],
+    [/^\/master\/fan-out$/, "master_fan_out"],
     [/^\/review-packets\/[^/]+$/, "review_packet_get"],
   ];
   const route = entries.find(([pattern]) => pattern.test(pathname))?.[1];

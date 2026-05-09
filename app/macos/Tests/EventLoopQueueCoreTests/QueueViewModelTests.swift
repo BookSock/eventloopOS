@@ -1007,6 +1007,99 @@ final class QueueViewModelTests: XCTestCase {
         }
     }
 
+    func testChangeBadgeReportsNewWhenPacketUnseen() async {
+        let packet = ReviewPacket(
+            id: "qit_a",
+            taskId: "task_a",
+            title: "Unread",
+            summary: "Never seen",
+            source: "test",
+            priority: 500,
+            recommendedAction: "Action",
+            recommendedActionType: "mark_done",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let viewModel = QueueViewModel(client: FakeQueueClient(packets: [packet]))
+        await viewModel.refreshQueue()
+        viewModel.selectedPacketID = nil
+
+        XCTAssertEqual(viewModel.changeBadge(for: packet), .new)
+    }
+
+    func testChangeBadgeReportsPriorityChangeAfterBump() async {
+        let packet = ReviewPacket(
+            id: "qit_b",
+            taskId: "task_b",
+            title: "Bumpable",
+            summary: "Will be bumped",
+            source: "test",
+            priority: 500,
+            recommendedAction: "Mark done",
+            recommendedActionType: "mark_done",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(packets: [packet])
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.refreshQueue()
+        viewModel.selectedPacketID = "qit_b"
+        XCTAssertEqual(viewModel.changeBadge(for: viewModel.selectedPacket!), .none)
+
+        await viewModel.bumpQueuePaperPriority(packetId: "qit_b", delta: 200, reason: "test_priority_bump")
+        let updated = viewModel.packets.first { $0.id == "qit_b" }!
+        if case let .priorityIncreased(by) = viewModel.changeBadge(for: updated) {
+            XCTAssertEqual(by, 200)
+        } else {
+            XCTFail("expected priorityIncreased badge after bump")
+        }
+    }
+
+    func testPreviewFanOutReturnsMatchedTasksWithoutSending() async {
+        let client = FakeQueueClient(
+            packets: [],
+            taskSessions: [
+                TaskSession(id: "session_blog_email", taskId: "task_blog_email_draft", provider: "fake", status: "idle"),
+                TaskSession(id: "session_blog_outreach", taskId: "task_blog_partner_email", provider: "fake", status: "idle"),
+                TaskSession(id: "session_recruiting", taskId: "task_recruiting_review", provider: "fake", status: "idle"),
+            ]
+        )
+        let viewModel = QueueViewModel(client: client)
+
+        let result = await viewModel.previewFanOut(
+            message: "use new sign off",
+            taskHintSubstring: "blog",
+            taskIdPattern: nil,
+            idempotencyKey: "preview_blog_v1"
+        )
+
+        XCTAssertNotNil(result)
+        XCTAssertEqual(result?.dryRun, true)
+        XCTAssertEqual(result?.matchedCount, 2)
+        XCTAssertEqual(client.sentMasterCommands.count, 0, "preview should not send any followups")
+    }
+
+    func testExecuteFanOutDeliversFollowupsToBoundSessions() async {
+        let client = FakeQueueClient(
+            packets: [],
+            taskSessions: [
+                TaskSession(id: "session_a", taskId: "task_blog_email", provider: "fake", status: "idle"),
+                TaskSession(id: "session_b", taskId: "task_blog_outreach", provider: "fake", status: "idle"),
+                TaskSession(id: "session_c", taskId: "task_pricing", provider: "fake", status: "idle"),
+            ]
+        )
+        let viewModel = QueueViewModel(client: client)
+
+        let result = await viewModel.executeFanOut(
+            message: "Pause all blog work for 1h",
+            taskHintSubstring: "blog",
+            taskIdPattern: nil,
+            idempotencyKey: "exec_blog_pause_v1"
+        )
+
+        XCTAssertEqual(result?.deliveredCount, 2)
+        XCTAssertEqual(client.sentMasterCommands.count, 2)
+        XCTAssertTrue(client.sentMasterCommands.allSatisfy { $0.text.contains("Pause all blog work") })
+    }
+
     func testVoiceCaptureUnavailableWhenNoServiceInjected() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: []))
         XCTAssertEqual(viewModel.voiceCaptureState, .unavailable)

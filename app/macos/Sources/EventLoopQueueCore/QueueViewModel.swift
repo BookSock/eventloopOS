@@ -7,6 +7,35 @@ public enum ManualWorkspaceCaptureState: Equatable, Sendable {
     case failed(String)
 }
 
+public struct PacketViewSnapshot: Equatable, Sendable {
+    public let priority: Int
+    public let priorityReasonsHash: Int
+    public let contextResourceCount: Int
+
+    public init(priority: Int, priorityReasonsHash: Int, contextResourceCount: Int) {
+        self.priority = priority
+        self.priorityReasonsHash = priorityReasonsHash
+        self.contextResourceCount = contextResourceCount
+    }
+
+    public static func from(_ packet: ReviewPacket) -> PacketViewSnapshot {
+        PacketViewSnapshot(
+            priority: packet.priority,
+            priorityReasonsHash: packet.priorityReasons.joined(separator: "|").hashValue,
+            contextResourceCount: packet.contextResources.count
+        )
+    }
+}
+
+public enum PacketChangeBadge: Equatable, Sendable {
+    case none
+    case new
+    case priorityIncreased(by: Int)
+    case priorityDecreased(by: Int)
+    case priorityReasonsChanged
+    case contextChanged(addedResources: Int)
+}
+
 public enum VoiceCaptureState: Equatable, Sendable {
     case unavailable
     case idle
@@ -30,8 +59,12 @@ public final class QueueViewModel: ObservableObject {
             taskBindingState = .idle
             contextRestoreState = .idle
             queueLineageState = .idle
+            if let selectedPacketID, let packet = packets.first(where: { $0.id == selectedPacketID }) {
+                viewedSnapshots[selectedPacketID] = PacketViewSnapshot.from(packet)
+            }
         }
     }
+    @Published public private(set) var viewedSnapshots: [String: PacketViewSnapshot] = [:]
     @Published public private(set) var state: QueueState
     @Published public private(set) var mode: EventLoopMode
     @Published public private(set) var shouldRestoreWorkspace: Bool
@@ -86,6 +119,26 @@ public final class QueueViewModel: ObservableObject {
         queueRefreshTask?.cancel()
         leaseRenewalTask?.cancel()
         contextRestoreRefreshTask?.cancel()
+    }
+
+    public func changeBadge(for packet: ReviewPacket) -> PacketChangeBadge {
+        guard let snapshot = viewedSnapshots[packet.id] else {
+            return .new
+        }
+        let current = PacketViewSnapshot.from(packet)
+        if current.priority > snapshot.priority {
+            return .priorityIncreased(by: current.priority - snapshot.priority)
+        }
+        if current.priority < snapshot.priority {
+            return .priorityDecreased(by: snapshot.priority - current.priority)
+        }
+        if current.priorityReasonsHash != snapshot.priorityReasonsHash {
+            return .priorityReasonsChanged
+        }
+        if current.contextResourceCount > snapshot.contextResourceCount {
+            return .contextChanged(addedResources: current.contextResourceCount - snapshot.contextResourceCount)
+        }
+        return .none
     }
 
     public var selectedPacket: ReviewPacket? {
@@ -561,6 +614,46 @@ public final class QueueViewModel: ObservableObject {
             await requestSelectedBrowserContextRestoresIfNeeded()
         } catch {
             masterCommandState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func previewFanOut(message: String, taskHintSubstring: String?, taskIdPattern: String?, idempotencyKey: String) async -> MasterFanOutResult? {
+        masterCommandState = .sending
+        do {
+            let result = try await client.masterFanOut(
+                message: message,
+                taskHintSubstring: taskHintSubstring,
+                taskIdPattern: taskIdPattern,
+                taskIds: [],
+                dryRun: true,
+                idempotencyKey: idempotencyKey
+            )
+            masterCommandState = .idle
+            return result
+        } catch {
+            masterCommandState = .failed(error.localizedDescription)
+            return nil
+        }
+    }
+
+    public func executeFanOut(message: String, taskHintSubstring: String?, taskIdPattern: String?, idempotencyKey: String) async -> MasterFanOutResult? {
+        masterCommandState = .sending
+        do {
+            let result = try await client.masterFanOut(
+                message: message,
+                taskHintSubstring: taskHintSubstring,
+                taskIdPattern: taskIdPattern,
+                taskIds: [],
+                dryRun: false,
+                idempotencyKey: idempotencyKey
+            )
+            masterCommandState = .idle
+            await refreshQueue()
+            await loadTaskSessions()
+            return result
+        } catch {
+            masterCommandState = .failed(error.localizedDescription)
+            return nil
         }
     }
 

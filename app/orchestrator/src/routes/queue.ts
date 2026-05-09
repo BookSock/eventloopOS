@@ -10,6 +10,7 @@ import type { Observability } from "../observability.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import { bestTaskSessionForTask } from "../task_sessions/session_selection.js";
+import { triggerTerminalKeystroke, terminalSendEnabledFromEnv, type TerminalSendExecutor } from "../task_sessions/terminal_send.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
 import { parseWorkspaceSnapshot } from "../workspace/controller.js";
 import type { JsonBodyReader } from "./context_restore.js";
@@ -23,6 +24,8 @@ export async function handleQueueRoute(input: {
   store: GatewayStore;
   taskSessions?: TaskSessionController;
   observability: Observability;
+  terminalSendExecutor?: TerminalSendExecutor;
+  terminalSendEnabled?: boolean;
   now: Date;
   requestId: string;
 }): Promise<RouteResult | undefined> {
@@ -251,7 +254,14 @@ export async function handleQueueRoute(input: {
     const workspaceSave = await saveTaskWorkspaceSnapshotFromQueueAction(input, item, parsed.value, validation.actorId);
     if (!workspaceSave.ok) return schemaError(workspaceSave.message);
 
-    const actionResult = await executeQueueAction(input, item, item.review_packet.recommended_action);
+    const actionResult = await executeQueueAction({
+      store: input.store,
+      taskSessions: input.taskSessions,
+      observability: input.observability,
+      terminalSendExecutor: input.terminalSendExecutor,
+      terminalSendEnabled: input.terminalSendEnabled,
+      now: input.now,
+    }, item, item.review_packet.recommended_action);
     if (!actionResult.ok) {
       return error(actionResult.status, actionResult.code, actionResult.message, actionResult.details);
     }
@@ -542,6 +552,8 @@ async function executeQueueAction(
     store: GatewayStore;
     taskSessions?: TaskSessionController;
     observability: Observability;
+    terminalSendExecutor?: TerminalSendExecutor;
+    terminalSendEnabled?: boolean;
     now: Date;
   },
   item: QueueItemWithPacket,
@@ -617,6 +629,41 @@ async function executeQueueAction(
     };
   }
 
+  const terminalRef = isRecord(session) && typeof session.terminal_ref === "string" ? session.terminal_ref : undefined;
+  const terminalSendResult = terminalRef
+    ? await triggerTerminalKeystroke({
+      terminalRef,
+      text: taskActionFollowupText(item, eventResult?.event),
+      submit: true,
+      enabled: input.terminalSendEnabled !== false,
+      executor: input.terminalSendExecutor,
+    })
+    : undefined;
+
+  if (terminalSendResult) {
+    await input.observability.recordActivity({
+      type: "terminal_keystroke_attempted",
+      occurred_at: input.now.toISOString(),
+      actor: "system",
+      task_id: taskId,
+      queue_item_id: item.id,
+      task_session_id: session.id,
+      status: terminalSendResult.ok ? "ok" : "failed",
+      summary: terminalSendResult.ok
+        ? `Sent ${terminalSendResult.commandCount} keystroke command(s) to ${terminalRef}.`
+        : `Skipped terminal keystroke (${terminalSendResult.reason}).`,
+      details: sanitizeActivityDetails({
+        terminal_ref: terminalRef,
+        result: terminalSendResult,
+      }),
+    });
+    if (terminalSendResult.ok) {
+      await input.observability.incrementCounter("terminal_keystrokes_total");
+    } else if (terminalSendResult.reason !== "disabled" && terminalSendResult.reason !== "no_executor") {
+      await input.observability.incrementCounter("terminal_keystrokes_failed_total");
+    }
+  }
+
   return {
     ok: true,
     result: {
@@ -626,6 +673,7 @@ async function executeQueueAction(
       task_id: taskId,
       task_session_id: session.id,
       task_message: taskMessage,
+      terminal_send: terminalSendResult,
       executed_at: input.now.toISOString(),
     },
   };
@@ -642,14 +690,27 @@ function taskActionFollowupText(item: QueueItemWithPacket, event: McpEvent | und
   if (packet.decision_needed) lines.push(`Decision: ${packet.decision_needed}`);
   if (event) {
     lines.push(`Source event: ${event.source} ${event.id}`);
+    if (event.title && event.title !== packet.title) lines.push(`Source title: ${event.title}`);
+    if (event.summary && event.summary !== packet.summary) lines.push(`Source body: ${event.summary}`);
     lines.push(`Raw ref: ${event.raw_ref.uri}`);
   }
+  const quotes: string[] = [];
+  for (const resource of packet.context) {
+    const value = stringFromRecord(resource as unknown as Record<string, unknown>, "text_quote");
+    if (value) quotes.push(`${resource.title ?? resource.kind}: "${truncate(value, 240)}"`);
+  }
+  if (quotes.length > 0) lines.push(`Quoted context:\n- ${quotes.join("\n- ")}`);
   const links = [
     ...packet.context.flatMap((resource) => resource.url ? [resource.url] : []),
     ...packet.evidence.flatMap((evidence) => evidence.url ? [evidence.url] : []),
   ];
   if (links.length > 0) lines.push(`Links: ${links.join(", ")}`);
   return lines.join("\n");
+}
+
+function truncate(value: string, max: number): string {
+  if (value.length <= max) return value;
+  return `${value.slice(0, max - 1)}…`;
 }
 
 function stringFromRecord(input: Record<string, unknown>, key: string): string | undefined {

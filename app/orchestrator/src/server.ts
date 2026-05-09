@@ -10,11 +10,13 @@ import { handleEventsRoute, routeEventThroughGateway } from "./routes/events.js"
 import { handleMcpSourcesRoute, type McpSourceRegistry } from "./routes/mcp_sources.js";
 import { handleActivityRoute, handleMetricsRoute } from "./routes/observability.js";
 import { handleOnboardingRoute } from "./routes/onboarding.js";
+import { handleMasterRoute } from "./routes/master.js";
 import { handleQueueRoute } from "./routes/queue.js";
 import { handleReadingQueueRoute } from "./routes/reading_queue.js";
 import { handleTaskSessionsRoute } from "./routes/task_sessions.js";
 import { handleWorkspaceRoute } from "./routes/workspace.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
+import type { TerminalSendExecutor } from "./task_sessions/terminal_send.js";
 import type { WorkspaceController } from "./workspace/controller.js";
 
 export type GatewayServerOptions = {
@@ -24,6 +26,8 @@ export type GatewayServerOptions = {
   workspace?: WorkspaceController;
   workspaceExecuteEnabled?: boolean;
   observability?: Observability;
+  terminalSendExecutor?: TerminalSendExecutor;
+  terminalSendEnabled?: boolean;
   now?: () => Date;
 };
 
@@ -81,6 +85,8 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         store: options.store,
         taskSessions: options.taskSessions,
         observability,
+        terminalSendExecutor: options.terminalSendExecutor,
+        terminalSendEnabled: options.terminalSendEnabled,
         now: now(),
         requestId: context.requestId,
       });
@@ -128,6 +134,27 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           observability,
           routeNameForPath(request.method, context.url.pathname) ?? "workspace",
           workspaceRoute,
+          startedAt,
+        );
+      }
+
+      const masterRoute = await handleMasterRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        readJsonBody: () => readJsonBody(request),
+        store: options.store,
+        taskSessions: options.taskSessions,
+        observability,
+        now: now(),
+        requestId: context.requestId,
+      });
+      if (masterRoute) {
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "master",
+          masterRoute,
           startedAt,
         );
       }

@@ -9,6 +9,12 @@ export type VoiceIntent =
     delta?: number;
     score?: number;
     target: string;
+  }
+  | {
+    kind: "fan_out";
+    transcript: string;
+    selector: string;
+    message: string;
   };
 
 const RAISE_TOKENS = ["raise", "bump", "boost", "increase", "higher", "promote"];
@@ -21,6 +27,9 @@ export function classifyVoiceIntent(transcript: string): VoiceIntent {
     return { kind: "note", transcript: cleaned };
   }
   const lowered = cleaned.toLowerCase();
+
+  const fanOut = detectFanOut(cleaned, lowered);
+  if (fanOut) return fanOut;
 
   if (!hasPriorityTrigger(lowered)) {
     return { kind: "note", transcript: cleaned };
@@ -49,6 +58,45 @@ export function classifyVoiceIntent(transcript: string): VoiceIntent {
     delta: direction === "up" ? 250 : -250,
     target,
   };
+}
+
+const FAN_OUT_QUANTIFIERS = /\b(all|every|each|any)\b/;
+const FAN_OUT_PATTERNS = [
+  /\b(?:all|every|each|any)\s+(?:of\s+)?(?:the\s+)?(.+?)\s+(?:tasks?|papers?|threads?|agents?)\b\s*(?:should|need to|must|please|to)?\s*[:,]?\s*(.+)/i,
+  /\b(?:tell|let|inform|broadcast(?: to)?)\s+(?:all|every|each|any)\s+(?:of\s+)?(?:the\s+)?(.+?)\s+(?:tasks?|papers?|threads?|agents?)\s+(?:to|that)\s+(.+)/i,
+];
+
+function detectFanOut(original: string, lowered: string): VoiceIntent | undefined {
+  if (!FAN_OUT_QUANTIFIERS.test(lowered)) return undefined;
+  for (const pattern of FAN_OUT_PATTERNS) {
+    const match = original.match(pattern);
+    if (!match) continue;
+    const selectorText = (match[1] ?? "").trim();
+    const messageText = (match[2] ?? "").trim().replace(/[.!?,]+$/, "");
+    if (!selectorText || !messageText) continue;
+    return {
+      kind: "fan_out",
+      transcript: original.trim(),
+      selector: extractSelectorTokens(selectorText),
+      message: messageText,
+    };
+  }
+  return undefined;
+}
+
+const SELECTOR_STOP_WORDS = new Set([
+  "a", "an", "the", "of", "to", "for", "with", "and", "or",
+  "related", "about", "regarding", "concerning",
+]);
+
+function extractSelectorTokens(input: string): string {
+  return input
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !SELECTOR_STOP_WORDS.has(token))
+    .join(" ")
+    .trim();
 }
 
 function hasPriorityTrigger(lowered: string): boolean {

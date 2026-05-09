@@ -42,6 +42,27 @@ describe("classifyVoiceIntent", () => {
   });
 });
 
+describe("classifyVoiceIntent fan-out", () => {
+  it("classifies 'all email tasks should use new sign off' as fan_out", () => {
+    const intent = classifyVoiceIntent("all email tasks should use the new sign off");
+    if (intent.kind !== "fan_out") return assert.fail(`expected fan_out, got ${intent.kind}`);
+    assert.equal(intent.selector, "email");
+    assert.match(intent.message, /sign off/i);
+  });
+
+  it("classifies 'tell every blog launch task to pause for an hour'", () => {
+    const intent = classifyVoiceIntent("tell every blog launch task to pause for an hour");
+    if (intent.kind !== "fan_out") return assert.fail(`expected fan_out, got ${intent.kind}`);
+    assert.equal(intent.selector, "blog launch");
+    assert.match(intent.message, /pause for an hour/i);
+  });
+
+  it("falls through to note when fan-out pattern is missing message body", () => {
+    const intent = classifyVoiceIntent("all the email tasks");
+    assert.equal(intent.kind, "note");
+  });
+});
+
 describe("pickRerankCandidate", () => {
   const buildItem = (id: string, taskId: string, title: string): QueueItemWithPacket => ({
     id,

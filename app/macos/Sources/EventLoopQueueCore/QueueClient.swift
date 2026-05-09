@@ -21,7 +21,9 @@ public protocol QueueClient: Sendable {
     func approveOnboardingProposal(id: String, queuePaper: Bool) async throws -> OnboardingApprovalResult
     func fetchReadingQueue() async throws -> ReadingQueueListResult
     func promoteReadingQueueContexts(ids: [String]) async throws -> ReadingQueuePromoteResult
+    func autoPromoteReadingQueue(minAgeSeconds: Int) async throws -> ReadingQueuePromoteResult
     func bumpQueueItemPriority(packetId: String, delta: Int?, score: Int?, reason: String?) async throws -> QueueActionResult
+    func masterFanOut(message: String, taskHintSubstring: String?, taskIdPattern: String?, taskIds: [String], dryRun: Bool, idempotencyKey: String) async throws -> MasterFanOutResult
 }
 
 public extension QueueClient {
@@ -337,6 +339,33 @@ public struct HTTPQueueClient: QueueClient {
         return try decoder.decode(OnboardingApprovalResult.self, from: data)
     }
 
+    public func masterFanOut(
+        message: String,
+        taskHintSubstring: String? = nil,
+        taskIdPattern: String? = nil,
+        taskIds: [String] = [],
+        dryRun: Bool = false,
+        idempotencyKey: String
+    ) async throws -> MasterFanOutResult {
+        let url = baseURL.appending(path: "master/fan-out")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(MasterFanOutRequest(
+            message: message,
+            selector: MasterFanOutRequest.Selector(
+                taskIds: taskIds.isEmpty ? nil : taskIds,
+                taskHintSubstring: taskHintSubstring,
+                taskIdPattern: taskIdPattern
+            ),
+            dryRun: dryRun,
+            idempotencyKey: idempotencyKey
+        ))
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(MasterFanOutResult.self, from: data)
+    }
+
     public func bumpQueueItemPriority(packetId: String, delta: Int? = nil, score: Int? = nil, reason: String? = nil) async throws -> QueueActionResult {
         let url = baseURL.appending(path: "queue/\(packetId)/priority")
         var request = URLRequest(url: url)
@@ -369,6 +398,17 @@ public struct HTTPQueueClient: QueueClient {
             contextIds: ids.isEmpty ? nil : ids,
             actorId: "mac_queue_app"
         ))
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(ReadingQueuePromoteResult.self, from: data)
+    }
+
+    public func autoPromoteReadingQueue(minAgeSeconds: Int) async throws -> ReadingQueuePromoteResult {
+        let url = baseURL.appending(path: "reading-queue/auto-promote")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(["min_age_seconds": minAgeSeconds])
         let (data, response) = try await session.data(for: request)
         try validate(response: response)
         return try decoder.decode(ReadingQueuePromoteResult.self, from: data)
@@ -537,6 +577,39 @@ private struct ReadingQueuePromoteRequest: Encodable {
     enum CodingKeys: String, CodingKey {
         case contextIds = "context_ids"
         case actorId = "actor_id"
+    }
+}
+
+private struct MasterFanOutRequest: Encodable {
+    let message: String
+    let selector: Selector
+    let dryRun: Bool
+    let idempotencyKey: String
+
+    struct Selector: Encodable {
+        let taskIds: [String]?
+        let taskHintSubstring: String?
+        let taskIdPattern: String?
+
+        enum CodingKeys: String, CodingKey {
+            case taskIds = "task_ids"
+            case taskHintSubstring = "task_hint_substring"
+            case taskIdPattern = "task_id_pattern"
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            if let taskIds, !taskIds.isEmpty { try container.encode(taskIds, forKey: .taskIds) }
+            if let taskHintSubstring { try container.encode(taskHintSubstring, forKey: .taskHintSubstring) }
+            if let taskIdPattern { try container.encode(taskIdPattern, forKey: .taskIdPattern) }
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case message
+        case selector
+        case dryRun = "dry_run"
+        case idempotencyKey = "idempotency_key"
     }
 }
 
@@ -1101,6 +1174,67 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         }
     }
 
+    public func masterFanOut(
+        message: String,
+        taskHintSubstring: String? = nil,
+        taskIdPattern: String? = nil,
+        taskIds: [String] = [],
+        dryRun: Bool = false,
+        idempotencyKey: String
+    ) async throws -> MasterFanOutResult {
+        lock.withLock {
+            let allTaskIds = Set(taskSessions.compactMap { $0.taskId })
+            var matchedTaskIds: Set<String> = []
+            if !taskIds.isEmpty {
+                for id in taskIds where allTaskIds.contains(id) { matchedTaskIds.insert(id) }
+            }
+            if let needle = taskHintSubstring?.lowercased() {
+                for id in allTaskIds where id.lowercased().contains(needle) { matchedTaskIds.insert(id) }
+            }
+            if let pattern = taskIdPattern, let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) {
+                for id in allTaskIds where regex.firstMatch(in: id, range: NSRange(id.startIndex..., in: id)) != nil {
+                    matchedTaskIds.insert(id)
+                }
+            }
+            let matches = matchedTaskIds.sorted().map { taskId -> MasterFanOutMatch in
+                let session = taskSessions.first(where: { $0.taskId == taskId })
+                return MasterFanOutMatch(taskId: taskId, taskSessionId: session?.id)
+            }
+            if dryRun {
+                return MasterFanOutResult(
+                    ok: true,
+                    dryRun: true,
+                    matchedCount: matches.count,
+                    deliveredCount: 0,
+                    preview: matches,
+                    delivered: [],
+                    skipped: [],
+                    fanOutId: nil
+                )
+            }
+            var delivered: [MasterFanOutDelivery] = []
+            var skipped: [MasterFanOutSkip] = []
+            for match in matches {
+                if let sessionId = match.taskSessionId {
+                    delivered.append(MasterFanOutDelivery(taskId: match.taskId, taskSessionId: sessionId))
+                    masterCommands.append((text: message, taskHint: match.taskId))
+                } else {
+                    skipped.append(MasterFanOutSkip(taskId: match.taskId, reason: "no_bound_session"))
+                }
+            }
+            return MasterFanOutResult(
+                ok: true,
+                dryRun: false,
+                matchedCount: matches.count,
+                deliveredCount: delivered.count,
+                preview: matches,
+                delivered: delivered,
+                skipped: skipped,
+                fanOutId: "fake_fan_\(idempotencyKey)"
+            )
+        }
+    }
+
     public func bumpQueueItemPriority(packetId: String, delta: Int? = nil, score: Int? = nil, reason: String? = nil) async throws -> QueueActionResult {
         try lock.withLock {
             guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
@@ -1154,6 +1288,11 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
                 requestId: nil
             )
         }
+    }
+
+    public func autoPromoteReadingQueue(minAgeSeconds: Int) async throws -> ReadingQueuePromoteResult {
+        // Fake stub: same as promoting all unbound. Tests can layer behavior on top.
+        return try await promoteReadingQueueContexts(ids: [])
     }
 
     public func promoteReadingQueueContexts(ids: [String]) async throws -> ReadingQueuePromoteResult {

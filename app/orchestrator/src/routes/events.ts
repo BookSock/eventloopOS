@@ -52,6 +52,36 @@ export async function handleEventsRoute(input: {
 
     const transcriptValue = isRecord(parsed.value) && typeof parsed.value.transcript === "string" ? parsed.value.transcript : "";
     const intent = classifyVoiceIntent(transcriptValue);
+    if (intent.kind === "fan_out") {
+      await input.observability.incrementCounter("voice_fan_out_detected_total");
+      await input.observability.recordActivity({
+        type: "voice_fan_out_detected",
+        occurred_at: input.now.toISOString(),
+        actor: "human",
+        status: "ok",
+        summary: `Voice fan-out detected for selector "${intent.selector}".`,
+        details: sanitizeActivityDetails({
+          transcript: intent.transcript,
+          selector: intent.selector,
+          message_preview: intent.message.slice(0, 80),
+        }),
+      });
+      return ok(200, {
+        ok: true,
+        intent: "fan_out",
+        selector: intent.selector,
+        message: intent.message,
+        next_action: {
+          method: "POST",
+          path: "/master/fan-out",
+          body: {
+            message: intent.message,
+            selector: { task_hint_substring: intent.selector },
+          },
+        },
+        request_id: input.requestId,
+      });
+    }
     if (intent.kind === "rerank") {
       const queue = await input.store.listQueue("ready", input.now);
       const match = pickRerankCandidate(intent, queue);

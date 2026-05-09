@@ -3962,6 +3962,133 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("triggers terminal keystroke when bound session has terminal_ref", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const taskSessions = new DevelopmentTaskSessionController({ clock: () => new Date("2026-05-06T17:00:00.000Z") });
+    const session = taskSessions.seedSession({ id: "task_session_blog_term", task_id: "task_blog_feedback" });
+    void session;
+    taskSessions.bindTaskSession({ task_session_id: "task_session_blog_term", task_id: "task_blog_feedback", terminal_ref: "ghostty:front" });
+
+    const executorCalls: Array<{ file: string; args: string[] }> = [];
+    const termServer = createGatewayServer({
+      store,
+      taskSessions,
+      terminalSendExecutor: async (command) => { executorCalls.push(command); },
+      terminalSendEnabled: true,
+      now: () => new Date("2026-05-06T18:00:00.000Z"),
+    });
+    await new Promise<void>((resolve) => termServer.listen(0, "127.0.0.1", resolve));
+    const address = termServer.address() as AddressInfo;
+    const termBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const event = {
+        id: "evt_term_blog_action",
+        source: "manual",
+        source_id: "manual:term-blog-action",
+        idempotency_key: "manual:term-blog-action",
+        occurred_at: "2026-05-06T17:59:00.000Z",
+        received_at: "2026-05-06T18:00:00.000Z",
+        actor: { id: "user_jason", type: "human" },
+        task_hint: "blog feedback",
+        type: "manual.review_requested",
+        title: "Review blog launch tweet",
+        summary: "Decide on launch tweet copy with new sign off.",
+        raw_ref: { id: "raw_term_blog_action", uri: "manual://term-blog", media_type: "text/plain" },
+        links: [],
+        resources: [],
+      };
+      const eventResponse = await fetch(`${termBaseUrl}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ event }),
+      });
+      const eventBody = await eventResponse.json() as { queue_item: { id: string } };
+      assert.equal(eventResponse.status, 202);
+
+      const actionResponse = await fetch(`${termBaseUrl}/queue/${eventBody.queue_item.id}/actions/recommended`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ actor_id: "mac_queue_app" }),
+      });
+      assert.equal(actionResponse.status, 200);
+      const actionBody = await actionResponse.json() as {
+        action_result: {
+          terminal_send: { ok: boolean; transport?: string; commandCount?: number; reason?: string };
+        };
+      };
+      assert.equal(actionBody.action_result.terminal_send.ok, true);
+      assert.equal(actionBody.action_result.terminal_send.transport, "ghostty");
+      assert.ok(executorCalls.length >= 1);
+      assert.equal(executorCalls[0].file, "osascript");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        termServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("skips terminal keystroke when terminalSendEnabled is false", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const taskSessions = new DevelopmentTaskSessionController({ clock: () => new Date("2026-05-06T17:00:00.000Z") });
+    taskSessions.seedSession({ id: "task_session_killswitch", task_id: "task_blog_feedback" });
+    taskSessions.bindTaskSession({ task_session_id: "task_session_killswitch", task_id: "task_blog_feedback", terminal_ref: "ghostty:front" });
+
+    const executorCalls: Array<{ file: string; args: string[] }> = [];
+    const killServer = createGatewayServer({
+      store,
+      taskSessions,
+      terminalSendExecutor: async (command) => { executorCalls.push(command); },
+      terminalSendEnabled: false,
+      now: () => new Date("2026-05-06T18:00:00.000Z"),
+    });
+    await new Promise<void>((resolve) => killServer.listen(0, "127.0.0.1", resolve));
+    const address = killServer.address() as AddressInfo;
+    const killBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const event = {
+        id: "evt_killswitch_blog_action",
+        source: "manual",
+        source_id: "manual:killswitch-blog",
+        idempotency_key: "manual:killswitch-blog",
+        occurred_at: "2026-05-06T17:59:00.000Z",
+        received_at: "2026-05-06T18:00:00.000Z",
+        actor: { id: "user_jason", type: "human" },
+        task_hint: "blog feedback",
+        type: "manual.review_requested",
+        title: "Review",
+        summary: "Body",
+        raw_ref: { id: "raw_killswitch", uri: "manual://k", media_type: "text/plain" },
+        links: [],
+        resources: [],
+      };
+      const eventResponse = await fetch(`${killBaseUrl}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ event }),
+      });
+      const eventBody = await eventResponse.json() as { queue_item: { id: string } };
+
+      const actionResponse = await fetch(`${killBaseUrl}/queue/${eventBody.queue_item.id}/actions/recommended`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ actor_id: "mac_queue_app" }),
+      });
+      const actionBody = await actionResponse.json() as {
+        action_result: { terminal_send: { ok: boolean; reason?: string } };
+      };
+      assert.equal(actionResponse.status, 200);
+      assert.equal(actionBody.action_result.terminal_send.ok, false);
+      assert.equal(actionBody.action_result.terminal_send.reason, "disabled");
+      assert.equal(executorCalls.length, 0);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        killServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("normalizes voice commands into task-session followups", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const messages = new Map<string, Record<string, unknown>>();
