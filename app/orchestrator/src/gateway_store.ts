@@ -60,6 +60,7 @@ import {
   type TaskWorkspaceSnapshotRecord,
   type OnboardingRejectionRecord,
   type OnboardingApprovalBatchRecord,
+  type ManualModeStateRecord,
 } from "./store.js";
 import { eventToRecord } from "./db/postgres_queue_store.js";
 
@@ -143,6 +144,8 @@ export type GatewayStore = {
     results: Array<Record<string, unknown>>;
     now: Date;
   }): Promise<OnboardingApprovalBatchRecord>;
+  getManualModeState(): Promise<ManualModeStateRecord>;
+  setManualModeActive(active: boolean, reason: string | undefined, now: Date): Promise<ManualModeStateRecord>;
 };
 
 export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
@@ -154,6 +157,7 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   const taskSessionTerminalRefs = store.taskSessionTerminalRefs ?? new Map<string, TaskSessionTerminalRefRecord>();
   const onboardingRejections = store.onboardingRejections ?? new Map<string, OnboardingRejectionRecord>();
   const onboardingApprovalBatches = store.onboardingApprovalBatches ?? new Map<string, OnboardingApprovalBatchRecord>();
+  const manualModeState = store.manualModeState ?? { value: { active: false, updated_at: new Date(0).toISOString() } as ManualModeStateRecord };
   store.workspaceRestoreReceipts = workspaceRestoreReceipts;
   store.mcpPollStates = mcpPollStates;
   store.taskMessagesByIdempotencyKey = taskMessagesByIdempotencyKey;
@@ -162,6 +166,7 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   store.taskSessionTerminalRefs = taskSessionTerminalRefs;
   store.onboardingRejections = onboardingRejections;
   store.onboardingApprovalBatches = onboardingApprovalBatches;
+  store.manualModeState = manualModeState;
 
   const snapshotForTask = async (taskId: string) => getLatestTaskWorkspaceSnapshot(store, taskId);
   const contextEntriesForTask = async (taskId: string) => listContextEntries(store, { task_id: taskId, limit: 8 });
@@ -409,6 +414,27 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
       onboardingApprovalBatches.set(record.idempotency_key, record);
       return record;
     },
+    async getManualModeState() {
+      return { ...manualModeState.value };
+    },
+    async setManualModeActive(active, reason, now) {
+      const previous = manualModeState.value;
+      const timestamp = now.toISOString();
+      if (active) {
+        manualModeState.value = {
+          active: true,
+          entered_at: previous.active && previous.entered_at ? previous.entered_at : timestamp,
+          reason: reason ?? previous.reason,
+          updated_at: timestamp,
+        };
+      } else {
+        manualModeState.value = {
+          active: false,
+          updated_at: timestamp,
+        };
+      }
+      return { ...manualModeState.value };
+    },
   };
 }
 
@@ -576,6 +602,12 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async recordOnboardingApprovalBatch(input) {
       return store.recordOnboardingApprovalBatch(input);
+    },
+    async getManualModeState() {
+      return store.getManualModeState();
+    },
+    async setManualModeActive(active, reason, now) {
+      return store.setManualModeActive(active, reason, now);
     },
   };
 }

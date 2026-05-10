@@ -74,6 +74,7 @@ export function routeNameForPath(method: string | undefined, pathname: string): 
     [/^\/events\/[^/]+$/, "event_get"],
     [/^\/voice\/commands$/, "voice_commands"],
     [/^\/master\/fan-out$/, "master_fan_out"],
+    [/^\/modes\/manual$/, "modes_manual"],
     [/^\/agents\/codex\/auto-bind$/, "agents_codex_auto_bind"],
     [/^\/agents\/codex\/inspect\/[^/]+$/, "agents_codex_inspect"],
     [/^\/agents\/claude\/inspect\/[^/]+$/, "agents_claude_inspect"],

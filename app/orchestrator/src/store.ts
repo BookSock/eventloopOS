@@ -86,6 +86,14 @@ export type InMemoryStore = {
   taskSessionTerminalRefs?: Map<string, TaskSessionTerminalRefRecord>;
   onboardingRejections?: Map<string, OnboardingRejectionRecord>;
   onboardingApprovalBatches?: Map<string, OnboardingApprovalBatchRecord>;
+  manualModeState?: { value: ManualModeStateRecord };
+};
+
+export type ManualModeStateRecord = {
+  active: boolean;
+  entered_at?: string;
+  reason?: string;
+  updated_at: string;
 };
 
 export type TaskSessionTerminalRefRecord = {

@@ -1,6 +1,7 @@
 import { autoBindCodexFromWindows } from "../agents/codex/auto_bind.js";
 import { inspectCodexSession } from "../agents/codex/session_inspector.js";
 import { inspectClaudeSession } from "../agents/claude/session_inspector.js";
+import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
 import type { Runtime } from "../runtime.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
@@ -13,8 +14,35 @@ export async function handleAgentsRoute(input: {
   now: Date;
   requestId: string;
 }): Promise<RouteResult | undefined> {
-  const { workspace, taskSessions, observability } = input.runtime;
+  const { store, workspace, taskSessions, observability } = input.runtime;
   if (input.method === "POST" && input.pathname === "/agents/codex/auto-bind") {
+    const manualMode = await store.getManualModeState();
+    if (manualMode.active) {
+      await observability.recordActivity({
+        type: "codex_auto_bind_skipped",
+        occurred_at: input.now.toISOString(),
+        actor: "system",
+        status: "ok",
+        summary: "Auto-bind tick skipped: manual mode active.",
+        details: sanitizeActivityDetails({
+          paused: true,
+          reason: "paused: manual mode",
+          manual_mode_entered_at: manualMode.entered_at,
+        }),
+      });
+      return ok(200, {
+        ok: true,
+        paused: true,
+        reason: "manual_mode_active",
+        manual_mode: manualMode,
+        scanned_window_count: 0,
+        matched_count: 0,
+        bound: [],
+        skipped: [],
+        request_id: input.requestId,
+      });
+    }
+
     const result = await autoBindCodexFromWindows({
       workspace,
       taskSessions,

@@ -38,6 +38,7 @@ import {
   type TaskWorkspaceSnapshotRecord,
   type OnboardingRejectionRecord,
   type OnboardingApprovalBatchRecord,
+  type ManualModeStateRecord,
 } from "../store.js";
 import { stableId } from "../store/ids.js";
 import { runMigrations } from "./migrations.js";
@@ -547,6 +548,55 @@ export class PostgresQueueStore {
     const fetched = await this.getOnboardingApprovalBatch(input.idempotencyKey);
     if (!fetched) throw new Error(`failed to record onboarding approval batch ${input.idempotencyKey}`);
     return fetched;
+  }
+
+  async getManualModeState(): Promise<ManualModeStateRecord> {
+    const result = await this.pool.query(
+      `SELECT active, entered_at, reason, updated_at FROM manual_mode_state WHERE id = 'singleton'`,
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return { active: false, updated_at: new Date(0).toISOString() };
+    }
+    return rowToManualModeStateRecord(row);
+  }
+
+  async setManualModeActive(
+    active: boolean,
+    reason: string | undefined,
+    now: Date,
+  ): Promise<ManualModeStateRecord> {
+    const timestamp = now.toISOString();
+    if (active) {
+      const result = await this.pool.query(
+        `
+          INSERT INTO manual_mode_state (id, active, entered_at, reason, updated_at)
+          VALUES ('singleton', true, $1::timestamptz, $2, $1::timestamptz)
+          ON CONFLICT (id) DO UPDATE
+            SET active = true,
+                entered_at = CASE WHEN manual_mode_state.active THEN manual_mode_state.entered_at ELSE EXCLUDED.entered_at END,
+                reason = COALESCE(EXCLUDED.reason, manual_mode_state.reason),
+                updated_at = EXCLUDED.updated_at
+          RETURNING active, entered_at, reason, updated_at
+        `,
+        [timestamp, reason ?? null],
+      );
+      return rowToManualModeStateRecord(result.rows[0]);
+    }
+    const result = await this.pool.query(
+      `
+        INSERT INTO manual_mode_state (id, active, entered_at, reason, updated_at)
+        VALUES ('singleton', false, NULL, NULL, $1::timestamptz)
+        ON CONFLICT (id) DO UPDATE
+          SET active = false,
+              entered_at = NULL,
+              reason = NULL,
+              updated_at = EXCLUDED.updated_at
+        RETURNING active, entered_at, reason, updated_at
+      `,
+      [timestamp],
+    );
+    return rowToManualModeStateRecord(result.rows[0]);
   }
 
   async recordWorkspaceRestoreReceipt(input: {
@@ -1651,6 +1701,22 @@ function rowToOnboardingApprovalBatchRecord(row: Record<string, unknown>): Onboa
     idempotency_key: String(row.idempotency_key),
     results: (row.results ?? []) as Array<Record<string, unknown>>,
     created_at: requiredDateToIso(row.created_at),
+  };
+}
+
+function rowToManualModeStateRecord(row: Record<string, unknown>): ManualModeStateRecord {
+  const active = Boolean(row.active);
+  const enteredAt = row.entered_at;
+  const reason = row.reason;
+  return {
+    active,
+    entered_at: enteredAt instanceof Date
+      ? enteredAt.toISOString()
+      : typeof enteredAt === "string" && enteredAt
+        ? new Date(enteredAt).toISOString()
+        : undefined,
+    reason: typeof reason === "string" && reason ? reason : undefined,
+    updated_at: requiredDateToIso(row.updated_at),
   };
 }
 

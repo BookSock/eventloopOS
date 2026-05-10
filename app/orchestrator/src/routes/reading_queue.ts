@@ -32,6 +32,34 @@ export async function handleReadingQueueRoute(input: {
     const validation = validateAutoPromoteRequest(parsed.value);
     if (!validation.ok) return schemaError(validation.message);
 
+    const manualMode = await store.getManualModeState();
+    if (manualMode.active) {
+      await observability?.recordActivity({
+        type: "reading_queue_auto_promoted",
+        occurred_at: input.now.toISOString(),
+        actor: "system",
+        task_id: READING_QUEUE_TASK_ID,
+        status: "ok",
+        summary: "Auto-promote tick skipped: manual mode active.",
+        details: sanitizeActivityDetails({
+          paused: true,
+          reason: "paused: manual mode",
+          manual_mode_entered_at: manualMode.entered_at,
+        }),
+      });
+      return ok(200, {
+        ok: true,
+        paused: true,
+        reason: "manual_mode_active",
+        manual_mode: manualMode,
+        evaluated_count: 0,
+        aged_count: 0,
+        promoted_count: 0,
+        promoted: [],
+        request_id: input.requestId,
+      });
+    }
+
     const allUnbound = await listUnboundBrowserContexts(store);
     const ageThreshold = input.now.getTime() - validation.minAgeSeconds * 1000;
     const aged = allUnbound.filter((entry) => {

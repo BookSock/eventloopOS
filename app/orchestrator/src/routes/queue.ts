@@ -55,6 +55,13 @@ export async function handleQueueRoute(input: {
     const validation = parseQueueLeaseRequest(parsed.value, false);
     if (!validation.ok) return schemaError(validation.message);
 
+    const manualMode = await store.getManualModeState();
+    if (manualMode.active) {
+      return error(409, "manual_mode_active", "queue is paused while manual mode is active", {
+        manual_mode: manualMode,
+      });
+    }
+
     return ok(200, {
       item: await store.leaseNextQueueItem(validation.leaseOwner, input.now, validation.leaseMs, validation.excludeQueueItemId) ?? null,
       request_id: input.requestId,

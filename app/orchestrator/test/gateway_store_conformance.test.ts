@@ -588,6 +588,44 @@ function runGatewayStoreContract(
       }
     });
 
+    it("toggles manual-mode singleton state consistently", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        const initial = await harness.store.getManualModeState();
+        assert.equal(initial.active, false);
+        assert.equal(initial.entered_at, undefined);
+
+        const activated = await harness.store.setManualModeActive(true, "personal email", now);
+        assert.equal(activated.active, true);
+        assert.equal(activated.entered_at, createdAt);
+        assert.equal(activated.reason, "personal email");
+
+        // Re-activating preserves entered_at (idempotent enter).
+        const reactivated = await harness.store.setManualModeActive(true, "still working", new Date("2026-05-06T12:05:00.000Z"));
+        assert.equal(reactivated.active, true);
+        assert.equal(reactivated.entered_at, createdAt, "entered_at should pin to first activation");
+        assert.equal(reactivated.reason, "still working");
+
+        const fetched = await harness.store.getManualModeState();
+        assert.equal(fetched.active, true);
+        assert.equal(fetched.entered_at, createdAt);
+
+        const deactivated = await harness.store.setManualModeActive(false, undefined, new Date("2026-05-06T12:10:00.000Z"));
+        assert.equal(deactivated.active, false);
+        assert.equal(deactivated.entered_at, undefined);
+        assert.equal(deactivated.reason, undefined);
+
+        // Re-entering after deactivation captures a fresh entered_at.
+        const reentered = await harness.store.setManualModeActive(true, "second pass", new Date("2026-05-06T12:15:00.000Z"));
+        assert.equal(reentered.active, true);
+        assert.equal(reentered.entered_at, "2026-05-06T12:15:00.000Z");
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     it("dedupes and finalizes task message history consistently", async (t) => {
       const harness = await createHarness(t);
       if (!harness) return;
@@ -813,7 +851,8 @@ async function clearPostgresTestData(store: PostgresQueueStore): Promise<void> {
       queue_action_attempts,
       task_session_terminal_refs,
       onboarding_rejections,
-      onboarding_approval_batches
+      onboarding_approval_batches,
+      manual_mode_state
     RESTART IDENTITY CASCADE
   `);
 }

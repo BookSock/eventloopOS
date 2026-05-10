@@ -12,6 +12,7 @@ import { handleActivityRoute, handleMetricsRoute } from "./routes/observability.
 import { handleOnboardingRoute } from "./routes/onboarding.js";
 import { handleAgentsRoute } from "./routes/agents.js";
 import { handleMasterRoute } from "./routes/master.js";
+import { handleModesRoute } from "./routes/modes.js";
 import { handleQueueRoute } from "./routes/queue.js";
 import { handleReadingQueueRoute } from "./routes/reading_queue.js";
 import { handleTaskSessionsRoute } from "./routes/task_sessions.js";
@@ -181,6 +182,25 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           observability,
           routeNameForPath(request.method, context.url.pathname) ?? "master",
           masterRoute,
+          startedAt,
+        );
+      }
+
+      const modesRoute = await handleModesRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        readJsonBody: () => readJsonBody(request),
+        runtime,
+        now: now(),
+        requestId: context.requestId,
+      });
+      if (modesRoute) {
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "modes",
+          modesRoute,
           startedAt,
         );
       }

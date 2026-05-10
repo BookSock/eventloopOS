@@ -19,6 +19,7 @@ describe("Postgres migrations", () => {
       "0009_queue_action_attempts.sql",
       "0010_task_session_terminal_refs.sql",
       "0011_onboarding_rejections.sql",
+      "0012_manual_mode_state.sql",
     ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
