@@ -161,6 +161,10 @@ This codebase is built for the user persona that already operates this way. So t
 - Live-proof binaries should skip cleanly when their hardware/tools are missing, with a clear message — not silently pass.
 - When work hits the human/hardware ceiling (real Ghostty, real microphone, real desktop), say so explicitly. Don't pretend a substitute proof completes the literal verify item.
 
+## What's actually wired
+
+This file is the *belief system*. [`guardrails.md`](./guardrails.md) is the *current ledger* of which beliefs are encoded as tooling vs still aspirational. When you read a principle here and want to know whether the repo enforces it today, check that file first.
+
 ## The honest read
 
 There is real leverage available. The "tiny team, hundreds of engineers worth of output" rhetoric is overstated; ~10× for strong engineers is closer to ground truth. The way to get there is not "stop reviewing code." It is **turning review, testing, cleanup, and codebase hygiene into increasingly automated systems** so humans spend less time reading diffs and more time steering the product.

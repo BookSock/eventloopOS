@@ -1,0 +1,62 @@
+name: AI Review Template
+
+on:
+  pull_request:
+    types: [labeled]
+
+jobs:
+  template-review:
+    if: github.event.label.name == 'needs-ai-review'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute diff stats
+        id: diff
+        run: |
+          git fetch origin ${{ github.base_ref }} --depth=1 || true
+          base_sha=$(git rev-parse origin/${{ github.base_ref }} 2>/dev/null || git rev-parse HEAD~1)
+          changed=$(git diff --name-only "$base_sha"...HEAD | wc -l | tr -d ' ')
+          adds=$(git diff --shortstat "$base_sha"...HEAD | grep -oE '[0-9]+ insertion' | grep -oE '[0-9]+' || echo 0)
+          dels=$(git diff --shortstat "$base_sha"...HEAD | grep -oE '[0-9]+ deletion' | grep -oE '[0-9]+' || echo 0)
+          echo "files=$changed" >> "$GITHUB_OUTPUT"
+          echo "adds=${adds:-0}" >> "$GITHUB_OUTPUT"
+          echo "dels=${dels:-0}" >> "$GITHUB_OUTPUT"
+
+      - name: Post review checklist
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const files = "${{ steps.diff.outputs.files }}";
+            const adds = "${{ steps.diff.outputs.adds }}";
+            const dels = "${{ steps.diff.outputs.dels }}";
+            const body = [
+              "## AI-review checklist",
+              "",
+              `Diff: **${files}** files changed, **+${adds} / -${dels}** lines.`,
+              "",
+              "This is a templated reminder, not a paid AI pass. Per `docs/ai-engineering-principles.md`:",
+              "",
+              "- **Architecture & approach**: is this the right shape, or did the diff inflate complexity?",
+              "- **Reuse**: any near-duplicates of existing components/utilities being introduced?",
+              "- **Diff size**: would a 200-line version do what this 2,000-line version does?",
+              "- **Behavioral drift**: passing tests but subtle changes in semantics?",
+              "- **Security & data correctness**: secrets, auth, idempotency, SQL, PII handling.",
+              "- **Complex product logic**: queue ordering, restore plans, master-mode pause, voice intents.",
+              "- **Guardrail coverage**: would a recurring AI mistake here be caught by lint / typecheck / gitleaks / a smoke proof?",
+              "",
+              "Automated checks (lint, typecheck, tests, secret scan) run separately on this PR — see the Checks tab.",
+              "",
+              "If this comment was unnecessary, remove the `needs-ai-review` label.",
+            ].join("\n");
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });

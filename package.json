@@ -85,10 +85,14 @@
     "packets:golden": "pnpm --filter @eventloopos/test-harness --if-present packets:golden",
     "lint": "pnpm -r --if-present lint",
     "typecheck": "node --check bin/live-smoke && node --check bin/dev-dogfood && node --check bin/proof-agent && node --check bin/task-runtime-smoke && node --check bin/postgres-mcp-dogfood-smoke && node --check bin/claude-real-followup-smoke && node --check bin/provider-deeplink-smoke && node --check bin/agent-run-cli-smoke && node --check bin/event-loop-proof-smoke && node --check bin/event-loop-postgres-proof-smoke && node --check bin/event-loop-codex-proof-smoke && node --check bin/event-loop-codex-completion-workspace-proof-smoke && node --check bin/workspace-task-switch-proof-smoke && node --check bin/task-workspace-memory-proof-smoke && node --check bin/master-priority-proof-smoke && node --check bin/onboarding-live-proof-smoke && node --check bin/mvp-proof-audit && node --check bin/fresh-clone-proof-smoke && zsh -n bin/ghostty-codex-remote && pnpm -r --if-present typecheck",
-    "ci": "pnpm test:proof-agent && pnpm proof:agent"
+    "ci": "pnpm test:proof-agent && pnpm proof:agent",
+    "prepare": "lefthook install || true",
+    "hooks:install": "lefthook install",
+    "hooks:run": "lefthook run pre-commit"
   },
   "devDependencies": {
     "@types/node": "^24.10.2",
+    "lefthook": "^1.7.22",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.15"

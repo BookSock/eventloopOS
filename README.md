@@ -1,8 +1,11 @@
 # eventloopOS
 
+[![CI](https://github.com/BookSock/eventloopOS/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/BookSock/eventloopOS/actions/workflows/ci.yml)
+[![Secret Scan](https://github.com/BookSock/eventloopOS/actions/workflows/secret-scan.yml/badge.svg?branch=main)](https://github.com/BookSock/eventloopOS/actions/workflows/secret-scan.yml)
+
 eventloopOS turns your Mac into an attention scheduler for agent-heavy work: a single ranked queue of "papers" that need a human, where pulling a paper restores its full workspace (windows, Codex thread, Chrome tabs, source thread) so the decision takes seconds instead of minutes of context-hunting. It is built for people running many parallel coding/email/research agents who feel review bandwidth — not agent execution — as the bottleneck.
 
-> **Status:** pre-1.0. Working dogfood for solo dev use. Many surfaces still need real-world verification — see [TODO.md](./TODO.md). Not production-ready.
+> **Status:** pre-1.0. Working dogfood for solo dev use. Many surfaces still need real-world verification — see [TODO.md](./TODO.md). Not production-ready. Engineering guardrails: see [docs/guardrails.md](./docs/guardrails.md).
 
 ## Vision
 

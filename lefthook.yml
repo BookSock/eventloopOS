@@ -1,0 +1,25 @@
+pre-commit:
+  parallel: true
+  commands:
+    lint:
+      glob: "*.{ts,tsx,js,mjs,cjs,jsx}"
+      run: pnpm lint
+    typecheck:
+      glob: "*.{ts,tsx}"
+      run: pnpm typecheck
+    gitleaks:
+      run: gitleaks protect --staged --no-banner --redact
+      fail_text: |
+        gitleaks found a potential secret in staged changes.
+        Inspect the diff, scrub the secret, and re-commit.
+        If this is a known false positive, allow-list it in .gitleaks.toml.
+    file-size:
+      run: node scripts/guard-file-size.mjs {staged_files}
+    newline-eof:
+      glob: "*.{ts,tsx,js,mjs,cjs,jsx,swift,py,rb,sh,bash,zsh,html,css,json,jsonc,yml,yaml,toml,md,sql}"
+      run: node scripts/guard-newline-eof.mjs {staged_files}
+
+commit-msg:
+  commands:
+    no-secrets:
+      run: gitleaks protect --staged --no-banner --redact
