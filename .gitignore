@@ -34,6 +34,7 @@ artifacts/event-loop-codex-completion-workspace/*
 artifacts/workspace-task-switch/*
 artifacts/task-workspace-memory/*
 artifacts/master-priority/*
+artifacts/terminal-send-live/*
 artifacts/onboarding-live/*
 artifacts/mvp-audit/*
 artifacts/fresh-clone/*
@@ -45,5 +46,6 @@ artifacts/proof-live-isolated-manifest.json
 artifacts/proof-live-workspace-switch-manifest.json
 artifacts/proof-live-task-workspace-memory-manifest.json
 artifacts/proof-master-priority-manifest.json
+artifacts/proof-live-terminal-send-manifest.json
 artifacts/proof-live-onboarding-manifest.json
 !artifacts/**/.gitkeep

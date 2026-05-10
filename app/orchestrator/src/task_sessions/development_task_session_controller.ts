@@ -13,6 +13,7 @@ export type DevelopmentTaskSession = {
   last_seen_at: string;
   created_at: string;
   updated_at: string;
+  terminal_ref?: string;
 };
 
 export type DevelopmentTaskMessage = {
@@ -52,7 +53,7 @@ export class DevelopmentTaskSessionController {
     this.clock = clock;
   }
 
-  seedSession(input: { id: string; task_id?: string; status?: DevelopmentTaskSession["status"] }): DevelopmentTaskSession {
+  seedSession(input: { id: string; task_id?: string; status?: DevelopmentTaskSession["status"]; terminal_ref?: string }): DevelopmentTaskSession {
     const now = this.clock().toISOString();
     const session: DevelopmentTaskSession = {
       id: input.id,
@@ -69,6 +70,7 @@ export class DevelopmentTaskSessionController {
       last_seen_at: now,
       created_at: now,
       updated_at: now,
+      ...(input.terminal_ref !== undefined ? { terminal_ref: input.terminal_ref } : {}),
     };
     this.sessions.set(session.id, session);
     return session;

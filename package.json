@@ -47,6 +47,7 @@
     "proof:live:isolated": "EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"isolated AeroSpace workspace proof\",\"cmd\":\"pnpm\",\"args\":[\"--filter\",\"@eventloopos/orchestrator\",\"run\",\"live:aerospace:isolated\"]}]' bin/proof-agent --manifest artifacts/proof-live-isolated-manifest.json",
     "proof:live:workspace-switch": "EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"isolated workspace task switch proof\",\"cmd\":\"node\",\"args\":[\"bin/workspace-task-switch-proof-smoke\"]}]' bin/proof-agent --manifest artifacts/proof-live-workspace-switch-manifest.json",
     "proof:live:task-workspace-memory": "EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"task workspace memory proof\",\"cmd\":\"node\",\"args\":[\"bin/task-workspace-memory-proof-smoke\"]}]' bin/proof-agent --manifest artifacts/proof-live-task-workspace-memory-manifest.json",
+    "proof:live:terminal-send": "EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"terminal send live proof\",\"cmd\":\"node\",\"args\":[\"bin/terminal-send-live-proof-smoke\"]}]' bin/proof-agent --manifest artifacts/proof-live-terminal-send-manifest.json",
     "proof:master-priority": "EVENTLOOPOS_PROOF_COMMANDS='[{\"name\":\"master priority queue proof\",\"cmd\":\"node\",\"args\":[\"bin/master-priority-proof-smoke\"]}]' bin/proof-agent --manifest artifacts/proof-master-priority-manifest.json",
     "proof:fresh-clone": "node bin/fresh-clone-proof-smoke",
     "proof:audit": "node bin/mvp-proof-audit",

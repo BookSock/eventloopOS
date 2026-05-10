@@ -1,0 +1,291 @@
+#!/usr/bin/env node
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { createServer } from "node:net";
+
+const startedAt = new Date();
+const runId = `${startedAt.toISOString().replace(/[:.]/g, "-")}-${process.pid}`;
+const repoRoot = process.cwd();
+const artifactDir = resolve(
+  repoRoot,
+  process.env.EVENTLOOPOS_TERMINAL_SEND_LIVE_ARTIFACT_DIR ?? `artifacts/terminal-send-live/${runId}`,
+);
+const manifestPath = resolve(artifactDir, "manifest.json");
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.terminal_send_live_proof",
+  run_id: runId,
+  started_at: startedAt.toISOString(),
+  finished_at: undefined,
+  duration_ms: undefined,
+  artifact_dir: artifactDir,
+  orchestrator_url: undefined,
+  tmux_session: undefined,
+  marker: undefined,
+  steps: [],
+  passed: false,
+};
+
+const execFilePromise = promisify(execFile);
+
+let server;
+let port;
+let tmuxSession;
+
+mkdirSync(dirname(manifestPath), { recursive: true });
+writeManifest();
+
+try {
+  await step("verify tmux is installed", async () => {
+    await runChecked("tmux", ["-V"]);
+  });
+
+  port = await freePort();
+  manifest.orchestrator_url = `http://127.0.0.1:${port}`;
+  tmuxSession = `eventloopos_smoke_${runId.replace(/[^a-zA-Z0-9]+/g, "_")}`.slice(0, 60);
+  manifest.tmux_session = tmuxSession;
+  writeManifest();
+
+  await step("build orchestrator", async () => {
+    await runChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "build"]);
+  });
+
+  await step("start sacrificial tmux session", async () => {
+    await runChecked("tmux", ["new-session", "-d", "-s", tmuxSession, "-x", "200", "-y", "50"]);
+  });
+
+  server = startOrchestrator(port);
+
+  await step("wait for orchestrator", async () => {
+    await waitForHealth(manifest.orchestrator_url);
+  });
+
+  const taskId = "task_smoke_terminal_send";
+  const terminalRef = `tmux:${tmuxSession}`;
+  const marker = `eventloopos_marker_${runId.replace(/[^a-zA-Z0-9]+/g, "_")}`.slice(0, 60);
+  manifest.marker = marker;
+  writeManifest();
+
+  let sessionId;
+  await step("start fake task session", async () => {
+    const response = await postJson("/task-sessions", {
+      task_id: taskId,
+      prompt: "smoke task session",
+      idempotency_key: `smoke_start_${runId}`,
+    });
+    sessionId = response.started?.task_session_id ?? response.task_session?.id ?? response.session?.id;
+    assert(typeof sessionId === "string" && sessionId.length > 0, `expected session id from start: ${JSON.stringify(response)}`);
+  });
+
+  await step("bind session with tmux terminal_ref", async () => {
+    const response = await putJson(`/task-sessions/${encodeURIComponent(sessionId)}/task-binding`, {
+      task_id: taskId,
+      terminal_ref: terminalRef,
+    });
+    assert(response.ok === true, `task binding failed: ${JSON.stringify(response)}`);
+    assert(response.binding?.session?.terminal_ref === terminalRef, `expected terminal_ref to land on session, got ${JSON.stringify(response.binding?.session)}`);
+  });
+
+  const queueItemId = await step("ingest event that produces resume_agent paper", async () => {
+    const event = {
+      id: `evt_smoke_terminal_send_${runId}`,
+      source: "manual",
+      source_id: `manual:smoke_terminal_send:${runId}`,
+      idempotency_key: `manual:smoke_terminal_send:${runId}`,
+      occurred_at: new Date().toISOString(),
+      received_at: new Date().toISOString(),
+      actor: { id: "smoke_user", type: "human" },
+      task_hint: taskId.replace(/^task_/, "").replaceAll("_", " "),
+      type: "manual.review_requested",
+      title: `Smoke terminal send ${marker}`,
+      summary: `Send marker into tmux session: echo ${marker}`,
+      raw_ref: { id: `raw_smoke_terminal_send_${runId}`, uri: `manual://smoke/${runId}`, media_type: "text/plain" },
+      links: [],
+      resources: [],
+    };
+    const body = await postJson("/events", { event });
+    assert(body.queue_item, `expected queue item to be created, got ${JSON.stringify(body)}`);
+    return body.queue_item.id;
+  });
+
+  const actionResult = await step("trigger recommended resume_agent action", async () => {
+    const body = await postJson(`/queue/${queueItemId}/actions/recommended`, {
+      actor_id: "smoke_user",
+    });
+    assert(body.ok === true, `recommended action failed: ${JSON.stringify(body)}`);
+    assert(body.action_result?.terminal_send?.ok === true, `terminal_send did not run ok: ${JSON.stringify(body.action_result?.terminal_send)}`);
+    assert(body.action_result?.terminal_send?.transport === "tmux", `expected tmux transport, got ${body.action_result?.terminal_send?.transport}`);
+    return body.action_result;
+  });
+
+  await step("verify marker landed in tmux pane", async () => {
+    // Allow the keystroke to settle.
+    await sleep(500);
+    const { stdout } = await execFilePromise("tmux", ["capture-pane", "-p", "-t", tmuxSession]);
+    assert(stdout.includes(marker), `tmux pane did not contain marker. captured:\n${stdout}`);
+  });
+
+  manifest.passed = true;
+  manifest.action_result_summary = {
+    transport: actionResult?.terminal_send?.transport,
+    command_count: actionResult?.terminal_send?.commandCount,
+    task_session_id: actionResult?.task_session_id,
+  };
+} catch (error) {
+  manifest.error = serializeError(error);
+  process.exitCode = 1;
+} finally {
+  manifest.finished_at = new Date().toISOString();
+  manifest.duration_ms = Math.max(0, new Date(manifest.finished_at).getTime() - startedAt.getTime());
+  writeManifest();
+  if (tmuxSession) {
+    try {
+      await runChecked("tmux", ["kill-session", "-t", tmuxSession]);
+    } catch {
+      // best effort cleanup
+    }
+  }
+  if (server) {
+    server.kill("SIGTERM");
+  }
+  console.log(manifest.passed ? "terminal send live proof passed" : "terminal send live proof FAILED");
+  console.log(`manifest: ${manifestPath}`);
+}
+
+function startOrchestrator(port) {
+  const child = spawn("pnpm", ["--filter", "@eventloopos/orchestrator", "exec", "node", "dist/src/index.js"], {
+    env: {
+      ...process.env,
+      ORCHESTRATOR_HOST: "127.0.0.1",
+      ORCHESTRATOR_PORT: String(port),
+      ORCHESTRATOR_SEED_FIXTURE: "fixtures/empty-review-packets.json",
+      ORCHESTRATOR_TASK_SESSIONS: "fake",
+      ORCHESTRATOR_WORKSPACE: "off",
+      ORCHESTRATOR_MCP_SOURCES: "off",
+      EVENTLOOPOS_TERMINAL_SEND: "1",
+      EVENTLOOPOS_DEV_TASK_SESSION_SEED_ROUTE: "1",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  const logPath = resolve(artifactDir, "orchestrator.log");
+  const logChunks = [];
+  child.stdout?.on("data", (chunk) => logChunks.push(chunk));
+  child.stderr?.on("data", (chunk) => logChunks.push(chunk));
+  child.on("exit", () => {
+    writeFileSync(logPath, Buffer.concat(logChunks));
+  });
+  return child;
+}
+
+async function step(name, body) {
+  const startedAt = Date.now();
+  manifest.steps.push({ name, started_at: new Date().toISOString(), passed: false });
+  writeManifest();
+  try {
+    const result = await body();
+    const last = manifest.steps[manifest.steps.length - 1];
+    last.passed = true;
+    last.duration_ms = Date.now() - startedAt;
+    last.finished_at = new Date().toISOString();
+    writeManifest();
+    return result;
+  } catch (error) {
+    const last = manifest.steps[manifest.steps.length - 1];
+    last.passed = false;
+    last.duration_ms = Date.now() - startedAt;
+    last.finished_at = new Date().toISOString();
+    last.error = serializeError(error);
+    writeManifest();
+    throw error;
+  }
+}
+
+async function waitForHealth(baseUrl, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${baseUrl}/health`);
+      if (response.ok) return;
+    } catch {
+      // keep waiting
+    }
+    await sleep(150);
+  }
+  throw new Error(`orchestrator did not become healthy at ${baseUrl}`);
+}
+
+async function postJson(path, body) {
+  return await sendJson("POST", path, body);
+}
+
+async function putJson(path, body) {
+  return await sendJson("PUT", path, body);
+}
+
+async function sendJson(method, path, body) {
+  const response = await fetch(`${manifest.orchestrator_url}${path}`, {
+    method,
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const text = await response.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`${method} ${path} returned non-JSON: ${response.status} ${text.slice(0, 400)}`);
+  }
+  if (!response.ok) {
+    throw new Error(`${method} ${path} returned ${response.status}: ${JSON.stringify(parsed).slice(0, 400)}`);
+  }
+  return parsed;
+}
+
+async function runChecked(file, args, options = {}) {
+  return await new Promise((resolveRun, reject) => {
+    const child = spawn(file, args, { stdio: "inherit", ...options });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) resolveRun();
+      else reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}`));
+    });
+  });
+}
+
+async function freePort() {
+  return await new Promise((resolveFree, reject) => {
+    const socket = createServer();
+    socket.once("error", reject);
+    socket.listen(0, "127.0.0.1", () => {
+      const address = socket.address();
+      socket.close(() => {
+        if (address && typeof address === "object") {
+          resolveFree(address.port);
+        } else {
+          reject(new Error("failed to allocate free port"));
+        }
+      });
+    });
+  });
+}
+
+async function sleep(ms) {
+  await new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function writeManifest() {
+  writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+}
+
+function serializeError(error) {
+  if (error instanceof Error) {
+    return { message: error.message, stack: error.stack };
+  }
+  return { message: String(error) };
+}

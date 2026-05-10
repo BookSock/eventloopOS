@@ -56,6 +56,10 @@ try {
     "isolated workspace task switch proof",
   ]);
 
+  checkProofManifest("terminal send live proof", "artifacts/proof-live-terminal-send-manifest.json", [
+    "terminal send live proof",
+  ]);
+
   checkLatestManifest("fresh clone proof", "artifacts/fresh-clone/*/manifest.json", (manifest) => {
     const requiredSteps = [
       "copy tracked and shareable untracked files",
