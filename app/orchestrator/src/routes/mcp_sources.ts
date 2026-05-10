@@ -1,6 +1,6 @@
 import type { McpSourcePollOutput } from "../integrations/mcp_poll/development_registry.js";
 import type { McpCursorState, McpEvent } from "../integrations/mcp_poll/types.js";
-import type { Observability } from "../observability.js";
+import type { Runtime } from "../runtime.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
 
@@ -18,12 +18,12 @@ export async function handleMcpSourcesRoute(input: {
   method: string | undefined;
   pathname: string;
   readJsonBody: JsonBodyReader;
-  mcpSources?: McpSourceRegistry;
-  observability: Observability;
+  runtime: Runtime;
   now: Date;
   requestId: string;
   routeEvent: McpEventRouter;
 }): Promise<RouteResult | undefined> {
+  const { mcpSources, observability } = input.runtime;
   if (input.method === "POST" && input.pathname === "/mcp/poll") {
     const parsed = await input.readJsonBody();
     if (!parsed.ok) return schemaError(parsed.message);
@@ -41,11 +41,11 @@ export async function handleMcpSourcesRoute(input: {
   }
 
   if (input.method === "GET" && input.pathname === "/mcp-sources") {
-    if (!input.mcpSources) {
+    if (!mcpSources) {
       return error(501, "mcp_sources_unavailable", "MCP source registry is not configured");
     }
 
-    const sources = await input.mcpSources.listSources();
+    const sources = await mcpSources.listSources();
     return ok(200, {
       sources,
       count: Array.isArray(sources) ? sources.length : 0,
@@ -54,7 +54,7 @@ export async function handleMcpSourcesRoute(input: {
   }
 
   if (input.method === "POST" && input.pathname === "/mcp-sources/poll-all-and-route") {
-    if (!input.mcpSources) {
+    if (!mcpSources) {
       return error(501, "mcp_sources_unavailable", "MCP source registry is not configured");
     }
 
@@ -64,7 +64,7 @@ export async function handleMcpSourcesRoute(input: {
     const requestBody = parseMcpPollAllRequest(parsed.value);
     if (!requestBody.ok) return schemaError(requestBody.message);
 
-    const sources = await input.mcpSources.listSources();
+    const sources = await mcpSources.listSources();
     const sourceIds = sourceIdsForPollAll(sources, requestBody.sourceIds);
     if (!sourceIds.ok) return schemaError(sourceIds.message);
 
@@ -77,7 +77,7 @@ export async function handleMcpSourcesRoute(input: {
     for (const sourceId of sourceIds.value) {
       try {
         const sourceInput = requestBody.inputsBySourceId[sourceId] ?? { items: [] };
-        const pollResult = await input.mcpSources.pollSource(sourceId, sourceInput, input.now.toISOString());
+        const pollResult = await mcpSources.pollSource(sourceId, sourceInput, input.now.toISOString());
         if (!pollResult) {
           errors += 1;
           polled.push({
@@ -92,7 +92,7 @@ export async function handleMcpSourcesRoute(input: {
         for (const event of pollResult.events) {
           routed.push(await input.routeEvent(event, input.now));
         }
-        await commitPollState(input.mcpSources, sourceId, pollResult.state, input.now);
+        await commitPollState(mcpSources, sourceId, pollResult.state, input.now);
 
         eventsSeen += pollResult.events.length;
         routedCount += routed.length;
@@ -115,9 +115,9 @@ export async function handleMcpSourcesRoute(input: {
       }
     }
 
-    await input.observability.incrementCounter("mcp_poll_cycles_total");
-    await input.observability.incrementCounter("mcp_poll_errors_total", errors);
-    await input.observability.recordActivity({
+    await observability.incrementCounter("mcp_poll_cycles_total");
+    await observability.incrementCounter("mcp_poll_errors_total", errors);
+    await observability.recordActivity({
       type: "mcp_poll_cycle",
       occurred_at: input.now.toISOString(),
       actor: "system",
@@ -146,12 +146,12 @@ export async function handleMcpSourcesRoute(input: {
 
   const getMcpSourceMatch = input.pathname.match(/^\/mcp-sources\/([^/]+)$/);
   if (input.method === "GET" && getMcpSourceMatch) {
-    if (!input.mcpSources?.getSource) {
+    if (!mcpSources?.getSource) {
       return error(501, "mcp_sources_unavailable", "MCP source lookup is not configured");
     }
 
     const sourceId = decodeURIComponent(getMcpSourceMatch[1] ?? "");
-    const source = await input.mcpSources.getSource(sourceId);
+    const source = await mcpSources.getSource(sourceId);
     if (!source) return error(404, "not_found", `MCP source ${sourceId} was not found`);
 
     return ok(200, {
@@ -162,7 +162,7 @@ export async function handleMcpSourcesRoute(input: {
 
   const pollMcpSourceMatch = input.pathname.match(/^\/mcp-sources\/([^/]+)\/poll$/);
   if (input.method === "POST" && pollMcpSourceMatch) {
-    if (!input.mcpSources) {
+    if (!mcpSources) {
       return error(501, "mcp_sources_unavailable", "MCP source registry is not configured");
     }
 
@@ -171,9 +171,9 @@ export async function handleMcpSourcesRoute(input: {
 
     const sourceId = decodeURIComponent(pollMcpSourceMatch[1] ?? "");
     try {
-      const result = await input.mcpSources.pollSource(sourceId, parsed.value, input.now.toISOString());
+      const result = await mcpSources.pollSource(sourceId, parsed.value, input.now.toISOString());
       if (!result) return error(404, "not_found", `MCP source ${sourceId} was not found`);
-      await commitPollState(input.mcpSources, sourceId, result.state, input.now);
+      await commitPollState(mcpSources, sourceId, result.state, input.now);
 
       return ok(200, {
         source_id: sourceId,
@@ -189,7 +189,7 @@ export async function handleMcpSourcesRoute(input: {
 
   const previewMcpSourceMatch = input.pathname.match(/^\/mcp-sources\/([^/]+)\/preview$/);
   if (input.method === "POST" && previewMcpSourceMatch) {
-    if (!input.mcpSources) {
+    if (!mcpSources) {
       return error(501, "mcp_sources_unavailable", "MCP source registry is not configured");
     }
 
@@ -198,10 +198,10 @@ export async function handleMcpSourcesRoute(input: {
 
     const sourceId = decodeURIComponent(previewMcpSourceMatch[1] ?? "");
     try {
-      if (!input.mcpSources.previewSource) {
+      if (!mcpSources.previewSource) {
         return error(501, "mcp_sources_preview_unavailable", "MCP source preview is not configured");
       }
-      const result = await input.mcpSources.previewSource(sourceId, parsed.value, input.now.toISOString());
+      const result = await mcpSources.previewSource(sourceId, parsed.value, input.now.toISOString());
       if (!result) return error(404, "not_found", `MCP source ${sourceId} was not found`);
 
       return ok(200, {
@@ -219,7 +219,7 @@ export async function handleMcpSourcesRoute(input: {
 
   const pollAndRouteMcpSourceMatch = input.pathname.match(/^\/mcp-sources\/([^/]+)\/poll-and-route$/);
   if (input.method === "POST" && pollAndRouteMcpSourceMatch) {
-    if (!input.mcpSources) {
+    if (!mcpSources) {
       return error(501, "mcp_sources_unavailable", "MCP source registry is not configured");
     }
 
@@ -228,14 +228,14 @@ export async function handleMcpSourcesRoute(input: {
 
     const sourceId = decodeURIComponent(pollAndRouteMcpSourceMatch[1] ?? "");
     try {
-      const pollResult = await input.mcpSources.pollSource(sourceId, parsed.value, input.now.toISOString());
+      const pollResult = await mcpSources.pollSource(sourceId, parsed.value, input.now.toISOString());
       if (!pollResult) return error(404, "not_found", `MCP source ${sourceId} was not found`);
 
       const routed = [];
       for (const event of pollResult.events) {
         routed.push(await input.routeEvent(event, input.now));
       }
-      await commitPollState(input.mcpSources, sourceId, pollResult.state, input.now);
+      await commitPollState(mcpSources, sourceId, pollResult.state, input.now);
 
       return ok(200, {
         source_id: sourceId,

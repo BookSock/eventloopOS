@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { inspectCodexSession } from "../agents/codex/session_inspector.js";
 import type { GatewayStore } from "../gateway_store.js";
-import type { Observability } from "../observability.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
+import type { Runtime } from "../runtime.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import { bestTaskSessionForTask } from "../task_sessions/session_selection.js";
 import type { TaskRuntimeSession, TaskSessionController } from "../task_sessions/types.js";
@@ -21,12 +21,11 @@ export async function handleMasterRoute(input: {
   method: string | undefined;
   pathname: string;
   readJsonBody: JsonBodyReader;
-  store: GatewayStore;
-  taskSessions?: TaskSessionController;
-  observability: Observability;
+  runtime: Runtime;
   now: Date;
   requestId: string;
 }): Promise<RouteResult | undefined> {
+  const observability = input.runtime.observability;
   if (input.method !== "POST" || input.pathname !== "/master/fan-out") return undefined;
 
   const parsed = await input.readJsonBody();
@@ -57,7 +56,7 @@ export async function handleMasterRoute(input: {
     });
   }
 
-  if (!input.taskSessions) {
+  if (!input.runtime.taskSessions) {
     return error(501, "task_sessions_unavailable", "task session controller is not configured");
   }
 
@@ -72,9 +71,9 @@ export async function handleMasterRoute(input: {
     }
     try {
       const message = await sendTaskFollowupWithActivity({
-        taskSessions: input.taskSessions,
-        observability: input.observability,
-        taskMessageStore: input.store,
+        taskSessions: input.runtime.taskSessions,
+        observability: input.runtime.observability,
+        taskMessageStore: input.runtime.store,
       }, {
         task_session_id: match.task_session_id,
         text: buildFanOutFollowupText(validation.message, validation.target ?? validation.taskHintSubstring ?? "all"),
@@ -96,10 +95,10 @@ export async function handleMasterRoute(input: {
     }
   }
 
-  await input.observability.incrementCounter("master_fan_out_total");
-  await input.observability.incrementCounter("master_fan_out_delivered_total", delivered.length || undefined);
-  await input.observability.incrementCounter("master_fan_out_skipped_total", skipped.length || undefined);
-  await input.observability.recordActivity({
+  await input.runtime.observability.incrementCounter("master_fan_out_total");
+  await input.runtime.observability.incrementCounter("master_fan_out_delivered_total", delivered.length || undefined);
+  await input.runtime.observability.incrementCounter("master_fan_out_skipped_total", skipped.length || undefined);
+  await input.runtime.observability.recordActivity({
     type: "master_fan_out",
     occurred_at: input.now.toISOString(),
     actor: "human",
@@ -130,17 +129,16 @@ export async function handleMasterRoute(input: {
 
 async function resolveFanOutMatches(
   input: {
-    store: GatewayStore;
-    taskSessions?: TaskSessionController;
+    runtime: Runtime;
     now: Date;
   },
   validation: ValidatedFanOutRequest,
 ): Promise<FanOutMatch[]> {
-  const sessions = input.taskSessions?.listSessions
-    ? (await Promise.resolve(input.taskSessions.listSessions()).catch(() => [])) as TaskRuntimeSession[]
+  const sessions = input.runtime.taskSessions?.listSessions
+    ? (await Promise.resolve(input.runtime.taskSessions.listSessions()).catch(() => [])) as TaskRuntimeSession[]
     : [];
 
-  const queue = await input.store.listQueue(undefined, input.now);
+  const queue = await input.runtime.store.listQueue(undefined, input.now);
   const taskCandidates = new Map<string, FanOutMatch>();
 
   const includeTask = (taskId: string, packetId?: string, packetTitle?: string) => {

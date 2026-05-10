@@ -1,6 +1,5 @@
 import type { Action, AgentRun, EvidenceRef, RawRef } from "../contracts.js";
-import type { GatewayStore } from "../gateway_store.js";
-import type { Observability } from "../observability.js";
+import type { Runtime } from "../runtime.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
 
@@ -8,11 +7,11 @@ export async function handleAgentRunsRoute(input: {
   method: string | undefined;
   pathname: string;
   readJsonBody: JsonBodyReader;
-  store: GatewayStore;
-  observability: Observability;
+  runtime: Runtime;
   now: Date;
   requestId: string;
 }): Promise<RouteResult | undefined> {
+  const { store, observability } = input.runtime;
   if (input.method === "POST" && input.pathname === "/agent-runs") {
     const parsed = await input.readJsonBody();
     if (!parsed.ok) return schemaError(parsed.message);
@@ -21,17 +20,17 @@ export async function handleAgentRunsRoute(input: {
     const id = readString(parsed.value, "id");
     if (!id.ok) return schemaError(id.message);
 
-    const existing = await input.store.getAgentRun(id.value);
+    const existing = await store.getAgentRun(id.value);
     const run = validateAgentRun(parsed.value, input.now.toISOString(), existing);
     if (!run.ok) return schemaError(run.message);
 
-    const result = await input.store.upsertAgentRun(run.value, input.now);
+    const result = await store.upsertAgentRun(run.value, input.now);
     if (result.queue_item) {
-      await input.observability.incrementCounter("agent_run_human_input_upserts_total");
+      await observability.incrementCounter("agent_run_human_input_upserts_total");
       if (result.queue_item_created) {
-        await input.observability.incrementCounter("agent_run_queue_items_created_total");
+        await observability.incrementCounter("agent_run_queue_items_created_total");
       }
-      await input.observability.recordActivity({
+      await observability.recordActivity({
         type: "agent_run_waiting",
         occurred_at: input.now.toISOString(),
         actor: "agent",
@@ -59,7 +58,7 @@ export async function handleAgentRunsRoute(input: {
   const getMatch = input.pathname.match(/^\/agent-runs\/([^/]+)$/);
   if (input.method === "GET" && getMatch) {
     const id = decodeURIComponent(getMatch[1] ?? "");
-    const run = await input.store.getAgentRun(id);
+    const run = await store.getAgentRun(id);
     if (!run) return error(404, "not_found", `agent run ${id} was not found`);
     return ok(200, {
       agent_run: run,

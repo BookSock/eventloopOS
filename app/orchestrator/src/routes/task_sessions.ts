@@ -1,6 +1,7 @@
 import type { Observability } from "../observability.js";
 import type { GatewayStore } from "../gateway_store.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
+import type { Runtime } from "../runtime.js";
 import {
   taskMessageRecordToApiMessage,
   type DurableTaskMessageStatus,
@@ -20,16 +21,14 @@ export async function handleTaskSessionsRoute(input: {
   pathname: string;
   url: URL;
   readJsonBody: JsonBodyReader;
-  store: GatewayStore;
-  taskSessions?: TaskSessionController;
-  observability?: Observability;
+  runtime: Runtime;
   now: Date;
   requestId: string;
   idempotencyKey?: string;
 }): Promise<RouteResult | undefined> {
   if (input.method === "GET" && input.pathname === "/task-messages") {
     return handleListTaskMessagesRoute({
-      store: input.store,
+      runtime: input.runtime,
       url: input.url,
       requestId: input.requestId,
     });
@@ -39,8 +38,7 @@ export async function handleTaskSessionsRoute(input: {
     const parsed = await input.readJsonBody();
     if (!parsed.ok) return schemaError(parsed.message);
     return handleReconcileAttemptedTaskMessagesRoute({
-      store: input.store,
-      observability: input.observability,
+      runtime: input.runtime,
       body: parsed.value,
       occurredAt: input.now.toISOString(),
       requestId: input.requestId,
@@ -49,7 +47,7 @@ export async function handleTaskSessionsRoute(input: {
 
   if (input.method === "GET" && input.pathname === "/task-sessions") {
     return handleListTaskSessionsRoute({
-      taskSessions: input.taskSessions,
+      runtime: input.runtime,
       requestId: input.requestId,
     });
   }
@@ -59,9 +57,7 @@ export async function handleTaskSessionsRoute(input: {
     if (!parsed.ok) return schemaError(parsed.message);
 
     return handleStartTaskSessionRoute({
-      store: input.store,
-      taskSessions: input.taskSessions,
-      observability: input.observability,
+      runtime: input.runtime,
       body: parsed.value,
       idempotencyKey: input.idempotencyKey,
       now: input.now,
@@ -75,8 +71,7 @@ export async function handleTaskSessionsRoute(input: {
     if (!parsed.ok) return schemaError(parsed.message);
 
     return handleSaveTaskWorkspaceSnapshotRoute({
-      store: input.store,
-      observability: input.observability,
+      runtime: input.runtime,
       taskId: decodeURIComponent(taskWorkspaceSnapshotMatch[1] ?? ""),
       body: parsed.value,
       now: input.now,
@@ -87,7 +82,7 @@ export async function handleTaskSessionsRoute(input: {
   const getTaskSessionMatch = input.pathname.match(/^\/task-sessions\/([^/]+)$/);
   if (input.method === "GET" && getTaskSessionMatch) {
     return handleGetTaskSessionRoute({
-      taskSessions: input.taskSessions,
+      runtime: input.runtime,
       taskSessionId: decodeURIComponent(getTaskSessionMatch[1] ?? ""),
       requestId: input.requestId,
     });
@@ -99,9 +94,7 @@ export async function handleTaskSessionsRoute(input: {
     if (!parsed.ok) return schemaError(parsed.message);
 
     return handleTaskFollowupRoute({
-      taskSessions: input.taskSessions,
-      observability: input.observability,
-      store: input.store,
+      runtime: input.runtime,
       taskSessionId: decodeURIComponent(taskFollowupMatch[1] ?? ""),
       body: parsed.value,
       idempotencyKey: input.idempotencyKey,
@@ -116,7 +109,7 @@ export async function handleTaskSessionsRoute(input: {
     if (!parsed.ok) return schemaError(parsed.message);
 
     return handleTaskBindingRoute({
-      taskSessions: input.taskSessions,
+      runtime: input.runtime,
       taskSessionId: decodeURIComponent(taskBindingMatch[1] ?? ""),
       body: parsed.value,
       requestId: input.requestId,
@@ -127,19 +120,19 @@ export async function handleTaskSessionsRoute(input: {
 }
 
 async function handleSaveTaskWorkspaceSnapshotRoute(input: {
-  store: GatewayStore;
-  observability?: Observability;
+  runtime: Runtime;
   taskId: string;
   body: unknown;
   now: Date;
   requestId: string;
 }): Promise<RouteResult> {
+  const { store, observability } = input.runtime;
   const validation = validateTaskWorkspaceSnapshotRequest(input.body);
   if (!validation.ok) return schemaError(validation.message);
   const taskId = normalizeTaskId(input.taskId);
   if (!taskId) return schemaError("task id is required");
 
-  const record = await input.store.saveTaskWorkspaceSnapshot({
+  const record = await store.saveTaskWorkspaceSnapshot({
     taskId,
     snapshot: validation.workspaceSnapshot,
     capturedAt: input.now,
@@ -147,8 +140,8 @@ async function handleSaveTaskWorkspaceSnapshotRoute(input: {
     actorId: validation.actorId,
   });
 
-  await input.observability?.incrementCounter("task_workspace_snapshots_saved_total");
-  await input.observability?.recordActivity({
+  await observability?.incrementCounter("task_workspace_snapshots_saved_total");
+  await observability?.recordActivity({
     type: "task_workspace_snapshot_saved",
     occurred_at: record.updated_at,
     actor: "human",
@@ -176,10 +169,11 @@ async function handleSaveTaskWorkspaceSnapshotRoute(input: {
 }
 
 export async function handleListTaskMessagesRoute(input: {
-  store: GatewayStore;
+  runtime: Runtime;
   url: URL;
   requestId: string;
 }): Promise<RouteResult> {
+  const { store } = input.runtime;
   const validation = validateTaskMessageHistoryQuery(input.url.searchParams);
   if (!validation.ok) {
     return {
@@ -190,7 +184,7 @@ export async function handleListTaskMessagesRoute(input: {
     };
   }
 
-  const records = await input.store.listTaskMessages(validation.query);
+  const records = await store.listTaskMessages(validation.query);
   return {
     ok: true,
     status: 200,
@@ -204,16 +198,16 @@ export async function handleListTaskMessagesRoute(input: {
 }
 
 export async function handleReconcileAttemptedTaskMessagesRoute(input: {
-  store: GatewayStore;
-  observability?: Observability;
+  runtime: Runtime;
   body: unknown;
   occurredAt: string;
   requestId: string;
 }): Promise<RouteResult> {
+  const { store, observability } = input.runtime;
   const validation = validateReconcileAttemptedRequest(input.body);
   if (!validation.ok) return schemaError(validation.message);
 
-  const attempted = await input.store.listTaskMessages({
+  const attempted = await store.listTaskMessages({
     status: "attempted",
     limit: validation.limit,
   });
@@ -222,7 +216,7 @@ export async function handleReconcileAttemptedTaskMessagesRoute(input: {
   const reconciled = [];
   for (const message of stale) {
     const error = `stale attempted task message marked failed after ${validation.olderThanMs}ms; original text is not stored, inspect queue lineage and resend manually if needed`;
-    const finalized = await input.store.finalizeTaskMessage({
+    const finalized = await store.finalizeTaskMessage({
       idempotency_key: message.idempotency_key,
       status: "failed",
       occurred_at: input.occurredAt,
@@ -230,9 +224,9 @@ export async function handleReconcileAttemptedTaskMessagesRoute(input: {
     });
     if (!finalized) continue;
     reconciled.push(taskMessageRecordToApiMessage(finalized));
-    await input.observability?.incrementCounter("task_followups_failed_total");
-    await input.observability?.incrementCounter("task_followups_reconciled_failed_total");
-    await input.observability?.recordActivity({
+    await observability?.incrementCounter("task_followups_failed_total");
+    await observability?.incrementCounter("task_followups_reconciled_failed_total");
+    await observability?.recordActivity({
       type: "task_followup_failed",
       occurred_at: input.occurredAt,
       actor: "system",
@@ -269,10 +263,11 @@ export async function handleReconcileAttemptedTaskMessagesRoute(input: {
 }
 
 export async function handleListTaskSessionsRoute(input: {
-  taskSessions?: TaskSessionController;
+  runtime: Runtime;
   requestId: string;
 }): Promise<RouteResult> {
-  if (!input.taskSessions?.listSessions) {
+  const { taskSessions } = input.runtime;
+  if (!taskSessions?.listSessions) {
     return {
       ok: false,
       status: 501,
@@ -281,7 +276,7 @@ export async function handleListTaskSessionsRoute(input: {
     };
   }
 
-  const sessions = await input.taskSessions.listSessions();
+  const sessions = await taskSessions.listSessions();
   return {
     ok: true,
     status: 200,
@@ -294,11 +289,12 @@ export async function handleListTaskSessionsRoute(input: {
 }
 
 export async function handleGetTaskSessionRoute(input: {
-  taskSessions?: TaskSessionController;
+  runtime: Runtime;
   taskSessionId: string;
   requestId: string;
 }): Promise<RouteResult> {
-  if (!input.taskSessions?.getSession) {
+  const { taskSessions } = input.runtime;
+  if (!taskSessions?.getSession) {
     return {
       ok: false,
       status: 501,
@@ -307,7 +303,7 @@ export async function handleGetTaskSessionRoute(input: {
     };
   }
 
-  const session = await input.taskSessions.getSession(input.taskSessionId);
+  const session = await taskSessions.getSession(input.taskSessionId);
   if (!session) {
     return {
       ok: false,
@@ -328,15 +324,14 @@ export async function handleGetTaskSessionRoute(input: {
 }
 
 export async function handleStartTaskSessionRoute(input: {
-  store: GatewayStore;
-  taskSessions?: TaskSessionController;
-  observability?: Observability;
+  runtime: Runtime;
   body: unknown;
   idempotencyKey?: string;
   now: Date;
   requestId: string;
 }): Promise<RouteResult> {
-  if (!input.taskSessions?.startTaskSession) {
+  const { store, taskSessions, observability } = input.runtime;
+  if (!taskSessions?.startTaskSession) {
     return {
       ok: false,
       status: 501,
@@ -355,7 +350,7 @@ export async function handleStartTaskSessionRoute(input: {
     };
   }
 
-  const started = await input.taskSessions.startTaskSession({
+  const started = await taskSessions.startTaskSession({
     task_id: validation.taskId,
     prompt: validation.prompt,
     cwd: validation.cwd,
@@ -374,7 +369,7 @@ export async function handleStartTaskSessionRoute(input: {
   }
 
   const workspaceRecord = validation.workspaceSnapshot
-    ? await input.store.saveTaskWorkspaceSnapshot({
+    ? await store.saveTaskWorkspaceSnapshot({
       taskId: validation.taskId,
       snapshot: validation.workspaceSnapshot,
       capturedAt: input.now,
@@ -382,7 +377,7 @@ export async function handleStartTaskSessionRoute(input: {
     })
     : undefined;
   const queuedPaper = validation.queuePaper
-    ? await input.store.ingestEventAsReviewPacket(
+    ? await store.ingestEventAsReviewPacket(
       taskStartEvent({
         taskId: validation.taskId,
         prompt: validation.prompt,
@@ -394,7 +389,7 @@ export async function handleStartTaskSessionRoute(input: {
     : undefined;
 
   if (queuedPaper?.queue_item) {
-    await input.observability?.incrementCounter("master_task_start_queue_papers_total");
+    await observability?.incrementCounter("master_task_start_queue_papers_total");
   }
 
   return {
@@ -412,16 +407,15 @@ export async function handleStartTaskSessionRoute(input: {
 }
 
 export async function handleTaskFollowupRoute(input: {
-  taskSessions?: TaskSessionController;
-  observability?: Observability;
-  store: GatewayStore;
+  runtime: Runtime;
   taskSessionId: string;
   body: unknown;
   idempotencyKey?: string;
   occurredAt: string;
   requestId: string;
 }): Promise<RouteResult> {
-  if (!input.taskSessions) {
+  const { taskSessions, observability, store } = input.runtime;
+  if (!taskSessions) {
     return {
       ok: false,
       status: 501,
@@ -441,9 +435,9 @@ export async function handleTaskFollowupRoute(input: {
   }
 
   const message = await sendTaskFollowupWithActivity({
-    taskSessions: input.taskSessions,
-    observability: input.observability,
-    taskMessageStore: input.store,
+    taskSessions: taskSessions,
+    observability: observability,
+    taskMessageStore: store,
   }, {
     task_session_id: input.taskSessionId,
     text: validation.text,
@@ -474,12 +468,13 @@ export async function handleTaskFollowupRoute(input: {
 }
 
 export async function handleTaskBindingRoute(input: {
-  taskSessions?: TaskSessionController;
+  runtime: Runtime;
   taskSessionId: string;
   body: unknown;
   requestId: string;
 }): Promise<RouteResult> {
-  if (!input.taskSessions?.bindTaskSession) {
+  const { taskSessions } = input.runtime;
+  if (!taskSessions?.bindTaskSession) {
     return {
       ok: false,
       status: 501,
@@ -498,7 +493,7 @@ export async function handleTaskBindingRoute(input: {
     };
   }
 
-  const binding = await input.taskSessions.bindTaskSession({
+  const binding = await taskSessions.bindTaskSession({
     task_session_id: input.taskSessionId,
     task_id: validation.taskId,
     ...(validation.terminalRef ? { terminal_ref: validation.terminalRef } : {}),

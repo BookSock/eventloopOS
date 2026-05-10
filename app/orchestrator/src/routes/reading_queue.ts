@@ -1,7 +1,7 @@
 import type { GatewayStore } from "../gateway_store.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
-import type { Observability } from "../observability.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
+import type { Runtime } from "../runtime.js";
 import type { ContextEntry } from "../store.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
@@ -12,13 +12,13 @@ export async function handleReadingQueueRoute(input: {
   method: string | undefined;
   pathname: string;
   readJsonBody: JsonBodyReader;
-  store: GatewayStore;
-  observability?: Observability;
+  runtime: Runtime;
   now: Date;
   requestId: string;
 }): Promise<RouteResult | undefined> {
+  const { store, observability } = input.runtime;
   if (input.method === "GET" && input.pathname === "/reading-queue") {
-    const entries = await listUnboundBrowserContexts(input.store);
+    const entries = await listUnboundBrowserContexts(store);
     return ok(200, {
       contexts: entries.map(toReadingContextSummary),
       count: entries.length,
@@ -32,7 +32,7 @@ export async function handleReadingQueueRoute(input: {
     const validation = validateAutoPromoteRequest(parsed.value);
     if (!validation.ok) return schemaError(validation.message);
 
-    const allUnbound = await listUnboundBrowserContexts(input.store);
+    const allUnbound = await listUnboundBrowserContexts(store);
     const ageThreshold = input.now.getTime() - validation.minAgeSeconds * 1000;
     const aged = allUnbound.filter((entry) => {
       const captured = Date.parse(entry.captured_at);
@@ -46,8 +46,8 @@ export async function handleReadingQueueRoute(input: {
     }
 
     const newlyPromoted = promoted.filter((entry) => !entry.idempotent).length;
-    await input.observability?.incrementCounter("reading_queue_auto_promotions_total", newlyPromoted || undefined);
-    await input.observability?.recordActivity({
+    await observability?.incrementCounter("reading_queue_auto_promotions_total", newlyPromoted || undefined);
+    await observability?.recordActivity({
       type: "reading_queue_auto_promoted",
       occurred_at: input.now.toISOString(),
       actor: "system",
@@ -79,7 +79,7 @@ export async function handleReadingQueueRoute(input: {
     const validation = validatePromoteRequest(parsed.value);
     if (!validation.ok) return schemaError(validation.message);
 
-    const allUnbound = await listUnboundBrowserContexts(input.store);
+    const allUnbound = await listUnboundBrowserContexts(store);
     const target = validation.contextIds.length > 0
       ? allUnbound.filter((entry) => validation.contextIds.includes(contextEntryId(entry)))
       : allUnbound;
@@ -94,8 +94,8 @@ export async function handleReadingQueueRoute(input: {
       promoted.push(result);
     }
 
-    await input.observability?.incrementCounter("reading_queue_promotions_total", promoted.length || undefined);
-    await input.observability?.recordActivity({
+    await observability?.incrementCounter("reading_queue_promotions_total", promoted.length || undefined);
+    await observability?.recordActivity({
       type: "reading_queue_promoted",
       occurred_at: input.now.toISOString(),
       actor: "human",
@@ -151,10 +151,11 @@ function toReadingContextSummary(entry: ContextEntry) {
 }
 
 async function promoteEntryToQueuePaper(
-  input: { store: GatewayStore; now: Date },
+  input: { runtime: Runtime; now: Date },
   entry: ContextEntry,
   actorId: string,
 ): Promise<{ context_id: string; queue_item_id?: string; review_packet_id?: string; event_id: string; idempotent: boolean }> {
+  const { store } = input.runtime;
   const contextId = contextEntryId(entry);
   const slug = stableSlug(contextId);
   const eventId = `evt_reading_queue_${slug}`;
@@ -194,8 +195,8 @@ async function promoteEntryToQueuePaper(
     }],
   };
 
-  const existing = await input.store.getEventByIdempotencyKey("reading-queue", idempotencyKey);
-  const stored = await input.store.ingestEventAsReviewPacket(event, input.now);
+  const existing = await store.getEventByIdempotencyKey("reading-queue", idempotencyKey);
+  const stored = await store.ingestEventAsReviewPacket(event, input.now);
   return {
     context_id: contextId,
     queue_item_id: stored.queue_item?.id,

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createInMemoryGatewayStore } from "../gateway_store.js";
+import { createInMemoryObservability } from "../observability.js";
 import { handleWorkspaceRoute } from "../routes/workspace.js";
+import { createRuntime } from "../runtime.js";
 import type { InMemoryStore } from "../store.js";
 import type { WorkspaceController } from "./controller.js";
 
@@ -62,10 +64,15 @@ describe("workspace restore flow routes", () => {
       },
     };
     const store = createInMemoryGatewayStore(emptyStore());
-    const base = {
+    const runtime = createRuntime({
       store,
       workspace,
       workspaceExecuteEnabled: false,
+      observability: createInMemoryObservability(),
+      now: () => new Date("2026-05-07T12:00:00.000Z"),
+    });
+    const base = {
+      runtime,
       now: new Date("2026-05-07T12:00:00.000Z"),
     };
 

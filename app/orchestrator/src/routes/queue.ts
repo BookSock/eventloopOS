@@ -8,9 +8,10 @@ import type { GatewayStore } from "../gateway_store.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import type { Observability } from "../observability.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
+import type { Runtime } from "../runtime.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import { bestTaskSessionForTask } from "../task_sessions/session_selection.js";
-import { triggerTerminalKeystroke, terminalSendEnabledFromEnv, type TerminalSendExecutor } from "../task_sessions/terminal_send.js";
+import { triggerTerminalKeystroke, type TerminalSendExecutor } from "../task_sessions/terminal_send.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
 import { parseWorkspaceSnapshot } from "../workspace/controller.js";
 import type { JsonBodyReader } from "./context_restore.js";
@@ -21,19 +22,16 @@ export async function handleQueueRoute(input: {
   pathname: string;
   url: URL;
   readJsonBody: JsonBodyReader;
-  store: GatewayStore;
-  taskSessions?: TaskSessionController;
-  observability: Observability;
-  terminalSendExecutor?: TerminalSendExecutor;
-  terminalSendEnabled?: boolean;
+  runtime: Runtime;
   now: Date;
   requestId: string;
 }): Promise<RouteResult | undefined> {
+  const { store, taskSessions, observability, terminalSendExecutor, terminalSendEnabled } = input.runtime;
   if (input.method === "GET" && input.pathname === "/queue") {
     const validation = validateQueueQuery(input.url);
     if (!validation.ok) return schemaError(validation.message);
 
-    const items = await input.store.listQueue(validation.state, input.now);
+    const items = await store.listQueue(validation.state, input.now);
     return ok(200, {
       items,
       count: items.length,
@@ -43,7 +41,7 @@ export async function handleQueueRoute(input: {
 
   if (input.method === "GET" && input.pathname === "/queue/next") {
     return ok(200, {
-      item: await input.store.nextQueueItem(input.now) ?? null,
+      item: await store.nextQueueItem(input.now) ?? null,
       request_id: input.requestId,
     });
   }
@@ -57,7 +55,7 @@ export async function handleQueueRoute(input: {
     if (!validation.ok) return schemaError(validation.message);
 
     return ok(200, {
-      item: await input.store.leaseNextQueueItem(validation.leaseOwner, input.now, validation.leaseMs, validation.excludeQueueItemId) ?? null,
+      item: await store.leaseNextQueueItem(validation.leaseOwner, input.now, validation.leaseMs, validation.excludeQueueItemId) ?? null,
       request_id: input.requestId,
     });
   }
@@ -68,16 +66,16 @@ export async function handleQueueRoute(input: {
     if (!validation.ok) return schemaError(validation.message);
 
     const queueItemId = decodeURIComponent(lineageMatch[1] ?? "");
-    const item = await findQueueItem(input.store, queueItemId);
+    const item = await findQueueItem(store, queueItemId);
     if (!item) return error(404, "not_found", `queue item ${queueItemId} was not found`);
 
     const [activity, taskMessages] = await Promise.all([
-      input.observability.listActivity({ queue_item_id: queueItemId, limit: validation.limit }),
-      input.store.listTaskMessages({ queue_item_id: queueItemId, limit: validation.limit }),
+      observability.listActivity({ queue_item_id: queueItemId, limit: validation.limit }),
+      store.listTaskMessages({ queue_item_id: queueItemId, limit: validation.limit }),
     ]);
     const relatedEventIds = relatedEventIdsForLineage(item, activity, taskMessages);
     const events = await Promise.all(
-      relatedEventIds.map(async (eventId) => input.store.getEvent(eventId)),
+      relatedEventIds.map(async (eventId) => store.getEvent(eventId)),
     );
 
     return ok(200, {
@@ -107,7 +105,7 @@ export async function handleQueueRoute(input: {
     if (!validation.ok) return schemaError(validation.message);
 
     const queueItemId = decodeURIComponent(renewLeaseMatch[1] ?? "");
-    const item = await input.store.renewQueueLease(queueItemId, validation.leaseOwner, input.now, validation.leaseMs);
+    const item = await store.renewQueueLease(queueItemId, validation.leaseOwner, input.now, validation.leaseMs);
     if (!item) return error(409, "lease_not_renewed", `queue item ${queueItemId} lease was not renewed`);
 
     return ok(200, {
@@ -127,13 +125,13 @@ export async function handleQueueRoute(input: {
 
     const queueItemId = decodeURIComponent(doneMatch[1] ?? "");
     const actorId = typeof parsed.value.actor_id === "string" ? parsed.value.actor_id : "unknown";
-    const existingItem = await findQueueItem(input.store, queueItemId);
+    const existingItem = await findQueueItem(store, queueItemId);
     if (!existingItem) return error(404, "not_found", `queue item ${queueItemId} was not found`);
     const workspaceSave = await saveTaskWorkspaceSnapshotFromQueueAction(input, existingItem, parsed.value, actorId);
     if (!workspaceSave.ok) return schemaError(workspaceSave.message);
-    const item = await input.store.markQueueItemDone(queueItemId, actorId, input.now);
+    const item = await store.markQueueItemDone(queueItemId, actorId, input.now);
     if (!item) return error(404, "not_found", `queue item ${queueItemId} was not found`);
-    await recordQueueDone(input.observability, item);
+    await recordQueueDone(observability, item);
 
     return ok(200, {
       ok: true,
@@ -159,14 +157,14 @@ export async function handleQueueRoute(input: {
     if (!validation.ok) return schemaError(validation.message);
 
     const queueItemId = decodeURIComponent(deferMatch[1] ?? "");
-    const existingItem = await findQueueItem(input.store, queueItemId);
+    const existingItem = await findQueueItem(store, queueItemId);
     if (!existingItem) return error(404, "not_found", `queue item ${queueItemId} was not found`);
     const workspaceSave = await saveTaskWorkspaceSnapshotFromQueueAction(input, existingItem, parsed.value, validation.actorId);
     if (!workspaceSave.ok) return schemaError(workspaceSave.message);
-    const item = await input.store.deferQueueItem(queueItemId, validation.actorId, validation.dueAt, input.now);
+    const item = await store.deferQueueItem(queueItemId, validation.actorId, validation.dueAt, input.now);
     if (!item) return error(404, "not_found", `queue item ${queueItemId} was not found`);
-    await input.observability.incrementCounter("queue_items_deferred_total");
-    await input.observability.recordActivity({
+    await observability.incrementCounter("queue_items_deferred_total");
+    await observability.recordActivity({
       type: "queue_item_deferred",
       occurred_at: item.updated_at,
       actor: "human",
@@ -205,14 +203,14 @@ export async function handleQueueRoute(input: {
     if (!validation.ok) return schemaError(validation.message);
 
     const queueItemId = decodeURIComponent(ignoreMatch[1] ?? "");
-    const existingItem = await findQueueItem(input.store, queueItemId);
+    const existingItem = await findQueueItem(store, queueItemId);
     if (!existingItem) return error(404, "not_found", `queue item ${queueItemId} was not found`);
     const workspaceSave = await saveTaskWorkspaceSnapshotFromQueueAction(input, existingItem, parsed.value, validation.actorId);
     if (!workspaceSave.ok) return schemaError(workspaceSave.message);
-    const item = await input.store.ignoreQueueItem(queueItemId, validation.actorId, input.now);
+    const item = await store.ignoreQueueItem(queueItemId, validation.actorId, input.now);
     if (!item) return error(404, "not_found", `queue item ${queueItemId} was not found`);
-    await input.observability.incrementCounter("queue_items_ignored_total");
-    await input.observability.recordActivity({
+    await observability.incrementCounter("queue_items_ignored_total");
+    await observability.recordActivity({
       type: "queue_item_ignored",
       occurred_at: item.updated_at,
       actor: "human",
@@ -249,26 +247,22 @@ export async function handleQueueRoute(input: {
     if (!validation.ok) return schemaError(validation.message);
 
     const queueItemId = decodeURIComponent(recommendedActionMatch[1] ?? "");
-    const item = await findQueueItem(input.store, queueItemId);
+    const item = await findQueueItem(store, queueItemId);
     if (!item) return error(404, "not_found", `queue item ${queueItemId} was not found`);
     const workspaceSave = await saveTaskWorkspaceSnapshotFromQueueAction(input, item, parsed.value, validation.actorId);
     if (!workspaceSave.ok) return schemaError(workspaceSave.message);
 
     const actionResult = await executeQueueAction({
-      store: input.store,
-      taskSessions: input.taskSessions,
-      observability: input.observability,
-      terminalSendExecutor: input.terminalSendExecutor,
-      terminalSendEnabled: input.terminalSendEnabled,
+      runtime: input.runtime,
       now: input.now,
     }, item, item.review_packet.recommended_action);
     if (!actionResult.ok) {
       return error(actionResult.status, actionResult.code, actionResult.message, actionResult.details);
     }
 
-    const completed = await input.store.markQueueItemDone(queueItemId, validation.actorId, input.now);
+    const completed = await store.markQueueItemDone(queueItemId, validation.actorId, input.now);
     if (completed) {
-      await recordQueueDone(input.observability, completed, {
+      await recordQueueDone(observability, completed, {
         taskSessionId: stringFromRecord(actionResult.result, "task_session_id"),
         actionResult: actionResult.result,
       });
@@ -295,15 +289,15 @@ export async function handleQueueRoute(input: {
     const validation = validateQueuePriorityRequest(parsed.value);
     if (!validation.ok) return schemaError(validation.message);
 
-    const updated = await input.store.bumpQueueItemPriority(queueItemId, {
+    const updated = await store.bumpQueueItemPriority(queueItemId, {
       delta: validation.delta,
       score: validation.score,
       reason: validation.reason,
     }, input.now);
     if (!updated) return error(404, "not_found", `queue item ${queueItemId} was not found`);
 
-    await input.observability.incrementCounter("queue_items_priority_bumped_total");
-    await input.observability.recordActivity({
+    await observability.incrementCounter("queue_items_priority_bumped_total");
+    await observability.recordActivity({
       type: "queue_item_priority_bumped",
       occurred_at: input.now.toISOString(),
       actor: "human",
@@ -387,28 +381,28 @@ async function recordQueueDone(
 
 async function saveTaskWorkspaceSnapshotFromQueueAction(
   input: {
-    store: GatewayStore;
-    observability: Observability;
+    runtime: Runtime;
     now: Date;
   },
   item: QueueItemWithPacket,
   body: Record<string, unknown>,
   actorId: string,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
+  const { store, observability } = input.runtime;
   const parsed = parseOptionalWorkspaceSnapshotBody(body);
   if (!parsed.ok) return parsed;
   if (!parsed.snapshot) return { ok: true };
   if (!item.task_id) return { ok: true };
 
-  const record = await input.store.saveTaskWorkspaceSnapshot({
+  const record = await store.saveTaskWorkspaceSnapshot({
     taskId: item.task_id,
     snapshot: parsed.snapshot,
     capturedAt: input.now,
     sourceQueueItemId: item.id,
     actorId,
   });
-  await input.observability.incrementCounter("task_workspace_snapshots_saved_total");
-  await input.observability.recordActivity({
+  await observability.incrementCounter("task_workspace_snapshots_saved_total");
+  await observability.recordActivity({
     type: "task_workspace_snapshot_saved",
     occurred_at: record.updated_at,
     actor: "human",
@@ -549,11 +543,7 @@ function relatedEventIdsForLineage(
 
 async function executeQueueAction(
   input: {
-    store: GatewayStore;
-    taskSessions?: TaskSessionController;
-    observability: Observability;
-    terminalSendExecutor?: TerminalSendExecutor;
-    terminalSendEnabled?: boolean;
+    runtime: Runtime;
     now: Date;
   },
   item: QueueItemWithPacket,
@@ -562,6 +552,7 @@ async function executeQueueAction(
   | { ok: true; result: Record<string, unknown> }
   | { ok: false; status: number; code: string; message: string; details?: unknown }
 > {
+  const { store, taskSessions, observability, terminalSendExecutor, terminalSendEnabled } = input.runtime;
   if (action.type !== "resume_agent") {
     return {
       ok: false,
@@ -571,7 +562,7 @@ async function executeQueueAction(
     };
   }
 
-  if (!input.taskSessions?.listSessions) {
+  if (!taskSessions?.listSessions) {
     return {
       ok: false,
       status: 501,
@@ -590,7 +581,7 @@ async function executeQueueAction(
     };
   }
 
-  const session = bestTaskSessionForTask(await input.taskSessions.listSessions(), taskId);
+  const session = bestTaskSessionForTask(await taskSessions.listSessions(), taskId);
   if (!session || !isRecord(session) || typeof session.id !== "string") {
     return {
       ok: false,
@@ -601,11 +592,11 @@ async function executeQueueAction(
   }
 
   const eventId = typeof action.payload.event_id === "string" ? action.payload.event_id : undefined;
-  const eventResult = eventId ? await input.store.getEvent(eventId) : undefined;
+  const eventResult = eventId ? await store.getEvent(eventId) : undefined;
   const taskMessage = await sendTaskFollowupWithActivity({
-    taskSessions: input.taskSessions,
-    observability: input.observability,
-    taskMessageStore: input.store,
+    taskSessions: taskSessions,
+    observability: observability,
+    taskMessageStore: store,
   }, {
     task_session_id: session.id,
     text: taskActionFollowupText(item, eventResult?.event),
@@ -635,13 +626,13 @@ async function executeQueueAction(
       terminalRef,
       text: taskActionFollowupText(item, eventResult?.event),
       submit: true,
-      enabled: input.terminalSendEnabled !== false,
-      executor: input.terminalSendExecutor,
+      enabled: terminalSendEnabled !== false,
+      executor: terminalSendExecutor,
     })
     : undefined;
 
   if (terminalSendResult) {
-    await input.observability.recordActivity({
+    await observability.recordActivity({
       type: "terminal_keystroke_attempted",
       occurred_at: input.now.toISOString(),
       actor: "system",
@@ -658,9 +649,9 @@ async function executeQueueAction(
       }),
     });
     if (terminalSendResult.ok) {
-      await input.observability.incrementCounter("terminal_keystrokes_total");
+      await observability.incrementCounter("terminal_keystrokes_total");
     } else if (terminalSendResult.reason !== "disabled" && terminalSendResult.reason !== "no_executor") {
-      await input.observability.incrementCounter("terminal_keystrokes_failed_total");
+      await observability.incrementCounter("terminal_keystrokes_failed_total");
     }
   }
 

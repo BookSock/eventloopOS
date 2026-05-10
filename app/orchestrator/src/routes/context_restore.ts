@@ -1,8 +1,12 @@
 import { randomUUID } from "node:crypto";
 import type { GatewayStore } from "../gateway_store.js";
 import type { Observability } from "../observability.js";
+import { buildContextRestorePlan, wrapPlanForBrowserExtension } from "../restore_plans/index.js";
+import type { Runtime } from "../runtime.js";
 import type { ContextRestoreRequestRecord } from "../store.js";
 import type { RouteResult } from "./types.js";
+
+export { buildContextRestorePlan } from "../restore_plans/index.js";
 
 export type JsonBodyReader = () => Promise<{ ok: true; value: unknown } | { ok: false; message: string }>;
 
@@ -11,17 +15,17 @@ export async function handleContextRestoreRoute(input: {
   pathname: string;
   url: URL;
   readJsonBody: JsonBodyReader;
-  store: GatewayStore;
-  observability: Observability;
+  runtime: Runtime;
   now: Date;
   requestId: string;
   idempotencyKey?: string;
 }): Promise<RouteResult | undefined> {
+  const { store, observability } = input.runtime;
   if (input.method === "GET" && input.pathname === "/contexts") {
     const validation = validateContextQuery(input.url);
     if (!validation.ok) return schemaError(validation.message);
 
-    const entries = await input.store.listContextEntries(validation.query);
+    const entries = await store.listContextEntries(validation.query);
     return ok(200, {
       entries,
       count: entries.length,
@@ -59,17 +63,17 @@ export async function handleContextRestoreRoute(input: {
       );
     }
 
-    const created = await input.store.createContextRestoreRequest({
+    const created = await store.createContextRestoreRequest({
       id: `ctx_restore_${randomUUID()}`,
       idempotency_key: input.idempotencyKey,
       resource: validation.resource,
       restore_plan: browserPlan,
     }, input.now);
     const restoreInfo = restoreResourceInfo(created.record.resource);
-    await input.observability.incrementCounter("restore_requests_created_total", created.inserted ? 1 : 0);
+    await observability.incrementCounter("restore_requests_created_total", created.inserted ? 1 : 0);
     if (created.inserted) {
-      await input.observability.incrementCounter(`restore_requests_created_provider_${restoreInfo.counterProvider}`);
-      await input.observability.recordActivity({
+      await observability.incrementCounter(`restore_requests_created_provider_${restoreInfo.counterProvider}`);
+      await observability.recordActivity({
         type: "context_restore_requested",
         occurred_at: created.record.created_at,
         actor: "system",
@@ -91,7 +95,7 @@ export async function handleContextRestoreRoute(input: {
   }
 
   if (input.method === "GET" && input.pathname === "/contexts/restore-requests/next") {
-    const nextRequest = await input.store.peekNextContextRestoreRequest(input.now);
+    const nextRequest = await store.peekNextContextRestoreRequest(input.now);
     return ok(200, {
       restore_request: nextRequest ? presentContextRestoreRequest(nextRequest) : null,
       request_id: input.requestId,
@@ -103,7 +107,7 @@ export async function handleContextRestoreRoute(input: {
     if (!parsed.ok) return schemaError(parsed.message);
     const claimRequest = parseContextRestoreClaimRequest(parsed.value);
     if (!claimRequest.ok) return schemaError(claimRequest.message);
-    const nextRequest = await input.store.claimNextContextRestoreRequest(
+    const nextRequest = await store.claimNextContextRestoreRequest(
       claimRequest.leaseOwner,
       input.now,
       claimRequest.leaseMs,
@@ -117,7 +121,7 @@ export async function handleContextRestoreRoute(input: {
   const restoreGetMatch = input.pathname.match(/^\/contexts\/restore-requests\/([^/]+)$/);
   if (input.method === "GET" && restoreGetMatch) {
     const restoreRequestId = decodeURIComponent(restoreGetMatch[1] ?? "");
-    const record = await input.store.getContextRestoreRequest(restoreRequestId);
+    const record = await store.getContextRestoreRequest(restoreRequestId);
     if (!record) return error(404, "not_found", `context restore request ${restoreRequestId} was not found`);
     return ok(200, {
       restore_request: presentContextRestoreRequest(record),
@@ -146,12 +150,12 @@ export async function handleContextRestoreRoute(input: {
   const restoreRetryMatch = input.pathname.match(/^\/contexts\/restore-requests\/([^/]+)\/retry$/);
   if (input.method === "POST" && restoreRetryMatch) {
     const restoreRequestId = decodeURIComponent(restoreRetryMatch[1] ?? "");
-    const record = await input.store.retryContextRestoreRequest(restoreRequestId, input.now);
+    const record = await store.retryContextRestoreRequest(restoreRequestId, input.now);
     if (!record) return error(404, "not_found", `context restore request ${restoreRequestId} was not found`);
     const restoreInfo = restoreResourceInfo(record.resource);
-    await input.observability.incrementCounter("restore_requests_retried_total");
-    await input.observability.incrementCounter(`restore_requests_retried_provider_${restoreInfo.counterProvider}`);
-    await input.observability.recordActivity({
+    await observability.incrementCounter("restore_requests_retried_total");
+    await observability.incrementCounter(`restore_requests_retried_provider_${restoreInfo.counterProvider}`);
+    await observability.recordActivity({
       type: "context_restore_retried",
       occurred_at: record.updated_at,
       actor: "human",
@@ -208,25 +212,25 @@ function validateContextQuery(
 
 async function markRestoreFinished(input: {
   readJsonBody: JsonBodyReader;
-  store: GatewayStore;
-  observability: Observability;
+  runtime: Runtime;
   now: Date;
   requestId: string;
   restoreRequestId: string;
   status: "done" | "failed";
 }): Promise<RouteResult> {
+  const { store, observability } = input.runtime;
   const parsed = await input.readJsonBody();
   if (!parsed.ok) return schemaError(parsed.message);
   const result = isRecord(parsed.value) && "result" in parsed.value ? parsed.value.result : parsed.value;
   const record = input.status === "done"
-    ? await input.store.markContextRestoreRequestDone(input.restoreRequestId, result, input.now)
-    : await input.store.markContextRestoreRequestFailed(input.restoreRequestId, result, input.now);
+    ? await store.markContextRestoreRequestDone(input.restoreRequestId, result, input.now)
+    : await store.markContextRestoreRequestFailed(input.restoreRequestId, result, input.now);
   if (!record) return error(404, "not_found", `context restore request ${input.restoreRequestId} was not found`);
 
   const restoreInfo = restoreResourceInfo(record.resource);
-  await input.observability.incrementCounter(input.status === "done" ? "restore_requests_done_total" : "restore_requests_failed_total");
-  await input.observability.incrementCounter(`restore_requests_${input.status}_provider_${restoreInfo.counterProvider}`);
-  await input.observability.recordActivity({
+  await observability.incrementCounter(input.status === "done" ? "restore_requests_done_total" : "restore_requests_failed_total");
+  await observability.incrementCounter(`restore_requests_${input.status}_provider_${restoreInfo.counterProvider}`);
+  await observability.recordActivity({
     type: input.status === "done" ? "context_restore_done" : "context_restore_failed",
     occurred_at: record.updated_at,
     actor: "system",
@@ -260,163 +264,6 @@ export function validateContextRestorePlanRequest(
     return { ok: false, message: "resource.kind must be a non-empty string" };
   }
   return { ok: true, resource };
-}
-
-export function buildContextRestorePlan(resource: Record<string, unknown>): Record<string, unknown> | undefined {
-  const url = typeof resource.url === "string" && resource.url ? resource.url : undefined;
-  if (resource.kind === "browser_tab" && url) {
-    return {
-      kind: "browser_extension_message",
-      side_effect: "local",
-      execute_supported: false,
-      target: "eventloopOS browser extension runtime",
-      message: {
-        type: "eventloop.restore",
-        resource,
-      },
-    };
-  }
-
-  if (resource.kind === "slack_thread") {
-    const slackUrl = url ?? buildSlackUrl(resource);
-    if (slackUrl) {
-      return {
-        kind: "open_slack_thread",
-        side_effect: "local",
-        execute_supported: false,
-        url: slackUrl,
-        anchor: pickRecord(resource.details, ["thread_ts", "message_ts", "channel_id", "workspace_id", "team_id"]),
-      };
-    }
-  }
-
-  if (resource.kind === "gmail_thread" || resource.kind === "email") {
-    const emailUrl = url ?? buildGmailUrl(resource);
-    if (emailUrl) {
-      return {
-        kind: "open_email",
-        side_effect: "local",
-        execute_supported: false,
-        url: emailUrl,
-        anchor: pickRecord(resource.details, ["thread_id", "message_id", "account", "subject_hash"]),
-      };
-    }
-  }
-
-  if (resource.kind === "notion_page") {
-    if (url) {
-      return {
-        kind: "open_notion_page",
-        side_effect: "local",
-        execute_supported: false,
-        url,
-        anchor: pickRecord(resource.details, ["page_id", "block_id", "database_id"]),
-      };
-    }
-  }
-
-  if (resource.kind === "google_doc" || resource.kind === "doc_anchor") {
-    if (url) {
-      return {
-        kind: "open_doc_anchor",
-        side_effect: "local",
-        execute_supported: false,
-        url,
-        anchor: pickRecord(resource.details, ["doc_id", "heading_id", "comment_id", "selection_quote"]),
-      };
-    }
-  }
-
-  if (url) {
-    return {
-      kind: "open_url",
-      side_effect: "local",
-      execute_supported: false,
-      url,
-    };
-  }
-
-  const path = typeof resource.path === "string" && resource.path ? resource.path : undefined;
-  if (resource.kind === "file" && path) {
-    return {
-      kind: "open_file",
-      side_effect: "local",
-      execute_supported: false,
-      path,
-      line: resource.line,
-      column: resource.column,
-    };
-  }
-
-  return undefined;
-}
-
-function buildSlackUrl(resource: Record<string, unknown>): string | undefined {
-  const details = isRecord(resource.details) ? resource.details : {};
-  const team = stringFromRecord(details, "team_domain") ?? stringFromRecord(details, "workspace_domain");
-  const channel = stringFromRecord(details, "channel_id");
-  const ts = stringFromRecord(details, "message_ts") ?? stringFromRecord(details, "thread_ts");
-  if (team && channel && ts) {
-    const tsCompact = ts.replace(".", "").replace(/[^0-9]/g, "");
-    return `https://${team}.slack.com/archives/${channel}/p${tsCompact}`;
-  }
-  return undefined;
-}
-
-function buildGmailUrl(resource: Record<string, unknown>): string | undefined {
-  const details = isRecord(resource.details) ? resource.details : {};
-  const threadId = stringFromRecord(details, "thread_id") ?? stringFromRecord(details, "message_id");
-  if (threadId) {
-    return `https://mail.google.com/mail/u/0/#all/${threadId}`;
-  }
-  return undefined;
-}
-
-const BROWSER_RESTORE_PLAN_KINDS = new Set([
-  "browser_extension_message",
-  "open_slack_thread",
-  "open_email",
-  "open_notion_page",
-  "open_doc_anchor",
-]);
-
-function wrapPlanForBrowserExtension(
-  plan: Record<string, unknown>,
-  resource: Record<string, unknown>,
-): Record<string, unknown> | undefined {
-  const kind = typeof plan.kind === "string" ? plan.kind : undefined;
-  if (!kind || !BROWSER_RESTORE_PLAN_KINDS.has(kind)) return undefined;
-  if (kind === "browser_extension_message") return plan;
-
-  const anchor = isRecord(plan.anchor) ? plan.anchor : undefined;
-  const url = typeof plan.url === "string" ? plan.url : undefined;
-  return {
-    kind: "browser_extension_message",
-    side_effect: "local",
-    execute_supported: false,
-    target: "eventloopOS browser extension runtime",
-    plan_kind: kind,
-    message: {
-      type: "eventloop.restore",
-      resource: {
-        ...resource,
-        ...(url ? { url } : {}),
-        anchor,
-        plan_kind: kind,
-      },
-    },
-  };
-}
-
-function pickRecord(details: unknown, keys: string[]): Record<string, unknown> | undefined {
-  if (!isRecord(details)) return undefined;
-  const out: Record<string, unknown> = {};
-  for (const key of keys) {
-    if (details[key] !== undefined && details[key] !== null) {
-      out[key] = details[key];
-    }
-  }
-  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function parseContextRestoreClaimRequest(

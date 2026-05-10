@@ -3,6 +3,7 @@ import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import type { Observability } from "../observability.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
 import { injectEventIntoTaskSessionIfPossible } from "../routing/task_session_injection.js";
+import type { Runtime } from "../runtime.js";
 import type { RouteDecision } from "../store.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
@@ -20,13 +21,13 @@ export async function handleEventsRoute(input: {
   method: string | undefined;
   pathname: string;
   readJsonBody: JsonBodyReader;
-  store: GatewayStore;
-  taskSessions?: TaskSessionController;
-  observability: Observability;
+  runtime: Runtime;
   now: Date;
   requestId: string;
   idempotencyKey?: string;
 }): Promise<RouteResult | undefined> {
+  const { store, taskSessions, observability } = input.runtime;
+  const eventGatewayOptions: EventGatewayOptions = { store, taskSessions, observability };
   if (input.method === "POST" && input.pathname === "/events") {
     const parsed = await input.readJsonBody();
     if (!parsed.ok) return schemaError(parsed.message);
@@ -34,7 +35,7 @@ export async function handleEventsRoute(input: {
     const eventValidation = validateEventRequest(parsed.value);
     if (!eventValidation.ok) return schemaError(eventValidation.message);
 
-    const routed = await routeEventThroughGateway(input, eventValidation.event, input.now);
+    const routed = await routeEventThroughGateway(eventGatewayOptions,eventValidation.event, input.now);
 
     return ok(202, {
       ok: true,
@@ -53,8 +54,8 @@ export async function handleEventsRoute(input: {
     const transcriptValue = isRecord(parsed.value) && typeof parsed.value.transcript === "string" ? parsed.value.transcript : "";
     const intent = classifyVoiceIntent(transcriptValue);
     if (intent.kind === "fan_out") {
-      await input.observability.incrementCounter("voice_fan_out_detected_total");
-      await input.observability.recordActivity({
+      await observability.incrementCounter("voice_fan_out_detected_total");
+      await observability.recordActivity({
         type: "voice_fan_out_detected",
         occurred_at: input.now.toISOString(),
         actor: "human",
@@ -83,17 +84,17 @@ export async function handleEventsRoute(input: {
       });
     }
     if (intent.kind === "rerank") {
-      const queue = await input.store.listQueue("ready", input.now);
+      const queue = await store.listQueue("ready", input.now);
       const match = pickRerankCandidate(intent, queue);
       if (match) {
-        const updated = await input.store.bumpQueueItemPriority(match.item.id, {
+        const updated = await store.bumpQueueItemPriority(match.item.id, {
           delta: intent.delta,
           score: intent.score,
           reason: `voice_rerank_${intent.direction}`,
         }, input.now);
         if (updated) {
-          await input.observability.incrementCounter("voice_rerank_total");
-          await input.observability.recordActivity({
+          await observability.incrementCounter("voice_rerank_total");
+          await observability.recordActivity({
             type: "voice_rerank",
             occurred_at: input.now.toISOString(),
             actor: "human",
@@ -124,8 +125,8 @@ export async function handleEventsRoute(input: {
         }
       }
       // Fall through to note routing if no match found, but record telemetry.
-      await input.observability.incrementCounter("voice_rerank_no_match_total");
-      await input.observability.recordActivity({
+      await observability.incrementCounter("voice_rerank_no_match_total");
+      await observability.recordActivity({
         type: "voice_rerank_no_match",
         occurred_at: input.now.toISOString(),
         actor: "human",
@@ -139,7 +140,7 @@ export async function handleEventsRoute(input: {
       });
     }
 
-    const routed = await routeEventThroughGateway(input, voiceValidation.event, input.now);
+    const routed = await routeEventThroughGateway(eventGatewayOptions,voiceValidation.event, input.now);
 
     return ok(202, {
       ok: true,
@@ -152,7 +153,7 @@ export async function handleEventsRoute(input: {
     const id = decodeURIComponent(input.pathname.slice("/events/".length));
     if (!id) return schemaError("event id is required");
 
-    const result = await input.store.getEvent(id);
+    const result = await store.getEvent(id);
     if (!result) return error(404, "not_found", `event ${id} was not found`);
 
     return ok(200, {
@@ -168,7 +169,7 @@ export async function handleEventsRoute(input: {
     const id = decodeURIComponent(input.pathname.slice("/review-packets/".length));
     if (!id) return schemaError("review packet id is required");
 
-    const packet = await input.store.getReviewPacket(id);
+    const packet = await store.getReviewPacket(id);
     if (!packet) return error(404, "not_found", `review packet ${id} was not found`);
 
     return ok(200, {

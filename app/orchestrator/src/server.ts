@@ -16,6 +16,7 @@ import { handleQueueRoute } from "./routes/queue.js";
 import { handleReadingQueueRoute } from "./routes/reading_queue.js";
 import { handleTaskSessionsRoute } from "./routes/task_sessions.js";
 import { handleWorkspaceRoute } from "./routes/workspace.js";
+import { createRuntime, type Runtime } from "./runtime.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
 import type { TerminalSendExecutor } from "./task_sessions/terminal_send.js";
 import type { WorkspaceController } from "./workspace/controller.js";
@@ -39,8 +40,19 @@ type RequestContext = {
 };
 
 export function createGatewayServer(options: GatewayServerOptions): Server {
-  const now = options.now ?? (() => new Date());
   const observability = options.observability ?? createInMemoryObservability();
+  const runtime = createRuntime({
+    store: options.store,
+    taskSessions: options.taskSessions,
+    workspace: options.workspace,
+    observability,
+    mcpSources: options.mcpSources,
+    workspaceExecuteEnabled: options.workspaceExecuteEnabled,
+    terminalSendExecutor: options.terminalSendExecutor,
+    terminalSendEnabled: options.terminalSendEnabled,
+    now: options.now,
+  });
+  const now = runtime.now;
   const serverOptions = { ...options, observability };
 
   return createServer(async (request, response) => {
@@ -83,11 +95,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         pathname: context.url.pathname,
         url: context.url,
         readJsonBody: () => readJsonBody(request),
-        store: options.store,
-        taskSessions: options.taskSessions,
-        observability,
-        terminalSendExecutor: options.terminalSendExecutor,
-        terminalSendEnabled: options.terminalSendEnabled,
+        runtime,
         now: now(),
         requestId: context.requestId,
       });
@@ -100,8 +108,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         pathname: context.url.pathname,
         url: context.url,
         readJsonBody: () => readJsonBody(request),
-        store: options.store,
-        observability,
+        runtime,
         now: now(),
         requestId: context.requestId,
         idempotencyKey: context.idempotencyKey,
@@ -121,9 +128,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         method: request.method,
         pathname: context.url.pathname,
         readJsonBody: () => readJsonBody(request),
-        store: options.store,
-        workspace: options.workspace,
-        workspaceExecuteEnabled: options.workspaceExecuteEnabled,
+        runtime,
         now: now(),
         requestId: context.requestId,
         idempotencyKey: context.idempotencyKey,
@@ -143,9 +148,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         method: request.method,
         pathname: context.url.pathname,
         readJsonBody: () => readJsonBody(request),
-        workspace: options.workspace,
-        taskSessions: options.taskSessions,
-        observability,
+        runtime,
         now: now(),
         requestId: context.requestId,
       });
@@ -164,9 +167,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         method: request.method,
         pathname: context.url.pathname,
         readJsonBody: () => readJsonBody(request),
-        store: options.store,
-        taskSessions: options.taskSessions,
-        observability,
+        runtime,
         now: now(),
         requestId: context.requestId,
       });
@@ -185,8 +186,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         method: request.method,
         pathname: context.url.pathname,
         readJsonBody: () => readJsonBody(request),
-        store: options.store,
-        observability,
+        runtime,
         now: now(),
         requestId: context.requestId,
       });
@@ -205,10 +205,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         method: request.method,
         pathname: context.url.pathname,
         readJsonBody: () => readJsonBody(request),
-        store: options.store,
-        workspace: options.workspace,
-        taskSessions: options.taskSessions,
-        observability,
+        runtime,
         now: now(),
         requestId: context.requestId,
       });
@@ -227,8 +224,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         method: request.method,
         pathname: context.url.pathname,
         readJsonBody: () => readJsonBody(request),
-        mcpSources: options.mcpSources,
-        observability,
+        runtime,
         now: now(),
         requestId: context.requestId,
         routeEvent: (event, routedAt) => routeEventThroughGateway(serverOptions, event, routedAt),
@@ -249,9 +245,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         pathname: context.url.pathname,
         url: context.url,
         readJsonBody: () => readJsonBody(request),
-        store: options.store,
-        taskSessions: options.taskSessions,
-        observability,
+        runtime,
         now: now(),
         requestId: context.requestId,
         idempotencyKey: context.idempotencyKey,
@@ -271,8 +265,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         method: request.method,
         pathname: context.url.pathname,
         readJsonBody: () => readJsonBody(request),
-        store: options.store,
-        observability,
+        runtime,
         now: now(),
         requestId: context.requestId,
       });
@@ -291,9 +284,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         method: request.method,
         pathname: context.url.pathname,
         readJsonBody: () => readJsonBody(request),
-        store: options.store,
-        taskSessions: options.taskSessions,
-        observability,
+        runtime,
         now: now(),
         requestId: context.requestId,
         idempotencyKey: context.idempotencyKey,

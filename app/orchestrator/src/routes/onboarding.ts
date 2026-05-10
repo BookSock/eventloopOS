@@ -1,8 +1,8 @@
 import { buildOnboardingScan } from "../onboarding/task_grouping.js";
 import type { GatewayStore } from "../gateway_store.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
-import type { Observability } from "../observability.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
+import type { Runtime } from "../runtime.js";
 import type { RouteDecision } from "../store.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
 import type { WorkspaceController } from "../workspace/controller.js";
@@ -13,36 +13,34 @@ export async function handleOnboardingRoute(input: {
   method: string | undefined;
   pathname: string;
   readJsonBody: JsonBodyReader;
-  store: GatewayStore;
-  workspace?: WorkspaceController;
-  taskSessions?: TaskSessionController;
-  observability?: Observability;
+  runtime: Runtime;
   now: Date;
   requestId: string;
 }): Promise<RouteResult | undefined> {
+  const { store, workspace, taskSessions, observability } = input.runtime;
   if (input.method === "GET" && input.pathname === "/onboarding/scan") {
     const warnings: string[] = [];
     let snapshot;
-    if (input.workspace) {
+    if (workspace) {
       try {
-        snapshot = await input.workspace.capture();
+        snapshot = await workspace.capture();
       } catch (error) {
         warnings.push(`workspace capture failed: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    if (!input.workspace) {
+    if (!workspace) {
       warnings.push("workspace controller is not configured");
     }
 
-    const taskSessions = input.taskSessions?.listSessions ? await Promise.resolve(input.taskSessions.listSessions()).catch((error) => {
+    const sessions = taskSessions?.listSessions ? await Promise.resolve(taskSessions.listSessions()).catch((error) => {
       warnings.push(`task session listing failed: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     }) : [];
-    if (!input.taskSessions?.listSessions) {
+    if (!taskSessions?.listSessions) {
       warnings.push("task session listing is not configured");
     }
 
-    const browserContexts = await input.store.listContextEntries({ limit: 100 }).catch((error) => {
+    const browserContexts = await store.listContextEntries({ limit: 100 }).catch((error) => {
       warnings.push(`browser context listing failed: ${error instanceof Error ? error.message : String(error)}`);
       return [];
     });
@@ -53,7 +51,7 @@ export async function handleOnboardingRoute(input: {
       body: {
         ...buildOnboardingScan({
           snapshot,
-          taskSessions,
+          taskSessions: sessions,
           browserContexts,
           capturedAt: input.now.toISOString(),
           warnings,
@@ -74,15 +72,15 @@ export async function handleOnboardingRoute(input: {
     const warnings: string[] = [];
     let workspaceRecord;
     if (validation.windowIds.length > 0) {
-      if (!input.workspace) return error(409, "workspace_not_configured", "workspace controller is not configured");
-      const snapshot = await input.workspace.capture();
+      if (!workspace) return error(409, "workspace_not_configured", "workspace controller is not configured");
+      const snapshot = await workspace.capture();
       const selected = snapshot.windows.filter((window) => validation.windowIds.includes(window.id));
       const missingWindowIds = validation.windowIds.filter((id) => !selected.some((window) => window.id === id));
       if (missingWindowIds.length > 0) {
         return error(404, "window_not_found", "one or more requested windows were not found", { missing_window_ids: missingWindowIds });
       }
 
-      workspaceRecord = await input.store.saveTaskWorkspaceSnapshot({
+      workspaceRecord = await store.saveTaskWorkspaceSnapshot({
         taskId: validation.taskId,
         snapshot: {
           backend: "aerospace",
@@ -97,11 +95,11 @@ export async function handleOnboardingRoute(input: {
 
     const bindings = [];
     if (validation.taskSessionIds.length > 0) {
-      if (!input.taskSessions?.bindTaskSession) {
+      if (!taskSessions?.bindTaskSession) {
         return error(409, "task_binding_unavailable", "task session binding is not configured");
       }
       for (const taskSessionId of validation.taskSessionIds) {
-        const binding = await Promise.resolve(input.taskSessions.bindTaskSession({
+        const binding = await Promise.resolve(taskSessions.bindTaskSession({
           task_session_id: taskSessionId,
           task_id: validation.taskId,
         }));
@@ -121,8 +119,8 @@ export async function handleOnboardingRoute(input: {
       warnings.push("approval accepted but no windows or task sessions were provided");
     }
 
-    await input.observability?.incrementCounter("onboarding_task_approvals_total");
-    await input.observability?.recordActivity({
+    await observability?.incrementCounter("onboarding_task_approvals_total");
+    await observability?.recordActivity({
       type: "onboarding_task_approved",
       occurred_at: input.now.toISOString(),
       actor: "human",
@@ -163,39 +161,38 @@ export async function handleOnboardingRoute(input: {
 
 async function resolveProposalApprovalIfNeeded(
   input: {
-    workspace?: WorkspaceController;
-    taskSessions?: TaskSessionController;
-    store: GatewayStore;
+    runtime: Runtime;
     now: Date;
   },
   value: unknown,
 ): Promise<{ ok: true; value: unknown; proposalId?: string; proposalTitle?: string; browserContexts?: Array<{ id: string; title: string; url?: string; window_id?: string; tab_id?: string; restore_confidence: "high" | "medium" | "low"; captured_at: string }> } | { ok: false; result: RouteResult }> {
+  const { workspace, taskSessions, store } = input.runtime;
   if (!isRecord(value)) return { ok: true, value };
   const proposalId = readOptionalString(value.proposal_id);
   if (!proposalId) return { ok: true, value };
 
   const warnings: string[] = [];
   let snapshot;
-  if (input.workspace) {
+  if (workspace) {
     try {
-      snapshot = await input.workspace.capture();
+      snapshot = await workspace.capture();
     } catch (error) {
       warnings.push(`workspace capture failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
-  const taskSessions = input.taskSessions?.listSessions ? await Promise.resolve(input.taskSessions.listSessions()).catch((error) => {
+  const sessions = taskSessions?.listSessions ? await Promise.resolve(taskSessions.listSessions()).catch((error) => {
     warnings.push(`task session listing failed: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   }) : [];
-  const browserContexts = await input.store.listContextEntries({ limit: 100 }).catch((error) => {
+  const browserContexts = await store.listContextEntries({ limit: 100 }).catch((error) => {
     warnings.push(`browser context listing failed: ${error instanceof Error ? error.message : String(error)}`);
     return [];
   });
 
   const scan = buildOnboardingScan({
     snapshot,
-    taskSessions,
+    taskSessions: sessions,
     browserContexts,
     capturedAt: input.now.toISOString(),
     warnings,
@@ -262,7 +259,7 @@ function validateOnboardingApprovalRequest(input: unknown): {
 
 async function queueOnboardingPaper(
   input: {
-    store: GatewayStore;
+    runtime: Runtime;
     now: Date;
   },
   validation: {
@@ -271,6 +268,7 @@ async function queueOnboardingPaper(
   },
   proposalTitle: string | undefined,
 ) {
+  const { store } = input.runtime;
   const title = proposalTitle ?? validation.taskId.replace(/^task_/, "").replaceAll("_", " ");
   const nowIso = input.now.toISOString();
   const event: McpEvent = {
@@ -303,12 +301,12 @@ async function queueOnboardingPaper(
       },
     }],
   };
-  return input.store.ingestEventAsReviewPacket(event, input.now);
+  return store.ingestEventAsReviewPacket(event, input.now);
 }
 
 async function bindBrowserContextsToTask(
   input: {
-    store: GatewayStore;
+    runtime: Runtime;
     now: Date;
   },
   validation: {
@@ -318,9 +316,10 @@ async function bindBrowserContextsToTask(
   },
   proposalBrowserContexts?: Array<{ id: string; title: string; url?: string; window_id?: string; tab_id?: string; restore_confidence: "high" | "medium" | "low"; captured_at: string }>,
 ): Promise<Array<{ browser_context_id: string; event_id: string; task_id: string }>> {
+  const { store } = input.runtime;
   if (validation.browserContextIds.length === 0) return [];
   const proposalById = new Map((proposalBrowserContexts ?? []).map((context) => [context.id, context]));
-  const existingEntries = await input.store.listContextEntries({ limit: 200 });
+  const existingEntries = await store.listContextEntries({ limit: 200 });
   const existingById = new Map(existingEntries.map((entry) => [readOptionalString(entry.resource.id) ?? entry.event_id, entry]));
   const bindings: Array<{ browser_context_id: string; event_id: string; task_id: string }> = [];
 
@@ -369,7 +368,7 @@ async function bindBrowserContextsToTask(
       evidence: [],
       created_at: nowIso,
     };
-    await input.store.recordEventRoute(event, routeDecision, input.now);
+    await store.recordEventRoute(event, routeDecision, input.now);
     bindings.push({ browser_context_id: contextId, event_id: event.id, task_id: validation.taskId });
   }
 

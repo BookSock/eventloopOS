@@ -1,9 +1,7 @@
 import { autoBindCodexFromWindows } from "../agents/codex/auto_bind.js";
 import { inspectCodexSession } from "../agents/codex/session_inspector.js";
 import { inspectClaudeSession } from "../agents/claude/session_inspector.js";
-import type { Observability } from "../observability.js";
-import type { TaskSessionController } from "../task_sessions/types.js";
-import type { WorkspaceController } from "../workspace/controller.js";
+import type { Runtime } from "../runtime.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
 
@@ -11,17 +9,16 @@ export async function handleAgentsRoute(input: {
   method: string | undefined;
   pathname: string;
   readJsonBody: JsonBodyReader;
-  workspace?: WorkspaceController;
-  taskSessions?: TaskSessionController;
-  observability: Observability;
+  runtime: Runtime;
   now: Date;
   requestId: string;
 }): Promise<RouteResult | undefined> {
+  const { workspace, taskSessions, observability } = input.runtime;
   if (input.method === "POST" && input.pathname === "/agents/codex/auto-bind") {
     const result = await autoBindCodexFromWindows({
-      workspace: input.workspace,
-      taskSessions: input.taskSessions,
-      observability: input.observability,
+      workspace,
+      taskSessions,
+      observability,
       now: input.now,
     });
     return ok(200, { ok: true, ...result, request_id: input.requestId });
