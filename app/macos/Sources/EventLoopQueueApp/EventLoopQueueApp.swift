@@ -21,6 +21,8 @@ struct EventLoopQueueApp: App {
         let viewModel = QueueViewModel(
             client: configuration.makeClient(),
             workspaceClient: configuration.makeWorkspaceClient(),
+            aeroSpaceClient: configuration.makeAeroSpaceClient(),
+            codexForegroundResolver: configuration.makeCodexForegroundResolver(),
             voiceTranscriptionService: voiceService
         )
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -28,7 +30,7 @@ struct EventLoopQueueApp: App {
             pullNextPaper: {
                 NSApp.activate(ignoringOtherApps: true)
                 Task {
-                    await viewModel.pullNextPaper()
+                    await viewModel.advance()
                 }
             },
             toggleManualMode: {

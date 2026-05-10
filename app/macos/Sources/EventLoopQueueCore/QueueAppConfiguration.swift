@@ -46,6 +46,24 @@ public struct QueueAppConfiguration: Equatable, Sendable {
         }
     }
 
+    public func makeAeroSpaceClient() -> any AeroSpaceWorkspaceClient {
+        switch clientMode {
+        case .fake:
+            FakeAeroSpaceWorkspaceClient()
+        case .http:
+            ProcessAeroSpaceWorkspaceClient()
+        }
+    }
+
+    public func makeCodexForegroundResolver() -> any CodexForegroundResolver {
+        switch clientMode {
+        case .fake:
+            FakeCodexForegroundResolver()
+        case .http:
+            NoOpCodexForegroundResolver()
+        }
+    }
+
     private static func value(after flag: String, in arguments: [String]) -> String? {
         guard let index = arguments.firstIndex(of: flag) else {
             return nil

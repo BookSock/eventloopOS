@@ -98,6 +98,7 @@ export type TaskRecord = {
   task_id: string;
   primary_anchor_kind: TaskAnchorKind;
   primary_anchor_id: string;
+  aerospace_workspace_id?: string;
   created_at: string;
   updated_at: string;
   last_paper_emitted_at?: string;

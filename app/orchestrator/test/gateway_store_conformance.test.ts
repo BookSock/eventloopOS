@@ -807,6 +807,77 @@ function runGatewayStoreContract(
         await harness.cleanup();
       }
     });
+
+    it("binds tasks to aerospace workspaces and looks them up by workspace id", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        const layout: WorkspaceSnapshot = {
+          backend: "aerospace",
+          activeWorkspace: "ws-alpha",
+          focusedWindowId: 31,
+          windows: [{ id: 31, app: "Ghostty", title: "codex alpha", workspace: "ws-alpha" }],
+        };
+
+        const created = await harness.store.createTask({
+          primaryAnchor: { kind: "codex_thread", id: "thread-ws-1" },
+          capturedLayout: layout,
+          aerospaceWorkspaceId: "ws-alpha",
+          now,
+        });
+        assert.equal(created.created, true);
+        assert.equal(created.task.aerospace_workspace_id, "ws-alpha");
+
+        const fetched = await harness.store.getTaskByAnchor("codex_thread", "thread-ws-1");
+        assert.equal(fetched?.aerospace_workspace_id, "ws-alpha");
+
+        const onAlpha = await harness.store.getTasksByWorkspaceId("ws-alpha");
+        assert.equal(onAlpha.length, 1);
+        assert.equal(onAlpha[0]?.task_id, created.task.task_id);
+
+        const onUnknown = await harness.store.getTasksByWorkspaceId("ws-nope");
+        assert.deepEqual(onUnknown, []);
+
+        const moved = await harness.store.createTask({
+          primaryAnchor: { kind: "codex_thread", id: "thread-ws-1" },
+          capturedLayout: layout,
+          aerospaceWorkspaceId: "ws-beta",
+          now: new Date("2026-05-06T12:10:00.000Z"),
+        });
+        assert.equal(moved.created, false);
+        assert.equal(moved.task.task_id, created.task.task_id);
+        assert.equal(moved.task.aerospace_workspace_id, "ws-beta");
+
+        const onAlphaAfterMove = await harness.store.getTasksByWorkspaceId("ws-alpha");
+        assert.deepEqual(onAlphaAfterMove, []);
+        const onBeta = await harness.store.getTasksByWorkspaceId("ws-beta");
+        assert.equal(onBeta.length, 1);
+        assert.equal(onBeta[0]?.task_id, created.task.task_id);
+
+        const replayWithoutWorkspace = await harness.store.createTask({
+          primaryAnchor: { kind: "codex_thread", id: "thread-ws-1" },
+          capturedLayout: layout,
+          now: new Date("2026-05-06T12:11:00.000Z"),
+        });
+        assert.equal(replayWithoutWorkspace.task.aerospace_workspace_id, "ws-beta", "missing workspace_id must not clobber existing binding");
+
+        const list = await harness.store.listTasks();
+        assert.equal(list.length, 1, "listTasks unfiltered still returns the row");
+
+        const noWorkspaceTask = await harness.store.createTask({
+          primaryAnchor: { kind: "ghostty_window", id: "win-no-ws" },
+          capturedLayout: layout,
+          now: new Date("2026-05-06T12:12:00.000Z"),
+        });
+        assert.equal(noWorkspaceTask.task.aerospace_workspace_id, undefined);
+
+        const listAfter = await harness.store.listTasks();
+        assert.equal(listAfter.length, 2);
+      } finally {
+        await harness.cleanup();
+      }
+    });
   });
 }
 

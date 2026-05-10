@@ -154,10 +154,12 @@ export type GatewayStore = {
     primaryAnchor: { kind: TaskAnchorKind; id: string };
     capturedLayout: WorkspaceSnapshot;
     autoPaperIdleSeconds?: number;
+    aerospaceWorkspaceId?: string;
     now: Date;
   }): Promise<{ task: TaskRecord; layout: TaskLayoutRecord; created: boolean }>;
   getTask(taskId: string): Promise<TaskRecord | undefined>;
   getTaskByAnchor(kind: TaskAnchorKind, id: string): Promise<TaskRecord | undefined>;
+  getTasksByWorkspaceId(workspaceId: string): Promise<TaskRecord[]>;
   listTasks(): Promise<TaskRecord[]>;
   getTaskLayout(taskId: string): Promise<TaskLayoutRecord | undefined>;
   updateTaskLayout(taskId: string, layout: WorkspaceSnapshot, now: Date): Promise<TaskRecord | undefined>;
@@ -467,13 +469,26 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
         (record) => `${record.primary_anchor_kind}:${record.primary_anchor_id}` === anchorKey,
       );
       if (existing) {
-        const layout = taskLayouts.get(existing.task_id);
+        const timestamp = input.now.toISOString();
+        let updatedExisting = existing;
+        if (
+          input.aerospaceWorkspaceId !== undefined &&
+          input.aerospaceWorkspaceId !== existing.aerospace_workspace_id
+        ) {
+          updatedExisting = {
+            ...existing,
+            aerospace_workspace_id: input.aerospaceWorkspaceId,
+            updated_at: timestamp,
+          };
+          tasks.set(existing.task_id, updatedExisting);
+        }
+        const layout = taskLayouts.get(updatedExisting.task_id);
         return {
-          task: { ...existing },
+          task: { ...updatedExisting },
           layout: layout ?? {
-            task_id: existing.task_id,
+            task_id: updatedExisting.task_id,
             layout: input.capturedLayout,
-            updated_at: existing.updated_at,
+            updated_at: updatedExisting.updated_at,
           },
           created: false,
         };
@@ -484,6 +499,7 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
         task_id: taskId,
         primary_anchor_kind: input.primaryAnchor.kind,
         primary_anchor_id: input.primaryAnchor.id,
+        aerospace_workspace_id: input.aerospaceWorkspaceId,
         created_at: timestamp,
         updated_at: timestamp,
         auto_paper_idle_seconds:
@@ -509,6 +525,12 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
         (entry) => entry.primary_anchor_kind === kind && entry.primary_anchor_id === id,
       );
       return record ? { ...record } : undefined;
+    },
+    async getTasksByWorkspaceId(workspaceId) {
+      return Array.from(tasks.values())
+        .filter((entry) => entry.aerospace_workspace_id === workspaceId)
+        .map((entry) => ({ ...entry }))
+        .sort((left, right) => left.created_at.localeCompare(right.created_at));
     },
     async listTasks() {
       return Array.from(tasks.values())
@@ -736,6 +758,9 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async getTaskByAnchor(kind, id) {
       return store.getTaskByAnchor(kind, id);
+    },
+    async getTasksByWorkspaceId(workspaceId) {
+      return store.getTasksByWorkspaceId(workspaceId);
     },
     async listTasks() {
       return store.listTasks();

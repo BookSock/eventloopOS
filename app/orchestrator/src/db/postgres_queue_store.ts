@@ -607,6 +607,7 @@ export class PostgresQueueStore {
     primaryAnchor: { kind: TaskAnchorKind; id: string };
     capturedLayout: WorkspaceSnapshot;
     autoPaperIdleSeconds?: number;
+    aerospaceWorkspaceId?: string;
     now: Date;
   }): Promise<{ task: TaskRecord; layout: TaskLayoutRecord; created: boolean }> {
     const client = await this.pool.connect();
@@ -614,14 +615,31 @@ export class PostgresQueueStore {
       await client.query("BEGIN");
       const existingResult = await client.query(
         `
-          SELECT task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+          SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
           FROM tasks
           WHERE primary_anchor_kind = $1 AND primary_anchor_id = $2
         `,
         [input.primaryAnchor.kind, input.primaryAnchor.id],
       );
       if (existingResult.rows[0]) {
-        const task = rowToTaskRecord(existingResult.rows[0]);
+        let row = existingResult.rows[0];
+        const timestamp = input.now.toISOString();
+        if (
+          input.aerospaceWorkspaceId !== undefined &&
+          (row.aerospace_workspace_id ?? undefined) !== input.aerospaceWorkspaceId
+        ) {
+          const updated = await client.query(
+            `
+              UPDATE tasks
+                 SET aerospace_workspace_id = $2, updated_at = $3::timestamptz
+               WHERE task_id = $1
+              RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+            `,
+            [row.task_id, input.aerospaceWorkspaceId, timestamp],
+          );
+          row = updated.rows[0];
+        }
+        const task = rowToTaskRecord(row);
         const layoutResult = await client.query(
           `SELECT task_id, layout_json, updated_at FROM task_layouts WHERE task_id = $1`,
           [task.task_id],
@@ -641,11 +659,11 @@ export class PostgresQueueStore {
           : 60;
       const inserted = await client.query(
         `
-          INSERT INTO tasks (task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, auto_paper_idle_seconds)
-          VALUES ($1, $2, $3, $4::timestamptz, $4::timestamptz, $5)
-          RETURNING task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+          INSERT INTO tasks (task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, auto_paper_idle_seconds)
+          VALUES ($1, $2, $3, $4, $5::timestamptz, $5::timestamptz, $6)
+          RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
         `,
-        [taskId, input.primaryAnchor.kind, input.primaryAnchor.id, timestamp, idleSeconds],
+        [taskId, input.primaryAnchor.kind, input.primaryAnchor.id, input.aerospaceWorkspaceId ?? null, timestamp, idleSeconds],
       );
       const layoutInserted = await client.query(
         `
@@ -672,7 +690,7 @@ export class PostgresQueueStore {
   async getTask(taskId: string): Promise<TaskRecord | undefined> {
     const result = await this.pool.query(
       `
-        SELECT task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
         FROM tasks
         WHERE task_id = $1
       `,
@@ -685,7 +703,7 @@ export class PostgresQueueStore {
   async getTaskByAnchor(kind: TaskAnchorKind, id: string): Promise<TaskRecord | undefined> {
     const result = await this.pool.query(
       `
-        SELECT task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
         FROM tasks
         WHERE primary_anchor_kind = $1 AND primary_anchor_id = $2
       `,
@@ -695,10 +713,23 @@ export class PostgresQueueStore {
     return row ? rowToTaskRecord(row) : undefined;
   }
 
+  async getTasksByWorkspaceId(workspaceId: string): Promise<TaskRecord[]> {
+    const result = await this.pool.query(
+      `
+        SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        FROM tasks
+        WHERE aerospace_workspace_id = $1
+        ORDER BY created_at ASC, task_id ASC
+      `,
+      [workspaceId],
+    );
+    return result.rows.map(rowToTaskRecord);
+  }
+
   async listTasks(): Promise<TaskRecord[]> {
     const result = await this.pool.query(
       `
-        SELECT task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
         FROM tasks
         ORDER BY created_at ASC, task_id ASC
       `,
@@ -721,7 +752,7 @@ export class PostgresQueueStore {
       `
         UPDATE tasks SET updated_at = $2::timestamptz
         WHERE task_id = $1
-        RETURNING task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
       `,
       [taskId, timestamp],
     );
@@ -792,7 +823,7 @@ export class PostgresQueueStore {
       `
         UPDATE tasks SET last_paper_emitted_at = $2::timestamptz, updated_at = $2::timestamptz
         WHERE task_id = $1
-        RETURNING task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
       `,
       [taskId, timestamp],
     );
@@ -1943,10 +1974,13 @@ function rowToTaskWorkspaceSnapshotRecord(row: Record<string, unknown>): TaskWor
 
 function rowToTaskRecord(row: Record<string, unknown>): TaskRecord {
   const lastPaper = row.last_paper_emitted_at;
+  const workspaceId = row.aerospace_workspace_id;
   return {
     task_id: String(row.task_id),
     primary_anchor_kind: row.primary_anchor_kind as TaskAnchorKind,
     primary_anchor_id: String(row.primary_anchor_id),
+    aerospace_workspace_id:
+      typeof workspaceId === "string" && workspaceId ? workspaceId : undefined,
     created_at: requiredDateToIso(row.created_at),
     updated_at: requiredDateToIso(row.updated_at),
     last_paper_emitted_at:

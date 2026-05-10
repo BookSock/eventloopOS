@@ -7,6 +7,7 @@ import type { RouteResult } from "./types.js";
 export async function handleTasksRoute(input: {
   method: string | undefined;
   pathname: string;
+  url?: URL;
   readJsonBody: JsonBodyReader;
   runtime: Runtime;
   now: Date;
@@ -55,7 +56,10 @@ export async function handleTasksRoute(input: {
   }
 
   if (input.method === "GET" && input.pathname === "/tasks") {
-    const tasks = await store.listTasks();
+    const workspaceFilter = input.url?.searchParams.get("aerospace_workspace_id")?.trim();
+    const tasks = workspaceFilter
+      ? await store.getTasksByWorkspaceId(workspaceFilter)
+      : await store.listTasks();
     return ok(200, {
       tasks,
       request_id: input.requestId,
@@ -72,6 +76,7 @@ export async function handleTasksRoute(input: {
       primaryAnchor: validated.primaryAnchor,
       capturedLayout: validated.capturedLayout,
       autoPaperIdleSeconds: validated.autoPaperIdleSeconds,
+      aerospaceWorkspaceId: validated.aerospaceWorkspaceId,
       now: input.now,
     });
     const current = await store.getCurrentTaskState();
@@ -119,6 +124,7 @@ type ValidatedCreateTaskRequest = {
   primaryAnchor: { kind: TaskAnchorKind; id: string };
   capturedLayout: WorkspaceSnapshot;
   autoPaperIdleSeconds?: number;
+  aerospaceWorkspaceId?: string;
 };
 
 function validateCreateTaskRequest(value: unknown): ValidatedCreateTaskRequest | { ok: false; message: string } {
@@ -142,11 +148,19 @@ function validateCreateTaskRequest(value: unknown): ValidatedCreateTaskRequest |
     }
     autoPaperIdleSeconds = value.auto_paper_idle_seconds;
   }
+  let aerospaceWorkspaceId: string | undefined;
+  if (value.aerospace_workspace_id !== undefined && value.aerospace_workspace_id !== null) {
+    if (typeof value.aerospace_workspace_id !== "string" || !value.aerospace_workspace_id.trim()) {
+      return { ok: false, message: "aerospace_workspace_id must be a non-empty string" };
+    }
+    aerospaceWorkspaceId = value.aerospace_workspace_id.trim();
+  }
   return {
     ok: true,
     primaryAnchor: { kind, id: id.trim() },
     capturedLayout: layout.snapshot,
     autoPaperIdleSeconds,
+    aerospaceWorkspaceId,
   };
 }
 

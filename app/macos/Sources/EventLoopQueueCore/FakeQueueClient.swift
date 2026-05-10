@@ -42,6 +42,14 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var fakeActivityEvents: [ActivityEvent] = []
     private var fakeAutoBindRunCount: Int = 0
     private let masterCommandResult: MasterCommandResult?
+    private var tasks: [TaskRecord] = []
+    private var taskLayouts: [String: WorkspaceSnapshot] = [:]
+    private var currentTaskId: String?
+    private var currentTaskEnteredAt: Date?
+    private var createTaskCalls: [(primaryAnchor: TaskAnchor, capturedLayout: WorkspaceSnapshot, idempotencyKey: String)] = []
+    private var setCurrentTaskCalls: [String?] = []
+    private var updateTaskLayoutCalls: [(taskId: String, layout: WorkspaceSnapshot)] = []
+    private var fakeNow: Date = Date(timeIntervalSince1970: 1_778_070_000)
 
     public init(
         packets: [ReviewPacket] = SeededQueue.packets,
@@ -757,6 +765,112 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public var autoBindRunCount: Int {
         lock.withLock { fakeAutoBindRunCount }
+    }
+
+    public var createTaskRequests: [(primaryAnchor: TaskAnchor, capturedLayout: WorkspaceSnapshot, idempotencyKey: String)] {
+        lock.withLock { createTaskCalls }
+    }
+
+    public var setCurrentTaskRequests: [String?] {
+        lock.withLock { setCurrentTaskCalls }
+    }
+
+    public var updateTaskLayoutRequests: [(taskId: String, layout: WorkspaceSnapshot)] {
+        lock.withLock { updateTaskLayoutCalls }
+    }
+
+    public func setFakeTasks(_ tasks: [TaskRecord]) {
+        lock.withLock { self.tasks = tasks }
+    }
+
+    public func setFakeCurrentTask(_ taskId: String?) {
+        lock.withLock {
+            self.currentTaskId = taskId
+            self.currentTaskEnteredAt = taskId == nil ? nil : Date()
+        }
+    }
+
+    public func setFakeTaskLayout(taskId: String, layout: WorkspaceSnapshot) {
+        lock.withLock { taskLayouts[taskId] = layout }
+    }
+
+    public func createTask(
+        primaryAnchor: TaskAnchor,
+        capturedLayout: WorkspaceSnapshot,
+        autoPaperIdleSeconds: Int?,
+        idempotencyKey: String
+    ) async throws -> CreateTaskResult {
+        lock.withLock {
+            createTaskCalls.append((primaryAnchor: primaryAnchor, capturedLayout: capturedLayout, idempotencyKey: idempotencyKey))
+            let now = Date()
+            let existing = tasks.first { $0.primaryAnchorKind == primaryAnchor.kind && $0.primaryAnchorId == primaryAnchor.id }
+            if let existing {
+                taskLayouts[existing.taskId] = capturedLayout
+                return CreateTaskResult(
+                    task: existing,
+                    layout: TaskLayoutRecord(taskId: existing.taskId, layout: capturedLayout, updatedAt: now),
+                    created: false,
+                    current: currentTaskId == existing.taskId
+                )
+            }
+            let taskId = "task_fake_\(tasks.count + 1)"
+            let record = TaskRecord(
+                taskId: taskId,
+                primaryAnchorKind: primaryAnchor.kind,
+                primaryAnchorId: primaryAnchor.id,
+                createdAt: now,
+                updatedAt: now,
+                lastPaperEmittedAt: nil,
+                autoPaperIdleSeconds: autoPaperIdleSeconds ?? 60
+            )
+            tasks.append(record)
+            taskLayouts[taskId] = capturedLayout
+            return CreateTaskResult(
+                task: record,
+                layout: TaskLayoutRecord(taskId: taskId, layout: capturedLayout, updatedAt: now),
+                created: true,
+                current: false
+            )
+        }
+    }
+
+    public func getCurrentTask() async throws -> CurrentTaskState {
+        lock.withLock {
+            let task = currentTaskId.flatMap { id in tasks.first { $0.taskId == id } }
+            return CurrentTaskState(task: task, enteredAt: currentTaskEnteredAt, updatedAt: currentTaskEnteredAt)
+        }
+    }
+
+    public func setCurrentTask(taskId: String?) async throws -> CurrentTaskState {
+        try lock.withLock {
+            setCurrentTaskCalls.append(taskId)
+            if let taskId, !tasks.contains(where: { $0.taskId == taskId }) {
+                throw QueueClientError.packetNotFound(taskId)
+            }
+            currentTaskId = taskId
+            currentTaskEnteredAt = taskId == nil ? nil : Date()
+            let task = currentTaskId.flatMap { id in tasks.first { $0.taskId == id } }
+            return CurrentTaskState(task: task, enteredAt: currentTaskEnteredAt, updatedAt: currentTaskEnteredAt)
+        }
+    }
+
+    public func listTasks() async throws -> [TaskRecord] {
+        lock.withLock { tasks }
+    }
+
+    public func updateTaskLayout(taskId: String, layout: WorkspaceSnapshot) async throws -> TaskRecord {
+        try lock.withLock {
+            updateTaskLayoutCalls.append((taskId: taskId, layout: layout))
+            guard let index = tasks.firstIndex(where: { $0.taskId == taskId }) else {
+                throw QueueClientError.packetNotFound(taskId)
+            }
+            taskLayouts[taskId] = layout
+            return tasks[index]
+        }
+    }
+
+    public func taskLayout(taskId: String) -> WorkspaceSnapshot? {
+        lock.withLock { taskLayouts[taskId] }
     }
 
     public func promoteReadingQueueContexts(ids: [String]) async throws -> ReadingQueuePromoteResult {

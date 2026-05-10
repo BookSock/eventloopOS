@@ -72,7 +72,21 @@ describe("PostgresQueueStore", () => {
       { id: "0011_onboarding_rejections.sql" },
       { id: "0012_manual_mode_state.sql" },
       { id: "0013_tasks.sql" },
+      { id: "0014_tasks_aerospace_workspace.sql" },
     ]);
+
+    const column = await store.pool.query(
+      `SELECT data_type, is_nullable
+         FROM information_schema.columns
+        WHERE table_name = 'tasks' AND column_name = 'aerospace_workspace_id'`,
+    );
+    assert.equal(column.rows[0]?.data_type, "text");
+    assert.equal(column.rows[0]?.is_nullable, "YES");
+
+    const index = await store.pool.query(
+      `SELECT indexname FROM pg_indexes WHERE tablename = 'tasks' AND indexname = 'tasks_aerospace_workspace_idx'`,
+    );
+    assert.equal(index.rows.length, 1);
   });
 
   it("persists latest task workspace snapshot", async (t) => {

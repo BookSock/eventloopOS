@@ -29,6 +29,11 @@ public protocol QueueClient: Sendable {
     func masterFanOut(message: String, taskHintSubstring: String?, taskIdPattern: String?, taskIds: [String], dryRun: Bool, idempotencyKey: String) async throws -> MasterFanOutResult
     func fetchActivity(limit: Int) async throws -> ActivityFeedResult
     func runCodexAutoBind() async throws -> CodexAutoBindResult
+    func createTask(primaryAnchor: TaskAnchor, capturedLayout: WorkspaceSnapshot, autoPaperIdleSeconds: Int?, idempotencyKey: String) async throws -> CreateTaskResult
+    func getCurrentTask() async throws -> CurrentTaskState
+    func setCurrentTask(taskId: String?) async throws -> CurrentTaskState
+    func listTasks() async throws -> [TaskRecord]
+    func updateTaskLayout(taskId: String, layout: WorkspaceSnapshot) async throws -> TaskRecord
 }
 
 public extension QueueClient {
@@ -470,6 +475,63 @@ public struct HTTPQueueClient: QueueClient {
         return try decoder.decode(CodexAutoBindResult.self, from: data)
     }
 
+    public func createTask(
+        primaryAnchor: TaskAnchor,
+        capturedLayout: WorkspaceSnapshot,
+        autoPaperIdleSeconds: Int? = nil,
+        idempotencyKey: String
+    ) async throws -> CreateTaskResult {
+        let url = baseURL.appending(path: "tasks")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.httpBody = try encoder.encode(CreateTaskRequest(
+            primaryAnchor: primaryAnchor,
+            capturedLayout: capturedLayout,
+            autoPaperIdleSeconds: autoPaperIdleSeconds
+        ))
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(CreateTaskResult.self, from: data)
+    }
+
+    public func getCurrentTask() async throws -> CurrentTaskState {
+        let url = baseURL.appending(path: "tasks/current")
+        let (data, response) = try await session.data(from: url)
+        try validate(response: response)
+        return try decoder.decode(CurrentTaskState.self, from: data)
+    }
+
+    public func setCurrentTask(taskId: String?) async throws -> CurrentTaskState {
+        let url = baseURL.appending(path: "tasks/current")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(SetCurrentTaskRequest(taskId: taskId))
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(CurrentTaskState.self, from: data)
+    }
+
+    public func listTasks() async throws -> [TaskRecord] {
+        let url = baseURL.appending(path: "tasks")
+        let (data, response) = try await session.data(from: url)
+        try validate(response: response)
+        return try decoder.decode(TasksListEnvelope.self, from: data).tasks
+    }
+
+    public func updateTaskLayout(taskId: String, layout: WorkspaceSnapshot) async throws -> TaskRecord {
+        let url = baseURL.appending(path: "tasks/\(taskId)/layout")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(layout)
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(TaskLayoutUpdateEnvelope.self, from: data).task
+    }
+
     public func autoPromoteReadingQueue(minAgeSeconds: Int) async throws -> ReadingQueuePromoteResult {
         let url = baseURL.appending(path: "reading-queue/auto-promote")
         var request = URLRequest(url: url)
@@ -711,6 +773,40 @@ private struct QueuePriorityRequest: Encodable {
         case score
         case reason
         case actorId = "actor_id"
+    }
+}
+
+private struct CreateTaskRequest: Encodable {
+    let primaryAnchor: TaskAnchor
+    let capturedLayout: WorkspaceSnapshot
+    let autoPaperIdleSeconds: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case primaryAnchor = "primary_anchor"
+        case capturedLayout = "captured_layout"
+        case autoPaperIdleSeconds = "auto_paper_idle_seconds"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(primaryAnchor, forKey: .primaryAnchor)
+        try container.encode(capturedLayout, forKey: .capturedLayout)
+        if let autoPaperIdleSeconds {
+            try container.encode(autoPaperIdleSeconds, forKey: .autoPaperIdleSeconds)
+        }
+    }
+}
+
+private struct SetCurrentTaskRequest: Encodable {
+    let taskId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case taskId = "task_id"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(taskId, forKey: .taskId)
     }
 }
 

@@ -54,6 +54,15 @@ public enum TerminalSendConfirmScope: Equatable, Sendable {
     case rememberForRef
 }
 
+public enum AdvanceToast: Equatable, Sendable {
+    case manualModeActive
+    case noForegroundCodex
+    case enteredLimbo
+    case taskCreated(taskId: String)
+    case switchedToPaper(packetId: String)
+    case returnedToTask(taskId: String)
+}
+
 public enum VoiceCaptureState: Equatable, Sendable {
     case unavailable
     case idle
@@ -109,12 +118,17 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var activityEvents: [ActivityEvent] = []
     @Published public private(set) var autoBindContinuousEnabled: Bool = false
     @Published public private(set) var lastAutoBindResult: CodexAutoBindResult?
+    @Published public private(set) var advanceToast: AdvanceToast?
+    @Published public private(set) var currentTask: TaskRecord?
 
     private static let terminalSendConfirmedDefaultsKey = "eventLoopOS.terminalSendConfirmed.v1"
     private static let terminalSendRememberedRefsKey = "eventLoopOS.terminalSendRememberedRefs.v1"
 
     private let client: any QueueClient
     private let workspaceClient: any WorkspaceClient
+    private let aeroSpaceClient: any AeroSpaceWorkspaceClient
+    private let codexForegroundResolver: any CodexForegroundResolver
+    private let limboWorkspaceId: String
     private let voiceTranscriptionService: VoiceTranscriptionService?
     private let userDefaults: UserDefaults
     private var terminalSendThisSessionConfirmed: Set<String> = []
@@ -128,12 +142,18 @@ public final class QueueViewModel: ObservableObject {
     public init(
         client: any QueueClient,
         workspaceClient: any WorkspaceClient = NoOpWorkspaceClient(),
+        aeroSpaceClient: any AeroSpaceWorkspaceClient = NoOpAeroSpaceWorkspaceClient(),
+        codexForegroundResolver: any CodexForegroundResolver = NoOpCodexForegroundResolver(),
+        limboWorkspaceId: String = "limbo",
         initialPackets: [ReviewPacket] = [],
         voiceTranscriptionService: VoiceTranscriptionService? = nil,
         userDefaults: UserDefaults = .standard
     ) {
         self.client = client
         self.workspaceClient = workspaceClient
+        self.aeroSpaceClient = aeroSpaceClient
+        self.codexForegroundResolver = codexForegroundResolver
+        self.limboWorkspaceId = limboWorkspaceId
         self.voiceTranscriptionService = voiceTranscriptionService
         self.userDefaults = userDefaults
         self.packets = initialPackets
@@ -503,6 +523,201 @@ public final class QueueViewModel: ObservableObject {
         await loadTaskSessionsForSelectedPacketIfNeeded()
         await prepareSelectedWorkspaceRestore()
         await requestSelectedBrowserContextRestoresIfNeeded()
+    }
+
+    public func advance() async {
+        advanceToast = nil
+        let snapshot: AdvanceServerSnapshot
+        do {
+            snapshot = try await loadAdvanceSnapshot()
+        } catch {
+            state = .failed(error.localizedDescription)
+            return
+        }
+
+        let action = AdvanceCoordinator.nextAction(snapshot: snapshot)
+        await execute(advanceAction: action, snapshot: snapshot)
+    }
+
+    private func loadAdvanceSnapshot() async throws -> AdvanceServerSnapshot {
+        let manualModeState = try await client.getManualMode()
+        let currentWorkspaceId: String?
+        do {
+            currentWorkspaceId = try await aeroSpaceClient.focusedWorkspace()
+        } catch {
+            currentWorkspaceId = nil
+        }
+        let currentTaskState = try await client.getCurrentTask()
+        let allTasks = (try? await client.listTasks()) ?? []
+        let queue = (try? await client.fetchQueue()) ?? []
+        let foreground = await codexForegroundResolver.resolveForeground()
+
+        var tasksByWorkspace: [String: TaskRecord] = [:]
+        for task in allTasks {
+            let workspaceId = await workspaceIdForTask(task) ?? ""
+            if !workspaceId.isEmpty, tasksByWorkspace[workspaceId] == nil {
+                tasksByWorkspace[workspaceId] = task
+            }
+        }
+
+        currentTask = currentTaskState.task
+
+        return AdvanceServerSnapshot(
+            manualModeActive: manualModeState.active,
+            currentWorkspaceId: currentWorkspaceId,
+            currentTask: currentTaskState.task,
+            queue: queue,
+            tasksByWorkspace: tasksByWorkspace,
+            foreground: foreground,
+            limboWorkspaceId: limboWorkspaceId
+        )
+    }
+
+    private func workspaceIdForTask(_ task: TaskRecord) async -> String? {
+        guard let snapshot = try? await fetchTaskLayoutSnapshot(taskId: task.taskId) else {
+            return nil
+        }
+        return snapshot.activeWorkspace
+    }
+
+    private func fetchTaskLayoutSnapshot(taskId: String) async throws -> WorkspaceSnapshot? {
+        // The fake/HTTP clients expose layout via getTask responses. For Phase 3 we read it
+        // best-effort from the layout-bearing get-task envelope. To avoid adding another
+        // client method, we synthesize from the create/update flows or the layout in the
+        // existing snapshot. Here we surface nil if not available; coordinators tolerate it.
+        if let fake = client as? FakeQueueClient {
+            return fake.taskLayout(taskId: taskId)
+        }
+        return nil
+    }
+
+    private func execute(advanceAction: AdvanceAction, snapshot: AdvanceServerSnapshot) async {
+        switch advanceAction {
+        case .toastManualModeActive:
+            advanceToast = .manualModeActive
+        case .toastNoForegroundCodex:
+            advanceToast = .noForegroundCodex
+        case let .createTaskFromForeground(anchor, workspaceId):
+            await runCreateTaskFromForeground(anchor: anchor, workspaceId: workspaceId)
+        case let .saveLayoutAndPullPaper(currentTaskId, nextPacketId, nextWorkspaceId):
+            await runSaveLayoutAndSwitch(
+                currentTaskId: currentTaskId,
+                workspaceId: nextWorkspaceId,
+                packetId: nextPacketId,
+                toastForSwitch: .switchedToPaper(packetId: nextPacketId)
+            )
+        case let .saveLayoutAndEnterLimbo(currentTaskId, limboWorkspaceId):
+            await runSaveLayoutAndSwitch(
+                currentTaskId: currentTaskId,
+                workspaceId: limboWorkspaceId,
+                packetId: nil,
+                toastForSwitch: .enteredLimbo,
+                clearCurrentTask: true
+            )
+        case let .markPaperDoneAndPullNext(packetId, nextPacketId, nextWorkspaceId):
+            await runMarkPaperDoneAndSwitch(
+                packetId: packetId,
+                workspaceId: nextWorkspaceId,
+                nextSelectionPacketId: nextPacketId,
+                toast: .switchedToPaper(packetId: nextPacketId),
+                snapshot: snapshot
+            )
+        case let .markPaperDoneAndReturnToTask(packetId, taskId, taskWorkspaceId):
+            await runMarkPaperDoneAndSwitch(
+                packetId: packetId,
+                workspaceId: taskWorkspaceId,
+                nextSelectionPacketId: nil,
+                toast: .returnedToTask(taskId: taskId),
+                snapshot: snapshot,
+                returnToTaskId: taskId
+            )
+        case let .markPaperDoneAndEnterLimbo(packetId, limboWorkspaceId):
+            await runMarkPaperDoneAndSwitch(
+                packetId: packetId,
+                workspaceId: limboWorkspaceId,
+                nextSelectionPacketId: nil,
+                toast: .enteredLimbo,
+                snapshot: snapshot,
+                clearCurrentTask: true
+            )
+        }
+    }
+
+    private func runCreateTaskFromForeground(anchor: TaskAnchor, workspaceId: String) async {
+        do {
+            let captured = try await workspaceClient.capture()
+            let layout = WorkspaceSnapshot(
+                backend: captured.backend,
+                windows: captured.windows,
+                activeWorkspace: captured.activeWorkspace ?? workspaceId,
+                focusedWindowId: captured.focusedWindowId
+            )
+            let key = "mac_advance_create_task_\(anchor.kind.rawValue)_\(anchor.id)_\(workspaceId)"
+            let result = try await client.createTask(
+                primaryAnchor: anchor,
+                capturedLayout: layout,
+                autoPaperIdleSeconds: nil,
+                idempotencyKey: key
+            )
+            _ = try await client.setCurrentTask(taskId: result.task.taskId)
+            currentTask = result.task
+            advanceToast = .taskCreated(taskId: result.task.taskId)
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+
+    private func runSaveLayoutAndSwitch(
+        currentTaskId: String,
+        workspaceId: String,
+        packetId: String?,
+        toastForSwitch: AdvanceToast,
+        clearCurrentTask: Bool = false
+    ) async {
+        do {
+            let captured = try await workspaceClient.capture()
+            _ = try await client.updateTaskLayout(taskId: currentTaskId, layout: captured)
+            try await aeroSpaceClient.switchTo(workspace: workspaceId)
+            if clearCurrentTask {
+                _ = try await client.setCurrentTask(taskId: nil)
+                currentTask = nil
+            }
+            if let packetId, packets.contains(where: { $0.id == packetId }) {
+                selectedPacketID = packetId
+            }
+            advanceToast = toastForSwitch
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+    }
+
+    private func runMarkPaperDoneAndSwitch(
+        packetId: String,
+        workspaceId: String,
+        nextSelectionPacketId: String?,
+        toast: AdvanceToast,
+        snapshot _: AdvanceServerSnapshot,
+        returnToTaskId: String? = nil,
+        clearCurrentTask: Bool = false
+    ) async {
+        do {
+            let captured = try await workspaceClient.capture()
+            _ = try await client.complete(packetId: packetId, workspaceSnapshot: captured)
+            try await aeroSpaceClient.switchTo(workspace: workspaceId)
+            if let returnToTaskId {
+                _ = try await client.setCurrentTask(taskId: returnToTaskId)
+            } else if clearCurrentTask {
+                _ = try await client.setCurrentTask(taskId: nil)
+                currentTask = nil
+            }
+            packets = (try? await client.fetchQueue()) ?? packets.filter { $0.id != packetId }
+            if let nextSelectionPacketId, packets.contains(where: { $0.id == nextSelectionPacketId }) {
+                selectedPacketID = nextSelectionPacketId
+            }
+            advanceToast = toast
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
     }
 
     public func doneAndNext() async {

@@ -155,6 +155,53 @@ describe("tasks route — phase 2 of hotkey state machine", () => {
     assert.equal(response.status, 404);
   });
 
+  it("POST /tasks accepts aerospace_workspace_id and GET /tasks?aerospace_workspace_id=X filters", async () => {
+    const created = await fetch(`${baseUrl}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        primary_anchor: { kind: "codex_thread", id: "thread-route-ws-1" },
+        captured_layout: layoutA,
+        aerospace_workspace_id: "ws-route-alpha",
+      }),
+    });
+    assert.equal(created.status, 200);
+    const createdBody = await created.json() as {
+      task: { task_id: string; aerospace_workspace_id?: string };
+      created: boolean;
+    };
+    assert.equal(createdBody.task.aerospace_workspace_id, "ws-route-alpha");
+
+    const filtered = await fetch(`${baseUrl}/tasks?aerospace_workspace_id=ws-route-alpha`).then((r) => r.json()) as {
+      tasks: Array<{ task_id: string; aerospace_workspace_id?: string }>;
+    };
+    assert.equal(filtered.tasks.length, 1);
+    assert.equal(filtered.tasks[0]?.task_id, createdBody.task.task_id);
+    assert.equal(filtered.tasks[0]?.aerospace_workspace_id, "ws-route-alpha");
+
+    const empty = await fetch(`${baseUrl}/tasks?aerospace_workspace_id=ws-route-nobody`).then((r) => r.json()) as {
+      tasks: Array<unknown>;
+    };
+    assert.deepEqual(empty.tasks, []);
+
+    const moved = await fetch(`${baseUrl}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        primary_anchor: { kind: "codex_thread", id: "thread-route-ws-1" },
+        captured_layout: layoutA,
+        aerospace_workspace_id: "ws-route-beta",
+      }),
+    }).then((r) => r.json()) as { task: { task_id: string; aerospace_workspace_id?: string }; created: boolean };
+    assert.equal(moved.created, false);
+    assert.equal(moved.task.task_id, createdBody.task.task_id);
+    assert.equal(moved.task.aerospace_workspace_id, "ws-route-beta", "newer workspace_id wins");
+
+    const all = await fetch(`${baseUrl}/tasks`).then((r) => r.json()) as { tasks: Array<{ task_id: string }> };
+    const matching = all.tasks.filter((task) => task.task_id === createdBody.task.task_id);
+    assert.equal(matching.length, 1, "unfiltered list still returns the task once");
+  });
+
   it("rejects malformed bodies with schema_error", async () => {
     const missingAnchor = await fetch(`${baseUrl}/tasks`, {
       method: "POST",
