@@ -1,6 +1,15 @@
-# Hotkey State Machine — iteration 1
+# Hotkey State Machine — iteration 2
 
-Draft. Goal: lock the user-facing model before refactoring code. Iterate on this doc, not the implementation.
+Decisions locked from iteration 1's six open questions:
+
+1. **Task identity = primary Codex thread UUID; Ghostty window id is fallback** when no thread is detectable.
+2. **One primary anchor per task.** Multi-anchor deferred.
+3. **Shared windows via `[shared]` title tag.** Mirrors V10c's `[task:<slug>]` convention.
+4. **Auto-paper threshold = 60s of Codex idle**, per-task override allowed.
+5. **Manual mode + advance** → toast "exit manual mode first." No queueing.
+6. **Onboarding scan stays as recovery tool, not primary path.**
+
+The rest of this doc is the executable spec.
 
 ## What the user does in their day
 
@@ -119,13 +128,6 @@ Open question: do we need a config UI for this, or is title-based tagging enough
 6. Shared-window mechanism (title tag).
 7. (Later) MCP skill for self-reporting.
 
-## What I'd like your feedback on
+## Decisions log
 
-1. **Anchor by Codex thread UUID, with Ghostty window as fallback** — agree? Or should it be Ghostty window primarily?
-2. **One primary anchor per task** — agree, or do you want multi-anchor?
-3. **Shared window via `[shared]` title tag** — too cute, or fine?
-4. **Auto-paper threshold = 60s default** — feels right?
-5. **Manual mode + advance interaction** — toast "exit manual mode first" vs queue the advance for after exit?
-6. **Onboarding scan stays as a recovery tool, not primary path** — fine?
-
-Reply with answers (or "iterate this section more") and we'll converge.
+Iteration 1 → 2 changes are at the top of this doc. Future iterations should append to this section, not edit history in place.
