@@ -28,7 +28,7 @@ Live list of code gaps for the full vision. Sorted into **Build**, **Verify** (b
 - [ ] **P16. Split `QueueModels.swift` (1.8k LOC)** by domain when it starts hurting (review packets, task sessions, onboarding, master command, etc).
 - [ ] **P17. Split `FakeQueueClient` out of `QueueClient.swift`** (~700 of the 1.5k lines is test stub). Do when adding the next protocol method makes the file painful.
 - [x] **P18. Activity feed filter chips and search** ~~so a long activity log is browsable.~~ ✅ Shipped 2026-05-10: All/Send/Restore/Defer/Errors capsule chips + magnifier search field on `ActivityFeedSheet`. Pure `filterActivity` helper for tests.
-- [ ] **P19. Onboarding "Approve all + Queue" hotkey** so day-1 onboarding feels one keystroke.
+- [x] **P19. Onboarding "Approve all + Queue" hotkey** ~~so day-1 onboarding feels one keystroke.~~ ✅ Shipped 2026-05-10: ⌘↵ in `OnboardingSheet` approves all proposals, queues them, dismisses the sheet. Footer hint "⌘↵ to approve & queue all" surfaces the binding.
 - [x] **P20. Repo Topics on GitHub UI** ~~(`event-loop`, `attention`, `agents`, `macos`, `chrome-extension`, etc) for discovery.~~ ✅ Shipped 2026-05-10: 14 topics live on `BookSock/eventloopOS`.
 
 ---

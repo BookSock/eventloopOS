@@ -1486,6 +1486,65 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedWorkspaceSnapshot?.windows.map(\.id), [101])
     }
 
+    func testApproveAllOnboardingProposalsTransitionsToApprovedTerminalState() async {
+        let scan = OnboardingScan(
+            ok: true,
+            capturedAt: Date(timeIntervalSince1970: 1_778_080_000),
+            activeWorkspace: "desk",
+            focusedWindowId: 201,
+            summary: OnboardingScanSummary(
+                windowCount: 3,
+                groupedWindowCount: 3,
+                ungroupedWindowCount: 0,
+                taskSessionCount: 0,
+                browserContextCount: 0,
+                proposalCount: 3
+            ),
+            proposals: [
+                OnboardingTaskProposal(
+                    id: "onboard_a",
+                    taskId: "task_a",
+                    title: "A",
+                    confidence: "medium",
+                    reason: "window title",
+                    windows: [OnboardingWindow(id: 201, app: "Ghostty", title: "A", workspace: "a")],
+                    suggestedNextAction: "Approve."
+                ),
+                OnboardingTaskProposal(
+                    id: "onboard_b",
+                    taskId: "task_b",
+                    title: "B",
+                    confidence: "medium",
+                    reason: "window title",
+                    windows: [OnboardingWindow(id: 202, app: "Ghostty", title: "B", workspace: "b")],
+                    suggestedNextAction: "Approve."
+                ),
+                OnboardingTaskProposal(
+                    id: "onboard_c",
+                    taskId: "task_c",
+                    title: "C",
+                    confidence: "medium",
+                    reason: "window title",
+                    windows: [OnboardingWindow(id: 203, app: "Ghostty", title: "C", workspace: "c")],
+                    suggestedNextAction: "Approve."
+                )
+            ]
+        )
+        let client = FakeQueueClient(packets: [])
+        client.replaceOnboardingScan(scan)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.scanOnboarding()
+
+        await viewModel.approveAllOnboardingProposals(queuePaper: true)
+
+        XCTAssertEqual(client.approvedOnboardingProposalIds, ["onboard_a", "onboard_b", "onboard_c"])
+        XCTAssertEqual(viewModel.packets.count, 3)
+        guard case .approved = viewModel.onboardingState else {
+            XCTFail("expected onboardingState to be .approved after approve-all, got \(viewModel.onboardingState)")
+            return
+        }
+    }
+
     func testRenewSelectedLeaseKeepsSelectionLoaded() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
         await viewModel.pullNextPaper()

@@ -8,6 +8,12 @@ struct OnboardingSheet: View {
     let approveAll: (Bool) -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var dismissOnApproveAllSuccess = false
+
+    private var hasLoadedProposals: Bool {
+        if case let .loaded(scan) = state { return !scan.proposals.isEmpty }
+        return false
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -88,6 +94,12 @@ struct OnboardingSheet: View {
             }
 
             HStack {
+                if hasLoadedProposals {
+                    Text("⌘↵ to approve & queue all")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("onboarding-approve-all-hint")
+                }
                 Spacer()
                 Button {
                     rescan()
@@ -101,10 +113,32 @@ struct OnboardingSheet: View {
                 }
                 .keyboardShortcut(.defaultAction)
             }
+
+            Button("Approve All + Queue (⌘↵)") {
+                triggerApproveAllAndDismiss()
+            }
+            .keyboardShortcut(.return, modifiers: .command)
+            .opacity(0)
+            .frame(width: 0, height: 0)
+            .accessibilityHidden(true)
+            .disabled(!hasLoadedProposals)
+            .accessibilityIdentifier("onboarding-approve-all-shortcut")
         }
         .padding(20)
         .frame(width: 680, height: 560)
         .accessibilityIdentifier("onboarding-sheet")
+        .onChange(of: state) { newValue in
+            if dismissOnApproveAllSuccess, case .approved = newValue {
+                dismissOnApproveAllSuccess = false
+                dismiss()
+            }
+        }
+    }
+
+    private func triggerApproveAllAndDismiss() {
+        guard hasLoadedProposals else { return }
+        dismissOnApproveAllSuccess = true
+        approveAll(true)
     }
 }
 
