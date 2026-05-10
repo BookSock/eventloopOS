@@ -15,6 +15,7 @@
     "mcp:gh-notifications": "node dist/src/mcp_sources/gh_notifications_server.js",
     "mcp:local-events": "node dist/src/mcp_sources/local_events_server.js",
     "mcp:script-events": "node dist/src/mcp_sources/script_events_server.js",
+    "mcp:paper-source": "node dist/src/mcp_sources/paper_source_server.js",
     "mcp:sources": "node dist/src/mcp_sources/source_cli.js list",
     "mcp:preview": "node dist/src/mcp_sources/source_cli.js preview",
     "mcp:route-once": "node dist/src/mcp_sources/source_cli.js route-once",

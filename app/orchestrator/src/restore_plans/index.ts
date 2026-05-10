@@ -3,6 +3,7 @@ import { buildDocAnchorPlan } from "./doc_anchor.js";
 import { buildEmailPlan } from "./email.js";
 import { buildFilePlan } from "./file.js";
 import { buildNotionPagePlan } from "./notion_page.js";
+import { buildPaperPlan } from "./paper.js";
 import { RestorePlanRegistry, type RestorePlan, type RestorePlanResource } from "./registry.js";
 import { buildSlackThreadPlan } from "./slack_thread.js";
 import { buildUrlFallbackPlan } from "./url_fallback.js";
@@ -20,6 +21,7 @@ export function createDefaultRestorePlanRegistry(): RestorePlanRegistry {
   registry.register("google_doc", buildDocAnchorPlan);
   registry.register("doc_anchor", buildDocAnchorPlan);
   registry.register("file", buildFilePlan);
+  registry.register("paper", buildPaperPlan);
   registry.registerFallback(buildUrlFallbackPlan);
   return registry;
 }
