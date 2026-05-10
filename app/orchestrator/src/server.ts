@@ -30,6 +30,7 @@ export type GatewayServerOptions = {
   observability?: Observability;
   terminalSendExecutor?: TerminalSendExecutor;
   terminalSendEnabled?: boolean;
+  codexHome?: string;
   now?: () => Date;
 };
 
@@ -50,6 +51,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
     workspaceExecuteEnabled: options.workspaceExecuteEnabled,
     terminalSendExecutor: options.terminalSendExecutor,
     terminalSendEnabled: options.terminalSendEnabled,
+    codexHome: options.codexHome,
     now: options.now,
   });
   const now = runtime.now;

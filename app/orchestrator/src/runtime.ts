@@ -24,6 +24,7 @@ export type Runtime = Readonly<{
   workspaceExecuteEnabled?: boolean;
   terminalSendExecutor?: TerminalSendExecutor;
   terminalSendEnabled?: boolean;
+  codexHome?: string;
   now: () => Date;
 }>;
 
@@ -36,6 +37,7 @@ export type CreateRuntimeOptions = {
   workspaceExecuteEnabled?: boolean;
   terminalSendExecutor?: TerminalSendExecutor;
   terminalSendEnabled?: boolean;
+  codexHome?: string;
   now?: () => Date;
 };
 
@@ -49,6 +51,7 @@ export function createRuntime(options: CreateRuntimeOptions): Runtime {
     workspaceExecuteEnabled: options.workspaceExecuteEnabled,
     terminalSendExecutor: options.terminalSendExecutor,
     terminalSendEnabled: options.terminalSendEnabled,
+    codexHome: options.codexHome,
     now: options.now ?? (() => new Date()),
   };
   return Object.freeze(runtime);

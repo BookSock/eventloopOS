@@ -68,6 +68,7 @@ describe("PostgresQueueStore", () => {
       { id: "0007_agent_runs.sql" },
       { id: "0008_task_workspace_snapshots.sql" },
       { id: "0009_queue_action_attempts.sql" },
+      { id: "0010_task_session_terminal_refs.sql" },
     ]);
   });
 
@@ -689,7 +690,8 @@ async function clearTestData(store: PostgresQueueStore) {
       review_packets,
       agent_runs,
       events,
-      context_restore_requests
+      context_restore_requests,
+      task_session_terminal_refs
     RESTART IDENTITY CASCADE
   `);
 }

@@ -471,6 +471,47 @@ function runGatewayStoreContract(
       }
     });
 
+    it("upserts and clears task session terminal refs consistently", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        const taskSessionId = "task_session_blog";
+        const initialFetch = await harness.store.getTaskSessionTerminalRef(taskSessionId);
+        assert.equal(initialFetch, undefined);
+
+        const inserted = await harness.store.setTaskSessionTerminalRef(taskSessionId, "ghostty:front", now);
+        assert.equal(inserted.task_session_id, taskSessionId);
+        assert.equal(inserted.terminal_ref, "ghostty:front");
+        assert.equal(inserted.created_at, createdAt);
+        assert.equal(inserted.updated_at, createdAt);
+
+        const updatedAt = "2026-05-06T12:01:00.000Z";
+        const updated = await harness.store.setTaskSessionTerminalRef(
+          taskSessionId,
+          "tmux:codex-blog",
+          new Date(updatedAt),
+        );
+        assert.equal(updated.terminal_ref, "tmux:codex-blog");
+        assert.equal(updated.created_at, inserted.created_at);
+        assert.equal(updated.updated_at, updatedAt);
+
+        const fetched = await harness.store.getTaskSessionTerminalRef(taskSessionId);
+        assert.deepEqual(fetched, updated);
+
+        const cleared = await harness.store.clearTaskSessionTerminalRef(taskSessionId);
+        assert.deepEqual(cleared, updated);
+
+        const afterClear = await harness.store.getTaskSessionTerminalRef(taskSessionId);
+        assert.equal(afterClear, undefined);
+
+        const clearMissing = await harness.store.clearTaskSessionTerminalRef("task_session_unknown");
+        assert.equal(clearMissing, undefined);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     it("dedupes and finalizes task message history consistently", async (t) => {
       const harness = await createHarness(t);
       if (!harness) return;
@@ -693,7 +734,8 @@ async function clearPostgresTestData(store: PostgresQueueStore): Promise<void> {
       agent_runs,
       events,
       context_restore_requests,
-      queue_action_attempts
+      queue_action_attempts,
+      task_session_terminal_refs
     RESTART IDENTITY CASCADE
   `);
 }

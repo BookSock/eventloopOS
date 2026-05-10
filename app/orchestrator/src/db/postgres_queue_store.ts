@@ -34,6 +34,7 @@ import {
   type RouteDecision,
   type StoredActionAttempt,
   type StoredEventResult,
+  type TaskSessionTerminalRefRecord,
   type TaskWorkspaceSnapshotRecord,
 } from "../store.js";
 import { stableId } from "../store/ids.js";
@@ -436,6 +437,50 @@ export class PostgresQueueStore {
       [input.idempotencyKey, JSON.stringify(input.actionResult), input.now.toISOString()],
     );
     return result.rows[0] ? rowToStoredActionAttempt(result.rows[0]) : undefined;
+  }
+
+  async getTaskSessionTerminalRef(taskSessionId: string): Promise<TaskSessionTerminalRefRecord | undefined> {
+    const result = await this.pool.query(
+      `
+        SELECT task_session_id, terminal_ref, created_at, updated_at
+        FROM task_session_terminal_refs
+        WHERE task_session_id = $1
+      `,
+      [taskSessionId],
+    );
+    return result.rows[0] ? rowToTaskSessionTerminalRefRecord(result.rows[0]) : undefined;
+  }
+
+  async setTaskSessionTerminalRef(
+    taskSessionId: string,
+    terminalRef: string,
+    now: Date,
+  ): Promise<TaskSessionTerminalRefRecord> {
+    const timestamp = now.toISOString();
+    const result = await this.pool.query(
+      `
+        INSERT INTO task_session_terminal_refs (task_session_id, terminal_ref, created_at, updated_at)
+        VALUES ($1, $2, $3::timestamptz, $3::timestamptz)
+        ON CONFLICT (task_session_id) DO UPDATE
+          SET terminal_ref = EXCLUDED.terminal_ref,
+              updated_at = EXCLUDED.updated_at
+        RETURNING task_session_id, terminal_ref, created_at, updated_at
+      `,
+      [taskSessionId, terminalRef, timestamp],
+    );
+    return rowToTaskSessionTerminalRefRecord(result.rows[0]);
+  }
+
+  async clearTaskSessionTerminalRef(taskSessionId: string): Promise<TaskSessionTerminalRefRecord | undefined> {
+    const result = await this.pool.query(
+      `
+        DELETE FROM task_session_terminal_refs
+        WHERE task_session_id = $1
+        RETURNING task_session_id, terminal_ref, created_at, updated_at
+      `,
+      [taskSessionId],
+    );
+    return result.rows[0] ? rowToTaskSessionTerminalRefRecord(result.rows[0]) : undefined;
   }
 
   async recordWorkspaceRestoreReceipt(input: {
@@ -1522,6 +1567,15 @@ function rowToStoredActionAttempt(row: Record<string, unknown>): StoredActionAtt
     completed: Boolean(row.completed),
     action_result: row.action_result ? row.action_result as Record<string, unknown> : undefined,
     terminal_send_result: row.terminal_send_result ? row.terminal_send_result as Record<string, unknown> : undefined,
+    created_at: requiredDateToIso(row.created_at),
+    updated_at: requiredDateToIso(row.updated_at),
+  };
+}
+
+function rowToTaskSessionTerminalRefRecord(row: Record<string, unknown>): TaskSessionTerminalRefRecord {
+  return {
+    task_session_id: String(row.task_session_id),
+    terminal_ref: String(row.terminal_ref),
     created_at: requiredDateToIso(row.created_at),
     updated_at: requiredDateToIso(row.updated_at),
   };

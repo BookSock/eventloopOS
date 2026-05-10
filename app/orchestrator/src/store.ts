@@ -83,6 +83,14 @@ export type InMemoryStore = {
   taskMessagesByIdempotencyKey?: Map<string, DurableTaskMessageRecord>;
   taskWorkspaceSnapshots?: Map<string, TaskWorkspaceSnapshotRecord>;
   queueActionAttempts?: Map<string, StoredActionAttempt>;
+  taskSessionTerminalRefs?: Map<string, TaskSessionTerminalRefRecord>;
+};
+
+export type TaskSessionTerminalRefRecord = {
+  task_session_id: string;
+  terminal_ref: string;
+  created_at: string;
+  updated_at: string;
 };
 
 export type StoredActionAttempt = {

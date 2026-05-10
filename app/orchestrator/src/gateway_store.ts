@@ -56,6 +56,7 @@ import {
   type RouteDecision,
   type StoredActionAttempt,
   type StoredEventResult,
+  type TaskSessionTerminalRefRecord,
   type TaskWorkspaceSnapshotRecord,
 } from "./store.js";
 import { eventToRecord } from "./db/postgres_queue_store.js";
@@ -128,6 +129,9 @@ export type GatewayStore = {
     actionResult: Record<string, unknown>;
     now: Date;
   }): Promise<StoredActionAttempt | undefined>;
+  getTaskSessionTerminalRef(taskSessionId: string): Promise<TaskSessionTerminalRefRecord | undefined>;
+  setTaskSessionTerminalRef(taskSessionId: string, terminalRef: string, now: Date): Promise<TaskSessionTerminalRefRecord>;
+  clearTaskSessionTerminalRef(taskSessionId: string): Promise<TaskSessionTerminalRefRecord | undefined>;
 };
 
 export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
@@ -136,11 +140,13 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   const taskMessagesByIdempotencyKey = store.taskMessagesByIdempotencyKey ?? new Map<string, DurableTaskMessageRecord>();
   const taskWorkspaceSnapshots = store.taskWorkspaceSnapshots ?? new Map<string, TaskWorkspaceSnapshotRecord>();
   const queueActionAttempts = store.queueActionAttempts ?? new Map<string, StoredActionAttempt>();
+  const taskSessionTerminalRefs = store.taskSessionTerminalRefs ?? new Map<string, TaskSessionTerminalRefRecord>();
   store.workspaceRestoreReceipts = workspaceRestoreReceipts;
   store.mcpPollStates = mcpPollStates;
   store.taskMessagesByIdempotencyKey = taskMessagesByIdempotencyKey;
   store.taskWorkspaceSnapshots = taskWorkspaceSnapshots;
   store.queueActionAttempts = queueActionAttempts;
+  store.taskSessionTerminalRefs = taskSessionTerminalRefs;
 
   const snapshotForTask = async (taskId: string) => getLatestTaskWorkspaceSnapshot(store, taskId);
   const contextEntriesForTask = async (taskId: string) => listContextEntries(store, { task_id: taskId, limit: 8 });
@@ -335,6 +341,27 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
       queueActionAttempts.set(updated.idempotency_key, updated);
       return updated;
     },
+    async getTaskSessionTerminalRef(taskSessionId) {
+      return taskSessionTerminalRefs.get(taskSessionId);
+    },
+    async setTaskSessionTerminalRef(taskSessionId, terminalRef, now) {
+      const existing = taskSessionTerminalRefs.get(taskSessionId);
+      const timestamp = now.toISOString();
+      const record: TaskSessionTerminalRefRecord = {
+        task_session_id: taskSessionId,
+        terminal_ref: terminalRef,
+        created_at: existing?.created_at ?? timestamp,
+        updated_at: timestamp,
+      };
+      taskSessionTerminalRefs.set(taskSessionId, record);
+      return record;
+    },
+    async clearTaskSessionTerminalRef(taskSessionId) {
+      const existing = taskSessionTerminalRefs.get(taskSessionId);
+      if (!existing) return undefined;
+      taskSessionTerminalRefs.delete(taskSessionId);
+      return existing;
+    },
   };
 }
 
@@ -478,6 +505,15 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async markQueueActionCompleted(input) {
       return store.markQueueActionCompleted(input);
+    },
+    async getTaskSessionTerminalRef(taskSessionId) {
+      return store.getTaskSessionTerminalRef(taskSessionId);
+    },
+    async setTaskSessionTerminalRef(taskSessionId, terminalRef, now) {
+      return store.setTaskSessionTerminalRef(taskSessionId, terminalRef, now);
+    },
+    async clearTaskSessionTerminalRef(taskSessionId) {
+      return store.clearTaskSessionTerminalRef(taskSessionId);
     },
   };
 }

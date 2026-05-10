@@ -199,7 +199,7 @@ async function resolveFanOutMatches(
       const session = sessions.find((entry) => isRecord(entry) && typeof entry.id === "string" && entry.id === candidate.task_session_id);
       const nativeThreadId = isRecord(session) && typeof session.native_thread_id === "string" ? session.native_thread_id : undefined;
       if (!nativeThreadId) continue;
-      const inspection = await inspectCodexSession(nativeThreadId, { now: input.now });
+      const inspection = await inspectCodexSession(nativeThreadId, { now: input.now, codexHome: input.runtime.codexHome });
       if (!inspection.exists || inspection.idle_seconds === undefined) continue;
       if (inspection.idle_seconds < validation.idleMinSeconds) continue;
       filtered.push({ ...candidate, idle_seconds: inspection.idle_seconds });

@@ -1,0 +1,159 @@
+#!/usr/bin/env node
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = fileURLToPath(import.meta.url);
+const orchestratorRoot = resolve(here, "../..");
+const distEntry = resolve(orchestratorRoot, "dist/src/server.js");
+const distStore = resolve(orchestratorRoot, "dist/src/store.js");
+const distGateway = resolve(orchestratorRoot, "dist/src/gateway_store.js");
+
+const { createGatewayServer } = await import(distEntry);
+const { createSeededStore } = await import(distStore);
+const { createInMemoryGatewayStore } = await import(distGateway);
+
+const NOW = new Date("2026-05-09T12:00:00.000Z");
+const codexHome = await mkdtemp(join(tmpdir(), "v15-codex-"));
+const sentMessages = [];
+
+async function writeRollout(threadId, lastEventIso) {
+  const dayPath = join(codexHome, "sessions", "2026", "05", "09");
+  await mkdir(dayPath, { recursive: true });
+  const rolloutPath = join(dayPath, `rollout-2026-05-09T08-00-00-${threadId}.jsonl`);
+  const lines = [
+    JSON.stringify({ timestamp: "2026-05-09T08:00:00.000Z", type: "session_meta", payload: {} }),
+    JSON.stringify({ timestamp: "2026-05-09T08:00:30.000Z", type: "user_input", payload: { text: "kickoff" } }),
+    JSON.stringify({ timestamp: lastEventIso, type: "event_msg", payload: { type: "agent_message" } }),
+  ];
+  await writeFile(rolloutPath, lines.join("\n") + "\n");
+  return rolloutPath;
+}
+
+const sessions = [
+  { id: "session_alpha", task_id: "task_alpha", provider: "codex", status: "idle", native_thread_id: "thread_alpha_recent" },
+  { id: "session_beta", task_id: "task_beta", provider: "codex", status: "idle", native_thread_id: "thread_beta_idle10m" },
+  { id: "session_gamma", task_id: "task_gamma", provider: "codex", status: "idle", native_thread_id: "thread_gamma_idle2h" },
+];
+
+let server;
+let passed = false;
+
+try {
+  await writeRollout("thread_alpha_recent", "2026-05-09T11:59:55.000Z");
+  await writeRollout("thread_beta_idle10m", "2026-05-09T11:50:00.000Z");
+  await writeRollout("thread_gamma_idle2h", "2026-05-09T10:00:00.000Z");
+
+  const seeded = await createSeededStore("fixtures/empty-review-packets.json");
+  const store = createInMemoryGatewayStore(seeded);
+
+  server = createGatewayServer({
+    store,
+    now: () => NOW,
+    codexHome,
+    taskSessions: {
+      listSessions() { return sessions; },
+      sendFollowupMessage(input) {
+        sentMessages.push({ task_session_id: input.task_session_id, text: input.text, idempotency_key: input.idempotency_key });
+        return {
+          id: `msg_${sentMessages.length}`,
+          task_session_id: input.task_session_id,
+          mode: "followup",
+          text: input.text,
+          event_ids: input.event_ids,
+          idempotency_key: input.idempotency_key,
+          status: "sent",
+        };
+      },
+    },
+  });
+
+  const baseUrl = await new Promise((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      resolveListen(`http://127.0.0.1:${addr.port}`);
+    });
+  });
+
+  const dryResp = await fetch(`${baseUrl}/master/fan-out`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      message: "ping idle threads",
+      selector: { task_id_pattern: "^task_", idle_min_seconds: 600 },
+      dry_run: true,
+    }),
+  });
+  const dryBody = await dryResp.json();
+  assertEqual(dryResp.status, 200, "dry-run status");
+  assertEqual(dryBody.matched_count, 2, "dry-run matched_count");
+  const dryTaskIds = dryBody.preview.map((p) => p.task_id).sort();
+  assertEqualJson(dryTaskIds, ["task_beta", "task_gamma"], "dry-run task ids");
+  const beta = dryBody.preview.find((p) => p.task_id === "task_beta");
+  const gamma = dryBody.preview.find((p) => p.task_id === "task_gamma");
+  assertEqual(beta?.idle_seconds, 600, "beta idle_seconds");
+  assertEqual(gamma?.idle_seconds, 7200, "gamma idle_seconds");
+
+  const liveResp = await fetch(`${baseUrl}/master/fan-out`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      message: "stop and report",
+      selector: { task_id_pattern: "^task_", idle_min_seconds: 600 },
+      idempotency_key: "v15_fanout_idle_proof_v1",
+    }),
+  });
+  const liveBody = await liveResp.json();
+  assertEqual(liveResp.status, 200, "live status");
+  assertEqual(liveBody.delivered_count, 2, "delivered_count");
+  assertEqual(liveBody.skipped.length, 0, "skipped count");
+  const deliveredIds = liveBody.delivered.map((d) => d.task_id).sort();
+  assertEqualJson(deliveredIds, ["task_beta", "task_gamma"], "delivered task ids");
+  assertEqual(sentMessages.length, 2, "sentMessages count");
+
+  const noneResp = await fetch(`${baseUrl}/master/fan-out`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      message: "no one idle enough",
+      selector: { task_id_pattern: "^task_", idle_min_seconds: 86400 },
+      dry_run: true,
+    }),
+  });
+  const noneBody = await noneResp.json();
+  assertEqual(noneBody.matched_count, 0, "no-match matched_count");
+
+  passed = true;
+  console.log("PASS v15 master fan-out idle filter");
+  console.log(`  filtered out (recent):    thread_alpha_recent (idle ~5s)`);
+  console.log(`  passed filter (10m idle): thread_beta_idle10m -> task_beta`);
+  console.log(`  passed filter (2h idle):  thread_gamma_idle2h -> task_gamma`);
+  console.log(`  delivered to: ${deliveredIds.join(", ")}`);
+} catch (error) {
+  passed = false;
+  console.error("FAIL v15 master fan-out idle filter");
+  console.error(error instanceof Error ? error.stack : String(error));
+  process.exitCode = 1;
+} finally {
+  if (server) {
+    await new Promise((res) => server.close(() => res()));
+  }
+  await rm(codexHome, { recursive: true, force: true });
+  if (!passed && process.exitCode === 0) process.exitCode = 1;
+}
+
+function assertEqual(actual, expected, label) {
+  if (actual !== expected) {
+    throw new Error(`assertion failed [${label}]: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
+}
+
+function assertEqualJson(actual, expected, label) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a !== e) {
+    throw new Error(`assertion failed [${label}]: expected ${e}, got ${a}`);
+  }
+}

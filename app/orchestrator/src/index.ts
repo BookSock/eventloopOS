@@ -19,6 +19,8 @@ import { CodexNativeThreadController } from "./task_sessions/codex_native_thread
 import { CompositeTaskSessionController, type CompositeTaskSessionRuntime } from "./task_sessions/composite_task_session_controller.js";
 import { CodexTaskMapResolver } from "./task_sessions/codex_task_map.js";
 import { createSeededDevelopmentTaskSessions } from "./task_sessions/development_task_session_controller.js";
+import { PersistentTerminalRefController } from "./task_sessions/persistent_terminal_ref_controller.js";
+import type { GatewayStore } from "./gateway_store.js";
 import { terminalSendEnabledFromEnv, type TerminalSendCommand, type TerminalSendExecutor } from "./task_sessions/terminal_send.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
 import { AerospaceWorkspaceController } from "./workspace/controller.js";
@@ -31,7 +33,7 @@ if (!config.ok) {
 }
 
 const gatewayRuntime = await createGatewayRuntime();
-const taskSessionRuntime = createTaskSessionRuntime();
+const taskSessionRuntime = createTaskSessionRuntime(gatewayRuntime.persistTerminalRefs ? gatewayRuntime.store : undefined);
 const taskSessions = taskSessionRuntime?.controller;
 const mcpSources = await createMcpSourceRegistry();
 const workspace = config.value.workspace === "aerospace" ? new AerospaceWorkspaceController(execFilePromise) : undefined;
@@ -49,6 +51,7 @@ const server = createGatewayServer({
   observability: gatewayRuntime.observability,
   terminalSendExecutor,
   terminalSendEnabled: terminalSendEnabledFromEnv(process.env),
+  codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
 });
 
 server.listen(config.value.port, config.value.host, () => {
@@ -118,6 +121,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
 async function createGatewayRuntime(): Promise<{
   store: ReturnType<typeof createInMemoryGatewayStore> | ReturnType<typeof createPostgresGatewayStore>;
   observability?: Observability;
+  persistTerminalRefs?: boolean;
   close?: () => Promise<void>;
 }> {
   if (config.ok && config.value.databaseUrl) {
@@ -126,6 +130,7 @@ async function createGatewayRuntime(): Promise<{
     return {
       store: createPostgresGatewayStore(postgres),
       observability: new PostgresObservability(postgres.pool),
+      persistTerminalRefs: true,
       close: () => postgres.close(),
     };
   }
@@ -148,18 +153,22 @@ async function createMcpSourceRegistry() {
   return createSeededDevelopmentMcpSourceRegistry();
 }
 
-function createTaskSessionRuntime(): { controller: TaskSessionController; close?: () => void } | undefined {
+function createTaskSessionRuntime(store?: GatewayStore): { controller: TaskSessionController; close?: () => void } | undefined {
   if (!config.ok || config.value.taskSessions === "off") {
     return undefined;
   }
 
   const runtimes: Array<CompositeTaskSessionRuntime & { close?: () => void }> = config.value.taskSessions.map((mode) => {
     if (mode === "codex_app_server") return createCodexTaskSessionRuntime(config.value);
-    if (mode === "claude_cli") return createClaudeTaskSessionRuntime(config.value);
-    return {
+    if (mode === "claude_cli") {
+      const claude = createClaudeTaskSessionRuntime(config.value);
+      return store ? { ...claude, controller: new PersistentTerminalRefController({ inner: claude.controller, store }) } : claude;
+    }
+    const fake: CompositeTaskSessionRuntime = {
       name: "fake",
       controller: createSeededDevelopmentTaskSessions(),
     };
+    return store ? { ...fake, controller: new PersistentTerminalRefController({ inner: fake.controller, store }) } : fake;
   });
 
   if (runtimes.length === 1) {
