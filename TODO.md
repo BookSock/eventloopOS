@@ -29,8 +29,8 @@ Live list of code gaps for the full vision. Sorted into **Build**, **Verify** (b
 - [ ] **P17. Split `FakeQueueClient` out of `QueueClient.swift`** (~700 of the 1.5k lines is test stub). Do when adding the next protocol method makes the file painful.
 - [ ] **P18. Activity feed filter chips and search** so a long activity log is browsable.
 - [ ] **P19. Onboarding "Approve all + Queue" hotkey** so day-1 onboarding feels one keystroke.
-- [ ] **P20. Repo Topics on GitHub UI** (`event-loop`, `attention`, `agents`, `macos`, `chrome-extension`, etc) for discovery.
+- [x] **P20. Repo Topics on GitHub UI** ~~(`event-loop`, `attention`, `agents`, `macos`, `chrome-extension`, etc) for discovery.~~ ✅ Shipped 2026-05-10: 14 topics live on `BookSock/eventloopOS`.
 
 ---
 
-Last updated: 2026-05-09 (B4 + B6 landed). Updated as items complete.
+Last updated: 2026-05-10 (P20 done; B3/B5/V15/P18 in flight). Updated as items complete.
