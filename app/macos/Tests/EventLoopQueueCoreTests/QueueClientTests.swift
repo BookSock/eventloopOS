@@ -1369,6 +1369,15 @@ final class QueueClientTests: XCTestCase {
         let session = URLSession(configuration: configuration)
         return (HTTPWorkspaceClient(baseURL: URL(string: "http://127.0.0.1:4377")!, session: session), recorder)
     }
+
+    func testSlugifyTaskNameNormalizesFreeFormTitles() {
+        XCTAssertEqual(slugifyTaskName("new task im making to get a good"), "new-task-im-making-to-get-a-good")
+        XCTAssertEqual(slugifyTaskName("Hello   World!"), "hello-world")
+        XCTAssertEqual(slugifyTaskName("BLOG Feedback ✨"), "blog-feedback")
+        XCTAssertEqual(slugifyTaskName("café résumé"), "caf-rsum")
+        XCTAssertEqual(slugifyTaskName("--leading-and-trailing--"), "leading-and-trailing")
+        XCTAssertEqual(slugifyTaskName("ALL UPPER"), "all-upper")
+    }
 }
 
 private final class HTTPClientRecorder: @unchecked Sendable {

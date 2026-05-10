@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { normalizeTaskId } from "../task_sessions/task_session_cli.js";
+import { normalizeTaskId, slugifyTaskName } from "../task_sessions/task_session_cli.js";
 
 export type MasterCommandCliOptions = {
   baseUrl: string;
@@ -140,7 +140,7 @@ type RequiredTransport = {
 
 function masterPromptForNewTask(text: string, taskId: string): string {
   return [
-    `[task:${taskId.slice("task_".length).replaceAll("_", " ")}]`,
+    `[task:${slugifyTaskName(taskId.slice("task_".length).replaceAll("_", " "))}]`,
     "You are background task agent controlled by eventloopOS.",
     "Work async. Use tests/proofs where possible. If human judgment needed, create waiting_approval or blocked status through eventloopOS agent run CLI.",
     "",

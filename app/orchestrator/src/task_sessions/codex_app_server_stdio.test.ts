@@ -108,6 +108,46 @@ describe("NdjsonRpcClient", () => {
     assert.deepEqual(await connection.initialized, { ok: true });
     connection.close();
   });
+
+  it("forwards stderr chunks to onStderr callback for friendly translation", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const emitter = new EventEmitter();
+    const child = Object.assign(emitter, {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill() {
+        child.killed = true;
+        emitter.emit("close");
+      },
+    }) as typeof emitter & {
+      stdin: PassThrough;
+      stdout: PassThrough;
+      stderr: PassThrough;
+      killed: boolean;
+      kill(): void;
+    };
+
+    const received: string[] = [];
+    const connection = createCodexAppServerStdioConnection({
+      spawnFn: (() => child) as never,
+      onStderr: (chunk) => received.push(chunk),
+    });
+    // Resolve the initialize request so close() does not race against a
+    // pending promise that would surface as an unhandled rejection.
+    connection.initialized.catch(() => undefined);
+    stdout.write(JSON.stringify({ id: 1, result: { ok: true } }) + "\n");
+    await connection.initialized;
+    stderr.write(
+      'worker quit with fatal: Transport channel closed, when Auth(TokenRefreshFailed("invalid_grant: Invalid refresh token"))\n',
+    );
+    await waitFor(() => received.join("").includes("TokenRefreshFailed"));
+    assert.match(received.join(""), /TokenRefreshFailed/);
+    connection.close();
+  });
 });
 
 async function waitFor(predicate: () => boolean): Promise<void> {

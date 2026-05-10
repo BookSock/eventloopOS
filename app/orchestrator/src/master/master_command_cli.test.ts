@@ -69,6 +69,7 @@ describe("master command CLI", () => {
     assert.equal(body.model, "gpt-5.3-codex");
     assert.equal(body.idempotency_key, "idem_master_start");
     assert.match(String(body.prompt), /Draft email to Sam/);
+    assert.match(String(body.prompt), /^\[task:sam-launch-email\]/);
     assert.deepEqual(writes, [`${JSON.stringify({ ok: true, started: { task_id: "task_sam_launch_email" } })}\n`]);
   });
 

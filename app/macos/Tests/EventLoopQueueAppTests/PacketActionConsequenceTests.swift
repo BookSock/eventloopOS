@@ -47,7 +47,7 @@ final class PacketActionConsequenceTests: XCTestCase {
 
         XCTAssertEqual(
             actionConsequence(for: packet, selectedTaskSessions: []),
-            "Send to Agent is blocked until a task session is bound. Done / Next will save this workspace and move on without sending agent follow-up."
+            "Send to Agent is blocked until a task session is bound. Use Bind Session in the Agent panel above to pick a Codex thread, or click Done / Next to save this workspace and move on without an agent follow-up."
         )
     }
 

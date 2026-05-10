@@ -168,6 +168,24 @@ struct PacketDetail: View {
                 HStack {
                     Spacer()
                     if packet.recommendedActionType == "resume_agent" {
+                        if !canExecuteRecommendedAction && selectedTaskSessions.isEmpty {
+                            Menu {
+                                if taskSessions.isEmpty {
+                                    Button("Load Sessions") { loadTaskSessions() }
+                                } else {
+                                    ForEach(taskSessions) { session in
+                                        Button(taskSessionLabel(session)) {
+                                            bindTaskSession(session.id)
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Label("Bind Session", systemImage: "link")
+                            }
+                            .controlSize(.large)
+                            .help("Bind a Codex session before sending. Send to Agent stays disabled until a session is bound.")
+                            .accessibilityIdentifier("queue-bind-session-shortcut")
+                        }
                         Button {
                             executeRecommendedAction()
                         } label: {
@@ -633,7 +651,7 @@ func actionConsequence(for packet: ReviewPacket, selectedTaskSessions: [TaskSess
             let presentation = TaskSessionTargetPresentation(session: session)
             return "Send to Agent will forward this packet to \(presentation.provider): \(presentation.title), save the current workspace, mark this paper done, then pull the next paper."
         }
-        return "Send to Agent is blocked until a task session is bound. Done / Next will save this workspace and move on without sending agent follow-up."
+        return "Send to Agent is blocked until a task session is bound. Use Bind Session in the Agent panel above to pick a Codex thread, or click Done / Next to save this workspace and move on without an agent follow-up."
     case "mark_done":
         return "Done / Next will save this workspace for the task and move to the next paper."
     default:

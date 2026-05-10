@@ -186,6 +186,15 @@ export function normalizeTaskId(input: string | undefined): string | undefined {
   return `task_${stableId(trimmed)}`;
 }
 
+export function slugifyTaskName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9-]/g, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
 function parseArgs(argv: string[]): Partial<TaskSessionCliOptions> {
   const options: Partial<TaskSessionCliOptions> = {};
   const positional: string[] = [];

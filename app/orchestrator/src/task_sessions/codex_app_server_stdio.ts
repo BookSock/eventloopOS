@@ -19,6 +19,7 @@ export type CodexAppServerStdioOptions = {
     version: string;
   };
   spawnFn?: typeof spawn;
+  onStderr?: (chunk: string) => void;
 };
 
 export class NdjsonRpcClient {
@@ -110,6 +111,12 @@ export function createCodexAppServerStdioConnection(options: CodexAppServerStdio
   const rpc = new NdjsonRpcClient(child.stdin, child.stdout, options.requestTimeoutMs);
   child.on("close", () => rpc.close(new Error("Codex app-server process closed")));
   child.on("error", (error) => rpc.close(error));
+  if (options.onStderr && child.stderr) {
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string | Buffer) => {
+      options.onStderr?.(typeof chunk === "string" ? chunk : chunk.toString("utf8"));
+    });
+  }
 
   const rawRequest = rpc.request;
   const initialized = Promise.resolve(rawRequest({

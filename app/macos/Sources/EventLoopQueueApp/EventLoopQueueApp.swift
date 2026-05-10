@@ -12,6 +12,11 @@ struct EventLoopQueueApp: App {
 
     init() {
         let configuration = QueueAppConfiguration.parse(arguments: CommandLine.arguments)
+        if !CommandLine.arguments.contains("--test-mode"),
+           ProcessInfo.processInfo.environment["EVENTLOOP_QUEUE_TEST_MODE"] != "1",
+           ProcessInfo.processInfo.environment["EVENTLOOPOS_SINGLE_INSTANCE_DISABLED"] != "1" {
+            enforceSingleInstance()
+        }
         let voiceService: VoiceTranscriptionService?
         if ProcessInfo.processInfo.environment["EVENTLOOPOS_VOICE_DISABLED"] == "1" {
             voiceService = nil

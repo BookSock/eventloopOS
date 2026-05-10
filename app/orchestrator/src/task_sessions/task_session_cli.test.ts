@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   normalizeTaskId,
   runTaskSessionCli,
+  slugifyTaskName,
   taskSessionCliOptionsFromEnvAndArgv,
 } from "./task_session_cli.js";
 
@@ -218,6 +219,17 @@ describe("task session CLI", () => {
     assert.equal(exitCode, 1);
     assert.equal(called, false);
     assert.match(errors.join(""), /task session id must be provided/);
+  });
+});
+
+describe("slugifyTaskName", () => {
+  it("dashes spaces, drops emoji/punctuation, lowercases", () => {
+    assert.equal(slugifyTaskName("new task im making to get a good"), "new-task-im-making-to-get-a-good");
+    assert.equal(slugifyTaskName("Hello   World!"), "hello-world");
+    assert.equal(slugifyTaskName("BLOG Feedback ✨"), "blog-feedback");
+    assert.equal(slugifyTaskName("café résumé"), "caf-rsum");
+    assert.equal(slugifyTaskName("--leading-and-trailing--"), "leading-and-trailing");
+    assert.equal(slugifyTaskName("ALL UPPER"), "all-upper");
   });
 });
 

@@ -819,13 +819,46 @@ private struct SetCurrentTaskRequest: Encodable {
 }
 
 private func masterPromptForNewTask(text: String, taskId: String) -> String {
-    [
-        "[task:\(taskId.dropFirst("task_".count).replacingOccurrences(of: "_", with: " "))]",
+    let spaced = taskId.dropFirst("task_".count).replacingOccurrences(of: "_", with: " ")
+    return [
+        "[task:\(slugifyTaskName(String(spaced)))]",
         "You are background task agent controlled by eventloopOS.",
         "Work async. Use tests/proofs where possible. If human judgment needed, create waiting_approval or blocked status through eventloopOS agent run CLI.",
         "",
         text,
     ].joined(separator: "\n")
+}
+
+public func slugifyTaskName(_ name: String) -> String {
+    let lowered = name.lowercased()
+    var dashed = ""
+    var lastWasSpace = false
+    for character in lowered {
+        if character.isWhitespace {
+            if !lastWasSpace {
+                dashed.append("-")
+                lastWasSpace = true
+            }
+        } else {
+            dashed.append(character)
+            lastWasSpace = false
+        }
+    }
+    var scalars = ""
+    for character in dashed {
+        if character == "-" {
+            scalars.append(character)
+        } else if let ascii = character.asciiValue,
+                  (ascii >= 0x30 && ascii <= 0x39) || (ascii >= 0x61 && ascii <= 0x7A) {
+            scalars.append(character)
+        }
+    }
+    while scalars.contains("--") {
+        scalars = scalars.replacingOccurrences(of: "--", with: "-")
+    }
+    while scalars.hasPrefix("-") { scalars.removeFirst() }
+    while scalars.hasSuffix("-") { scalars.removeLast() }
+    return scalars
 }
 
 func normalizedTaskId(from raw: String) -> String? {

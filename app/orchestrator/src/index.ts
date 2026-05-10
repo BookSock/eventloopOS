@@ -28,6 +28,7 @@ import { ClaudeCliTaskSessionController, parseClaudeSessionConfigs } from "./tas
 import { CodexAppServerThreadClient } from "./task_sessions/codex_app_server_thread_client.js";
 import { createCodexAppServerStdioConnection } from "./task_sessions/codex_app_server_stdio.js";
 import { createCodexAppServerWebSocketConnection } from "./task_sessions/codex_app_server_ws.js";
+import { translateCodexStderr } from "./task_sessions/codex_stderr_friendly.js";
 import { CodexNativeThreadController } from "./task_sessions/codex_native_thread_controller.js";
 import { CompositeTaskSessionController, type CompositeTaskSessionRuntime } from "./task_sessions/composite_task_session_controller.js";
 import { CodexTaskMapResolver } from "./task_sessions/codex_task_map.js";
@@ -306,7 +307,14 @@ function createTaskSessionRuntime(store?: GatewayStore): { controller: TaskSessi
 function createCodexTaskSessionRuntime(runtimeConfig: OrchestratorConfig): CompositeTaskSessionRuntime & { close: () => void } {
     const connection = runtimeConfig.codexAppServerUrl
       ? createCodexAppServerWebSocketConnection({ url: runtimeConfig.codexAppServerUrl })
-      : createCodexAppServerStdioConnection();
+      : createCodexAppServerStdioConnection({
+          onStderr: (chunk) => {
+            const friendly = translateCodexStderr(chunk);
+            if (friendly) {
+              console.warn(friendly.message);
+            }
+          },
+        });
     const taskMap = new CodexTaskMapResolver({
       inlineMap: runtimeConfig.codexTaskMap,
       mapPath: runtimeConfig.codexTaskMapPath,
@@ -315,7 +323,13 @@ function createCodexTaskSessionRuntime(runtimeConfig: OrchestratorConfig): Compo
       },
     });
     connection.initialized.catch((error) => {
-      console.error(`Codex app-server initialization failed: ${error instanceof Error ? error.message : String(error)}`);
+      const message = error instanceof Error ? error.message : String(error);
+      const friendly = translateCodexStderr(message);
+      if (friendly) {
+        console.warn(friendly.message);
+        return;
+      }
+      console.warn(`[codex-bridge] Codex app-server initialization failed: ${message}. Keystroke + queue paths still work.`);
     });
     return {
       name: "codex_app_server",
