@@ -148,7 +148,7 @@ final class QueueViewModelTests: XCTestCase {
             client: FakeQueueClient(packets: SeededQueue.packets),
             workspaceClient: workspaceClient
         )
-        viewModel.enterManualMode()
+        await viewModel.enterManualMode()
 
         await viewModel.pullNextPaper()
 
@@ -1545,6 +1545,161 @@ final class QueueViewModelTests: XCTestCase {
         }
     }
 
+    func testApproveAllOnboardingProposalsCallsBatchEndpointOnce() async {
+        let scan = OnboardingScan(
+            ok: true,
+            capturedAt: Date(timeIntervalSince1970: 1_778_080_000),
+            activeWorkspace: "desk",
+            focusedWindowId: 301,
+            summary: OnboardingScanSummary(
+                windowCount: 3,
+                groupedWindowCount: 3,
+                ungroupedWindowCount: 0,
+                taskSessionCount: 0,
+                browserContextCount: 0,
+                proposalCount: 3
+            ),
+            proposals: [
+                OnboardingTaskProposal(
+                    id: "onboard_a",
+                    taskId: "task_a",
+                    title: "A",
+                    confidence: "medium",
+                    reason: "window title",
+                    windows: [OnboardingWindow(id: 301, app: "Ghostty", title: "A", workspace: "a")],
+                    suggestedNextAction: "Approve."
+                ),
+                OnboardingTaskProposal(
+                    id: "onboard_b",
+                    taskId: "task_b",
+                    title: "B",
+                    confidence: "medium",
+                    reason: "window title",
+                    windows: [OnboardingWindow(id: 302, app: "Ghostty", title: "B", workspace: "b")],
+                    suggestedNextAction: "Approve."
+                ),
+                OnboardingTaskProposal(
+                    id: "onboard_c",
+                    taskId: "task_c",
+                    title: "C",
+                    confidence: "medium",
+                    reason: "window title",
+                    windows: [OnboardingWindow(id: 303, app: "Ghostty", title: "C", workspace: "c")],
+                    suggestedNextAction: "Approve."
+                )
+            ]
+        )
+        let client = FakeQueueClient(packets: [])
+        client.replaceOnboardingScan(scan)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.scanOnboarding()
+
+        await viewModel.approveAllOnboardingProposals(queuePaper: true)
+
+        XCTAssertEqual(client.batchApprovalRequests.count, 1, "expected single batch call regardless of N proposals")
+        XCTAssertEqual(client.batchApprovalRequests.first?.approvals.count, 3)
+        XCTAssertEqual(client.batchApprovalRequests.first?.approvals.map(\.proposalId), ["onboard_a", "onboard_b", "onboard_c"])
+        XCTAssertEqual(client.batchApprovalRequests.first?.approvals.allSatisfy(\.queuePaper), true)
+    }
+
+    func testApproveAllOnboardingProposalsRetriesTransientWithSameIdempotencyKey() async {
+        let scan = OnboardingScan(
+            ok: true,
+            capturedAt: Date(timeIntervalSince1970: 1_778_080_000),
+            activeWorkspace: "desk",
+            focusedWindowId: 401,
+            summary: OnboardingScanSummary(
+                windowCount: 1,
+                groupedWindowCount: 1,
+                ungroupedWindowCount: 0,
+                taskSessionCount: 0,
+                browserContextCount: 0,
+                proposalCount: 1
+            ),
+            proposals: [
+                OnboardingTaskProposal(
+                    id: "onboard_a",
+                    taskId: "task_a",
+                    title: "A",
+                    confidence: "medium",
+                    reason: "window title",
+                    windows: [OnboardingWindow(id: 401, app: "Ghostty", title: "A", workspace: "a")],
+                    suggestedNextAction: "Approve."
+                )
+            ]
+        )
+        let client = FakeQueueClient(packets: [])
+        client.replaceOnboardingScan(scan)
+        client.setBatchApprovalFailureCount(2)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.scanOnboarding()
+
+        await viewModel.approveAllOnboardingProposals(queuePaper: true)
+
+        XCTAssertEqual(client.batchApprovalRequests.count, 3)
+        let keys = Set(client.batchApprovalRequests.map(\.idempotencyKey))
+        XCTAssertEqual(keys.count, 1, "all retries should reuse the same idempotency key")
+    }
+
+    func testEnterManualModeCallsServerAndStaysInLoopOnFailure() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        client.setManualModeFakeError(QueueClientError.httpStatus(503))
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.enterManualMode()
+
+        XCTAssertEqual(client.manualModeSetRequests.count, 1)
+        XCTAssertEqual(client.manualModeSetRequests.first?.active, true)
+        XCTAssertEqual(client.manualModeSetRequests.first?.reason, "user_hotkey")
+        XCTAssertEqual(viewModel.mode, .eventLoop, "server failure must not silently flip local mode")
+        if case let .failed(message) = viewModel.state {
+            XCTAssertTrue(message.contains("Manual mode failed"))
+        } else {
+            XCTFail("expected state to surface server failure")
+        }
+    }
+
+    func testEnterManualModeFlipsLocalAfterServerSucceeds() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.enterManualMode()
+
+        XCTAssertEqual(client.manualModeSetRequests.count, 1)
+        XCTAssertEqual(client.manualModeSetRequests.first?.active, true)
+        XCTAssertEqual(viewModel.mode, .manual)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
+    }
+
+    func testExitManualModePostsActiveFalseToServer() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.enterManualMode()
+
+        await viewModel.exitManualMode()
+
+        XCTAssertEqual(client.manualModeSetRequests.map(\.active), [true, false])
+        XCTAssertEqual(viewModel.mode, .eventLoop)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
+    }
+
+    func testBootstrapReadsManualModeStateFromServer() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        client.setManualModeFakeState(ManualModeState(
+            active: true,
+            enteredAt: Date(timeIntervalSince1970: 1_778_080_000),
+            reason: "another_client",
+            updatedAt: Date(timeIntervalSince1970: 1_778_080_001)
+        ))
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.bootstrap()
+
+        XCTAssertGreaterThanOrEqual(client.manualModeGetRequestCount, 1)
+        XCTAssertEqual(viewModel.mode, .manual, "bootstrap must reflect server-side manual flag in local UI")
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
+    }
+
     func testRenewSelectedLeaseKeepsSelectionLoaded() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
         await viewModel.pullNextPaper()
@@ -1594,14 +1749,14 @@ final class QueueViewModelTests: XCTestCase {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
         await viewModel.loadQueue()
 
-        viewModel.enterManualMode()
+        await viewModel.enterManualMode()
 
         XCTAssertEqual(viewModel.mode, .manual)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
         XCTAssertNil(viewModel.selectedPacketID)
         XCTAssertEqual(viewModel.packets.count, 3)
 
-        viewModel.returnToEventLoopMode()
+        await viewModel.returnToEventLoopMode()
 
         XCTAssertEqual(viewModel.mode, .eventLoop)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
@@ -1710,7 +1865,7 @@ final class QueueViewModelTests: XCTestCase {
             workspaceClient: workspaceClient
         )
 
-        viewModel.enterManualMode()
+        await viewModel.enterManualMode()
         await viewModel.returnToEventLoopModeAndPrepareWorkspaceRestore()
         await viewModel.confirmManualWorkspaceRestore()
 
@@ -1763,7 +1918,7 @@ final class QueueViewModelTests: XCTestCase {
         )
         await viewModel.loadQueue()
         viewModel.select(packetId: "packet-with-workspace")
-        viewModel.enterManualMode()
+        await viewModel.enterManualMode()
 
         await viewModel.returnToEventLoopModeAndPrepareWorkspaceRestore()
 
@@ -1785,7 +1940,7 @@ final class QueueViewModelTests: XCTestCase {
             activeWorkspace: "eventloop-blog"
         )
 
-        viewModel.enterManualMode()
+        await viewModel.enterManualMode()
         await viewModel.prepareWorkspaceRestore(snapshot: snapshot)
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .skippedManualMode)
@@ -2016,7 +2171,7 @@ final class QueueViewModelTests: XCTestCase {
             windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")]
         )
 
-        viewModel.enterManualMode()
+        await viewModel.enterManualMode()
         await viewModel.confirmWorkspaceRestore(snapshot: snapshot)
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .skippedManualMode)

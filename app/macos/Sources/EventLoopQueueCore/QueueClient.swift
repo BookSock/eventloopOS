@@ -19,6 +19,9 @@ public protocol QueueClient: Sendable {
     func startMasterTask(text: String, taskHint: String?, cwd: String?, model: String?, workspaceSnapshot: WorkspaceSnapshot?) async throws -> TaskSessionStartResult
     func fetchOnboardingScan() async throws -> OnboardingScan
     func approveOnboardingProposal(id: String, queuePaper: Bool) async throws -> OnboardingApprovalResult
+    func batchApproveOnboardingProposals(approvals: [OnboardingApprovalRequest], idempotencyKey: String) async throws -> OnboardingApprovalBatchResult
+    func setManualMode(active: Bool, reason: String?) async throws -> ManualModeState
+    func getManualMode() async throws -> ManualModeState
     func fetchReadingQueue() async throws -> ReadingQueueListResult
     func promoteReadingQueueContexts(ids: [String]) async throws -> ReadingQueuePromoteResult
     func autoPromoteReadingQueue(minAgeSeconds: Int) async throws -> ReadingQueuePromoteResult
@@ -55,6 +58,10 @@ public extension QueueClient {
 
     func saveTaskWorkspaceSnapshot(taskId: String, workspaceSnapshot: WorkspaceSnapshot) async throws -> TaskWorkspaceSnapshotSaveResult {
         try await saveTaskWorkspaceSnapshot(taskId: taskId, workspaceSnapshot: workspaceSnapshot, sourceQueueItemId: nil)
+    }
+
+    func setManualMode(active: Bool) async throws -> ManualModeState {
+        try await setManualMode(active: active, reason: nil)
     }
 }
 
@@ -341,6 +348,44 @@ public struct HTTPQueueClient: QueueClient {
         return try decoder.decode(OnboardingApprovalResult.self, from: data)
     }
 
+    public func batchApproveOnboardingProposals(
+        approvals: [OnboardingApprovalRequest],
+        idempotencyKey: String
+    ) async throws -> OnboardingApprovalBatchResult {
+        let url = baseURL.appending(path: "onboarding/approvals/batch")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.httpBody = try encoder.encode(OnboardingApprovalBatchRequestBody(
+            approvals: approvals,
+            idempotencyKey: idempotencyKey
+        ))
+
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(OnboardingApprovalBatchResult.self, from: data)
+    }
+
+    public func setManualMode(active: Bool, reason: String? = nil) async throws -> ManualModeState {
+        let url = baseURL.appending(path: "modes/manual")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(ManualModeRequestBody(active: active, reason: reason))
+
+        let (data, response) = try await session.data(for: request)
+        try validate(response: response)
+        return try decoder.decode(ManualModeStateEnvelope.self, from: data).manualMode
+    }
+
+    public func getManualMode() async throws -> ManualModeState {
+        let url = baseURL.appending(path: "modes/manual")
+        let (data, response) = try await session.data(from: url)
+        try validate(response: response)
+        return try decoder.decode(ManualModeStateEnvelope.self, from: data).manualMode
+    }
+
     public func masterFanOut(
         message: String,
         taskHintSubstring: String? = nil,
@@ -580,15 +625,35 @@ private struct TaskSessionStartRequest: Encodable {
     }
 }
 
-private struct OnboardingApprovalRequest: Encodable {
-    let proposalId: String
-    let queuePaper: Bool
-    let actorId: String
+private struct OnboardingApprovalBatchRequestBody: Encodable {
+    let approvals: [OnboardingApprovalRequest]
+    let idempotencyKey: String?
 
     enum CodingKeys: String, CodingKey {
-        case proposalId = "proposal_id"
-        case queuePaper = "queue_paper"
-        case actorId = "actor_id"
+        case approvals
+        case idempotencyKey = "idempotency_key"
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(approvals, forKey: .approvals)
+        if let idempotencyKey { try container.encode(idempotencyKey, forKey: .idempotencyKey) }
+    }
+}
+
+private struct ManualModeRequestBody: Encodable {
+    let active: Bool
+    let reason: String?
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(active, forKey: .active)
+        if let reason { try container.encode(reason, forKey: .reason) }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case active
+        case reason
     }
 }
 

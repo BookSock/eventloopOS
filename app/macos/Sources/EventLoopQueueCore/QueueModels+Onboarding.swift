@@ -307,6 +307,111 @@ public enum OnboardingState: Equatable, Sendable {
     case failed(String)
 }
 
+public struct OnboardingApprovalRequest: Encodable, Equatable, Sendable {
+    public let proposalId: String
+    public let queuePaper: Bool
+    public let actorId: String
+
+    public init(proposalId: String, queuePaper: Bool = false, actorId: String = "mac_queue_app") {
+        self.proposalId = proposalId
+        self.queuePaper = queuePaper
+        self.actorId = actorId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case proposalId = "proposal_id"
+        case queuePaper = "queue_paper"
+        case actorId = "actor_id"
+    }
+}
+
+public struct OnboardingApprovalBatchEntry: Decodable, Equatable, Sendable {
+    public let ok: Bool
+    public let proposalId: String?
+    public let taskId: String?
+    public let queuedPaper: OnboardingQueuedPaper?
+    public let errorCode: String?
+    public let errorMessage: String?
+
+    public init(
+        ok: Bool,
+        proposalId: String? = nil,
+        taskId: String? = nil,
+        queuedPaper: OnboardingQueuedPaper? = nil,
+        errorCode: String? = nil,
+        errorMessage: String? = nil
+    ) {
+        self.ok = ok
+        self.proposalId = proposalId
+        self.taskId = taskId
+        self.queuedPaper = queuedPaper
+        self.errorCode = errorCode
+        self.errorMessage = errorMessage
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case proposalId = "proposal_id"
+        case taskId = "task_id"
+        case queuedPaper = "queue_item"
+        case error
+    }
+
+    private enum ErrorKeys: String, CodingKey {
+        case code
+        case message
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.ok = try container.decode(Bool.self, forKey: .ok)
+        self.proposalId = try container.decodeIfPresent(String.self, forKey: .proposalId)
+        self.taskId = try container.decodeIfPresent(String.self, forKey: .taskId)
+        self.queuedPaper = try container.decodeIfPresent(OnboardingQueuedPaper.self, forKey: .queuedPaper)
+        if let errorContainer = try? container.nestedContainer(keyedBy: ErrorKeys.self, forKey: .error) {
+            self.errorCode = try errorContainer.decodeIfPresent(String.self, forKey: .code)
+            self.errorMessage = try errorContainer.decodeIfPresent(String.self, forKey: .message)
+        } else {
+            self.errorCode = nil
+            self.errorMessage = nil
+        }
+    }
+}
+
+public struct OnboardingApprovalBatchResult: Decodable, Equatable, Sendable {
+    public let ok: Bool
+    public let results: [OnboardingApprovalBatchEntry]
+    public let idempotentReplay: Bool
+    public let requestId: String?
+
+    public init(
+        ok: Bool,
+        results: [OnboardingApprovalBatchEntry],
+        idempotentReplay: Bool = false,
+        requestId: String? = nil
+    ) {
+        self.ok = ok
+        self.results = results
+        self.idempotentReplay = idempotentReplay
+        self.requestId = requestId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case ok
+        case results
+        case idempotentReplay = "idempotent_replay"
+        case requestId = "request_id"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.ok = try container.decodeIfPresent(Bool.self, forKey: .ok) ?? true
+        self.results = try container.decodeIfPresent([OnboardingApprovalBatchEntry].self, forKey: .results) ?? []
+        self.idempotentReplay = try container.decodeIfPresent(Bool.self, forKey: .idempotentReplay) ?? false
+        self.requestId = try container.decodeIfPresent(String.self, forKey: .requestId)
+    }
+}
+
 public struct CodexAutoBindResult: Decodable, Equatable, Sendable {
     public let scannedWindowCount: Int
     public let matchedCount: Int

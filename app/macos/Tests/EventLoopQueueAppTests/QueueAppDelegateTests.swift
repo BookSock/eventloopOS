@@ -18,7 +18,7 @@ final class QueueAppDelegateTests: XCTestCase {
             workspaceClient: workspaceClient
         )
         await viewModel.enterManualModeAndCaptureWorkspace()
-        viewModel.returnToEventLoopMode()
+        await viewModel.returnToEventLoopMode()
 
         let delegate = QueueAppDelegate()
         delegate.viewModel = viewModel

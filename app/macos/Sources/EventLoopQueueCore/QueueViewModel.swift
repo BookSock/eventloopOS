@@ -249,6 +249,24 @@ public final class QueueViewModel: ObservableObject {
         await refreshQueue()
     }
 
+    public func bootstrap() async {
+        await syncManualModeFromServer()
+        await loadQueue()
+    }
+
+    public func syncManualModeFromServer() async {
+        do {
+            let serverState = try await client.getManualMode()
+            if serverState.active {
+                applyLocalEnterManualMode()
+            } else if mode == .manual {
+                applyLocalReturnToEventLoopMode()
+            }
+        } catch {
+            // Don't fail bootstrap on a manual-mode read failure; surface as activity later if needed.
+        }
+    }
+
     public func refreshQueue() async {
         do {
             packets = try await client.fetchQueue()
@@ -322,7 +340,26 @@ public final class QueueViewModel: ObservableObject {
         await requestSelectedBrowserContextRestoresIfNeeded()
     }
 
-    public func enterManualMode() {
+    public func enterManualMode() async {
+        do {
+            _ = try await client.setManualMode(active: true, reason: "user_hotkey")
+        } catch {
+            state = .failed("Manual mode failed to engage on server: \(error.localizedDescription)")
+            return
+        }
+        applyLocalEnterManualMode()
+    }
+
+    public func exitManualMode() async {
+        applyLocalReturnToEventLoopMode()
+        do {
+            _ = try await client.setManualMode(active: false, reason: nil)
+        } catch {
+            state = .failed("Manual mode failed to disengage on server: \(error.localizedDescription)")
+        }
+    }
+
+    private func applyLocalEnterManualMode() {
         mode = .manual
         shouldRestoreWorkspace = false
         workspaceRestoreState = .skippedManualMode
@@ -332,7 +369,8 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func enterManualModeAndCaptureWorkspace() async {
-        enterManualMode()
+        await enterManualMode()
+        guard mode == .manual else { return }
         await captureManualWorkspaceSnapshot()
     }
 
@@ -373,24 +411,44 @@ public final class QueueViewModel: ObservableObject {
         )
     }
 
-    public func returnToEventLoopMode() {
+    public func returnToEventLoopMode() async {
+        let wasManual = mode == .manual
+        applyLocalReturnToEventLoopMode()
+        if wasManual {
+            do {
+                _ = try await client.setManualMode(active: false, reason: nil)
+            } catch {
+                state = .failed("Manual mode failed to disengage on server: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func applyLocalReturnToEventLoopMode() {
         mode = .eventLoop
         shouldRestoreWorkspace = true
     }
 
     public func returnToEventLoopModeAndPrepareWorkspaceRestore() async {
-        if mode == .manual {
+        let wasManual = mode == .manual
+        if wasManual {
             await captureManualWorkspaceSnapshot()
         }
-        returnToEventLoopMode()
+        applyLocalReturnToEventLoopMode()
         await prepareSelectedWorkspaceRestore()
+        if wasManual {
+            do {
+                _ = try await client.setManualMode(active: false, reason: nil)
+            } catch {
+                state = .failed("Manual mode failed to disengage on server: \(error.localizedDescription)")
+            }
+        }
     }
 
-    public func toggleManualMode() {
+    public func toggleManualMode() async {
         if mode == .eventLoop {
-            enterManualMode()
+            await enterManualMode()
         } else {
-            returnToEventLoopMode()
+            await returnToEventLoopMode()
         }
     }
 
@@ -401,7 +459,8 @@ public final class QueueViewModel: ObservableObject {
             } catch {
                 state = .failed(error.localizedDescription)
             }
-            enterManualMode()
+            await enterManualMode()
+            guard mode == .manual else { return }
             if manualWorkspaceSnapshot != nil {
                 await confirmManualWorkspaceRestore()
             }
@@ -413,7 +472,7 @@ public final class QueueViewModel: ObservableObject {
     public func pullNextPaper() async {
         if mode == .manual {
             await captureManualWorkspaceSnapshot()
-            returnToEventLoopMode()
+            await returnToEventLoopMode()
         } else if manualWorkspaceSnapshot == nil {
             await captureManualWorkspaceSnapshot()
         }
@@ -972,26 +1031,82 @@ public final class QueueViewModel: ObservableObject {
         }
 
         onboardingState = .approving("all")
+        let approvals = scan.proposals.map { proposal in
+            OnboardingApprovalRequest(proposalId: proposal.id, queuePaper: queuePaper)
+        }
+        let idempotencyKey = "mac_onboarding_batch_\(UUID().uuidString)"
+
         do {
-            var results: [OnboardingApprovalResult] = []
-            for proposal in scan.proposals {
-                let result = try await client.approveOnboardingProposal(id: proposal.id, queuePaper: queuePaper)
-                results.append(result)
-            }
+            let batchResult = try await batchApproveWithRetry(
+                approvals: approvals,
+                idempotencyKey: idempotencyKey,
+                maxAttempts: 3
+            )
             await loadTaskSessions()
             await refreshQueue()
-            if let firstQueuedPaperId = results.compactMap(\.queuedPaper?.id).first,
+            if let firstQueuedPaperId = batchResult.results.compactMap(\.queuedPaper?.id).first,
                packets.contains(where: { $0.id == firstQueuedPaperId }) {
                 selectedPacketID = firstQueuedPaperId
             }
-            if let last = results.last {
-                onboardingState = .approved(last)
+            if let lastEntry = batchResult.results.last {
+                let proposal = scan.proposals.first { $0.id == lastEntry.proposalId }
+                onboardingState = .approved(OnboardingApprovalResult(
+                    ok: lastEntry.ok,
+                    taskId: lastEntry.taskId ?? proposal?.taskId ?? "",
+                    proposalId: lastEntry.proposalId,
+                    bindings: [],
+                    browserContextBindings: [],
+                    queuedPaper: lastEntry.queuedPaper,
+                    warnings: []
+                ))
             }
             await prepareSelectedWorkspaceRestore()
             await requestSelectedBrowserContextRestoresIfNeeded()
         } catch {
             onboardingState = .failed(error.localizedDescription)
         }
+    }
+
+    private func batchApproveWithRetry(
+        approvals: [OnboardingApprovalRequest],
+        idempotencyKey: String,
+        maxAttempts: Int
+    ) async throws -> OnboardingApprovalBatchResult {
+        var lastError: Error = QueueClientError.invalidResponse
+        for attempt in 1...maxAttempts {
+            do {
+                return try await client.batchApproveOnboardingProposals(
+                    approvals: approvals,
+                    idempotencyKey: idempotencyKey
+                )
+            } catch {
+                lastError = error
+                if attempt == maxAttempts || !isTransientBatchError(error) {
+                    throw error
+                }
+                let delayNs = UInt64(200_000_000) * UInt64(1 << (attempt - 1))
+                try? await Task.sleep(nanoseconds: delayNs)
+            }
+        }
+        throw lastError
+    }
+
+    private func isTransientBatchError(_ error: Error) -> Bool {
+        if let queueError = error as? QueueClientError {
+            switch queueError {
+            case let .httpStatus(status):
+                return status == 408 || status == 425 || status == 429 || (500...599).contains(status)
+            case .invalidResponse:
+                return true
+            case .packetNotFound:
+                return false
+            }
+        }
+        let nsError = error as NSError
+        if nsError.domain == NSURLErrorDomain {
+            return true
+        }
+        return false
     }
 
     public func renewSelectedLease() async {

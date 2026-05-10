@@ -32,6 +32,12 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var masterTaskStarts: [(text: String, taskHint: String?, cwd: String?, model: String?, workspaceSnapshot: WorkspaceSnapshot?)] = []
     private var onboardingScan: OnboardingScan
     private var approvedOnboardingIds: [String] = []
+    private var batchApprovalCalls: [(approvals: [OnboardingApprovalRequest], idempotencyKey: String)] = []
+    private var batchApprovalFailureCount: Int = 0
+    private var manualModeFakeState: ManualModeState = ManualModeState(active: false, updatedAt: Date(timeIntervalSince1970: 0))
+    private var manualModeFakeError: Error?
+    private var manualModeSetCalls: [(active: Bool, reason: String?)] = []
+    private var manualModeGetCallCount: Int = 0
     private var readingQueueContexts: [ReadingQueueContext] = []
     private var fakeActivityEvents: [ActivityEvent] = []
     private var fakeAutoBindRunCount: Int = 0
@@ -183,6 +189,30 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public var approvedOnboardingProposalIds: [String] {
         lock.withLock { approvedOnboardingIds }
+    }
+
+    public var batchApprovalRequests: [(approvals: [OnboardingApprovalRequest], idempotencyKey: String)] {
+        lock.withLock { batchApprovalCalls }
+    }
+
+    public var manualModeSetRequests: [(active: Bool, reason: String?)] {
+        lock.withLock { manualModeSetCalls }
+    }
+
+    public var manualModeGetRequestCount: Int {
+        lock.withLock { manualModeGetCallCount }
+    }
+
+    public func setManualModeFakeState(_ state: ManualModeState) {
+        lock.withLock { manualModeFakeState = state }
+    }
+
+    public func setManualModeFakeError(_ error: Error?) {
+        lock.withLock { manualModeFakeError = error }
+    }
+
+    public func setBatchApprovalFailureCount(_ count: Int) {
+        lock.withLock { batchApprovalFailureCount = count }
     }
 
     public func replacePackets(_ nextPackets: [ReviewPacket]) {
@@ -514,6 +544,71 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
                 queuedPaper: queuedPaper,
                 warnings: []
             )
+        }
+    }
+
+    public func batchApproveOnboardingProposals(
+        approvals: [OnboardingApprovalRequest],
+        idempotencyKey: String
+    ) async throws -> OnboardingApprovalBatchResult {
+        let shouldFail: Bool = lock.withLock {
+            batchApprovalCalls.append((approvals: approvals, idempotencyKey: idempotencyKey))
+            if batchApprovalFailureCount > 0 {
+                batchApprovalFailureCount -= 1
+                return true
+            }
+            return false
+        }
+        if shouldFail {
+            throw QueueClientError.httpStatus(503)
+        }
+        var entries: [OnboardingApprovalBatchEntry] = []
+        for approval in approvals {
+            do {
+                let result = try await approveOnboardingProposal(id: approval.proposalId, queuePaper: approval.queuePaper)
+                entries.append(OnboardingApprovalBatchEntry(
+                    ok: true,
+                    proposalId: result.proposalId ?? approval.proposalId,
+                    taskId: result.taskId,
+                    queuedPaper: result.queuedPaper
+                ))
+            } catch {
+                entries.append(OnboardingApprovalBatchEntry(
+                    ok: false,
+                    proposalId: approval.proposalId,
+                    errorCode: "approval_failed",
+                    errorMessage: error.localizedDescription
+                ))
+            }
+        }
+        return OnboardingApprovalBatchResult(ok: true, results: entries)
+    }
+
+    public func setManualMode(active: Bool, reason: String?) async throws -> ManualModeState {
+        try lock.withLock {
+            manualModeSetCalls.append((active: active, reason: reason))
+            if let manualModeFakeError {
+                throw manualModeFakeError
+            }
+            let now = Date()
+            let entered = active ? (manualModeFakeState.active ? manualModeFakeState.enteredAt : now) : nil
+            manualModeFakeState = ManualModeState(
+                active: active,
+                enteredAt: entered,
+                reason: active ? reason : nil,
+                updatedAt: now
+            )
+            return manualModeFakeState
+        }
+    }
+
+    public func getManualMode() async throws -> ManualModeState {
+        try lock.withLock {
+            manualModeGetCallCount += 1
+            if let manualModeFakeError {
+                throw manualModeFakeError
+            }
+            return manualModeFakeState
         }
     }
 

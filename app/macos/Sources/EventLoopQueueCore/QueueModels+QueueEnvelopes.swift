@@ -87,3 +87,42 @@ public enum EventLoopMode: Equatable, Sendable {
     case eventLoop
     case manual
 }
+
+public struct ManualModeState: Equatable, Sendable, Decodable {
+    public let active: Bool
+    public let enteredAt: Date?
+    public let reason: String?
+    public let updatedAt: Date
+
+    public init(active: Bool, enteredAt: Date? = nil, reason: String? = nil, updatedAt: Date) {
+        self.active = active
+        self.enteredAt = enteredAt
+        self.reason = reason
+        self.updatedAt = updatedAt
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case active
+        case enteredAt = "entered_at"
+        case reason
+        case updatedAt = "updated_at"
+    }
+}
+
+public struct ManualModeStateEnvelope: Decodable, Equatable, Sendable {
+    public let manualMode: ManualModeState
+    public let transitioned: Bool?
+    public let requestId: String?
+
+    public init(manualMode: ManualModeState, transitioned: Bool? = nil, requestId: String? = nil) {
+        self.manualMode = manualMode
+        self.transitioned = transitioned
+        self.requestId = requestId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case manualMode = "manual_mode"
+        case transitioned
+        case requestId = "request_id"
+    }
+}

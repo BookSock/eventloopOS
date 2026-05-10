@@ -345,7 +345,7 @@ private struct QueueMenuView: View {
         }
         .task {
             if viewModel.state == .idle {
-                await viewModel.loadQueue()
+                await viewModel.bootstrap()
             }
             await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
         }

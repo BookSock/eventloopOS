@@ -715,6 +715,111 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(result.queuedPaper?.state, "ready")
     }
 
+    func testHTTPQueueClientBatchApprovesOnboardingProposals() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/onboarding/approvals/batch")
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), "idem_batch_42")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: Any])
+            XCTAssertEqual(body["idempotency_key"] as? String, "idem_batch_42")
+            let approvals = try XCTUnwrap(body["approvals"] as? [[String: Any]])
+            XCTAssertEqual(approvals.count, 2)
+            XCTAssertEqual(approvals[0]["proposal_id"] as? String, "onboard_a")
+            XCTAssertEqual(approvals[0]["queue_paper"] as? Bool, true)
+            XCTAssertEqual(approvals[1]["proposal_id"] as? String, "onboard_b")
+            return """
+            {
+              "ok": true,
+              "results": [
+                {
+                  "ok": true,
+                  "proposal_id": "onboard_a",
+                  "task_id": "task_a",
+                  "queue_item": {
+                    "id": "qit_a",
+                    "review_packet_id": "pkt_a",
+                    "task_id": "task_a",
+                    "state": "ready",
+                    "priority_score": 700
+                  }
+                },
+                {
+                  "ok": false,
+                  "proposal_id": "onboard_b",
+                  "error": { "code": "schema_error", "message": "bad" }
+                }
+              ],
+              "request_id": "req_batch"
+            }
+            """
+        }
+
+        let approvals = [
+            OnboardingApprovalRequest(proposalId: "onboard_a", queuePaper: true),
+            OnboardingApprovalRequest(proposalId: "onboard_b", queuePaper: true)
+        ]
+        let result = try await client.batchApproveOnboardingProposals(approvals: approvals, idempotencyKey: "idem_batch_42")
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.results.count, 2)
+        XCTAssertEqual(result.results[0].ok, true)
+        XCTAssertEqual(result.results[0].queuedPaper?.id, "qit_a")
+        XCTAssertEqual(result.results[1].ok, false)
+        XCTAssertEqual(result.results[1].errorCode, "schema_error")
+    }
+
+    func testHTTPQueueClientPostsManualMode() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/modes/manual")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: Any])
+            XCTAssertEqual(body["active"] as? Bool, true)
+            XCTAssertEqual(body["reason"] as? String, "user_hotkey")
+            return """
+            {
+              "ok": true,
+              "manual_mode": {
+                "active": true,
+                "entered_at": "2026-05-10T08:30:00Z",
+                "reason": "user_hotkey",
+                "updated_at": "2026-05-10T08:30:00Z"
+              },
+              "transitioned": true,
+              "request_id": "req_manual_post"
+            }
+            """
+        }
+
+        let state = try await client.setManualMode(active: true, reason: "user_hotkey")
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertTrue(state.active)
+        XCTAssertEqual(state.reason, "user_hotkey")
+    }
+
+    func testHTTPQueueClientGetsManualMode() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/modes/manual")
+            return """
+            {
+              "manual_mode": {
+                "active": false,
+                "updated_at": "2026-05-10T08:00:00Z"
+              },
+              "request_id": "req_manual_get"
+            }
+            """
+        }
+
+        let state = try await client.getManualMode()
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertFalse(state.active)
+        XCTAssertNil(state.reason)
+    }
+
     func testHTTPQueueClientFetchesReadingQueue() async throws {
         let (client, recorder) = makeHTTPClient { request in
             XCTAssertEqual(request.httpMethod, "GET")
