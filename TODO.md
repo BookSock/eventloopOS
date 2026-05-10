@@ -17,8 +17,9 @@ Live list of code gaps for the full vision. Sorted into **Build**, **Verify** (b
 - [ ] **V8. Real Send-to-Agent → real Codex thread with terminal_ref keystroke** landing in front Ghostty. Smoke proof uses tmux; never tested with real Codex + real Ghostty.
 - [ ] **V9. Voice mic → real microphone → STT → /voice/commands → fan-out delivered.** Built end-to-end, never spoken into during dogfood.
 - [ ] **V10. Auto-bind continuous timer** firing every 30s in real dogfood, finding real `[task:foo]` Ghostty windows, binding correctly.
-- [ ] **V11. Reading queue auto-promote timer** firing on the orchestrator side under real captured tabs (env var exists; never enabled in dogfood).
-- [ ] **V12. Onboarding scan → approve → first paper → done** as a real Mac flow with real windows and real Codex threads. Live proof exercises sub-steps; full happy path not done.
+- [x] **V11. Reading queue auto-promote timer** ~~firing on the orchestrator side under real captured tabs (env var exists; never enabled in dogfood).~~ ✅ Shipped 2026-05-10: integration test + `bin/v11-auto-promote-proof-smoke` drive `EVENTLOOPOS_READING_QUEUE_AUTO_PROMOTE_INTERVAL_MS` over an injected clock; bound tabs correctly excluded, fresh tabs cross threshold on later ticks.
+- [x] **V12. Onboarding scan → approve → first paper → done** ~~as a real Mac flow with real windows and real Codex threads. Live proof exercises sub-steps; full happy path not done.~~ ✅ Shipped 2026-05-10: HTTP-API E2E test walks scan → approve x3 → lease → done. Surfaced gaps filed as V12b.
+- [ ] **V12b. Gaps surfaced by V12 E2E proof.** (1) `/queue/:id/actions/recommended` returns 422 `unsupported_action` for `mark_done` — Mac client must fall back to `/queue/:id/done`. The route name is misleading. (2) Onboarding rejection isn't persisted — rejected proposals reappear on every `/onboarding/scan`. (3) No `/onboarding/approvals/batch` endpoint; client loops one POST per proposal.
 - [ ] **V13. Manual mode → real desktop returns → return to loop → original workbench back.** Exists in code; never run with real personal layout.
 - [x] **V14. Browser extension anchor restore on actual Slack/Notion/Docs sites** ~~with real allowed-origins config. Handlers shipped; never opened against real sites.~~ ✅ Shipped 2026-05-10: fixture-DOM proof against synthesized Slack `data-qa`, Notion `data-block-id`, Google Docs `id="h.&lt;token&gt;"` shapes. Real-site click-test still needs Jason at the keyboard (V14b below).
 - [x] **V14b. B1 follow-up bugs surfaced by V14 fixture proof.** ~~(1) `selectorHintForElement` never emits provider data-attributes (`data-block-id`, `data-ts`, `data-message-id`, `data-qa`) — viewport-anchor loses the deterministic per-block/per-message hook. (2) Heading-id regex `^[A-Za-z][\w-]*$` rejects Google Docs `h.&lt;token&gt;` pattern → ambiguous bare-tag fallback. (3) `restorePageContext` highlights but does not `scrollIntoView` on the viewport-anchor path; relies on saved `scroll.y` even when content shifted.~~ ✅ Shipped 2026-05-10: `selectorHintForElement` now prefers provider data-attrs, falls back to `[id="…"]` for non-bare ids; `restorePageContext` scrolls the matched element into view.
@@ -26,12 +27,12 @@ Live list of code gaps for the full vision. Sorted into **Build**, **Verify** (b
 
 ## Polish
 
-- [ ] **P16. Split `QueueModels.swift` (1.8k LOC)** by domain when it starts hurting (review packets, task sessions, onboarding, master command, etc).
-- [ ] **P17. Split `FakeQueueClient` out of `QueueClient.swift`** (~700 of the 1.5k lines is test stub). Do when adding the next protocol method makes the file painful.
+- [x] **P16. Split `QueueModels.swift` (1.8k LOC)** ~~by domain when it starts hurting (review packets, task sessions, onboarding, master command, etc).~~ ✅ Shipped 2026-05-10: 1.8k → 178 LOC core + 9 `QueueModels+*.swift` domain files.
+- [x] **P17. Split `FakeQueueClient` out of `QueueClient.swift`** ~~(~700 of the 1.5k lines is test stub). Do when adding the next protocol method makes the file painful.~~ ✅ Shipped 2026-05-10: `FakeQueueClient.swift` (784 LOC) lives in same target so SwiftUI Previews still work; `QueueClient.swift` 1465 → 682 LOC.
 - [x] **P18. Activity feed filter chips and search** ~~so a long activity log is browsable.~~ ✅ Shipped 2026-05-10: All/Send/Restore/Defer/Errors capsule chips + magnifier search field on `ActivityFeedSheet`. Pure `filterActivity` helper for tests.
 - [x] **P19. Onboarding "Approve all + Queue" hotkey** ~~so day-1 onboarding feels one keystroke.~~ ✅ Shipped 2026-05-10: ⌘↵ in `OnboardingSheet` approves all proposals, queues them, dismisses the sheet. Footer hint "⌘↵ to approve & queue all" surfaces the binding.
 - [x] **P20. Repo Topics on GitHub UI** ~~(`event-loop`, `attention`, `agents`, `macos`, `chrome-extension`, etc) for discovery.~~ ✅ Shipped 2026-05-10: 14 topics live on `BookSock/eventloopOS`.
 
 ---
 
-Last updated: 2026-05-10 (B3, B5, V15, P18, P19, P20, V14, V14b all landed today).
+Last updated: 2026-05-10 (B3, B5, V11, V12, V14, V14b, V15, P16, P17, P18, P19, P20 all landed today; V12b filed).
