@@ -34,6 +34,16 @@ export type VoiceIntent =
     event_type: string;
     body_substring: string;
     target: "current_task";
+  }
+  | {
+    kind: "stop_sharing";
+    transcript: string;
+    target_app_or_title: string;
+  }
+  | {
+    kind: "wake_task";
+    transcript: string;
+    target: string;
   };
 
 const RAISE_TOKENS = ["raise", "bump", "boost", "increase", "higher", "promote"];
@@ -49,6 +59,12 @@ export function classifyVoiceIntent(transcript: string): VoiceIntent {
 
   const trigger = detectDefineTrigger(cleaned, lowered);
   if (trigger) return trigger;
+
+  const stopSharing = detectStopSharing(cleaned, lowered);
+  if (stopSharing) return stopSharing;
+
+  const wakeTask = detectWakeTask(cleaned, lowered);
+  if (wakeTask) return wakeTask;
 
   const pause = detectPause(cleaned, lowered);
   if (pause) return pause;
@@ -106,6 +122,46 @@ const DEFINE_TRIGGER_EVENT_TYPES: Record<string, string> = {
   github: "github.notification",
   browser: "browser.review_requested",
 };
+
+const STOP_SHARING_PATTERNS = [
+  /^(?:please\s+)?(?:stop\s+sharing|stop\s+following|unshare|unsync|detach)\s+(.+?)[.!?]?\s*$/i,
+  /^(?:please\s+)?keep\s+(.+?)\s+(?:on|in)\s+(?:this|the current)\s+(?:desktop|workspace|space)[.!?]?\s*$/i,
+];
+
+function detectStopSharing(original: string, lowered: string): VoiceIntent | undefined {
+  if (!/(stop\s+(?:sharing|following)|unshare|unsync|detach|keep\b)/i.test(lowered)) return undefined;
+  for (const pattern of STOP_SHARING_PATTERNS) {
+    const match = original.match(pattern);
+    const target = (match?.[1] ?? "").trim().replace(/^(?:the|a|an)\s+/i, "").replace(/[.!?]+$/, "");
+    if (!target) continue;
+    return {
+      kind: "stop_sharing",
+      transcript: original.trim(),
+      target_app_or_title: target,
+    };
+  }
+  return undefined;
+}
+
+const WAKE_TASK_PATTERNS = [
+  /^(?:please\s+)?(?:wake|resume|undormant|reactivate)\s+(?:the\s+)?(?:task|paper|thread)?\s*(.+?)[.!?]?\s*$/i,
+  /^(?:please\s+)?(?:bring\s+back|start\s+showing)\s+(?:the\s+)?(.+?)\s+(?:task|paper|thread)[.!?]?\s*$/i,
+];
+
+function detectWakeTask(original: string, lowered: string): VoiceIntent | undefined {
+  if (!/(wake|resume|undormant|reactivate|bring back|start showing)/i.test(lowered)) return undefined;
+  for (const pattern of WAKE_TASK_PATTERNS) {
+    const match = original.match(pattern);
+    const target = (match?.[1] ?? "").trim().replace(/^(?:the|a|an)\s+/i, "").replace(/[.!?]+$/, "");
+    if (!target) continue;
+    return {
+      kind: "wake_task",
+      transcript: original.trim(),
+      target: extractSelectorTokens(target) || target.toLowerCase(),
+    };
+  }
+  return undefined;
+}
 
 function detectDefineTrigger(original: string, _lowered: string): VoiceIntent | undefined {
   const match = original.match(DEFINE_TRIGGER_PATTERN);

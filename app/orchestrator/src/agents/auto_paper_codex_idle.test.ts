@@ -15,16 +15,20 @@ function createDeps(input: {
   tasks: AutoPaperTaskRecord[];
   inspections: Map<string, CodexSessionInspection | CodexSessionInspection[]>;
   manualModeActive?: boolean;
+  activeTaskId?: string | null;
   now?: Date;
   defaultIdleSeconds?: number;
+  autoDormantSeconds?: number;
 }): AutoPaperCodexIdleDeps & {
   ingested: RecordedIngest[];
   emitted: Array<{ taskId: string; emittedAt: Date }>;
+  markedDormant: Array<{ taskId: string; dormantAt: Date }>;
   setNow: (next: Date) => void;
   setInspection: (threadId: string, inspection: CodexSessionInspection) => void;
 } {
   const ingested: RecordedIngest[] = [];
   const emitted: Array<{ taskId: string; emittedAt: Date }> = [];
+  const markedDormant: Array<{ taskId: string; dormantAt: Date }> = [];
   let now = input.now ?? new Date("2026-05-09T12:00:00.000Z");
   const inspectionMap = new Map<string, CodexSessionInspection | CodexSessionInspection[]>(input.inspections);
   return {
@@ -34,6 +38,9 @@ function createDeps(input: {
       },
       async recordTaskPaperEmitted(taskId: string, emittedAt: Date) {
         emitted.push({ taskId, emittedAt });
+      },
+      async markTaskDormant(taskId: string, dormantAt: Date) {
+        markedDormant.push({ taskId, dormantAt });
       },
     },
     ingestor: {
@@ -58,6 +65,11 @@ function createDeps(input: {
         return { active: Boolean(input.manualModeActive) };
       },
     },
+    activeTask: {
+      async getCurrentTaskState() {
+        return { current_task_id: input.activeTaskId ?? null, updated_at: now.toISOString() };
+      },
+    },
     inspect: async (threadId) => {
       const value = inspectionMap.get(threadId);
       if (Array.isArray(value)) {
@@ -69,9 +81,11 @@ function createDeps(input: {
       return value;
     },
     defaultIdleSeconds: input.defaultIdleSeconds,
+    autoDormantSeconds: input.autoDormantSeconds,
     now: () => now,
     ingested,
     emitted,
+    markedDormant,
     setNow: (next) => {
       now = next;
     },
@@ -236,6 +250,78 @@ describe("AutoPaperCodexIdleWatcher", () => {
     assert.equal(result.considered, 1);
     assert.equal(result.emitted.length, 1);
     assert.equal(result.emitted[0]!.task_id, "task_codex");
+  });
+
+  it("skips the currently active task so reading output does not paper the task under the user's eyes", async () => {
+    const deps = createDeps({
+      tasks: [
+        { id: "task_active", primary_anchor_kind: "codex_thread", primary_anchor_id: "thread_active" },
+      ],
+      activeTaskId: "task_active",
+      inspections: new Map([
+        ["thread_active", {
+          thread_id: "thread_active",
+          exists: true,
+          last_event_at: "2026-05-09T10:00:00.000Z",
+          idle_seconds: 7200,
+          event_count: 1,
+        }],
+      ]),
+    });
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+    assert.equal(result.emitted.length, 0);
+    assert.equal(result.skipped[0]?.reason, "task_currently_active");
+    assert.equal(deps.ingested.length, 0);
+  });
+
+  it("skips already dormant tasks", async () => {
+    const deps = createDeps({
+      tasks: [
+        {
+          id: "task_dormant",
+          primary_anchor_kind: "codex_thread",
+          primary_anchor_id: "thread_dormant",
+          dormant_at: "2026-05-08T12:00:00.000Z",
+        },
+      ],
+      inspections: new Map([
+        ["thread_dormant", {
+          thread_id: "thread_dormant",
+          exists: true,
+          last_event_at: "2026-05-07T12:00:00.000Z",
+          idle_seconds: 86400,
+          event_count: 1,
+        }],
+      ]),
+    });
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+    assert.equal(result.emitted.length, 0);
+    assert.equal(result.skipped[0]?.reason, "task_dormant");
+    assert.equal(deps.ingested.length, 0);
+  });
+
+  it("marks very old idle tasks dormant instead of papering forever", async () => {
+    const deps = createDeps({
+      tasks: [
+        { id: "task_stale", primary_anchor_kind: "codex_thread", primary_anchor_id: "thread_stale" },
+      ],
+      autoDormantSeconds: 3600,
+      inspections: new Map([
+        ["thread_stale", {
+          thread_id: "thread_stale",
+          exists: true,
+          last_event_at: "2026-05-09T10:00:00.000Z",
+          idle_seconds: 7200,
+          event_count: 1,
+        }],
+      ]),
+    });
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+    assert.equal(result.emitted.length, 0);
+    assert.equal(result.skipped[0]?.reason, "marked_dormant");
+    assert.equal(deps.markedDormant.length, 1);
+    assert.equal(deps.markedDormant[0]?.taskId, "task_stale");
+    assert.equal(deps.ingested.length, 0);
   });
 
   it("respects per-task idle override", async () => {

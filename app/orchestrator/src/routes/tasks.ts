@@ -79,12 +79,19 @@ export async function handleTasksRoute(input: {
       aerospaceWorkspaceId: validated.aerospaceWorkspaceId,
       now: input.now,
     });
+    const binding = await bindTaskSessionForCreatedTask({
+      runtime: input.runtime,
+      task: result.task,
+      anchor: validated.primaryAnchor,
+      now: input.now,
+    });
     const current = await store.getCurrentTaskState();
     return ok(200, {
       task: result.task,
       layout: result.layout,
       created: result.created,
       current: current.current_task_id === result.task.task_id,
+      ...(binding ? { binding } : {}),
       request_id: input.requestId,
     });
   }
@@ -96,6 +103,21 @@ export async function handleTasksRoute(input: {
       if (!record) return notFound(`task ${taskIdMatch.taskId} not found`);
       const layout = await store.getTaskLayout(record.task_id);
       return ok(200, { task: record, layout: layout ?? null, request_id: input.requestId });
+    }
+
+    if (input.method === "POST" && taskIdMatch.suffix === "/wake") {
+      const task = await store.wakeTask(taskIdMatch.taskId, input.now);
+      if (!task) return notFound(`task ${taskIdMatch.taskId} not found`);
+      await input.runtime.observability.recordActivity({
+        type: "task_woken",
+        occurred_at: input.now.toISOString(),
+        actor: "human",
+        task_id: task.task_id,
+        status: "ok",
+        summary: `Task woken: ${task.task_id}`,
+        details: { task_id: task.task_id },
+      });
+      return ok(200, { ok: true, task, request_id: input.requestId });
     }
 
     if (input.method === "PUT" && taskIdMatch.suffix === "/layout") {
@@ -117,6 +139,55 @@ export async function handleTasksRoute(input: {
   }
 
   return undefined;
+}
+
+async function bindTaskSessionForCreatedTask(input: {
+  runtime: Runtime;
+  task: TaskRecord;
+  anchor: { kind: TaskAnchorKind; id: string };
+  now: Date;
+}): Promise<Record<string, unknown> | undefined> {
+  if (input.anchor.kind !== "codex_thread") return undefined;
+  const taskSessions = input.runtime.taskSessions;
+  if (!taskSessions?.listSessions || !taskSessions.bindTaskSession) return undefined;
+
+  const sessions = await Promise.resolve(taskSessions.listSessions()).catch(() => []);
+  const match = sessions.find((session) => {
+    if (!isRecord(session)) return false;
+    if (session.task_id === input.task.task_id) return true;
+    if (session.native_thread_id === input.anchor.id) return true;
+    if (session.id === input.anchor.id) return true;
+    return false;
+  });
+  const sessionId = isRecord(match) && typeof match.id === "string" ? match.id : undefined;
+  if (!sessionId) return undefined;
+
+  const existingTaskId = isRecord(match) && typeof match.task_id === "string" ? match.task_id : undefined;
+  if (existingTaskId === input.task.task_id) {
+    return { ok: true, skipped: true, reason: "already_bound", task_session_id: sessionId };
+  }
+
+  const binding = await Promise.resolve(taskSessions.bindTaskSession({
+    task_session_id: sessionId,
+    task_id: input.task.task_id,
+  })).catch((error) => ({
+    ok: false,
+    task_session_id: sessionId,
+    task_id: input.task.task_id,
+    error: error instanceof Error ? error.message : String(error),
+  }));
+
+  await input.runtime.observability.recordActivity({
+    type: "task_created_session_bind",
+    occurred_at: input.now.toISOString(),
+    actor: "system",
+    status: isRecord(binding) && binding.ok === false ? "failed" : "ok",
+    task_id: input.task.task_id,
+    task_session_id: sessionId,
+    summary: `Task creation bound Codex session ${sessionId} to ${input.task.task_id}.`,
+    details: isRecord(binding) ? binding : { binding },
+  });
+  return isRecord(binding) ? binding : { ok: true, task_session_id: sessionId };
 }
 
 type ValidatedCreateTaskRequest = {

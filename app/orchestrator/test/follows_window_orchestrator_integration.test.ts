@@ -56,8 +56,14 @@ describe("follows_window_orchestrator integration", () => {
       aerospaceWorkspaceId: "ws-2",
       now: baseTime,
     });
+    await store.createTask({
+      primaryAnchor: { kind: "ghostty_window", id: "win-400-task-c" },
+      capturedLayout: layout,
+      aerospaceWorkspaceId: "ws-3",
+      now: baseTime,
+    });
 
-    // Seed observations: window 100 (Slack) seen on both ws-1 and ws-2 as task workspaces.
+    // Seed observations: window 100 (Slack) seen on three task workspaces.
     await store.recordWindowWorkspaceObservation({
       windowId: "100",
       workspaceId: "ws-1",
@@ -69,6 +75,12 @@ describe("follows_window_orchestrator integration", () => {
       workspaceId: "ws-2",
       isTaskWorkspace: true,
       observedAt: new Date(baseTime.getTime() + 60_000),
+    });
+    await store.recordWindowWorkspaceObservation({
+      windowId: "100",
+      workspaceId: "ws-3",
+      isTaskWorkspace: true,
+      observedAt: new Date(baseTime.getTime() + 90_000),
     });
     // Non-follows window 200: only on ws-1.
     await store.recordWindowWorkspaceObservation({

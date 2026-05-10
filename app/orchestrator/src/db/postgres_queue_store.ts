@@ -45,6 +45,7 @@ import {
   type CurrentTaskStateRecord,
   type WindowWorkspaceObservationRecord,
   type FollowsWindowRecord,
+  type FollowsWindowExclusionRecord,
   type PaperTriggerRecord,
   type PaperTriggerCreateInput,
   type PaperTriggerPatch,
@@ -620,7 +621,7 @@ export class PostgresQueueStore {
       await client.query("BEGIN");
       const existingResult = await client.query(
         `
-          SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+          SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds
           FROM tasks
           WHERE primary_anchor_kind = $1 AND primary_anchor_id = $2
         `,
@@ -630,17 +631,20 @@ export class PostgresQueueStore {
         let row = existingResult.rows[0];
         const timestamp = input.now.toISOString();
         if (
-          input.aerospaceWorkspaceId !== undefined &&
-          (row.aerospace_workspace_id ?? undefined) !== input.aerospaceWorkspaceId
+          (input.aerospaceWorkspaceId !== undefined &&
+            (row.aerospace_workspace_id ?? undefined) !== input.aerospaceWorkspaceId) ||
+          row.dormant_at
         ) {
           const updated = await client.query(
             `
               UPDATE tasks
-                 SET aerospace_workspace_id = $2, updated_at = $3::timestamptz
+                 SET aerospace_workspace_id = COALESCE($2, aerospace_workspace_id),
+                     dormant_at = NULL,
+                     updated_at = $3::timestamptz
                WHERE task_id = $1
-              RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+              RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds
             `,
-            [row.task_id, input.aerospaceWorkspaceId, timestamp],
+            [row.task_id, input.aerospaceWorkspaceId ?? null, timestamp],
           );
           row = updated.rows[0];
         }
@@ -666,7 +670,7 @@ export class PostgresQueueStore {
         `
           INSERT INTO tasks (task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, auto_paper_idle_seconds)
           VALUES ($1, $2, $3, $4, $5::timestamptz, $5::timestamptz, $6)
-          RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+          RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds
         `,
         [taskId, input.primaryAnchor.kind, input.primaryAnchor.id, input.aerospaceWorkspaceId ?? null, timestamp, idleSeconds],
       );
@@ -695,7 +699,7 @@ export class PostgresQueueStore {
   async getTask(taskId: string): Promise<TaskRecord | undefined> {
     const result = await this.pool.query(
       `
-        SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds
         FROM tasks
         WHERE task_id = $1
       `,
@@ -708,7 +712,7 @@ export class PostgresQueueStore {
   async getTaskByAnchor(kind: TaskAnchorKind, id: string): Promise<TaskRecord | undefined> {
     const result = await this.pool.query(
       `
-        SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds
         FROM tasks
         WHERE primary_anchor_kind = $1 AND primary_anchor_id = $2
       `,
@@ -721,7 +725,7 @@ export class PostgresQueueStore {
   async getTasksByWorkspaceId(workspaceId: string): Promise<TaskRecord[]> {
     const result = await this.pool.query(
       `
-        SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds
         FROM tasks
         WHERE aerospace_workspace_id = $1
         ORDER BY created_at ASC, task_id ASC
@@ -734,7 +738,7 @@ export class PostgresQueueStore {
   async listTasks(): Promise<TaskRecord[]> {
     const result = await this.pool.query(
       `
-        SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds
         FROM tasks
         ORDER BY created_at ASC, task_id ASC
       `,
@@ -757,7 +761,7 @@ export class PostgresQueueStore {
       `
         UPDATE tasks SET updated_at = $2::timestamptz
         WHERE task_id = $1
-        RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds
       `,
       [taskId, timestamp],
     );
@@ -828,7 +832,35 @@ export class PostgresQueueStore {
       `
         UPDATE tasks SET last_paper_emitted_at = $2::timestamptz, updated_at = $2::timestamptz
         WHERE task_id = $1
-        RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds
+      `,
+      [taskId, timestamp],
+    );
+    const row = result.rows[0];
+    return row ? rowToTaskRecord(row) : undefined;
+  }
+
+  async markTaskDormant(taskId: string, dormantAt: Date): Promise<TaskRecord | undefined> {
+    const timestamp = dormantAt.toISOString();
+    const result = await this.pool.query(
+      `
+        UPDATE tasks SET dormant_at = $2::timestamptz, updated_at = $2::timestamptz
+        WHERE task_id = $1
+        RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds
+      `,
+      [taskId, timestamp],
+    );
+    const row = result.rows[0];
+    return row ? rowToTaskRecord(row) : undefined;
+  }
+
+  async wakeTask(taskId: string, now: Date): Promise<TaskRecord | undefined> {
+    const timestamp = now.toISOString();
+    const result = await this.pool.query(
+      `
+        UPDATE tasks SET dormant_at = NULL, updated_at = $2::timestamptz
+        WHERE task_id = $1
+        RETURNING task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds
       `,
       [taskId, timestamp],
     );
@@ -871,8 +903,9 @@ export class PostgresQueueStore {
     return rowToWindowWorkspaceObservation(result.rows[0]);
   }
 
-  async listFollowsWindows(input: { now: Date; ttlMs: number }): Promise<FollowsWindowRecord[]> {
+  async listFollowsWindows(input: { now: Date; ttlMs: number; minWorkspaceCount?: number }): Promise<FollowsWindowRecord[]> {
     const cutoff = new Date(input.now.getTime() - input.ttlMs).toISOString();
+    const minWorkspaceCount = Math.max(2, Math.floor(input.minWorkspaceCount ?? 3));
     const result = await this.pool.query(
       `
         WITH live AS (
@@ -880,6 +913,12 @@ export class PostgresQueueStore {
           FROM window_workspace_observations
           WHERE is_task_workspace = TRUE
             AND last_seen_at >= $1::timestamptz
+            AND NOT EXISTS (
+              SELECT 1
+              FROM follows_window_exclusions ex
+              WHERE (ex.app_bundle IS NULL OR lower(ex.app_bundle) = lower(window_workspace_observations.app_bundle))
+                AND (ex.title_substring IS NULL OR lower(window_workspace_observations.title_prefix) LIKE '%' || lower(ex.title_substring) || '%')
+            )
         ),
         slot_groups AS (
           SELECT
@@ -894,7 +933,7 @@ export class PostgresQueueStore {
           FROM live
           WHERE app_bundle IS NOT NULL AND title_prefix IS NOT NULL
           GROUP BY app_bundle, title_prefix
-          HAVING count(DISTINCT workspace_id) >= 2
+          HAVING count(DISTINCT workspace_id) >= $2
         ),
         window_groups AS (
           SELECT
@@ -903,7 +942,7 @@ export class PostgresQueueStore {
             count(DISTINCT workspace_id) AS workspace_count
           FROM live
           GROUP BY window_id
-          HAVING count(DISTINCT workspace_id) >= 2
+          HAVING count(DISTINCT workspace_id) >= $2
         ),
         slot_emitted AS (
           SELECT DISTINCT unnest(slot_window_ids) AS window_id FROM slot_groups
@@ -926,7 +965,7 @@ export class PostgresQueueStore {
         WHERE wg.window_id NOT IN (SELECT window_id FROM slot_emitted)
         ORDER BY window_id ASC
       `,
-      [cutoff],
+      [cutoff, minWorkspaceCount],
     );
     return result.rows.map((row) => {
       const appBundle = row.app_bundle;
@@ -941,6 +980,26 @@ export class PostgresQueueStore {
       if (Array.isArray(slotIds)) record.slot_window_ids = slotIds.map(String);
       return record;
     });
+  }
+
+  async addFollowsWindowExclusion(input: { appBundle?: string; titleSubstring?: string; now: Date }): Promise<FollowsWindowExclusionRecord> {
+    const appBundle = normalizeOptionalText(input.appBundle)?.toLowerCase() ?? null;
+    const titleSubstring = normalizeOptionalText(input.titleSubstring)?.toLowerCase() ?? null;
+    if (!appBundle && !titleSubstring) {
+      throw new Error("follows window exclusion needs appBundle or titleSubstring");
+    }
+    const exclusionId = `fwex_${stableId(`${appBundle ?? ""}_${titleSubstring ?? ""}`)}`;
+    const timestamp = input.now.toISOString();
+    const result = await this.pool.query(
+      `
+        INSERT INTO follows_window_exclusions (exclusion_id, app_bundle, title_substring, created_at)
+        VALUES ($1, $2, $3, $4::timestamptz)
+        ON CONFLICT (exclusion_id) DO UPDATE SET created_at = follows_window_exclusions.created_at
+        RETURNING exclusion_id, app_bundle, title_substring, created_at
+      `,
+      [exclusionId, appBundle, titleSubstring, timestamp],
+    );
+    return rowToFollowsWindowExclusionRecord(result.rows[0]);
   }
 
   async pruneWindowWorkspaceObservations(olderThan: Date): Promise<number> {
@@ -2251,6 +2310,7 @@ function rowToTaskWorkspaceSnapshotRecord(row: Record<string, unknown>): TaskWor
 
 function rowToTaskRecord(row: Record<string, unknown>): TaskRecord {
   const lastPaper = row.last_paper_emitted_at;
+  const dormantAt = row.dormant_at;
   const workspaceId = row.aerospace_workspace_id;
   return {
     task_id: String(row.task_id),
@@ -2266,8 +2326,30 @@ function rowToTaskRecord(row: Record<string, unknown>): TaskRecord {
         : typeof lastPaper === "string" && lastPaper
           ? new Date(lastPaper).toISOString()
           : undefined,
+    dormant_at:
+      dormantAt instanceof Date
+        ? dormantAt.toISOString()
+        : typeof dormantAt === "string" && dormantAt
+          ? new Date(dormantAt).toISOString()
+          : undefined,
     auto_paper_idle_seconds: Number(row.auto_paper_idle_seconds),
   };
+}
+
+function rowToFollowsWindowExclusionRecord(row: Record<string, unknown>): FollowsWindowExclusionRecord {
+  const appBundle = row.app_bundle;
+  const titleSubstring = row.title_substring;
+  return {
+    exclusion_id: String(row.exclusion_id),
+    app_bundle: typeof appBundle === "string" && appBundle ? appBundle : undefined,
+    title_substring: typeof titleSubstring === "string" && titleSubstring ? titleSubstring : undefined,
+    created_at: requiredDateToIso(row.created_at),
+  };
+}
+
+function normalizeOptionalText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function rowToTaskLayoutRecord(row: Record<string, unknown>): TaskLayoutRecord {

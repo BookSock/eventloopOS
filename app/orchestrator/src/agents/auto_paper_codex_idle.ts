@@ -18,6 +18,7 @@ import type { StoredEventResult } from "../store.js";
 
 export const DEFAULT_IDLE_THRESHOLD_SECONDS = 60;
 export const DEFAULT_TICK_INTERVAL_MS = 30_000;
+export const DEFAULT_AUTO_DORMANT_SECONDS = 24 * 60 * 60;
 
 export type AutoPaperTaskRecord = {
   id: string;
@@ -25,10 +26,15 @@ export type AutoPaperTaskRecord = {
   primary_anchor_id: string;
   auto_paper_idle_seconds?: number;
   last_paper_emitted_at?: string | null;
+  dormant_at?: string | null;
 };
 
 export type AutoPaperManualModeReader = {
   getManualModeState(): Promise<{ active: boolean; entered_at?: string }>;
+};
+
+export type AutoPaperActiveTaskReader = {
+  getCurrentTaskState(): Promise<{ current_task_id: string | null }>;
 };
 
 export type AutoPaperTaskRegistry = {
@@ -36,6 +42,7 @@ export type AutoPaperTaskRegistry = {
   // lands the tasks table + GatewayStore methods.
   listTasks(): Promise<AutoPaperTaskRecord[]>;
   recordTaskPaperEmitted(taskId: string, emittedAt: Date): Promise<void>;
+  markTaskDormant?(taskId: string, dormantAt: Date): Promise<unknown>;
 };
 
 export type AutoPaperEventIngestor = {
@@ -51,10 +58,12 @@ export type AutoPaperCodexIdleDeps = {
   registry: AutoPaperTaskRegistry;
   ingestor: AutoPaperEventIngestor;
   manualMode: AutoPaperManualModeReader;
+  activeTask?: AutoPaperActiveTaskReader;
   inspect?: AutoPaperInspectFn;
   observability?: Observability;
   codexHome?: string;
   defaultIdleSeconds?: number;
+  autoDormantSeconds?: number;
   now: () => Date;
 };
 
@@ -84,6 +93,7 @@ export class AutoPaperCodexIdleWatcher {
     const now = this.deps.now();
     const inspect = this.deps.inspect ?? inspectCodexSession;
     const defaultIdle = this.deps.defaultIdleSeconds ?? DEFAULT_IDLE_THRESHOLD_SECONDS;
+    const autoDormantSeconds = this.deps.autoDormantSeconds ?? DEFAULT_AUTO_DORMANT_SECONDS;
 
     const manualMode = await this.deps.manualMode.getManualModeState();
     if (manualMode.active) {
@@ -104,11 +114,22 @@ export class AutoPaperCodexIdleWatcher {
 
     const tasks = await this.deps.registry.listTasks();
     const codexTasks = tasks.filter((task) => task.primary_anchor_kind === "codex_thread" && task.primary_anchor_id);
+    const currentTaskId = this.deps.activeTask
+      ? (await this.deps.activeTask.getCurrentTaskState().catch(() => ({ current_task_id: null }))).current_task_id
+      : null;
 
     const emitted: AutoPaperTickResult["emitted"] = [];
     const skipped: AutoPaperTickResult["skipped"] = [];
 
     for (const task of codexTasks) {
+      if (task.dormant_at) {
+        skipped.push({ task_id: task.id, reason: "task_dormant" });
+        continue;
+      }
+      if (currentTaskId === task.id) {
+        skipped.push({ task_id: task.id, reason: "task_currently_active" });
+        continue;
+      }
       const inspection = await inspect(task.primary_anchor_id, { codexHome: this.deps.codexHome, now });
       if (!inspection.exists) {
         skipped.push({ task_id: task.id, reason: "rollout_missing" });
@@ -116,6 +137,27 @@ export class AutoPaperCodexIdleWatcher {
       }
       if (inspection.idle_seconds === undefined || !inspection.last_event_at) {
         skipped.push({ task_id: task.id, reason: "no_events" });
+        continue;
+      }
+      if (autoDormantSeconds > 0 && inspection.idle_seconds >= autoDormantSeconds) {
+        if (this.deps.registry.markTaskDormant) {
+          await this.deps.registry.markTaskDormant(task.id, now);
+          await this.deps.observability?.recordActivity({
+            type: "task_marked_dormant",
+            occurred_at: now.toISOString(),
+            actor: "system",
+            task_id: task.id,
+            status: "ok",
+            summary: `Task ${task.id} marked dormant after ${inspection.idle_seconds}s idle.`,
+            details: sanitizeActivityDetails({
+              thread_id: task.primary_anchor_id,
+              idle_seconds: inspection.idle_seconds,
+              last_event_at: inspection.last_event_at,
+              auto_dormant_seconds: autoDormantSeconds,
+            }),
+          });
+        }
+        skipped.push({ task_id: task.id, reason: "marked_dormant", idle_seconds: inspection.idle_seconds });
         continue;
       }
 

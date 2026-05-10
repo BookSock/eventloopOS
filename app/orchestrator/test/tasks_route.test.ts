@@ -6,6 +6,7 @@ import { createInMemoryGatewayStore } from "../src/gateway_store.js";
 import { createGatewayServer } from "../src/server.js";
 import { createSeededStore } from "../src/store.js";
 import type { WorkspaceSnapshot } from "../src/contracts.js";
+import type { TaskRuntimeBinding, TaskRuntimeSession, TaskSessionController } from "../src/task_sessions/types.js";
 
 const fixedNow = new Date("2026-05-10T12:00:00.000Z");
 
@@ -61,6 +62,67 @@ describe("tasks route — phase 2 of hotkey state machine", () => {
     assert.equal(body.task.auto_paper_idle_seconds, 45);
     assert.equal(body.created, true);
     assert.equal(body.current, false);
+  });
+
+  it("binds a matching Codex task session synchronously when creating a task", async () => {
+    const bindCalls: Array<{ task_session_id: string; task_id: string; terminal_ref?: string }> = [];
+    const taskSessions: TaskSessionController = {
+      listSessions(): TaskRuntimeSession[] {
+        return [{
+          id: "codex_thread_route_sync",
+          provider: "codex",
+          native_thread_id: "thread-route-sync-bind",
+          status: "idle",
+        }];
+      },
+      sendFollowupMessage() {
+        throw new Error("not used");
+      },
+      bindTaskSession(input): TaskRuntimeBinding {
+        bindCalls.push(input);
+        return {
+          ok: true,
+          task_session_id: input.task_session_id,
+          task_id: input.task_id,
+          session: {
+            id: input.task_session_id,
+            provider: "codex",
+            native_thread_id: "thread-route-sync-bind",
+            task_id: input.task_id,
+          },
+        };
+      },
+    };
+    const syncStore = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const syncServer = createGatewayServer({ store: syncStore, taskSessions, now: () => fixedNow });
+    await new Promise<void>((resolve) => syncServer.listen(0, "127.0.0.1", resolve));
+    const address = syncServer.address() as AddressInfo;
+    const syncBaseUrl = `http://127.0.0.1:${address.port}`;
+    try {
+      const response = await fetch(`${syncBaseUrl}/tasks`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          primary_anchor: { kind: "codex_thread", id: "thread-route-sync-bind" },
+          captured_layout: layoutA,
+        }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json() as {
+        task: { task_id: string };
+        binding?: { ok?: boolean; task_session_id?: string };
+      };
+      assert.equal(bindCalls.length, 1);
+      assert.equal(bindCalls[0]?.task_session_id, "codex_thread_route_sync");
+      assert.equal(bindCalls[0]?.task_id, body.task.task_id);
+      assert.equal(bindCalls[0]?.terminal_ref, undefined);
+      assert.equal(body.binding?.ok, true);
+      assert.equal(body.binding?.task_session_id, "codex_thread_route_sync");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        syncServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
   });
 
   it("re-POSTing the same anchor returns the same task with created=false", async () => {

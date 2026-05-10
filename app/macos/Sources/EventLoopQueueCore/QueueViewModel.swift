@@ -563,14 +563,17 @@ public final class QueueViewModel: ObservableObject {
         }
 
         var tasksByWorkspace: [String: TaskRecord] = [:]
+        var boundWorkspaceIds = Set(allTasks.compactMap(\.aerospaceWorkspaceId))
         for task in allTasks where relevantTaskIds.contains(task.taskId) {
             guard let workspaceId = await workspaceIdForTask(task) else { continue }
             if tasksByWorkspace[workspaceId] == nil {
                 tasksByWorkspace[workspaceId] = task
             }
+            boundWorkspaceIds.insert(workspaceId)
         }
 
         currentTask = currentTaskState.task
+        let resolvedLimboWorkspaceId = await pickLimboWorkspace(boundWorkspaceIds: boundWorkspaceIds) ?? limboWorkspaceId
 
         return AdvanceServerSnapshot(
             manualModeActive: manualModeState.active,
@@ -579,15 +582,27 @@ public final class QueueViewModel: ObservableObject {
             queue: queue,
             tasksByWorkspace: tasksByWorkspace,
             foreground: foreground,
-            limboWorkspaceId: limboWorkspaceId
+            limboWorkspaceId: resolvedLimboWorkspaceId
         )
     }
 
     private func workspaceIdForTask(_ task: TaskRecord) async -> String? {
+        if let workspaceId = task.aerospaceWorkspaceId, !workspaceId.isEmpty {
+            return workspaceId
+        }
         guard let envelope = try? await client.getTaskWithLayout(taskId: task.taskId) else {
             return nil
         }
         return envelope.layout?.layout.activeWorkspace
+    }
+
+    private func pickLimboWorkspace(boundWorkspaceIds: Set<String>) async -> String? {
+        guard let workspaces = try? await aeroSpaceClient.listWorkspaces() else {
+            return nil
+        }
+        return workspaces.first { workspace in
+            !boundWorkspaceIds.contains(workspace)
+        }
     }
 
     private func execute(advanceAction: AdvanceAction, snapshot: AdvanceServerSnapshot) async {

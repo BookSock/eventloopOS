@@ -4533,6 +4533,104 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("voice stop-sharing creates a follows-window exclusion", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const fixedNow = new Date("2026-05-09T13:00:00.000Z");
+    const voiceServer = createGatewayServer({
+      store,
+      now: () => fixedNow,
+    });
+    await new Promise<void>((resolve) => voiceServer.listen(0, "127.0.0.1", resolve));
+    const address = voiceServer.address() as AddressInfo;
+    const voiceBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      await store.recordWindowWorkspaceObservation({
+        windowId: "win-slack-a",
+        workspaceId: "ws-1",
+        isTaskWorkspace: true,
+        observedAt: fixedNow,
+        appBundle: "com.tinyspeck.slackmacgap",
+        titlePrefix: "Slack team",
+      });
+      await store.recordWindowWorkspaceObservation({
+        windowId: "win-slack-a",
+        workspaceId: "ws-2",
+        isTaskWorkspace: true,
+        observedAt: new Date(fixedNow.getTime() + 30_000),
+        appBundle: "com.tinyspeck.slackmacgap",
+        titlePrefix: "Slack team",
+      });
+      await store.recordWindowWorkspaceObservation({
+        windowId: "win-slack-b",
+        workspaceId: "ws-3",
+        isTaskWorkspace: true,
+        observedAt: new Date(fixedNow.getTime() + 60_000),
+        appBundle: "com.tinyspeck.slackmacgap",
+        titlePrefix: "Slack team",
+      });
+      const before = await store.listFollowsWindows({ now: fixedNow, ttlMs: 24 * 60 * 60 * 1_000 });
+      assert.equal(before.length, 1);
+
+      const response = await fetch(`${voiceBaseUrl}/voice/commands`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": "idem_voice_stop_sharing_slack" },
+        body: JSON.stringify({ transcript: "stop sharing Slack" }),
+      });
+      const body = await response.json() as { ok: boolean; intent?: string; exclusion?: { title_substring?: string } };
+      assert.equal(response.status, 200);
+      assert.equal(body.intent, "stop_sharing");
+      assert.equal(body.exclusion?.title_substring, "slack");
+
+      const after = await store.listFollowsWindows({ now: fixedNow, ttlMs: 24 * 60 * 60 * 1_000 });
+      assert.deepEqual(after, []);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        voiceServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("voice wake-task clears dormant task state", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const fixedNow = new Date("2026-05-09T14:00:00.000Z");
+    const layout = {
+      backend: "aerospace" as const,
+      activeWorkspace: "blog",
+      windows: [],
+    };
+    const created = await store.createTask({
+      primaryAnchor: { kind: "codex_thread", id: "blog-launch-thread" },
+      capturedLayout: layout,
+      now: fixedNow,
+    });
+    await store.markTaskDormant(created.task.task_id, new Date("2026-05-09T13:00:00.000Z"));
+    const voiceServer = createGatewayServer({
+      store,
+      now: () => fixedNow,
+    });
+    await new Promise<void>((resolve) => voiceServer.listen(0, "127.0.0.1", resolve));
+    const address = voiceServer.address() as AddressInfo;
+    const voiceBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${voiceBaseUrl}/voice/commands`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": "idem_voice_wake_blog" },
+        body: JSON.stringify({ transcript: "resume task blog launch" }),
+      });
+      const body = await response.json() as { ok: boolean; intent?: string; task?: { task_id: string; dormant_at?: string } };
+      assert.equal(response.status, 200);
+      assert.equal(body.intent, "wake_task");
+      assert.equal(body.task?.task_id, created.task.task_id);
+      assert.equal(body.task?.dormant_at, undefined);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        voiceServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("lists configured MCP sources and polls a source by id", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const mcpServer = createGatewayServer({

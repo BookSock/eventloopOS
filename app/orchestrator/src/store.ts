@@ -91,6 +91,7 @@ export type InMemoryStore = {
   taskLayouts?: Map<string, TaskLayoutRecord>;
   currentTaskState?: { value: CurrentTaskStateRecord };
   windowWorkspaceObservations?: Map<string, WindowWorkspaceObservationRecord>;
+  followsWindowExclusions?: Map<string, FollowsWindowExclusionRecord>;
   paperTriggers?: Map<string, PaperTriggerRecord>;
   paperTriggerFirings?: Map<string, true>;
 };
@@ -135,6 +136,7 @@ export type TaskRecord = {
   created_at: string;
   updated_at: string;
   last_paper_emitted_at?: string;
+  dormant_at?: string;
   auto_paper_idle_seconds: number;
 };
 
@@ -166,6 +168,13 @@ export type FollowsWindowRecord = {
   app_bundle?: string;
   title_prefix?: string;
   slot_window_ids?: string[];
+};
+
+export type FollowsWindowExclusionRecord = {
+  exclusion_id: string;
+  app_bundle?: string;
+  title_substring?: string;
+  created_at: string;
 };
 
 export const FOLLOWS_TITLE_PREFIX_MAX_LEN = 40;
@@ -636,11 +645,13 @@ export function recordWindowWorkspaceObservation(
 
 export function listFollowsWindows(
   store: InMemoryStore,
-  options: { now: Date; ttlMs: number },
+  options: { now: Date; ttlMs: number; minWorkspaceCount?: number },
 ): FollowsWindowRecord[] {
   const observations = store.windowWorkspaceObservations;
   if (!observations) return [];
   const cutoff = options.now.getTime() - options.ttlMs;
+  const minWorkspaceCount = Math.max(2, Math.floor(options.minWorkspaceCount ?? 3));
+  const exclusions = [...(store.followsWindowExclusions?.values() ?? [])];
 
   type WindowGroup = { workspaces: Set<string>; lastSeenMs: number };
   const windowGroups = new Map<string, WindowGroup>();
@@ -681,7 +692,8 @@ export function listFollowsWindows(
   const result: FollowsWindowRecord[] = [];
 
   for (const [slotKey, sg] of slotGroups.entries()) {
-    if (sg.workspaces.size < 2) continue;
+    if (sg.workspaces.size < minWorkspaceCount) continue;
+    if (isFollowsExcluded({ app_bundle: sg.app_bundle, title_prefix: sg.title_prefix }, exclusions)) continue;
     let currentWindowId: string | undefined;
     let currentLastSeen = -1;
     for (const [winId, lastSeen] of sg.windowIds.entries()) {
@@ -704,7 +716,7 @@ export function listFollowsWindows(
   }
 
   for (const [windowId, wg] of windowGroups.entries()) {
-    if (wg.workspaces.size < 2) continue;
+    if (wg.workspaces.size < minWorkspaceCount) continue;
     if (emittedWindowIds.has(windowId)) continue;
     result.push({
       window_id: windowId,
@@ -715,6 +727,45 @@ export function listFollowsWindows(
 
   result.sort((a, b) => a.window_id.localeCompare(b.window_id));
   return result;
+}
+
+export function addFollowsWindowExclusion(
+  store: InMemoryStore,
+  input: { appBundle?: string; titleSubstring?: string; now: Date },
+): FollowsWindowExclusionRecord {
+  const exclusions = store.followsWindowExclusions ?? new Map<string, FollowsWindowExclusionRecord>();
+  store.followsWindowExclusions = exclusions;
+  const appBundle = normalizeOptionalText(input.appBundle)?.toLowerCase();
+  const titleSubstring = normalizeOptionalText(input.titleSubstring)?.toLowerCase();
+  const key = `${appBundle ?? ""}\0${titleSubstring ?? ""}`;
+  const existing = exclusions.get(key);
+  if (existing) return existing;
+  const record: FollowsWindowExclusionRecord = {
+    exclusion_id: `fwex_${stableId(key)}`,
+    app_bundle: appBundle,
+    title_substring: titleSubstring,
+    created_at: input.now.toISOString(),
+  };
+  exclusions.set(key, record);
+  return record;
+}
+
+function isFollowsExcluded(
+  window: { app_bundle?: string; title_prefix?: string },
+  exclusions: FollowsWindowExclusionRecord[],
+): boolean {
+  const appBundle = window.app_bundle?.toLowerCase();
+  const titlePrefix = window.title_prefix?.toLowerCase();
+  return exclusions.some((exclusion) => {
+    const appMatches = !exclusion.app_bundle || exclusion.app_bundle === appBundle;
+    const titleMatches = !exclusion.title_substring || titlePrefix?.includes(exclusion.title_substring);
+    return appMatches && titleMatches;
+  });
+}
+
+function normalizeOptionalText(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 export function pruneWindowWorkspaceObservations(

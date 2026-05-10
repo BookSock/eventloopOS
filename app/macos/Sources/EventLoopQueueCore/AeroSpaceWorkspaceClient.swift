@@ -2,6 +2,7 @@ import Foundation
 
 public protocol AeroSpaceWorkspaceClient: Sendable {
     func focusedWorkspace() async throws -> String
+    func listWorkspaces() async throws -> [String]
     func switchTo(workspace: String) async throws
 }
 
@@ -32,6 +33,14 @@ public struct ProcessAeroSpaceWorkspaceClient: AeroSpaceWorkspaceClient {
             throw AeroSpaceWorkspaceClientError.commandFailed("empty focused-workspace output")
         }
         return trimmed
+    }
+
+    public func listWorkspaces() async throws -> [String] {
+        let output = try await runAeroSpace(args: ["list-workspaces", "--all"])
+        return output
+            .split(whereSeparator: \.isNewline)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     public func switchTo(workspace: String) async throws {
@@ -74,11 +83,13 @@ public struct ProcessAeroSpaceWorkspaceClient: AeroSpaceWorkspaceClient {
 public final class FakeAeroSpaceWorkspaceClient: AeroSpaceWorkspaceClient, @unchecked Sendable {
     private let lock = NSLock()
     private var focused: String
+    private var workspaces: [String]
     private var switchHistory: [String] = []
     private var switchError: Error?
 
-    public init(focused: String = "1") {
+    public init(focused: String = "1", workspaces: [String]? = nil) {
         self.focused = focused
+        self.workspaces = workspaces ?? [focused]
     }
 
     public var switchedWorkspaces: [String] {
@@ -86,7 +97,16 @@ public final class FakeAeroSpaceWorkspaceClient: AeroSpaceWorkspaceClient, @unch
     }
 
     public func setFocused(_ workspace: String) {
-        lock.withLock { focused = workspace }
+        lock.withLock {
+            focused = workspace
+            if !workspaces.contains(workspace) {
+                workspaces.append(workspace)
+            }
+        }
+    }
+
+    public func setWorkspaces(_ workspaces: [String]) {
+        lock.withLock { self.workspaces = workspaces }
     }
 
     public func setSwitchError(_ error: Error?) {
@@ -97,11 +117,18 @@ public final class FakeAeroSpaceWorkspaceClient: AeroSpaceWorkspaceClient, @unch
         lock.withLock { focused }
     }
 
+    public func listWorkspaces() async throws -> [String] {
+        lock.withLock { workspaces }
+    }
+
     public func switchTo(workspace: String) async throws {
         try lock.withLock {
             if let switchError { throw switchError }
             switchHistory.append(workspace)
             focused = workspace
+            if !workspaces.contains(workspace) {
+                workspaces.append(workspace)
+            }
         }
     }
 }
@@ -109,5 +136,6 @@ public final class FakeAeroSpaceWorkspaceClient: AeroSpaceWorkspaceClient, @unch
 public struct NoOpAeroSpaceWorkspaceClient: AeroSpaceWorkspaceClient {
     public init() {}
     public func focusedWorkspace() async throws -> String { "1" }
+    public func listWorkspaces() async throws -> [String] { ["1"] }
     public func switchTo(workspace _: String) async throws {}
 }

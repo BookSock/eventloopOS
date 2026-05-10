@@ -148,6 +148,7 @@ if (process.env.EVENTLOOPOS_FOLLOWS_WINDOWS === "1" && workspace) {
   const pollIntervalMs = parsePositiveInteger(process.env.EVENTLOOPOS_FOLLOWS_POLL_MS);
   const ttlMs = parsePositiveInteger(process.env.EVENTLOOPOS_FOLLOWS_TTL_MS);
   const pruneIntervalMs = parsePositiveInteger(process.env.EVENTLOOPOS_FOLLOWS_PRUNE_MS);
+  const minWorkspaceCount = parsePositiveInteger(process.env.EVENTLOOPOS_FOLLOWS_THRESHOLD);
   followsWindowOrchestrator = createFollowsWindowOrchestratorFromRuntime(
     runtime,
     async () => {
@@ -162,7 +163,7 @@ if (process.env.EVENTLOOPOS_FOLLOWS_WINDOWS === "1" && workspace) {
     async (command) => {
       await execFilePromise(command.command, command.args, { timeoutMs: 5_000 });
     },
-    { pollIntervalMs, ttlMs, pruneIntervalMs },
+    { pollIntervalMs, ttlMs, pruneIntervalMs, minWorkspaceCount },
   );
   followsWindowOrchestrator?.start();
   if (followsWindowOrchestrator) {
@@ -176,6 +177,7 @@ let autoPaperWatcher: AutoPaperCodexIdleHandle | undefined;
 if (process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED === "1") {
   const tickMs = parsePositiveInteger(process.env.EVENTLOOPOS_AUTO_PAPER_TICK_MS);
   const idleSeconds = parsePositiveInteger(process.env.EVENTLOOPOS_AUTO_PAPER_IDLE_SECONDS);
+  const dormantHours = parsePositiveNumber(process.env.EVENTLOOPOS_AUTO_DORMANT_HOURS);
   const observability = gatewayRuntime.observability ?? createInMemoryObservability();
   const registry = createAutoPaperTaskRegistry(gatewayRuntime.store);
   if (!registry) {
@@ -187,9 +189,11 @@ if (process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED === "1") {
       registry,
       ingestor: gatewayRuntime.store,
       manualMode: gatewayRuntime.store,
+      activeTask: gatewayRuntime.store,
       observability,
       codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
       defaultIdleSeconds: idleSeconds,
+      autoDormantSeconds: dormantHours === undefined ? undefined : Math.floor(dormantHours * 60 * 60),
       intervalMs: tickMs,
       now: () => new Date(),
     });
@@ -206,6 +210,7 @@ function createAutoPaperTaskRegistry(store: GatewayStore): AutoPaperTaskRegistry
   const candidate = store as unknown as {
     listTasks?: () => Promise<AutoPaperTaskRecord[]>;
     recordTaskPaperEmitted?: (taskId: string, emittedAt: Date) => Promise<void>;
+    markTaskDormant?: (taskId: string, dormantAt: Date) => Promise<unknown>;
   };
   if (typeof candidate.listTasks !== "function" || typeof candidate.recordTaskPaperEmitted !== "function") {
     return undefined;
@@ -213,6 +218,9 @@ function createAutoPaperTaskRegistry(store: GatewayStore): AutoPaperTaskRegistry
   return {
     listTasks: () => candidate.listTasks!(),
     recordTaskPaperEmitted: (taskId, emittedAt) => candidate.recordTaskPaperEmitted!(taskId, emittedAt),
+    markTaskDormant: candidate.markTaskDormant
+      ? (taskId, dormantAt) => candidate.markTaskDormant!(taskId, dormantAt)
+      : undefined,
   };
 }
 
@@ -220,6 +228,12 @@ function parsePositiveInteger(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
+}
+
+function parsePositiveNumber(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
 }
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {

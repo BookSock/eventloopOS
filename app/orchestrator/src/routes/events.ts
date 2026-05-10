@@ -102,6 +102,79 @@ export async function handleEventsRoute(input: {
         request_id: input.requestId,
       });
     }
+    if (intent.kind === "stop_sharing") {
+      const exclusion = await store.addFollowsWindowExclusion({
+        titleSubstring: intent.target_app_or_title,
+        now: input.now,
+      });
+      await observability.incrementCounter("voice_stop_sharing_total");
+      await observability.recordActivity({
+        type: "voice_stop_sharing",
+        occurred_at: input.now.toISOString(),
+        actor: "human",
+        status: "ok",
+        summary: `Voice stop sharing: ${intent.target_app_or_title}.`,
+        details: sanitizeActivityDetails({
+          transcript: intent.transcript,
+          target_app_or_title: intent.target_app_or_title,
+          exclusion_id: exclusion.exclusion_id,
+        }),
+      });
+      return ok(200, {
+        ok: true,
+        intent: "stop_sharing",
+        target_app_or_title: intent.target_app_or_title,
+        exclusion,
+        request_id: input.requestId,
+      });
+    }
+    if (intent.kind === "wake_task") {
+      const tasks = await store.listTasks();
+      const match = findBestTaskByVoiceTarget(intent.target, tasks);
+      if (!match) {
+        await observability.incrementCounter("voice_wake_task_no_match_total");
+        await observability.recordActivity({
+          type: "voice_wake_task_no_match",
+          occurred_at: input.now.toISOString(),
+          actor: "human",
+          status: "ok",
+          summary: `Voice wake task had no match for "${intent.target}".`,
+          details: sanitizeActivityDetails({
+            transcript: intent.transcript,
+            target: intent.target,
+          }),
+        });
+        return ok(200, {
+          ok: false,
+          intent: "wake_task",
+          error: "no_match",
+          target: intent.target,
+          request_id: input.requestId,
+        });
+      }
+      const task = await store.wakeTask(match.task_id, input.now);
+      await observability.incrementCounter("voice_wake_task_total");
+      await observability.recordActivity({
+        type: "voice_wake_task",
+        occurred_at: input.now.toISOString(),
+        actor: "human",
+        task_id: match.task_id,
+        status: task ? "ok" : "failed",
+        summary: `Voice woke task ${match.task_id}.`,
+        details: sanitizeActivityDetails({
+          transcript: intent.transcript,
+          target: intent.target,
+          matched_task_id: match.task_id,
+        }),
+      });
+      return ok(200, {
+        ok: Boolean(task),
+        intent: "wake_task",
+        target: intent.target,
+        task,
+        request_id: input.requestId,
+      });
+    }
     if (intent.kind === "fan_out") {
       await observability.incrementCounter("voice_fan_out_detected_total");
       await observability.recordActivity({
@@ -301,6 +374,41 @@ export async function handleEventsRoute(input: {
   }
 
   return undefined;
+}
+
+function findBestTaskByVoiceTarget(target: string, tasks: Awaited<ReturnType<GatewayStore["listTasks"]>>[number][]): Awaited<ReturnType<GatewayStore["listTasks"]>>[number] | undefined {
+  const normalizedTarget = normalizeVoiceTaskTarget(target);
+  if (!normalizedTarget) return undefined;
+  const scored = tasks
+    .map((task) => {
+      const haystacks = [
+        task.task_id,
+        task.primary_anchor_id,
+        task.primary_anchor_kind,
+        task.aerospace_workspace_id,
+      ].map((value) => normalizeVoiceTaskTarget(value ?? ""));
+      let score = 0;
+      for (const haystack of haystacks) {
+        if (!haystack) continue;
+        if (haystack === normalizedTarget) score = Math.max(score, 100);
+        if (haystack.includes(normalizedTarget)) score = Math.max(score, 50);
+        const tokens = normalizedTarget.split(" ").filter(Boolean);
+        const matchedTokens = tokens.filter((token) => haystack.includes(token)).length;
+        if (matchedTokens > 0) score = Math.max(score, matchedTokens * 10);
+      }
+      return { task, score };
+    })
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || right.task.updated_at.localeCompare(left.task.updated_at));
+  return scored[0]?.task;
+}
+
+function normalizeVoiceTaskTarget(input: string): string {
+  return input
+    .toLowerCase()
+    .replace(/^task_/, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 export function validateEventRequest(input: unknown): { ok: true; event: McpEvent } | { ok: false; message: string } {

@@ -10,6 +10,7 @@ import { createInMemoryObservability, type Observability } from "./observability
 import { handleAgentRunsRoute } from "./routes/agent_runs.js";
 import { handleContextRestoreRoute } from "./routes/context_restore.js";
 import { handleEventsRoute, routeEventThroughGateway } from "./routes/events.js";
+import { handleFollowsWindowsRoute } from "./routes/follows_windows.js";
 import { handleMcpSourcesRoute, type McpSourceRegistry } from "./routes/mcp_sources.js";
 import { handleActivityRoute, handleMetricsRoute } from "./routes/observability.js";
 import { handleOnboardingRoute } from "./routes/onboarding.js";
@@ -174,6 +175,25 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           observability,
           routeNameForPath(request.method, context.url.pathname) ?? "agents",
           agentsRoute,
+          startedAt,
+        );
+      }
+
+      const followsWindowsRoute = await handleFollowsWindowsRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        readJsonBody: () => readJsonBody(request),
+        runtime,
+        now: now(),
+        requestId: context.requestId,
+      });
+      if (followsWindowsRoute) {
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "follows_windows",
+          followsWindowsRoute,
           startedAt,
         );
       }

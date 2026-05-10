@@ -24,6 +24,7 @@ export type FollowsWindowOrchestratorDeps = {
   pollIntervalMs?: number;
   ttlMs?: number;
   pruneIntervalMs?: number;
+  minWorkspaceCount?: number;
   now?: () => Date;
 };
 
@@ -63,6 +64,7 @@ export function createFollowsWindowOrchestrator(deps: FollowsWindowOrchestratorD
   const pollIntervalMs = deps.pollIntervalMs ?? DEFAULT_FOLLOWS_POLL_MS;
   const ttlMs = deps.ttlMs ?? DEFAULT_FOLLOWS_TTL_HOURS * 60 * 60 * 1_000;
   const pruneIntervalMs = deps.pruneIntervalMs ?? DEFAULT_FOLLOWS_PRUNE_MS;
+  const minWorkspaceCount = deps.minWorkspaceCount ?? 3;
   const now = deps.now ?? (() => new Date());
 
   let lastFocusedWorkspace: string | undefined;
@@ -99,7 +101,7 @@ export function createFollowsWindowOrchestrator(deps: FollowsWindowOrchestratorD
       }
       lastFocusedWorkspace = focused;
 
-      const follows = await deps.store.listFollowsWindows({ now: tickNow, ttlMs });
+      const follows = await deps.store.listFollowsWindows({ now: tickNow, ttlMs, minWorkspaceCount });
       if (follows.length === 0) {
         await maybePrune(tickNow);
         return {
@@ -268,6 +270,7 @@ export type FollowsWindowOrchestratorRuntimeOptions = {
   pollIntervalMs?: number;
   ttlMs?: number;
   pruneIntervalMs?: number;
+  minWorkspaceCount?: number;
 };
 
 export function createFollowsWindowOrchestratorFromRuntime(
@@ -291,6 +294,7 @@ export function createFollowsWindowOrchestratorFromRuntime(
     pollIntervalMs: overrides.pollIntervalMs,
     ttlMs: overrides.ttlMs,
     pruneIntervalMs: overrides.pruneIntervalMs,
+    minWorkspaceCount: overrides.minWorkspaceCount,
     now: runtime.now,
   });
 }

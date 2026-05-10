@@ -799,10 +799,30 @@ function runGatewayStoreContract(
         const paperEmitted = await harness.store.recordTaskPaperEmitted(first.task.task_id, new Date("2026-05-06T12:08:00.000Z"));
         assert.equal(paperEmitted?.last_paper_emitted_at, "2026-05-06T12:08:00.000Z");
 
+        const dormant = await harness.store.markTaskDormant(first.task.task_id, new Date("2026-05-06T12:09:00.000Z"));
+        assert.equal(dormant?.dormant_at, "2026-05-06T12:09:00.000Z");
+
+        const replayAfterDormant = await harness.store.createTask({
+          primaryAnchor: { kind: "codex_thread", id: "thread-aaaa" },
+          capturedLayout: layoutA,
+          now: new Date("2026-05-06T12:09:30.000Z"),
+        });
+        assert.equal(replayAfterDormant.created, false);
+        assert.equal(replayAfterDormant.task.dormant_at, undefined, "re-posting an active anchor wakes dormant tasks");
+
+        await harness.store.markTaskDormant(first.task.task_id, new Date("2026-05-06T12:10:00.000Z"));
+        const woken = await harness.store.wakeTask(first.task.task_id, new Date("2026-05-06T12:11:00.000Z"));
+        assert.equal(woken?.dormant_at, undefined);
+        assert.equal(woken?.updated_at, "2026-05-06T12:11:00.000Z");
+
         const missingTaskUpdate = await harness.store.updateTaskLayout("task_missing", layoutA, now);
         assert.equal(missingTaskUpdate, undefined);
         const missingPaper = await harness.store.recordTaskPaperEmitted("task_missing", now);
         assert.equal(missingPaper, undefined);
+        const missingDormant = await harness.store.markTaskDormant("task_missing", now);
+        assert.equal(missingDormant, undefined);
+        const missingWake = await harness.store.wakeTask("task_missing", now);
+        assert.equal(missingWake, undefined);
       } finally {
         await harness.cleanup();
       }
@@ -847,6 +867,12 @@ function runGatewayStoreContract(
           observedAt: new Date("2026-05-06T12:01:00.000Z"),
         });
         await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-100",
+          workspaceId: "ws-gamma",
+          isTaskWorkspace: true,
+          observedAt: new Date("2026-05-06T12:01:30.000Z"),
+        });
+        await harness.store.recordWindowWorkspaceObservation({
           windowId: "win-200",
           workspaceId: "ws-alpha",
           isTaskWorkspace: false,
@@ -865,7 +891,7 @@ function runGatewayStoreContract(
         });
         assert.equal(follows.length, 1);
         assert.equal(follows[0]?.window_id, "win-100");
-        assert.deepEqual(follows[0]?.known_workspaces, ["ws-alpha", "ws-beta"]);
+        assert.deepEqual(follows[0]?.known_workspaces, ["ws-alpha", "ws-beta", "ws-gamma"]);
 
         const expired = await harness.store.listFollowsWindows({
           now: new Date("2026-05-08T12:00:00.000Z"),
@@ -880,7 +906,7 @@ function runGatewayStoreContract(
           now: new Date("2026-05-06T12:01:00.000Z"),
           ttlMs: 24 * 60 * 60 * 1_000,
         });
-        assert.equal(followsAfterPrune.length, 0, "after pruning win-100 ws-alpha row, win-100 only on ws-beta");
+        assert.equal(followsAfterPrune.length, 0, "after pruning win-100 ws-alpha row, win-100 only has two workspaces");
       } finally {
         await harness.cleanup();
       }
@@ -920,6 +946,14 @@ function runGatewayStoreContract(
           appBundle: "com.tinyspeck.slackmacgap",
           titlePrefix: "team-eng | slack",
         });
+        await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-A2",
+          workspaceId: "ws-gamma",
+          isTaskWorkspace: true,
+          observedAt: t3,
+          appBundle: "com.tinyspeck.slackmacgap",
+          titlePrefix: "team-eng | slack",
+        });
 
         const follows = await harness.store.listFollowsWindows({
           now: t3,
@@ -930,7 +964,7 @@ function runGatewayStoreContract(
         assert.equal(slot.window_id, "win-A2", "current window_id is the most-recently observed in the slot");
         assert.equal(slot.app_bundle, "com.tinyspeck.slackmacgap");
         assert.equal(slot.title_prefix, "team-eng | slack");
-        assert.deepEqual(slot.known_workspaces, ["ws-alpha", "ws-beta"]);
+        assert.deepEqual(slot.known_workspaces, ["ws-alpha", "ws-beta", "ws-gamma"]);
         assert.deepEqual(slot.slot_window_ids?.slice().sort(), ["win-A1", "win-A2"]);
 
         // Adding an unrelated single-workspace window must not affect the slot.
@@ -947,6 +981,17 @@ function runGatewayStoreContract(
           ttlMs: 24 * 60 * 60 * 1_000,
         });
         assert.equal(followsAgain.length, 1);
+
+        await harness.store.addFollowsWindowExclusion({
+          appBundle: "com.tinyspeck.slackmacgap",
+          titleSubstring: "team-eng",
+          now: new Date("2026-05-09T09:03:00.000Z"),
+        });
+        const excluded = await harness.store.listFollowsWindows({
+          now: new Date("2026-05-09T09:03:00.000Z"),
+          ttlMs: 24 * 60 * 60 * 1_000,
+        });
+        assert.deepEqual(excluded, [], "explicit exclusions must stop accidental sticky follows");
       } finally {
         await harness.cleanup();
       }
@@ -972,16 +1017,22 @@ function runGatewayStoreContract(
           isTaskWorkspace: true,
           observedAt: t1,
         });
+        await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-legacy",
+          workspaceId: "ws-gamma",
+          isTaskWorkspace: true,
+          observedAt: new Date("2026-05-09T10:01:00.000Z"),
+        });
 
         const follows = await harness.store.listFollowsWindows({
-          now: t1,
+          now: new Date("2026-05-09T10:01:00.000Z"),
           ttlMs: 24 * 60 * 60 * 1_000,
         });
         assert.equal(follows.length, 1);
         assert.equal(follows[0]?.window_id, "win-legacy");
         assert.equal(follows[0]?.app_bundle, undefined);
         assert.equal(follows[0]?.title_prefix, undefined);
-        assert.deepEqual(follows[0]?.known_workspaces, ["ws-alpha", "ws-beta"]);
+        assert.deepEqual(follows[0]?.known_workspaces, ["ws-alpha", "ws-beta", "ws-gamma"]);
       } finally {
         await harness.cleanup();
       }

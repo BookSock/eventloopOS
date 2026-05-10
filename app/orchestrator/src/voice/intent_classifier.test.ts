@@ -135,6 +135,34 @@ describe("classifyVoiceIntent define_trigger", () => {
   });
 });
 
+describe("classifyVoiceIntent stop_sharing", () => {
+  it("classifies stop sharing commands", () => {
+    const intent = classifyVoiceIntent("stop sharing Slack");
+    if (intent.kind !== "stop_sharing") return assert.fail(`expected stop_sharing, got ${intent.kind}`);
+    assert.equal(intent.target_app_or_title, "Slack");
+  });
+
+  it("classifies keep-on-this-workspace commands", () => {
+    const intent = classifyVoiceIntent("keep the Spotify window on this desktop");
+    if (intent.kind !== "stop_sharing") return assert.fail(`expected stop_sharing, got ${intent.kind}`);
+    assert.equal(intent.target_app_or_title, "Spotify window");
+  });
+});
+
+describe("classifyVoiceIntent wake_task", () => {
+  it("classifies resume task commands", () => {
+    const intent = classifyVoiceIntent("resume task blog launch");
+    if (intent.kind !== "wake_task") return assert.fail(`expected wake_task, got ${intent.kind}`);
+    assert.equal(intent.target, "blog launch");
+  });
+
+  it("classifies bring-back paper commands", () => {
+    const intent = classifyVoiceIntent("bring back the recruiting paper");
+    if (intent.kind !== "wake_task") return assert.fail(`expected wake_task, got ${intent.kind}`);
+    assert.equal(intent.target, "recruiting");
+  });
+});
+
 describe("classifyVoiceIntent pause", () => {
   it("classifies 'pause everything for 30 minutes' as pause with no selector", () => {
     const intent = classifyVoiceIntent("pause everything for 30 minutes");

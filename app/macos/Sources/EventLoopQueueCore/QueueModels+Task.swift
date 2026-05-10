@@ -19,9 +19,11 @@ public struct TaskRecord: Codable, Equatable, Identifiable, Sendable {
     public let taskId: String
     public let primaryAnchorKind: TaskAnchorKind
     public let primaryAnchorId: String
+    public let aerospaceWorkspaceId: String?
     public let createdAt: Date
     public let updatedAt: Date
     public let lastPaperEmittedAt: Date?
+    public let dormantAt: Date?
     public let autoPaperIdleSeconds: Int
 
     public var id: String { taskId }
@@ -30,17 +32,21 @@ public struct TaskRecord: Codable, Equatable, Identifiable, Sendable {
         taskId: String,
         primaryAnchorKind: TaskAnchorKind,
         primaryAnchorId: String,
+        aerospaceWorkspaceId: String? = nil,
         createdAt: Date,
         updatedAt: Date,
         lastPaperEmittedAt: Date? = nil,
+        dormantAt: Date? = nil,
         autoPaperIdleSeconds: Int = 60
     ) {
         self.taskId = taskId
         self.primaryAnchorKind = primaryAnchorKind
         self.primaryAnchorId = primaryAnchorId
+        self.aerospaceWorkspaceId = aerospaceWorkspaceId
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.lastPaperEmittedAt = lastPaperEmittedAt
+        self.dormantAt = dormantAt
         self.autoPaperIdleSeconds = autoPaperIdleSeconds
     }
 
@@ -48,9 +54,11 @@ public struct TaskRecord: Codable, Equatable, Identifiable, Sendable {
         case taskId = "task_id"
         case primaryAnchorKind = "primary_anchor_kind"
         case primaryAnchorId = "primary_anchor_id"
+        case aerospaceWorkspaceId = "aerospace_workspace_id"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case lastPaperEmittedAt = "last_paper_emitted_at"
+        case dormantAt = "dormant_at"
         case autoPaperIdleSeconds = "auto_paper_idle_seconds"
     }
 }

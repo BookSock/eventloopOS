@@ -45,6 +45,7 @@ import {
   recordEventRoute,
   recordWindowWorkspaceObservation,
   listFollowsWindows,
+  addFollowsWindowExclusion,
   pruneWindowWorkspaceObservations,
   saveTaskWorkspaceSnapshot,
   upsertAgentRun,
@@ -77,6 +78,7 @@ import {
   type CurrentTaskStateRecord,
   type WindowWorkspaceObservationRecord,
   type FollowsWindowRecord,
+  type FollowsWindowExclusionRecord,
   type PaperTriggerRecord,
   type PaperTriggerCreateInput,
   type PaperTriggerPatch,
@@ -181,6 +183,8 @@ export type GatewayStore = {
   getCurrentTaskState(): Promise<CurrentTaskStateRecord>;
   setCurrentTaskId(taskId: string | null, now: Date): Promise<CurrentTaskStateRecord>;
   recordTaskPaperEmitted(taskId: string, now: Date): Promise<TaskRecord | undefined>;
+  markTaskDormant(taskId: string, dormantAt: Date): Promise<TaskRecord | undefined>;
+  wakeTask(taskId: string, now: Date): Promise<TaskRecord | undefined>;
   recordWindowWorkspaceObservation(input: {
     windowId: string;
     workspaceId: string;
@@ -189,7 +193,8 @@ export type GatewayStore = {
     appBundle?: string;
     titlePrefix?: string;
   }): Promise<WindowWorkspaceObservationRecord>;
-  listFollowsWindows(input: { now: Date; ttlMs: number }): Promise<FollowsWindowRecord[]>;
+  listFollowsWindows(input: { now: Date; ttlMs: number; minWorkspaceCount?: number }): Promise<FollowsWindowRecord[]>;
+  addFollowsWindowExclusion(input: { appBundle?: string; titleSubstring?: string; now: Date }): Promise<FollowsWindowExclusionRecord>;
   pruneWindowWorkspaceObservations(olderThan: Date): Promise<number>;
   createPaperTrigger(input: PaperTriggerCreateInput, now: Date): Promise<PaperTriggerRecord>;
   listPaperTriggers(filter?: { task_id?: string; only_enabled?: boolean }): Promise<PaperTriggerRecord[]>;
@@ -215,6 +220,7 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   const currentTaskState = store.currentTaskState ?? {
     value: { current_task_id: null, updated_at: new Date(0).toISOString() } as CurrentTaskStateRecord,
   };
+  const followsWindowExclusions = store.followsWindowExclusions ?? new Map<string, FollowsWindowExclusionRecord>();
   store.workspaceRestoreReceipts = workspaceRestoreReceipts;
   store.mcpPollStates = mcpPollStates;
   store.taskMessagesByIdempotencyKey = taskMessagesByIdempotencyKey;
@@ -227,6 +233,7 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   store.tasks = tasks;
   store.taskLayouts = taskLayouts;
   store.currentTaskState = currentTaskState;
+  store.followsWindowExclusions = followsWindowExclusions;
 
   const snapshotForTask = async (taskId: string) => getLatestTaskWorkspaceSnapshot(store, taskId);
   const contextEntriesForTask = async (taskId: string) => listContextEntries(store, { task_id: taskId, limit: 8 });
@@ -504,12 +511,14 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
         const timestamp = input.now.toISOString();
         let updatedExisting = existing;
         if (
-          input.aerospaceWorkspaceId !== undefined &&
-          input.aerospaceWorkspaceId !== existing.aerospace_workspace_id
+          (input.aerospaceWorkspaceId !== undefined &&
+            input.aerospaceWorkspaceId !== existing.aerospace_workspace_id) ||
+          existing.dormant_at
         ) {
           updatedExisting = {
             ...existing,
-            aerospace_workspace_id: input.aerospaceWorkspaceId,
+            aerospace_workspace_id: input.aerospaceWorkspaceId ?? existing.aerospace_workspace_id,
+            dormant_at: undefined,
             updated_at: timestamp,
           };
           tasks.set(existing.task_id, updatedExisting);
@@ -608,11 +617,37 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
       tasks.set(taskId, updated);
       return { ...updated };
     },
+    async markTaskDormant(taskId, dormantAt) {
+      const existing = tasks.get(taskId);
+      if (!existing) return undefined;
+      const timestamp = dormantAt.toISOString();
+      const updated: TaskRecord = {
+        ...existing,
+        dormant_at: timestamp,
+        updated_at: timestamp,
+      };
+      tasks.set(taskId, updated);
+      return { ...updated };
+    },
+    async wakeTask(taskId, now) {
+      const existing = tasks.get(taskId);
+      if (!existing) return undefined;
+      const updated: TaskRecord = {
+        ...existing,
+        dormant_at: undefined,
+        updated_at: now.toISOString(),
+      };
+      tasks.set(taskId, updated);
+      return { ...updated };
+    },
     async recordWindowWorkspaceObservation(input) {
       return recordWindowWorkspaceObservation(store, input);
     },
     async listFollowsWindows(input) {
       return listFollowsWindows(store, input);
+    },
+    async addFollowsWindowExclusion(input) {
+      return addFollowsWindowExclusion(store, input);
     },
     async pruneWindowWorkspaceObservations(olderThan) {
       return pruneWindowWorkspaceObservations(store, olderThan);
@@ -842,11 +877,20 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     async recordTaskPaperEmitted(taskId, now) {
       return store.recordTaskPaperEmitted(taskId, now);
     },
+    async markTaskDormant(taskId, dormantAt) {
+      return store.markTaskDormant(taskId, dormantAt);
+    },
+    async wakeTask(taskId, now) {
+      return store.wakeTask(taskId, now);
+    },
     async recordWindowWorkspaceObservation(input) {
       return store.recordWindowWorkspaceObservation(input);
     },
     async listFollowsWindows(input) {
       return store.listFollowsWindows(input);
+    },
+    async addFollowsWindowExclusion(input) {
+      return store.addFollowsWindowExclusion(input);
     },
     async pruneWindowWorkspaceObservations(olderThan) {
       return store.pruneWindowWorkspaceObservations(olderThan);

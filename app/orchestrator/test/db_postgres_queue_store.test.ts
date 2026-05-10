@@ -76,6 +76,8 @@ describe("PostgresQueueStore", () => {
       { id: "0015_window_workspace_observations.sql" },
       { id: "0016_paper_triggers.sql" },
       { id: "0017_window_identity_keys.sql" },
+      { id: "0018_tasks_dormant_at.sql" },
+      { id: "0019_follows_window_exclusions.sql" },
     ]);
 
     const column = await store.pool.query(
@@ -108,6 +110,19 @@ describe("PostgresQueueStore", () => {
       `SELECT indexname FROM pg_indexes WHERE tablename = 'window_workspace_observations' AND indexname = 'window_workspace_observations_slot_idx'`,
     );
     assert.equal(slotIndex.rows.length, 1);
+
+    const dormantColumn = await store.pool.query(
+      `SELECT data_type, is_nullable
+         FROM information_schema.columns
+        WHERE table_name = 'tasks' AND column_name = 'dormant_at'`,
+    );
+    assert.equal(dormantColumn.rows[0]?.data_type, "timestamp with time zone");
+    assert.equal(dormantColumn.rows[0]?.is_nullable, "YES");
+
+    const exclusionTable = await store.pool.query(
+      `SELECT table_name FROM information_schema.tables WHERE table_name = 'follows_window_exclusions'`,
+    );
+    assert.equal(exclusionTable.rows.length, 1);
   });
 
   it("persists latest task workspace snapshot", async (t) => {

@@ -25,6 +25,8 @@ describe("Postgres migrations", () => {
       "0015_window_workspace_observations.sql",
       "0016_paper_triggers.sql",
       "0017_window_identity_keys.sql",
+      "0018_tasks_dormant_at.sql",
+      "0019_follows_window_exclusions.sql",
     ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
@@ -75,5 +77,9 @@ describe("Postgres migrations", () => {
     assert.match(sql, /ALTER TABLE window_workspace_observations[\s\S]*ADD COLUMN app_bundle text/);
     assert.match(sql, /ADD COLUMN title_prefix text/);
     assert.match(sql, /window_workspace_observations_slot_idx/);
+    assert.match(sql, /ALTER TABLE tasks ADD COLUMN dormant_at timestamptz/);
+    assert.match(sql, /tasks_dormant_at_idx/);
+    assert.match(sql, /CREATE TABLE follows_window_exclusions/);
+    assert.match(sql, /CHECK \(app_bundle IS NOT NULL OR title_substring IS NOT NULL\)/);
   });
 });
