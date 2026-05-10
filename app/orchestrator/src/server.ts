@@ -211,6 +211,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         runtime,
         now: now(),
         requestId: context.requestId,
+        idempotencyKey: context.idempotencyKey,
       });
       if (onboardingRoute) {
         return sendObservedRouteResult(

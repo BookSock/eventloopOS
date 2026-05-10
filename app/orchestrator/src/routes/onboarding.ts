@@ -16,147 +16,310 @@ export async function handleOnboardingRoute(input: {
   runtime: Runtime;
   now: Date;
   requestId: string;
+  idempotencyKey?: string;
 }): Promise<RouteResult | undefined> {
   const { store, workspace, taskSessions, observability } = input.runtime;
   if (input.method === "GET" && input.pathname === "/onboarding/scan") {
-    const warnings: string[] = [];
-    let snapshot;
-    if (workspace) {
-      try {
-        snapshot = await workspace.capture();
-      } catch (error) {
-        warnings.push(`workspace capture failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-    if (!workspace) {
-      warnings.push("workspace controller is not configured");
-    }
-
-    const sessions = taskSessions?.listSessions ? await Promise.resolve(taskSessions.listSessions()).catch((error) => {
-      warnings.push(`task session listing failed: ${error instanceof Error ? error.message : String(error)}`);
-      return [];
-    }) : [];
-    if (!taskSessions?.listSessions) {
-      warnings.push("task session listing is not configured");
-    }
-
-    const browserContexts = await store.listContextEntries({ limit: 100 }).catch((error) => {
-      warnings.push(`browser context listing failed: ${error instanceof Error ? error.message : String(error)}`);
-      return [];
-    });
-
+    const scan = await runOnboardingScan(input, []);
     return {
       ok: true,
       status: 200,
       body: {
-        ...buildOnboardingScan({
-          snapshot,
-          taskSessions: sessions,
-          browserContexts,
-          capturedAt: input.now.toISOString(),
-          warnings,
-        }),
+        ...scan.body,
         request_id: input.requestId,
       },
+    };
+  }
+
+  if (input.method === "POST" && input.pathname === "/onboarding/rejections") {
+    const parsed = await input.readJsonBody();
+    if (!parsed.ok) return schemaError(parsed.message);
+    if (!isRecord(parsed.value)) return schemaError("rejection request must be an object");
+    const proposalKey = readOptionalString(parsed.value.proposal_key);
+    if (!proposalKey) return schemaError("proposal_key is required");
+    const reason = readOptionalString(parsed.value.reason);
+    const record = await store.recordOnboardingRejection(proposalKey, reason, input.now);
+    await observability?.incrementCounter("onboarding_rejections_total");
+    await observability?.recordActivity({
+      type: "onboarding_proposal_rejected",
+      occurred_at: input.now.toISOString(),
+      actor: "human",
+      status: "ok",
+      summary: `Onboarding proposal rejected: ${proposalKey}`,
+      details: sanitizeActivityDetails({ proposal_key: proposalKey, reason }),
+    });
+    return {
+      ok: true,
+      status: 200,
+      body: { ok: true, rejection: record, request_id: input.requestId },
     };
   }
 
   if (input.method === "POST" && input.pathname === "/onboarding/approvals") {
     const parsed = await input.readJsonBody();
     if (!parsed.ok) return schemaError(parsed.message);
-    const resolved = await resolveProposalApprovalIfNeeded(input, parsed.value);
-    if (!resolved.ok) return resolved.result;
-    const validation = validateOnboardingApprovalRequest(resolved.value);
-    if (!validation.ok) return schemaError(validation.message);
+    const result = await processOnboardingApproval(input, parsed.value);
+    if (!result.ok) return result.error;
+    return { ok: true, status: 200, body: { ...result.body, request_id: input.requestId } };
+  }
 
-    const warnings: string[] = [];
-    let workspaceRecord;
-    if (validation.windowIds.length > 0) {
-      if (!workspace) return error(409, "workspace_not_configured", "workspace controller is not configured");
-      const snapshot = await workspace.capture();
-      const selected = snapshot.windows.filter((window) => validation.windowIds.includes(window.id));
-      const missingWindowIds = validation.windowIds.filter((id) => !selected.some((window) => window.id === id));
-      if (missingWindowIds.length > 0) {
-        return error(404, "window_not_found", "one or more requested windows were not found", { missing_window_ids: missingWindowIds });
+  if (input.method === "POST" && input.pathname === "/onboarding/approvals/batch") {
+    const parsed = await input.readJsonBody();
+    if (!parsed.ok) return schemaError(parsed.message);
+    if (!isRecord(parsed.value)) return schemaError("batch approval request must be an object");
+    const approvalsRaw = parsed.value.approvals;
+    if (!Array.isArray(approvalsRaw)) return schemaError("approvals must be an array");
+    if (approvalsRaw.length === 0) return schemaError("approvals must contain at least one item");
+
+    const idempotencyKey = readOptionalString(parsed.value.idempotency_key) ?? input.idempotencyKey;
+    if (idempotencyKey) {
+      const cached = await store.getOnboardingApprovalBatch(idempotencyKey);
+      if (cached) {
+        return {
+          ok: true,
+          status: 200,
+          body: {
+            ok: true,
+            results: cached.results,
+            idempotent_replay: true,
+            request_id: input.requestId,
+          },
+        };
       }
+    }
 
-      workspaceRecord = await store.saveTaskWorkspaceSnapshot({
-        taskId: validation.taskId,
-        snapshot: {
-          backend: "aerospace",
-          windows: selected,
-          activeWorkspace: snapshot.activeWorkspace,
-          focusedWindowId: selected.some((window) => window.id === snapshot.focusedWindowId) ? snapshot.focusedWindowId : undefined,
-        },
-        capturedAt: input.now,
-        actorId: validation.actorId,
+    const results: Array<Record<string, unknown>> = [];
+    for (const candidate of approvalsRaw) {
+      if (!isRecord(candidate)) {
+        results.push({ ok: false, error: { code: "schema_error", message: "approval entry must be an object" } });
+        continue;
+      }
+      const proposalId = readOptionalString(candidate.proposal_id);
+      const result = await processOnboardingApproval(input, candidate);
+      if (!result.ok) {
+        results.push({
+          ok: false,
+          proposal_id: proposalId,
+          error: { code: result.error.code, message: result.error.message, details: result.error.details },
+        });
+        continue;
+      }
+      results.push({
+        ok: true,
+        proposal_id: result.body.proposal_id ?? proposalId,
+        task_id: result.body.task_id,
+        queue_item: result.body.queue_item,
+        review_packet: result.body.review_packet,
       });
     }
 
-    const bindings = [];
-    if (validation.taskSessionIds.length > 0) {
-      if (!taskSessions?.bindTaskSession) {
-        return error(409, "task_binding_unavailable", "task session binding is not configured");
-      }
-      for (const taskSessionId of validation.taskSessionIds) {
-        const binding = await Promise.resolve(taskSessions.bindTaskSession({
-          task_session_id: taskSessionId,
-          task_id: validation.taskId,
-        }));
-        if (binding.ok === false) {
-          return error(409, "task_binding_failed", binding.error ?? "task session binding failed", binding);
-        }
-        bindings.push(binding);
-      }
+    if (idempotencyKey) {
+      await store.recordOnboardingApprovalBatch({
+        idempotencyKey,
+        results,
+        now: input.now,
+      });
     }
 
-    const browserContextBindings = await bindBrowserContextsToTask(input, validation, resolved.browserContexts);
-    const queuedPaper = validation.queuePaper
-      ? await queueOnboardingPaper(input, validation, resolved.proposalTitle)
-      : undefined;
-
-    if (!workspaceRecord && bindings.length === 0 && browserContextBindings.length === 0 && !queuedPaper?.queue_item) {
-      warnings.push("approval accepted but no windows or task sessions were provided");
-    }
-
-    await observability?.incrementCounter("onboarding_task_approvals_total");
+    await observability?.incrementCounter("onboarding_approval_batches_total");
     await observability?.recordActivity({
-      type: "onboarding_task_approved",
+      type: "onboarding_approval_batch",
       occurred_at: input.now.toISOString(),
       actor: "human",
-      task_id: validation.taskId,
       status: "ok",
-      summary: `Onboarding task approved: ${validation.taskId}`,
+      summary: `Onboarding approval batch: ${results.length} entries`,
       details: sanitizeActivityDetails({
-        window_ids: validation.windowIds,
-        task_session_ids: validation.taskSessionIds,
-        browser_context_ids: browserContextBindings.map((binding) => binding.browser_context_id),
-        queue_paper_created: Boolean(queuedPaper?.queue_item),
-        workspace_snapshot_saved: Boolean(workspaceRecord),
-        binding_count: bindings.length,
-        browser_context_binding_count: browserContextBindings.length,
+        idempotency_key: idempotencyKey,
+        ok_count: results.filter((entry) => entry.ok === true).length,
+        error_count: results.filter((entry) => entry.ok !== true).length,
       }),
     });
 
     return {
       ok: true,
       status: 200,
-      body: {
-        ok: true,
-        task_id: validation.taskId,
-        proposal_id: resolved.proposalId,
-        workspace_snapshot: workspaceRecord,
-        bindings,
-        browser_context_bindings: browserContextBindings,
-        queue_item: queuedPaper?.queue_item,
-        review_packet: queuedPaper?.review_packet,
-        warnings,
-        request_id: input.requestId,
-      },
+      body: { ok: true, results, request_id: input.requestId },
     };
   }
 
   return undefined;
+}
+
+async function runOnboardingScan(
+  input: { runtime: Runtime; now: Date },
+  extraWarnings: string[],
+): Promise<{ body: Record<string, unknown>; rejections: Set<string> }> {
+  const { store, workspace, taskSessions } = input.runtime;
+  const warnings: string[] = [...extraWarnings];
+  let snapshot;
+  if (workspace) {
+    try {
+      snapshot = await workspace.capture();
+    } catch (error) {
+      warnings.push(`workspace capture failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (!workspace) {
+    warnings.push("workspace controller is not configured");
+  }
+
+  const sessions = taskSessions?.listSessions ? await Promise.resolve(taskSessions.listSessions()).catch((error) => {
+    warnings.push(`task session listing failed: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  }) : [];
+  if (!taskSessions?.listSessions) {
+    warnings.push("task session listing is not configured");
+  }
+
+  const browserContexts = await store.listContextEntries({ limit: 100 }).catch((error) => {
+    warnings.push(`browser context listing failed: ${error instanceof Error ? error.message : String(error)}`);
+    return [];
+  });
+
+  const rejections = await store.listOnboardingRejections().catch((error) => {
+    warnings.push(`onboarding rejections listing failed: ${error instanceof Error ? error.message : String(error)}`);
+    return [] as Awaited<ReturnType<typeof store.listOnboardingRejections>>;
+  });
+  const rejectedKeys = new Set(rejections.map((rejection) => rejection.proposal_key));
+
+  const built = buildOnboardingScan({
+    snapshot,
+    taskSessions: sessions,
+    browserContexts,
+    capturedAt: input.now.toISOString(),
+    warnings,
+  });
+
+  const filteredProposals = built.proposals.filter((proposal) => !rejectedKeys.has(proposal.task_id) && !rejectedKeys.has(proposal.id));
+  const groupedWindowIds = new Set(filteredProposals.flatMap((proposal) => proposal.windows.map((window) => window.id)));
+
+  const body: Record<string, unknown> = {
+    ...built,
+    proposals: filteredProposals,
+    summary: {
+      ...built.summary,
+      proposal_count: filteredProposals.length,
+      grouped_window_count: groupedWindowIds.size,
+      ungrouped_window_count: built.summary.window_count - groupedWindowIds.size,
+    },
+    rejected_proposal_keys: Array.from(rejectedKeys),
+  };
+  return { body, rejections: rejectedKeys };
+}
+
+type ApprovalSuccess = {
+  ok: true;
+  body: {
+    ok: true;
+    task_id: string;
+    proposal_id?: string;
+    workspace_snapshot?: unknown;
+    bindings: unknown[];
+    browser_context_bindings: unknown[];
+    queue_item?: unknown;
+    review_packet?: unknown;
+    warnings: string[];
+  };
+};
+
+type ApprovalFailure = {
+  ok: false;
+  error: RouteFailure;
+};
+
+async function processOnboardingApproval(
+  input: { runtime: Runtime; now: Date },
+  rawValue: unknown,
+): Promise<ApprovalSuccess | ApprovalFailure> {
+  const { store, workspace, taskSessions, observability } = input.runtime;
+  const resolved = await resolveProposalApprovalIfNeeded(input, rawValue);
+  if (!resolved.ok) return { ok: false, error: resolved.result };
+  const validation = validateOnboardingApprovalRequest(resolved.value);
+  if (!validation.ok) return { ok: false, error: schemaError(validation.message) };
+
+  const warnings: string[] = [];
+  let workspaceRecord;
+  if (validation.windowIds.length > 0) {
+    if (!workspace) return { ok: false, error: error(409, "workspace_not_configured", "workspace controller is not configured") };
+    const snapshot = await workspace.capture();
+    const selected = snapshot.windows.filter((window) => validation.windowIds.includes(window.id));
+    const missingWindowIds = validation.windowIds.filter((id) => !selected.some((window) => window.id === id));
+    if (missingWindowIds.length > 0) {
+      return { ok: false, error: error(404, "window_not_found", "one or more requested windows were not found", { missing_window_ids: missingWindowIds }) };
+    }
+
+    workspaceRecord = await store.saveTaskWorkspaceSnapshot({
+      taskId: validation.taskId,
+      snapshot: {
+        backend: "aerospace",
+        windows: selected,
+        activeWorkspace: snapshot.activeWorkspace,
+        focusedWindowId: selected.some((window) => window.id === snapshot.focusedWindowId) ? snapshot.focusedWindowId : undefined,
+      },
+      capturedAt: input.now,
+      actorId: validation.actorId,
+    });
+  }
+
+  const bindings = [];
+  if (validation.taskSessionIds.length > 0) {
+    if (!taskSessions?.bindTaskSession) {
+      return { ok: false, error: error(409, "task_binding_unavailable", "task session binding is not configured") };
+    }
+    for (const taskSessionId of validation.taskSessionIds) {
+      const binding = await Promise.resolve(taskSessions.bindTaskSession({
+        task_session_id: taskSessionId,
+        task_id: validation.taskId,
+      }));
+      if (binding.ok === false) {
+        return { ok: false, error: error(409, "task_binding_failed", binding.error ?? "task session binding failed", binding) };
+      }
+      bindings.push(binding);
+    }
+  }
+
+  const browserContextBindings = await bindBrowserContextsToTask(input, validation, resolved.browserContexts);
+  const queuedPaper = validation.queuePaper
+    ? await queueOnboardingPaper(input, validation, resolved.proposalTitle)
+    : undefined;
+
+  if (!workspaceRecord && bindings.length === 0 && browserContextBindings.length === 0 && !queuedPaper?.queue_item) {
+    warnings.push("approval accepted but no windows or task sessions were provided");
+  }
+
+  await observability?.incrementCounter("onboarding_task_approvals_total");
+  await observability?.recordActivity({
+    type: "onboarding_task_approved",
+    occurred_at: input.now.toISOString(),
+    actor: "human",
+    task_id: validation.taskId,
+    status: "ok",
+    summary: `Onboarding task approved: ${validation.taskId}`,
+    details: sanitizeActivityDetails({
+      window_ids: validation.windowIds,
+      task_session_ids: validation.taskSessionIds,
+      browser_context_ids: browserContextBindings.map((binding) => binding.browser_context_id),
+      queue_paper_created: Boolean(queuedPaper?.queue_item),
+      workspace_snapshot_saved: Boolean(workspaceRecord),
+      binding_count: bindings.length,
+      browser_context_binding_count: browserContextBindings.length,
+    }),
+  });
+
+  return {
+    ok: true,
+    body: {
+      ok: true,
+      task_id: validation.taskId,
+      proposal_id: resolved.proposalId,
+      workspace_snapshot: workspaceRecord,
+      bindings,
+      browser_context_bindings: browserContextBindings,
+      queue_item: queuedPaper?.queue_item,
+      review_packet: queuedPaper?.review_packet,
+      warnings,
+    },
+  };
 }
 
 async function resolveProposalApprovalIfNeeded(
@@ -165,7 +328,7 @@ async function resolveProposalApprovalIfNeeded(
     now: Date;
   },
   value: unknown,
-): Promise<{ ok: true; value: unknown; proposalId?: string; proposalTitle?: string; browserContexts?: Array<{ id: string; title: string; url?: string; window_id?: string; tab_id?: string; restore_confidence: "high" | "medium" | "low"; captured_at: string }> } | { ok: false; result: RouteResult }> {
+): Promise<{ ok: true; value: unknown; proposalId?: string; proposalTitle?: string; browserContexts?: Array<{ id: string; title: string; url?: string; window_id?: string; tab_id?: string; restore_confidence: "high" | "medium" | "low"; captured_at: string }> } | { ok: false; result: RouteFailure }> {
   const { workspace, taskSessions, store } = input.runtime;
   if (!isRecord(value)) return { ok: true, value };
   const proposalId = readOptionalString(value.proposal_id);
@@ -442,10 +605,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function schemaError(message: string): RouteResult {
+type RouteFailure = Extract<RouteResult, { ok: false }>;
+
+function schemaError(message: string): RouteFailure {
   return error(400, "schema_error", message);
 }
 
-function error(status: number, code: string, message: string, details?: unknown): RouteResult {
+function error(status: number, code: string, message: string, details?: unknown): RouteFailure {
   return { ok: false, status, code, message, details };
 }

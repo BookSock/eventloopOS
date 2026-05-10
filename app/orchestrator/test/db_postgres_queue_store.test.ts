@@ -69,6 +69,7 @@ describe("PostgresQueueStore", () => {
       { id: "0008_task_workspace_snapshots.sql" },
       { id: "0009_queue_action_attempts.sql" },
       { id: "0010_task_session_terminal_refs.sql" },
+      { id: "0011_onboarding_rejections.sql" },
     ]);
   });
 

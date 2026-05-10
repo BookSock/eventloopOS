@@ -36,6 +36,8 @@ import {
   type StoredEventResult,
   type TaskSessionTerminalRefRecord,
   type TaskWorkspaceSnapshotRecord,
+  type OnboardingRejectionRecord,
+  type OnboardingApprovalBatchRecord,
 } from "../store.js";
 import { stableId } from "../store/ids.js";
 import { runMigrations } from "./migrations.js";
@@ -481,6 +483,70 @@ export class PostgresQueueStore {
       [taskSessionId],
     );
     return result.rows[0] ? rowToTaskSessionTerminalRefRecord(result.rows[0]) : undefined;
+  }
+
+  async recordOnboardingRejection(
+    proposalKey: string,
+    reason: string | undefined,
+    now: Date,
+  ): Promise<OnboardingRejectionRecord> {
+    const timestamp = now.toISOString();
+    const result = await this.pool.query(
+      `
+        INSERT INTO onboarding_rejections (proposal_key, reason, rejected_at)
+        VALUES ($1, $2, $3::timestamptz)
+        ON CONFLICT (proposal_key) DO UPDATE
+          SET reason = EXCLUDED.reason,
+              rejected_at = EXCLUDED.rejected_at
+        RETURNING proposal_key, reason, rejected_at
+      `,
+      [proposalKey, reason ?? null, timestamp],
+    );
+    return rowToOnboardingRejectionRecord(result.rows[0]);
+  }
+
+  async listOnboardingRejections(): Promise<OnboardingRejectionRecord[]> {
+    const result = await this.pool.query(
+      `SELECT proposal_key, reason, rejected_at FROM onboarding_rejections ORDER BY rejected_at ASC`,
+    );
+    return result.rows.map(rowToOnboardingRejectionRecord);
+  }
+
+  async clearOnboardingRejection(proposalKey: string): Promise<OnboardingRejectionRecord | undefined> {
+    const result = await this.pool.query(
+      `DELETE FROM onboarding_rejections WHERE proposal_key = $1 RETURNING proposal_key, reason, rejected_at`,
+      [proposalKey],
+    );
+    return result.rows[0] ? rowToOnboardingRejectionRecord(result.rows[0]) : undefined;
+  }
+
+  async getOnboardingApprovalBatch(idempotencyKey: string): Promise<OnboardingApprovalBatchRecord | undefined> {
+    const result = await this.pool.query(
+      `SELECT idempotency_key, results, created_at FROM onboarding_approval_batches WHERE idempotency_key = $1`,
+      [idempotencyKey],
+    );
+    return result.rows[0] ? rowToOnboardingApprovalBatchRecord(result.rows[0]) : undefined;
+  }
+
+  async recordOnboardingApprovalBatch(input: {
+    idempotencyKey: string;
+    results: Array<Record<string, unknown>>;
+    now: Date;
+  }): Promise<OnboardingApprovalBatchRecord> {
+    const timestamp = input.now.toISOString();
+    const result = await this.pool.query(
+      `
+        INSERT INTO onboarding_approval_batches (idempotency_key, results, created_at)
+        VALUES ($1, $2::jsonb, $3::timestamptz)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        RETURNING idempotency_key, results, created_at
+      `,
+      [input.idempotencyKey, JSON.stringify(input.results), timestamp],
+    );
+    if (result.rows[0]) return rowToOnboardingApprovalBatchRecord(result.rows[0]);
+    const fetched = await this.getOnboardingApprovalBatch(input.idempotencyKey);
+    if (!fetched) throw new Error(`failed to record onboarding approval batch ${input.idempotencyKey}`);
+    return fetched;
   }
 
   async recordWorkspaceRestoreReceipt(input: {
@@ -1569,6 +1635,22 @@ function rowToStoredActionAttempt(row: Record<string, unknown>): StoredActionAtt
     terminal_send_result: row.terminal_send_result ? row.terminal_send_result as Record<string, unknown> : undefined,
     created_at: requiredDateToIso(row.created_at),
     updated_at: requiredDateToIso(row.updated_at),
+  };
+}
+
+function rowToOnboardingRejectionRecord(row: Record<string, unknown>): OnboardingRejectionRecord {
+  return {
+    proposal_key: String(row.proposal_key),
+    reason: row.reason === null || row.reason === undefined ? undefined : String(row.reason),
+    rejected_at: requiredDateToIso(row.rejected_at),
+  };
+}
+
+function rowToOnboardingApprovalBatchRecord(row: Record<string, unknown>): OnboardingApprovalBatchRecord {
+  return {
+    idempotency_key: String(row.idempotency_key),
+    results: (row.results ?? []) as Array<Record<string, unknown>>,
+    created_at: requiredDateToIso(row.created_at),
   };
 }
 

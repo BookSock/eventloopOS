@@ -130,30 +130,17 @@ describe("onboarding happy path end-to-end", () => {
       },
       body: JSON.stringify({ actor_id: "mac_queue_app" }),
     });
-    const recommendedBody = await recommendedResponse.json() as { error?: { code?: string } };
-    assert.equal(
-      recommendedResponse.status,
-      422,
-      "GAP: onboarding-queued papers carry a mark_done recommended action, but /actions/recommended only executes resume_agent",
-    );
-    assert.equal(recommendedBody.error?.code, "unsupported_action");
-
-    const doneResponse = await fetch(`${baseUrl}/queue/${leaseBody.item.id}/done`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "idempotency-key": `idem-onboarding-done-${leaseBody.item.id}`,
-      },
-      body: JSON.stringify({ action: "done", actor_id: "mac_queue_app" }),
-    });
-    const doneActionBody = await doneResponse.json() as {
+    const recommendedBody = await recommendedResponse.json() as {
       ok: boolean;
+      action_result: { type: string; queue_item_id: string };
       item: { id: string; state: string };
     };
-    assert.equal(doneResponse.status, 200);
-    assert.equal(doneActionBody.ok, true);
-    assert.equal(doneActionBody.item.state, "done");
-    assert.equal(doneActionBody.item.id, leaseBody.item.id);
+    assert.equal(recommendedResponse.status, 200);
+    assert.equal(recommendedBody.ok, true);
+    assert.equal(recommendedBody.action_result.type, "mark_done");
+    assert.equal(recommendedBody.action_result.queue_item_id, leaseBody.item.id);
+    assert.equal(recommendedBody.item.state, "done");
+    assert.equal(recommendedBody.item.id, leaseBody.item.id);
 
     const remainingResponse = await fetch(`${baseUrl}/queue?state=ready`);
     const remainingBody = await remainingResponse.json() as {
@@ -170,7 +157,7 @@ describe("onboarding happy path end-to-end", () => {
     assert.ok(doneStateBody.items.some((item) => item.id === leaseBody.item.id));
   });
 
-  it("rejected proposal is skipped and never reaches the queue", async () => {
+  it("persists rejection so subsequent scans omit the rejected proposal", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
     const isolatedServer = createGatewayServer({
       store,
@@ -188,45 +175,107 @@ describe("onboarding happy path end-to-end", () => {
       };
       assert.equal(scanBody.proposals.length, 3);
 
-      const approved = scanBody.proposals.filter((proposal) => proposal.task_id !== "task_reports");
       const rejected = scanBody.proposals.find((proposal) => proposal.task_id === "task_reports");
       assert.ok(rejected, "fixture must have a task_reports proposal to reject");
 
-      for (const proposal of approved) {
-        const response = await fetch(`${isolatedUrl}/onboarding/approvals`, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "idempotency-key": `idem-onboarding-approve-${proposal.task_id}`,
-          },
-          body: JSON.stringify({
-            proposal_id: proposal.id,
-            queue_paper: true,
-            actor_id: "user_jason",
-          }),
-        });
-        assert.equal(response.status, 200);
-      }
-
-      const queueResponse = await fetch(`${isolatedUrl}/queue?state=ready`);
-      const queueBody = await queueResponse.json() as {
-        count: number;
-        items: Array<{ review_packet: { context: Array<{ details?: { task_id?: string } }> } }>;
-      };
-      assert.equal(queueBody.count, 2, "rejected proposal must not be queued");
-      const queuedTaskIds = queueBody.items
-        .flatMap((item) => item.review_packet.context.map((context) => context.details?.task_id))
-        .filter((value): value is string => typeof value === "string");
-      assert.ok(!queuedTaskIds.includes("task_reports"));
+      const rejectionResponse = await fetch(`${isolatedUrl}/onboarding/rejections`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ proposal_key: "task_reports", reason: "not relevant" }),
+      });
+      assert.equal(rejectionResponse.status, 200);
 
       const rescanResponse = await fetch(`${isolatedUrl}/onboarding/scan`);
       const rescanBody = await rescanResponse.json() as {
         proposals: Array<{ task_id: string }>;
+        summary: { proposal_count: number };
+        rejected_proposal_keys: string[];
       };
-      assert.ok(
-        rescanBody.proposals.some((proposal) => proposal.task_id === "task_reports"),
-        "rejected proposal still appears in scan because rejection is not persisted; this is a known gap",
-      );
+      assert.equal(rescanBody.proposals.length, 2);
+      assert.equal(rescanBody.summary.proposal_count, 2);
+      assert.ok(!rescanBody.proposals.some((proposal) => proposal.task_id === "task_reports"));
+      assert.ok(rescanBody.rejected_proposal_keys.includes("task_reports"));
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        isolatedServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("batch approves all proposals in one call and queues 3 papers", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const isolatedServer = createGatewayServer({
+      store,
+      workspace,
+      now: () => fixedNow,
+    });
+    await new Promise<void>((resolve) => isolatedServer.listen(0, "127.0.0.1", resolve));
+    const address = isolatedServer.address() as AddressInfo;
+    const isolatedUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const scanResponse = await fetch(`${isolatedUrl}/onboarding/scan`);
+      const scanBody = await scanResponse.json() as { proposals: Array<{ id: string; task_id: string }> };
+      assert.equal(scanBody.proposals.length, 3);
+
+      const batchResponse = await fetch(`${isolatedUrl}/onboarding/approvals/batch`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem-batch-1",
+        },
+        body: JSON.stringify({
+          approvals: scanBody.proposals.map((proposal) => ({
+            proposal_id: proposal.id,
+            queue_paper: true,
+            actor_id: "user_jason",
+          })),
+        }),
+      });
+      const batchBody = await batchResponse.json() as {
+        ok: boolean;
+        results: Array<{ ok: boolean; proposal_id?: string; task_id?: string; queue_item?: { id: string } }>;
+        idempotent_replay?: boolean;
+      };
+      assert.equal(batchResponse.status, 200);
+      assert.equal(batchBody.ok, true);
+      assert.equal(batchBody.results.length, 3);
+      assert.ok(batchBody.results.every((result) => result.ok === true));
+      assert.equal(batchBody.idempotent_replay, undefined);
+      const queueIds = batchBody.results.map((result) => result.queue_item?.id);
+      assert.ok(queueIds.every((id) => typeof id === "string" && id.length > 0));
+
+      const queueResponse = await fetch(`${isolatedUrl}/queue?state=ready`);
+      const queueBody = await queueResponse.json() as { count: number };
+      assert.equal(queueBody.count, 3);
+
+      const replayResponse = await fetch(`${isolatedUrl}/onboarding/approvals/batch`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": "idem-batch-1",
+        },
+        body: JSON.stringify({
+          approvals: scanBody.proposals.map((proposal) => ({
+            proposal_id: proposal.id,
+            queue_paper: true,
+            actor_id: "user_jason",
+          })),
+        }),
+      });
+      const replayBody = await replayResponse.json() as {
+        ok: boolean;
+        results: Array<{ ok: boolean }>;
+        idempotent_replay?: boolean;
+      };
+      assert.equal(replayResponse.status, 200);
+      assert.equal(replayBody.ok, true);
+      assert.equal(replayBody.idempotent_replay, true);
+      assert.deepEqual(replayBody.results, batchBody.results);
+
+      const queueAfterReplay = await fetch(`${isolatedUrl}/queue?state=ready`);
+      const queueAfterReplayBody = await queueAfterReplay.json() as { count: number };
+      assert.equal(queueAfterReplayBody.count, 3, "replay must not double-queue");
     } finally {
       await new Promise<void>((resolve, reject) => {
         isolatedServer.close((error) => (error ? reject(error) : resolve()));

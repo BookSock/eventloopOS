@@ -84,6 +84,8 @@ export type InMemoryStore = {
   taskWorkspaceSnapshots?: Map<string, TaskWorkspaceSnapshotRecord>;
   queueActionAttempts?: Map<string, StoredActionAttempt>;
   taskSessionTerminalRefs?: Map<string, TaskSessionTerminalRefRecord>;
+  onboardingRejections?: Map<string, OnboardingRejectionRecord>;
+  onboardingApprovalBatches?: Map<string, OnboardingApprovalBatchRecord>;
 };
 
 export type TaskSessionTerminalRefRecord = {
@@ -91,6 +93,18 @@ export type TaskSessionTerminalRefRecord = {
   terminal_ref: string;
   created_at: string;
   updated_at: string;
+};
+
+export type OnboardingRejectionRecord = {
+  proposal_key: string;
+  reason?: string;
+  rejected_at: string;
+};
+
+export type OnboardingApprovalBatchRecord = {
+  idempotency_key: string;
+  results: Array<Record<string, unknown>>;
+  created_at: string;
 };
 
 export type StoredActionAttempt = {

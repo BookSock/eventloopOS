@@ -604,6 +604,18 @@ async function executeQueueAction(
   | { ok: false; status: number; code: string; message: string; details?: unknown }
 > {
   const { store, taskSessions, observability, terminalSendExecutor, terminalSendEnabled } = input.runtime;
+  if (action.type === "mark_done") {
+    return {
+      ok: true,
+      result: {
+        type: "mark_done",
+        queue_item_id: item.id,
+        review_packet_id: item.review_packet_id,
+        task_id: item.task_id,
+        executed_at: input.now.toISOString(),
+      },
+    };
+  }
   if (action.type !== "resume_agent") {
     return {
       ok: false,

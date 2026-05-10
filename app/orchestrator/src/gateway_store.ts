@@ -58,6 +58,8 @@ import {
   type StoredEventResult,
   type TaskSessionTerminalRefRecord,
   type TaskWorkspaceSnapshotRecord,
+  type OnboardingRejectionRecord,
+  type OnboardingApprovalBatchRecord,
 } from "./store.js";
 import { eventToRecord } from "./db/postgres_queue_store.js";
 
@@ -132,6 +134,15 @@ export type GatewayStore = {
   getTaskSessionTerminalRef(taskSessionId: string): Promise<TaskSessionTerminalRefRecord | undefined>;
   setTaskSessionTerminalRef(taskSessionId: string, terminalRef: string, now: Date): Promise<TaskSessionTerminalRefRecord>;
   clearTaskSessionTerminalRef(taskSessionId: string): Promise<TaskSessionTerminalRefRecord | undefined>;
+  recordOnboardingRejection(proposalKey: string, reason: string | undefined, now: Date): Promise<OnboardingRejectionRecord>;
+  listOnboardingRejections(): Promise<OnboardingRejectionRecord[]>;
+  clearOnboardingRejection(proposalKey: string): Promise<OnboardingRejectionRecord | undefined>;
+  getOnboardingApprovalBatch(idempotencyKey: string): Promise<OnboardingApprovalBatchRecord | undefined>;
+  recordOnboardingApprovalBatch(input: {
+    idempotencyKey: string;
+    results: Array<Record<string, unknown>>;
+    now: Date;
+  }): Promise<OnboardingApprovalBatchRecord>;
 };
 
 export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
@@ -141,12 +152,16 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   const taskWorkspaceSnapshots = store.taskWorkspaceSnapshots ?? new Map<string, TaskWorkspaceSnapshotRecord>();
   const queueActionAttempts = store.queueActionAttempts ?? new Map<string, StoredActionAttempt>();
   const taskSessionTerminalRefs = store.taskSessionTerminalRefs ?? new Map<string, TaskSessionTerminalRefRecord>();
+  const onboardingRejections = store.onboardingRejections ?? new Map<string, OnboardingRejectionRecord>();
+  const onboardingApprovalBatches = store.onboardingApprovalBatches ?? new Map<string, OnboardingApprovalBatchRecord>();
   store.workspaceRestoreReceipts = workspaceRestoreReceipts;
   store.mcpPollStates = mcpPollStates;
   store.taskMessagesByIdempotencyKey = taskMessagesByIdempotencyKey;
   store.taskWorkspaceSnapshots = taskWorkspaceSnapshots;
   store.queueActionAttempts = queueActionAttempts;
   store.taskSessionTerminalRefs = taskSessionTerminalRefs;
+  store.onboardingRejections = onboardingRejections;
+  store.onboardingApprovalBatches = onboardingApprovalBatches;
 
   const snapshotForTask = async (taskId: string) => getLatestTaskWorkspaceSnapshot(store, taskId);
   const contextEntriesForTask = async (taskId: string) => listContextEntries(store, { task_id: taskId, limit: 8 });
@@ -362,6 +377,38 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
       taskSessionTerminalRefs.delete(taskSessionId);
       return existing;
     },
+    async recordOnboardingRejection(proposalKey, reason, now) {
+      const record: OnboardingRejectionRecord = {
+        proposal_key: proposalKey,
+        reason,
+        rejected_at: now.toISOString(),
+      };
+      onboardingRejections.set(proposalKey, record);
+      return record;
+    },
+    async listOnboardingRejections() {
+      return Array.from(onboardingRejections.values());
+    },
+    async clearOnboardingRejection(proposalKey) {
+      const existing = onboardingRejections.get(proposalKey);
+      if (!existing) return undefined;
+      onboardingRejections.delete(proposalKey);
+      return existing;
+    },
+    async getOnboardingApprovalBatch(idempotencyKey) {
+      return onboardingApprovalBatches.get(idempotencyKey);
+    },
+    async recordOnboardingApprovalBatch(input) {
+      const existing = onboardingApprovalBatches.get(input.idempotencyKey);
+      if (existing) return existing;
+      const record: OnboardingApprovalBatchRecord = {
+        idempotency_key: input.idempotencyKey,
+        results: input.results,
+        created_at: input.now.toISOString(),
+      };
+      onboardingApprovalBatches.set(record.idempotency_key, record);
+      return record;
+    },
   };
 }
 
@@ -514,6 +561,21 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async clearTaskSessionTerminalRef(taskSessionId) {
       return store.clearTaskSessionTerminalRef(taskSessionId);
+    },
+    async recordOnboardingRejection(proposalKey, reason, now) {
+      return store.recordOnboardingRejection(proposalKey, reason, now);
+    },
+    async listOnboardingRejections() {
+      return store.listOnboardingRejections();
+    },
+    async clearOnboardingRejection(proposalKey) {
+      return store.clearOnboardingRejection(proposalKey);
+    },
+    async getOnboardingApprovalBatch(idempotencyKey) {
+      return store.getOnboardingApprovalBatch(idempotencyKey);
+    },
+    async recordOnboardingApprovalBatch(input) {
+      return store.recordOnboardingApprovalBatch(input);
     },
   };
 }

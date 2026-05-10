@@ -512,6 +512,82 @@ function runGatewayStoreContract(
       }
     });
 
+    it("records, lists, and clears onboarding rejections consistently", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        const initial = await harness.store.listOnboardingRejections();
+        assert.deepEqual(initial, []);
+
+        const inserted = await harness.store.recordOnboardingRejection("task_blog", "manual reject", now);
+        assert.equal(inserted.proposal_key, "task_blog");
+        assert.equal(inserted.reason, "manual reject");
+        assert.equal(inserted.rejected_at, createdAt);
+
+        const updatedAt = "2026-05-06T12:01:00.000Z";
+        const updated = await harness.store.recordOnboardingRejection(
+          "task_blog",
+          "still rejecting",
+          new Date(updatedAt),
+        );
+        assert.equal(updated.reason, "still rejecting");
+        assert.equal(updated.rejected_at, updatedAt);
+
+        await harness.store.recordOnboardingRejection("task_reports", undefined, now);
+        const listed = await harness.store.listOnboardingRejections();
+        assert.equal(listed.length, 2);
+        const reportsEntry = listed.find((entry) => entry.proposal_key === "task_reports");
+        assert.equal(reportsEntry?.reason, undefined);
+
+        const cleared = await harness.store.clearOnboardingRejection("task_blog");
+        assert.equal(cleared?.proposal_key, "task_blog");
+        const afterClear = await harness.store.listOnboardingRejections();
+        assert.deepEqual(afterClear.map((entry) => entry.proposal_key), ["task_reports"]);
+
+        const missing = await harness.store.clearOnboardingRejection("task_unknown");
+        assert.equal(missing, undefined);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    it("caches onboarding approval batch results consistently", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        const initial = await harness.store.getOnboardingApprovalBatch("idem_batch_a");
+        assert.equal(initial, undefined);
+
+        const results = [
+          { ok: true, proposal_id: "p1" },
+          { ok: false, error: { code: "schema_error", message: "bad" } },
+        ];
+        const recorded = await harness.store.recordOnboardingApprovalBatch({
+          idempotencyKey: "idem_batch_a",
+          results,
+          now,
+        });
+        assert.equal(recorded.idempotency_key, "idem_batch_a");
+        assert.deepEqual(recorded.results, results);
+        assert.equal(recorded.created_at, createdAt);
+
+        const replay = await harness.store.recordOnboardingApprovalBatch({
+          idempotencyKey: "idem_batch_a",
+          results: [{ ok: true, proposal_id: "different" }],
+          now: new Date("2026-05-06T12:01:00.000Z"),
+        });
+        assert.deepEqual(replay.results, results);
+        assert.equal(replay.created_at, recorded.created_at);
+
+        const fetched = await harness.store.getOnboardingApprovalBatch("idem_batch_a");
+        assert.deepEqual(fetched, recorded);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     it("dedupes and finalizes task message history consistently", async (t) => {
       const harness = await createHarness(t);
       if (!harness) return;
@@ -735,7 +811,9 @@ async function clearPostgresTestData(store: PostgresQueueStore): Promise<void> {
       events,
       context_restore_requests,
       queue_action_attempts,
-      task_session_terminal_refs
+      task_session_terminal_refs,
+      onboarding_rejections,
+      onboarding_approval_batches
     RESTART IDENTITY CASCADE
   `);
 }
