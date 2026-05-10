@@ -1,15 +1,14 @@
-# Hotkey State Machine — iteration 2
+# Hotkey State Machine — iteration 3
 
-Decisions locked from iteration 1's six open questions:
+Decisions locked across iterations:
 
-1. **Task identity = primary Codex thread UUID; Ghostty window id is fallback** when no thread is detectable.
-2. **One primary anchor per task.** Multi-anchor deferred.
-3. **Shared windows via `[shared]` title tag.** Mirrors V10c's `[task:<slug>]` convention.
-4. **Auto-paper threshold = 60s of Codex idle**, per-task override allowed.
-5. **Manual mode + advance** → toast "exit manual mode first." No queueing.
-6. **Onboarding scan stays as recovery tool, not primary path.**
-
-The rest of this doc is the executable spec.
+1. **Task = (Codex thread UUID, AeroSpace virtual desktop).** Each task has a dedicated Codex thread spawned at task creation. That thread's Ghostty window lives in the task's virtual desktop as a persistent background presence — never moved between tasks. Other Codex/Ghostty/Slack/Chrome windows are free to move; AeroSpace tracks them.
+2. **Multiple Codex sessions per task allowed.** The task-anchor thread is just the "always there" one; additional Codex windows can be added freely. Each additional Codex window emits its own paper when idle. No "primary vs auxiliary" distinction beyond "one is the task-anchor that defines the desktop."
+3. **Shared windows tracked implicitly, no title tag.** Server records `(window_id → set_of_desktops_observed_on)`. A window seen on N>1 desktops is "shared." Restored on any desktop switch where it was previously seen. No user action required.
+4. **Auto-paper threshold = 60s of Codex idle**, per-task override. Applies to *every* Codex window in the task, not just the anchor.
+5. **Manual mode** = a designated personal AeroSpace virtual desktop. Toggle on → switch to it; server-side B7 flag pauses orchestrator auto-work. Toggle off → AeroSpace returns to the previous desktop. Advance pressed during manual mode → toast.
+6. **Onboarding scan dropped as primary path.** First-run UX = one screen: "press ⌘⌥⇧J in a Ghostty window to make your first task." Existing-thread import is a future skill (B-tier).
+7. **Custom user triggers** (e.g., "Slack message matches X → paper for task Y") are first-class but later. Phase 7 / future. Surface should be "easy to set" without writing code.
 
 ## What the user does in their day
 
@@ -17,19 +16,17 @@ The rest of this doc is the executable spec.
 
 The Mac queue UI exists for inspection and recovery, **not for normal use**. The user's interaction surface is hotkeys + their normal Ghostty/Codex/browser/Slack windows.
 
-## Task identity (the single hardest design call)
+## Task identity (resolved)
 
 A **task** is the central unit of saved-and-restored work. A task has:
 
-- One **primary anchor** — the thing that represents "the work" of this task. Used to (a) detect when the task is idle (→ paper), (b) decide which windows to restore-front when the user resumes the task. Today's best candidate: a Codex thread UUID or a Ghostty window id. The orchestrator stores both when available; the resolver prefers Codex thread UUID because it survives Ghostty restarts.
-- Zero or more **task-specific windows** — windows the user touched while on this task that aren't part of any other task. Restored when the user resumes.
-- Zero or more **shared windows** (e.g., a "to-do list" Ghostty window, a docs Notion tab) — windows tagged as participating in multiple tasks. Restored on every resume regardless of which task.
+- A **task-anchor Codex thread** (UUID) — spawned at task creation, never reused, lives in this task's virtual desktop as a persistent background presence. Conceptually a "per-task agent" — not a master, not shared.
+- An **AeroSpace virtual desktop** ID — the literal desktop the user is on when working this task. Switching tasks = switching desktops. AeroSpace handles the actual screen change.
+- Zero or more **additional Codex sessions / Ghostty windows / arbitrary other windows** — anything else the user has open while working this task. Tracked but not anchoring.
 
-Why anchor by Codex thread, not Ghostty window? Threads survive Ghostty restarts; window IDs don't. But a Codex thread doesn't have a screen position. So at restore time: look up the Ghostty window currently rendering this thread (V10c resolver pattern), or if none exists, launch a new Ghostty + `codex resume <thread-id>`. Window positions for the *containing* Ghostty are saved alongside the task.
+Restoring a task = AeroSpace switches to its virtual desktop. The task-anchor Codex thread's Ghostty window is already there (it never moved). Other windows are wherever AeroSpace last placed them. Any *shared* windows (windows observed on multiple tasks' desktops) get pulled into the new desktop too.
 
-This handles the "to-do list session in every task" case: that to-do list's Codex thread is registered as a `shared` resource. Other Codex threads (one per task) are primary anchors for their respective tasks.
-
-**Open question for review:** should we let a task have *multiple* primary anchors (e.g., two Codex threads both representing "the work")? Iteration 1 says no — one primary, rest are auxiliaries — for simplicity. Push back if this is wrong.
+The task-anchor is *the* thing that gives the task its identity and its idle-paper trigger. Multiple Codex sessions per task is fine — each can produce papers independently when idle. The task-anchor is just the one we know is always present.
 
 ## Three hotkeys, kept
 
@@ -41,45 +38,48 @@ This handles the "to-do list session in every task" case: that to-do list's Code
 
 The "advance" hotkey replaces today's `Pull next paper` hotkey with a richer state machine.
 
-## Advance state machine
+## Advance state machine (desktop-aware)
 
-States the system can be in when the hotkey is pressed:
+The current state is read from "what AeroSpace virtual desktop am I on, and is it bound to a task?"
 
-### State A — Unbounded
-No active task. The user is just on their Mac doing whatever.
-
-**On press:**
-1. Inspect foreground app.
-2. If it's a Ghostty window:
-   - Find the Codex/Claude thread rendering inside it (V10c-style title resolver, or Codex CLI's own session detection).
-   - Capture current AeroSpace window layout.
-   - **Create a new task** keyed by the thread UUID (or Ghostty window id if no thread visible).
-   - Register the thread as a watcher: when it goes idle >N seconds, emit a paper for this task.
-   - User now in **State B**.
-3. If foreground is *not* Ghostty:
-   - Show a small toast: *"No agent thread detected — open Ghostty with a Codex session and try again, or use master command to start one."*
-   - Stay in State A.
-
-### State B — On task, no paper queued
-A current task is active. User is doing the work.
+### State A — Limbo desktop (no task bound)
+The user is on a virtual desktop that has no associated task. (First launch lands here. Also: when the user advances out of a task with no paper queued, they end up here.)
 
 **On press:**
-1. Capture latest AeroSpace layout into the task.
-2. Mark the task "soft-closed" (not deleted; we keep the saved state for future resume).
-3. If queue has any pending paper across all tasks → pop the highest-priority one, restore its windows, transition to **State C**.
-4. If queue is empty → return to **State A**.
+1. Look at the foregrounded Ghostty window.
+   - If it has a Codex/Claude thread visible (resolved via V10c-style title or Codex CLI session detection): use that thread as the task-anchor. **No new thread spawned.**
+   - If foreground is Ghostty but no thread detectable: spawn a new Codex thread, attach it to this Ghostty window's foreground tab, use it as the task-anchor.
+   - If foreground isn't Ghostty: launch Ghostty + spawn a new Codex thread + use that.
+2. Bind the current AeroSpace virtual desktop ID to this new task.
+3. Capture current window layout.
+4. Register all Codex windows in this desktop as paper-trigger sources.
+5. User now in **State B** (on this task).
+
+### State B — On a task, no paper queued
+Current desktop is bound to a task. User is doing the work. Codex thread may be active or idle.
+
+**On press:**
+1. Capture latest layout for this task (debounced ambient saver was already doing this; press forces an immediate save).
+2. If queue has any pending paper for ANY task → pop highest-priority, switch AeroSpace to that paper's desktop, transition to **State C**. AeroSpace handles the visual switch.
+3. If queue is empty → AeroSpace switches to the limbo desktop. User is in **State A**.
 
 ### State C — On a paper
-A paper has been pulled; the user is reviewing/working through it.
+Current desktop is bound to a task and a paper is open. (The paper was generated for this task or a sibling.)
 
-**On press (Done / Next semantic):**
-1. Capture latest AeroSpace layout into the paper's task.
-2. Mark paper done, send-to-agent if the paper is set to do that, etc. (existing flow).
-3. If queue has more papers → pop next, restore, stay in State C with the new paper.
-4. Otherwise → if a current task is still considered active (user is mid-flow) return to State B; else return to State A.
+**On press (Done / Next):**
+1. Capture latest layout for this task.
+2. Mark paper done, fire send-to-agent if applicable.
+3. If queue has more papers → pop next, switch desktop, stay in State C.
+4. Otherwise → AeroSpace returns to the desktop the user was on before the paper popped (often State B); if that desktop is gone, fallback to limbo (State A).
 
-### State D — Manual mode (`⌘⌥⇧M` was pressed)
-Orthogonal. Press advance while in manual mode → toast "in manual mode; toggle off first." (Or: queue advance for when manual mode exits — TBD.)
+### State D — Manual mode
+Orthogonal toggle (`⌘⌥⇧M`). Manual mode = AeroSpace switched to the designated personal desktop + server-side B7 flag set. Auto-promote/auto-bind/auto-paper paused. Advance during manual mode → toast "exit manual mode first." Toggle off → AeroSpace returns + flag cleared.
+
+## How shared windows work (implicit)
+
+Server-side, on every layout save, record `(window_id → desktop_id)` observations. A window seen on multiple distinct desktops over time is "shared." Restoration of any desktop pulls in all shared windows last seen on that desktop, in their last-known positions. No user tagging needed. No `[shared]` title required.
+
+Edge case: a window the user genuinely *just* moved across desktops, that was once unique to one task, now becomes shared. That's correct behavior — the user implicitly opted-in by using it across desktops.
 
 ## Implicit ambient saves
 
@@ -89,44 +89,41 @@ Between hotkey presses, while in State B or C:
 
 ## Auto-paper generation
 
-For each registered task, watch its primary anchor (Codex thread):
-- Every 30s, read `~/.codex/sessions/<...>/<thread>.jsonl` (existing `inspectCodexSession` flow).
-- If `idle_seconds > N` (default 60s, configurable per task) AND no paper is currently active for this task → emit a paper. Body markdown = recent transcript summary; restore plan = task's saved window layout.
-- Throttle: once a paper is emitted for a task, suppress further auto-paper for that task until the user has either pulled the paper or marked it stale.
+For *every* Codex window in *every* task — not just task-anchors:
+- Watcher tracks each `(taskId, codexThreadId)` registered.
+- Every 30s, read the rollout file via `inspectCodexSession`.
+- If `idle_seconds >= task.auto_paper_idle_seconds` (default 60s) AND we haven't already emitted a paper for this `(taskId, codexThreadId)` in the current idle period → emit a paper. Body = recent transcript summary; restore plan = task's saved window layout.
+- Throttle keys on the rollout's `last_event_at`. Once activity advances `last_event_at`, a new idle period starts and a new paper can fire.
 
-Optional later: an MCP skill `eventloopos.enqueue_paper` exposed to Codex itself, so an agent can self-report "I'm waiting on a human" without us file-watching.
-
-## Shared windows
-
-Mechanism iteration 1: a window is "shared" iff it's a Ghostty window whose title contains `[shared]` (analogous to the `[task:<slug>]` convention V10c reads). When saving a task layout, shared windows are recorded but with a flag. On restore, shared windows are positioned wherever they were last seen *globally* (across all tasks), not the per-task position.
-
-Open question: do we need a config UI for this, or is title-based tagging enough? Iteration 1 says title-tagging is enough; revisit after dogfood.
+Optional later (Phase 7): an MCP skill `eventloopos.enqueue_paper` exposed to Codex itself, so an agent can self-report "I'm waiting on a human" without file-watching. Same skill could let agents define custom triggers (e.g., "watch this Slack channel for my-name mentions → paper for this task").
 
 ## What changes vs today
 
-- **`pullNextPaper` becomes `advance`.** Smarter behavior.
-- **Onboarding scan + approve flow** becomes optional. Tasks are created implicitly via advance. Onboarding stays for "find existing Codex sessions worth recovering" but isn't the primary path.
-- **Auto-promote / auto-bind timers** keep running. Auto-bind is now subordinate to "task created via advance press" — it fills in `terminal_ref` for tasks that were created without a session attached.
-- **`POST /tasks`** new route for implicit task creation: `{primary_anchor: {kind: "codex_thread" | "ghostty_window", id: string}, captured_layout: WorkspaceSnapshot}`. Idempotency-keyed by `primary_anchor.id` so re-press in unbounded on the same window doesn't create duplicates.
-- **Server-side state**: a singleton `current_task_id` (per-user; today single-user) so the orchestrator knows which task an ambient save belongs to.
+- **`pullNextPaper` becomes `advance`.** Desktop-aware state machine.
+- **Onboarding scan + approve flow** dropped as primary path. First-run = one tutorial screen. Existing-thread import filed as future skill.
+- **Auto-promote / auto-bind timers** keep running. Auto-bind is now subordinate to "task created via advance" — it fills in `terminal_ref` for tasks created without a session attached.
+- **New `POST /tasks` route** — body `{ task_anchor: { codex_thread_id }, aerospace_workspace_id, captured_layout }`. Idempotency-keyed by `(codex_thread_id, aerospace_workspace_id)`.
+- **New `current_task` server state** — singleton pointing at the active task ID; null = limbo desktop. Updated by the Mac on every desktop switch (or by AeroSpace event hook eventually).
+- **Implicit shared-window observation** — server records every `(window_id, desktop_id)` seen on every layout save. Window-shared-across-desktops detection is a SQL aggregate, not a user-set tag.
+- **AeroSpace desktop is first-class.** Tasks bind to a workspace ID. The Mac listens for AeroSpace workspace-change events (via `aerospace list-workspaces` polling or the in-config event hooks) and updates `current_task` accordingly.
 
 ## What's not in this iteration
 
-- Multi-anchor tasks (one task with two equal-weight Codex threads).
 - Cross-Mac sync (multiple Macs sharing tasks).
-- Codex skill for self-reporting (filed as future once the rest stabilizes).
+- Codex skill for self-reporting + custom triggers (Phase 7, future).
 - Voice-driven advance (today voice goes through master command sheet; advance is hotkey-only).
-- Time-based advance ("auto-advance every 30 min if no human input") — out of scope.
+- Time-based advance ("auto-advance every 30 min if no human input").
+- Existing-Codex-thread import flow on first launch.
 
 ## Sequencing for the actual refactor
 
-1. Lock this doc (you push back, we iterate, then we agree).
-2. New `POST /tasks` route + `current_task_id` singleton.
-3. Mac advance hotkey state machine (replace `pullNextPaper` wiring).
-4. Ambient AeroSpace saver (event-listen or polling fallback).
-5. Auto-paper-on-Codex-idle watcher.
-6. Shared-window mechanism (title tag).
-7. (Later) MCP skill for self-reporting.
+1. ✓ Spec locked at iteration 3.
+2. **Phase 2: `POST /tasks` + `current_task_id` singleton + `aerospace_workspace_id` column.** (in flight)
+3. **Phase 3: Mac advance hotkey state machine** (desktop-aware). Depends on phase 2.
+4. **Phase 4: Ambient AeroSpace saver.** ✓ shipped (needs phase-2-integration to wire).
+5. **Phase 5: Auto-paper-on-Codex-idle watcher.** ✓ shipped (needs phase-2-integration to wire).
+6. **Phase 6: Implicit shared-window aggregation.** Server-side SQL view + restoration logic.
+7. **Phase 7 (future): MCP skill for Codex self-reporting + custom triggers.**
 
 ## Decisions log
 
