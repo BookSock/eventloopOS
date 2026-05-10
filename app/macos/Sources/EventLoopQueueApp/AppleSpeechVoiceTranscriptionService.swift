@@ -5,13 +5,17 @@ import Speech
 
 public final class AppleSpeechVoiceTranscriptionService: VoiceTranscriptionService, @unchecked Sendable {
     private let recognizer: SFSpeechRecognizer
-    private let audioEngine: AVAudioEngine
+    private let bufferSource: VoiceBufferSource
     public let maxRecordingSeconds: Double
 
-    public init?(locale: Locale = .current, maxRecordingSeconds: Double = 6.0) {
+    public init?(
+        locale: Locale = .current,
+        maxRecordingSeconds: Double = 6.0,
+        bufferSource: VoiceBufferSource? = nil
+    ) {
         guard let recognizer = SFSpeechRecognizer(locale: locale) else { return nil }
         self.recognizer = recognizer
-        self.audioEngine = AVAudioEngine()
+        self.bufferSource = bufferSource ?? MicVoiceBufferSource()
         self.maxRecordingSeconds = maxRecordingSeconds
     }
 
@@ -30,25 +34,19 @@ public final class AppleSpeechVoiceTranscriptionService: VoiceTranscriptionServi
             let request = SFSpeechAudioBufferRecognitionRequest()
             request.shouldReportPartialResults = true
 
-            let inputNode = self.audioEngine.inputNode
-            let recordingFormat = inputNode.outputFormat(forBus: 0)
             var hasResumed = false
             let resumeLock = NSLock()
+            let source = self.bufferSource
 
             func cleanup() {
-                self.audioEngine.stop()
-                inputNode.removeTap(onBus: 0)
+                source.stop()
             }
 
-            inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { buffer, _ in
-                request.append(buffer)
-            }
-
-            self.audioEngine.prepare()
             do {
-                try self.audioEngine.start()
+                try source.start { buffer in
+                    request.append(buffer)
+                }
             } catch {
-                inputNode.removeTap(onBus: 0)
                 continuation.resume(throwing: error)
                 return
             }
