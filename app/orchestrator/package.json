@@ -37,7 +37,7 @@
     "onboarding:scan": "pnpm run build && node dist/src/onboarding/onboarding_scan_cli.js",
     "onboarding:agent": "pnpm run build && node dist/src/onboarding/onboarding_scan_cli.js --format agent",
     "onboarding:apply": "pnpm run build && node dist/src/onboarding/onboarding_scan_cli.js apply",
-    "test": "pnpm run build && node --test dist/test/**/*.test.js dist/src/**/*.test.js src/agents/codex/*.test.mjs src/task_sessions/*.test.mjs",
+    "test": "pnpm run build && bash -O globstar -c 'node --test dist/test/**/*.test.js dist/src/**/*.test.js src/agents/codex/*.test.mjs src/task_sessions/*.test.mjs'",
     "test:db": "pnpm run build && node --test dist/test/db*.test.js",
     "test:db:docker": "bin/dev-postgres test",
     "test:db:native": "bin/dev-postgres native-test",

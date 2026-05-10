@@ -14,7 +14,7 @@ export async function handleAgentsRoute(input: {
   now: Date;
   requestId: string;
 }): Promise<RouteResult | undefined> {
-  const { store, workspace, taskSessions, observability } = input.runtime;
+  const { store, workspace, taskSessions, observability, ghosttyResolver } = input.runtime;
   if (input.method === "POST" && input.pathname === "/agents/codex/auto-bind") {
     const manualMode = await store.getManualModeState();
     if (manualMode.active) {
@@ -47,6 +47,7 @@ export async function handleAgentsRoute(input: {
       workspace,
       taskSessions,
       observability,
+      ghosttyResolver,
       now: input.now,
     });
     return ok(200, { ok: true, ...result, request_id: input.requestId });

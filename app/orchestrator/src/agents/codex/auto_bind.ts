@@ -1,7 +1,18 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { Observability } from "../../observability.js";
 import { sanitizeActivityDetails } from "../../observability/activity_sanitizer.js";
 import type { TaskRuntimeSession, TaskSessionController } from "../../task_sessions/types.js";
 import type { WorkspaceController } from "../../workspace/controller.js";
+import { resolveGhosttyWindowId, type RunOsascript } from "./ghostty_window_resolver.js";
+
+const execFileAsync = promisify(execFile);
+
+export type GhosttyWindowResolver = (input: { taskSlug: string }) => Promise<{
+  ghosttyTextId: string | null;
+  matched: number;
+  ambiguous: boolean;
+}>;
 
 export type AutoBindFromWindowsOptions = {
   workspace?: WorkspaceController;
@@ -9,6 +20,7 @@ export type AutoBindFromWindowsOptions = {
   observability?: Observability;
   defaultTerminalRef?: string;
   now?: Date;
+  ghosttyResolver?: GhosttyWindowResolver;
 };
 
 export type AutoBindResult = {
@@ -43,13 +55,17 @@ export async function autoBindCodexFromWindows(options: AutoBindFromWindowsOptio
   const sessions = await Promise.resolve(options.taskSessions.listSessions()).catch(() => [] as TaskRuntimeSession[]);
 
   const fallbackTerminalRef = options.defaultTerminalRef ?? "ghostty:front";
+  const ghosttyResolver = options.ghosttyResolver ?? defaultGhosttyResolver;
+
+  const ambiguousSlugs: string[] = [];
 
   for (const window of snapshot.windows) {
     if (!TERMINAL_APP_PATTERN.test(window.app)) continue;
     const tagMatch = window.title.match(TASK_TAG_PATTERN);
     if (!tagMatch) continue;
     result.matched_count += 1;
-    const slug = `task_${tagMatch[1].trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`;
+    const rawSlug = tagMatch[1].trim();
+    const slug = `task_${rawSlug.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")}`;
     const candidates = sessions.filter((session) => isRecord(session) && typeof session.task_id === "string" && session.task_id === slug);
     if (candidates.length === 0) {
       result.skipped.push({ task_id: slug, window_id: window.id, window_title: window.title, reason: "no_session_for_task" });
@@ -65,9 +81,27 @@ export async function autoBindCodexFromWindows(options: AutoBindFromWindowsOptio
       result.skipped.push({ task_id: slug, window_id: window.id, window_title: window.title, reason: "session_missing_id" });
       continue;
     }
-    const perWindowTerminalRef = Number.isFinite(window.id)
-      ? `ghostty:win-${window.id}`
-      : fallbackTerminalRef;
+
+    let perWindowTerminalRef: string;
+    if (window.app.toLowerCase().includes("ghostty")) {
+      const resolution = await ghosttyResolver({ taskSlug: rawSlug }).catch(() => ({ ghosttyTextId: null, matched: 0, ambiguous: false }));
+      if (resolution.ambiguous) {
+        ambiguousSlugs.push(rawSlug);
+      }
+      if (resolution.ghosttyTextId) {
+        perWindowTerminalRef = `ghostty:win-${resolution.ghosttyTextId}`;
+      } else {
+        // Ghostty not running, no window matches the [task:<slug>] title, or
+        // resolver errored — fall back to ghostty:front so single-Ghostty
+        // dogfood keeps working byte-identical to V10a.
+        perWindowTerminalRef = fallbackTerminalRef;
+      }
+    } else if (Number.isFinite(window.id)) {
+      perWindowTerminalRef = `ghostty:win-${window.id}`;
+    } else {
+      perWindowTerminalRef = fallbackTerminalRef;
+    }
+
     const existingTerminalRef = isRecord(session) && typeof session.terminal_ref === "string" ? session.terminal_ref : undefined;
     if (existingTerminalRef === perWindowTerminalRef) {
       result.skipped.push({ task_id: slug, window_id: window.id, window_title: window.title, reason: "already_bound" });
@@ -112,10 +146,37 @@ export async function autoBindCodexFromWindows(options: AutoBindFromWindowsOptio
         skipped: result.skipped,
       }),
     });
+    if (ambiguousSlugs.length > 0) {
+      await options.observability.recordActivity({
+        type: "multiple_ghostty_windows_for_task",
+        occurred_at: (options.now ?? new Date()).toISOString(),
+        actor: "system",
+        status: "ok",
+        summary: `Multiple Ghostty windows match [task:<slug>] for ${ambiguousSlugs.length} slug(s); first id picked.`,
+        details: sanitizeActivityDetails({ slugs: ambiguousSlugs }),
+      });
+    }
   }
 
   return result;
 }
+
+const defaultRunOsascript: RunOsascript = async (args) => {
+  const { stdout, stderr } = await execFileAsync("osascript", args, { timeout: 5_000 });
+  return { stdout, stderr };
+};
+
+const defaultGhosttyResolver: GhosttyWindowResolver = async ({ taskSlug }) => {
+  if (process.platform !== "darwin") {
+    return { ghosttyTextId: null, matched: 0, ambiguous: false };
+  }
+  const resolution = await resolveGhosttyWindowId({ taskSlug, runOsascript: defaultRunOsascript });
+  return {
+    ghosttyTextId: resolution.ghosttyTextId,
+    matched: resolution.matched,
+    ambiguous: resolution.ambiguous,
+  };
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

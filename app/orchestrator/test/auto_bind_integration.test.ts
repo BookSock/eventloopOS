@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
+import type { GhosttyWindowResolver } from "../src/agents/codex/auto_bind.js";
 import { createInMemoryGatewayStore } from "../src/gateway_store.js";
 import { createGatewayServer } from "../src/server.js";
 import { createSeededStore } from "../src/store.js";
@@ -96,6 +97,17 @@ function createFakeTaskSessions(initial: TaskRuntimeSession[]): FakeTaskSessions
   };
 }
 
+// V10c — fake resolver maps task slug → synthetic Ghostty text-id.
+// Mirrors the production path: auto_bind enumerates Ghostty windows by
+// `[task:<slug>]` substring and writes ghostty:win-<text-id> rather than
+// the AeroSpace numeric id.
+function makeFakeGhosttyResolver(map: Record<string, string>): GhosttyWindowResolver {
+  return async ({ taskSlug }) => {
+    const textId = map[taskSlug];
+    return { ghosttyTextId: textId ?? null, matched: textId ? 1 : 0, ambiguous: false };
+  };
+}
+
 describe("codex auto-bind — V10 integration proof", () => {
   let server: Server;
   let baseUrl: string;
@@ -121,6 +133,10 @@ describe("codex auto-bind — V10 integration proof", () => {
       store,
       taskSessions,
       workspace,
+      ghosttyResolver: makeFakeGhosttyResolver({
+        blog: "ghost-blog-101",
+        recruiting: "ghost-recruiting-104",
+      }),
       now: () => clock,
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -157,9 +173,9 @@ describe("codex auto-bind — V10 integration proof", () => {
     assert.ok(blog, "task_blog should be bound");
     assert.ok(recruiting, "task_recruiting should be bound");
     assert.equal(blog!.window_id, 101);
-    assert.equal(blog!.terminal_ref, "ghostty:win-101", "per-window ref derived from AeroSpace window-id, not the legacy ghostty:front");
+    assert.equal(blog!.terminal_ref, "ghostty:win-ghost-blog-101", "per-window ref derived from resolved Ghostty text-id, not the AeroSpace numeric id");
     assert.equal(recruiting!.window_id, 104);
-    assert.equal(recruiting!.terminal_ref, "ghostty:win-104");
+    assert.equal(recruiting!.terminal_ref, "ghostty:win-ghost-recruiting-104");
     assert.notEqual(blog!.terminal_ref, recruiting!.terminal_ref, "two distinct windows must produce distinct terminal_refs");
 
     // Mail and the untagged Ghostty window must never appear in skipped — they
@@ -267,6 +283,7 @@ describe("codex auto-bind — V10 real-timer end-to-end", () => {
       store,
       taskSessions,
       workspace,
+      ghosttyResolver: makeFakeGhosttyResolver({ blog: "ghost-rt-401" }),
       now: () => clock,
     });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -322,6 +339,6 @@ describe("codex auto-bind — V10 real-timer end-to-end", () => {
     const lastCall = taskSessions.bindCalls.at(-1)!;
     assert.equal(lastCall.task_session_id, "session_blog_rt");
     assert.equal(lastCall.task_id, "task_blog");
-    assert.equal(lastCall.terminal_ref, "ghostty:win-401");
+    assert.equal(lastCall.terminal_ref, "ghostty:win-ghost-rt-401");
   });
 });

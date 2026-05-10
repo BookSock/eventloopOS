@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
+import type { GhosttyWindowResolver } from "./agents/codex/auto_bind.js";
 import type { GatewayStore } from "./gateway_store.js";
 import { routeNameForPath, sendObservedRouteResult } from "./http/route_observability.js";
 import { createInMemoryObservability, type Observability } from "./observability.js";
@@ -32,6 +33,7 @@ export type GatewayServerOptions = {
   terminalSendExecutor?: TerminalSendExecutor;
   terminalSendEnabled?: boolean;
   codexHome?: string;
+  ghosttyResolver?: GhosttyWindowResolver;
   now?: () => Date;
 };
 
@@ -53,6 +55,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
     terminalSendExecutor: options.terminalSendExecutor,
     terminalSendEnabled: options.terminalSendEnabled,
     codexHome: options.codexHome,
+    ghosttyResolver: options.ghosttyResolver,
     now: options.now,
   });
   const now = runtime.now;

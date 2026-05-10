@@ -1,3 +1,4 @@
+import type { GhosttyWindowResolver } from "./agents/codex/auto_bind.js";
 import type { GatewayStore } from "./gateway_store.js";
 import type { Observability } from "./observability.js";
 import type { McpSourceRegistry } from "./routes/mcp_sources.js";
@@ -25,6 +26,7 @@ export type Runtime = Readonly<{
   terminalSendExecutor?: TerminalSendExecutor;
   terminalSendEnabled?: boolean;
   codexHome?: string;
+  ghosttyResolver?: GhosttyWindowResolver;
   now: () => Date;
 }>;
 
@@ -38,6 +40,7 @@ export type CreateRuntimeOptions = {
   terminalSendExecutor?: TerminalSendExecutor;
   terminalSendEnabled?: boolean;
   codexHome?: string;
+  ghosttyResolver?: GhosttyWindowResolver;
   now?: () => Date;
 };
 
@@ -52,6 +55,7 @@ export function createRuntime(options: CreateRuntimeOptions): Runtime {
     terminalSendExecutor: options.terminalSendExecutor,
     terminalSendEnabled: options.terminalSendEnabled,
     codexHome: options.codexHome,
+    ghosttyResolver: options.ghosttyResolver,
     now: options.now ?? (() => new Date()),
   };
   return Object.freeze(runtime);

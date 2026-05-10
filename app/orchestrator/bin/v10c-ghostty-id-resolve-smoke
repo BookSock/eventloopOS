@@ -1,0 +1,245 @@
+#!/usr/bin/env node
+// V10c — live proof that resolveGhosttyWindowId enumerates a real Ghostty
+// window via AppleScript and returns its text id, which the dispatcher then
+// uses to land a keystroke in *that specific window*.
+//
+// What this proves end-to-end on a Mac with Ghostty installed:
+//   1. The orchestrator's resolver `resolveGhosttyWindowId` invokes osascript
+//      and parses the resulting window-id list correctly.
+//   2. The Ghostty text-id returned by the resolver is the SAME id that the
+//      dispatcher's AppleScript filter (`first window whose id is "<n>"`)
+//      accepts.
+//   3. A keystroke routed to `ghostty:win-<text-id>` lands in the matched
+//      window (proven by writing a marker to a temp log file from inside
+//      the Ghostty surface).
+//
+// Honest gaps:
+//   - Ghostty.sdef makes window/tab/terminal `name` read-only. We can't `set
+//     name` on a Ghostty window via AppleScript. So instead, we boot Ghostty
+//     with a shell command that emits an OSC 0 sequence to set the title to
+//     `[task:v10c-test-<pid>]`. Whether Ghostty respects OSC 0 in window
+//     titles is itself part of what this proof verifies.
+//   - Ghostty's text id stability across restarts is not documented. The
+//     resolver caches for 30s, which is fine for the auto-bind tick cadence
+//     even if ids rotate per launch.
+//
+// Gate: skipped unless EVENTLOOPOS_ENABLE_GHOSTTY_ID_RESOLVE_SMOKE=1.
+// macOS only. Skips cleanly if Ghostty.app is not installed.
+
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { existsSync } from "node:fs";
+import path from "node:path";
+
+const execFileP = promisify(execFile);
+
+if (process.env.EVENTLOOPOS_ENABLE_GHOSTTY_ID_RESOLVE_SMOKE !== "1") {
+  console.log("v10c ghostty-id-resolve smoke skipped: set EVENTLOOPOS_ENABLE_GHOSTTY_ID_RESOLVE_SMOKE=1");
+  process.exit(0);
+}
+
+if (process.platform !== "darwin") {
+  console.log("v10c ghostty-id-resolve smoke skipped: macOS only");
+  process.exit(0);
+}
+
+if (!existsSync("/Applications/Ghostty.app")) {
+  console.log("v10c ghostty-id-resolve smoke skipped: /Applications/Ghostty.app not installed");
+  process.exit(0);
+}
+
+if (!(await toolOnPath("osascript"))) {
+  console.log("v10c ghostty-id-resolve smoke skipped: 'osascript' not on PATH");
+  process.exit(0);
+}
+
+const taskSlug = `v10c-test-${process.pid}`;
+const titleTag = `[task:${taskSlug}]`;
+const marker = `eventloopos-v10c-marker-${process.pid}-${Date.now().toString(36)}`;
+const tmpRoot = await mkdtemp(path.join(tmpdir(), "v10c-ghostty-"));
+const titleSentinel = path.join(tmpRoot, "title-set.sentinel");
+const keystrokeLog = path.join(tmpRoot, "keystroke.log");
+
+let cleanupGhosttyWindowId = null;
+let resolvedTextId = null;
+
+try {
+  const resolverModuleUrl = new URL("../dist/src/agents/codex/ghostty_window_resolver.js", import.meta.url);
+  const { resolveGhosttyWindowId } = await import(resolverModuleUrl.href);
+  const dispatcherUrl = new URL("../dist/src/task_sessions/terminal_send.js", import.meta.url);
+  const { buildGhosttyAppleScript } = await import(dispatcherUrl.href);
+
+  console.log(`v10c task slug: ${taskSlug}`);
+  console.log(`v10c title tag: ${titleTag}`);
+  console.log(`v10c marker:    ${marker}`);
+
+  // 1. Boot a sacrificial Ghostty window. Ghostty's surface configuration
+  //    `command` parameter executes a shell command instead of the user's
+  //    default shell. We chain: emit OSC 0 to set the title to [task:slug],
+  //    write a sentinel so the proof knows the surface is up, then `cat`
+  //    so the window stays open and accepts subsequent input-text keystrokes.
+  //    `wait after command` keeps the window alive even if cat exits.
+  // bash --norc keeps the surface interactive so subsequent `input text`
+  // keystrokes are actually executed as shell commands, not just echoed by
+  // a non-shell consumer like `cat`. The OSC 0 + sentinel run as the bash
+  // PROMPT_COMMAND-style preamble via `eval` before the prompt.
+  const preamble = `printf '\\033]0;${titleTag}\\007'; printf 'v10c-ready\\n' > ${shellEscape(titleSentinel)}`;
+  const surfaceCommand = `bash --norc --noprofile -i -c ${shellEscape(`${preamble}; exec bash --norc --noprofile -i`)}`;
+
+  const bootScript = [
+    `tell application "Ghostty"`,
+    `  set cfg to new surface configuration`,
+    `  set command of cfg to ${appleScriptString(surfaceCommand)}`,
+    `  set wait after command of cfg to true`,
+    `  set newWin to new window with configuration cfg`,
+    `  return id of newWin`,
+    `end tell`,
+  ].join("\n");
+
+  let bootStdout = "";
+  try {
+    ({ stdout: bootStdout } = await execFileP("osascript", ["-e", bootScript]));
+  } catch (caught) {
+    console.error(`v10c boot script failed: ${caught instanceof Error ? caught.stderr ?? caught.message : String(caught)}`);
+    throw caught;
+  }
+  cleanupGhosttyWindowId = bootStdout.trim().replace(/^"+|"+$/g, "");
+  if (!cleanupGhosttyWindowId) throw new Error("failed to capture sacrificial Ghostty window id");
+  console.log(`v10c ghostty window text id (boot): ${cleanupGhosttyWindowId}`);
+
+  // 2. Wait until the shell-init OSC sequence has had a chance to fire.
+  //    Sentinel is written *after* the OSC printf, so its presence implies
+  //    the title was set (modulo Ghostty's OSC handling).
+  await waitFor(() => existsSync(titleSentinel), 5000, "Ghostty surface shell to come up");
+
+  // Some Ghostty versions debounce title updates; let it settle.
+  await sleep(700);
+
+  // 3. Run the orchestrator's resolver via real osascript subprocess.
+  const runOsascript = async (args) => {
+    const { stdout, stderr } = await execFileP("osascript", args, { timeout: 5_000 });
+    return { stdout, stderr };
+  };
+  const resolution = await resolveGhosttyWindowId({ taskSlug, runOsascript });
+  resolvedTextId = resolution.ghosttyTextId;
+  console.log(`v10c resolver matched=${resolution.matched} ambiguous=${resolution.ambiguous} ghosttyTextId=${resolvedTextId}`);
+
+  if (!resolvedTextId) {
+    throw new Error(
+      `resolver returned null for taskSlug='${taskSlug}'. ` +
+      `Likely cause: Ghostty did not honor the OSC 0 title-set escape sequence ` +
+      `in the surface initial input, so the window's name property never contains '${titleTag}'. ` +
+      `If so, this is the honest sdef-gap finding: Ghostty exposes window.name as read-only, ` +
+      `and there's no AppleScript-side way to retitle a window. The resolver still works for ` +
+      `windows whose title is set by the in-shell prompt or by Codex itself, but a sacrificial ` +
+      `proof needs the shell-side OSC pathway to actually update the AppleScript-visible name.`,
+    );
+  }
+
+  // 4. Use the dispatcher's actual buildGhosttyAppleScript with
+  //    terminalRef='ghostty:win-<text-id>' to land a marker in the matched
+  //    window. The marker writes itself to keystrokeLog from inside the
+  //    Ghostty surface, which gives us a ground-truth capture independent
+  //    of any window-scrape consent.
+  const keystrokeText = `printf 'v10c-keystroke %s\\n' '${marker}' >> ${shellEscape(keystrokeLog)}\n`;
+  const keystrokeScript = buildGhosttyAppleScript({
+    text: keystrokeText,
+    terminalRef: `ghostty:win-${resolvedTextId}`,
+  });
+  console.log(`\nv10c keystroke AppleScript:`);
+  console.log(indent(keystrokeScript));
+  await execFileP("osascript", ["-e", keystrokeScript]);
+
+  // 5. Wait for the marker to land in the per-window log.
+  await waitFor(
+    async () => {
+      try {
+        const contents = await readFile(keystrokeLog, "utf8");
+        return contents.includes(marker);
+      } catch {
+        return false;
+      }
+    },
+    5000,
+    "marker to land in keystroke log",
+  );
+
+  const finalLog = await readFile(keystrokeLog, "utf8");
+  if (!finalLog.includes(marker)) {
+    throw new Error(`marker ${marker} did not appear in ${keystrokeLog}.\n${finalLog}`);
+  }
+
+  const summary = {
+    ok: true,
+    test: "v10c-ghostty-id-resolve-smoke",
+    task_slug: taskSlug,
+    title_tag: titleTag,
+    resolved_ghostty_text_id: resolvedTextId,
+    resolver_matched: resolution.matched,
+    resolver_ambiguous: resolution.ambiguous,
+    keystroke_landed: true,
+    keystroke_log: keystrokeLog,
+  };
+  console.log(`\n${JSON.stringify(summary, null, 2)}`);
+  console.log("v10c ghostty-id-resolve smoke: PASS");
+} catch (error) {
+  console.error("v10c ghostty-id-resolve smoke: FAIL");
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  if (cleanupGhosttyWindowId) {
+    try {
+      const cleanupScript = [
+        `tell application "Ghostty"`,
+        `  try`,
+        `    close window id ${appleScriptString(cleanupGhosttyWindowId)}`,
+        `  end try`,
+        `end tell`,
+      ].join("\n");
+      await execFileP("osascript", ["-e", cleanupScript]);
+    } catch {
+      // best effort
+    }
+  }
+  try {
+    await rm(tmpRoot, { recursive: true, force: true });
+  } catch {
+    // best effort
+  }
+}
+
+function appleScriptString(value) {
+  return `"${String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
+}
+
+function shellEscape(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function toolOnPath(tool) {
+  return new Promise((resolve) => {
+    const child = spawn("which", [tool], { stdio: ["ignore", "ignore", "ignore"] });
+    child.on("error", () => resolve(false));
+    child.on("exit", (code) => resolve(code === 0));
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitFor(predicate, timeoutMs, label) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const result = await predicate();
+    if (result) return;
+    await sleep(50);
+  }
+  throw new Error(`waitFor[${label}]: predicate not true within ${timeoutMs}ms`);
+}
+
+function indent(value) {
+  return String(value).split("\n").map((line) => `    ${line}`).join("\n");
+}
