@@ -59,8 +59,8 @@ public struct QueueAppConfiguration: Equatable, Sendable {
         switch clientMode {
         case .fake:
             FakeCodexForegroundResolver()
-        case .http:
-            NoOpCodexForegroundResolver()
+        case let .http(url):
+            HTTPCodexForegroundResolver(baseURL: url)
         }
     }
 

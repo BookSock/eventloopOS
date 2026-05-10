@@ -100,6 +100,73 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         XCTAssertEqual(client.setCurrentTaskRequests, [])
     }
 
+    func testLoadAdvanceSnapshotPopulatesTasksByWorkspaceViaGetTaskWithLayout() async {
+        let paperForB = ReviewPacket(
+            id: "pkt_b",
+            reviewPacketId: "rpkt_b",
+            taskId: "task_b",
+            title: "B paper",
+            summary: "switch me",
+            source: "manual",
+            priority: 500,
+            recommendedAction: "review",
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+        let client = FakeQueueClient(packets: [paperForB])
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: WorkspaceSnapshot(
+                windows: [],
+                activeWorkspace: "ws_a",
+                focusedWindowId: nil
+            )
+        )
+        let aero = FakeAeroSpaceWorkspaceClient(focused: "ws_a")
+        let resolver = FakeCodexForegroundResolver(.none)
+        let viewModel = QueueViewModel(
+            client: client,
+            workspaceClient: workspaceClient,
+            aeroSpaceClient: aero,
+            codexForegroundResolver: resolver,
+            limboWorkspaceId: "limbo"
+        )
+
+        let taskA = TaskRecord(
+            taskId: "task_a",
+            primaryAnchorKind: .codexThread,
+            primaryAnchorId: "thr_a",
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+        let taskB = TaskRecord(
+            taskId: "task_b",
+            primaryAnchorKind: .codexThread,
+            primaryAnchorId: "thr_b",
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+        let taskUnused = TaskRecord(
+            taskId: "task_unused",
+            primaryAnchorKind: .codexThread,
+            primaryAnchorId: "thr_unused",
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+        client.setFakeTasks([taskA, taskB, taskUnused])
+        client.setFakeCurrentTask("task_a")
+        client.setFakeTaskLayout(taskId: "task_a", layout: WorkspaceSnapshot(windows: [], activeWorkspace: "ws_a"))
+        client.setFakeTaskLayout(taskId: "task_b", layout: WorkspaceSnapshot(windows: [], activeWorkspace: "ws_b"))
+        client.setFakeTaskLayout(taskId: "task_unused", layout: WorkspaceSnapshot(windows: [], activeWorkspace: "ws_unused"))
+
+        await viewModel.advance()
+
+        XCTAssertEqual(aero.switchedWorkspaces, ["ws_b"], "advance must resolve task_b's workspace via getTaskWithLayout")
+        if case let .switchedToPaper(packetId) = viewModel.advanceToast {
+            XCTAssertEqual(packetId, "pkt_b")
+        } else {
+            XCTFail("expected switchedToPaper toast, got \(String(describing: viewModel.advanceToast))")
+        }
+    }
+
     func testAdvanceFromLimboWithoutForegroundCodexShowsToast() async {
         let client = FakeQueueClient(packets: [])
         let workspaceClient = FakeWorkspaceClient()

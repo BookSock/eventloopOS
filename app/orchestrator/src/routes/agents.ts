@@ -1,4 +1,5 @@
 import { autoBindCodexFromWindows } from "../agents/codex/auto_bind.js";
+import { resolveForegroundCodex } from "../agents/codex/foreground_resolver.js";
 import { inspectCodexSession } from "../agents/codex/session_inspector.js";
 import { inspectClaudeSession } from "../agents/claude/session_inspector.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
@@ -51,6 +52,23 @@ export async function handleAgentsRoute(input: {
       now: input.now,
     });
     return ok(200, { ok: true, ...result, request_id: input.requestId });
+  }
+
+  if (input.method === "POST" && input.pathname === "/agents/codex/resolve-foreground") {
+    if (!input.runtime.runOsascript) {
+      return ok(200, {
+        codex_thread_id: null,
+        ghostty_window_id: null,
+        source: "none",
+        request_id: input.requestId,
+      });
+    }
+    const resolution = await resolveForegroundCodex({
+      runOsascript: input.runtime.runOsascript,
+      codexHome: input.runtime.codexHome,
+      listRolloutFiles: input.runtime.listRolloutFiles,
+    });
+    return ok(200, { ...resolution, request_id: input.requestId });
   }
 
   const inspectMatch = input.pathname.match(/^\/agents\/codex\/inspect\/([^/]+)$/);

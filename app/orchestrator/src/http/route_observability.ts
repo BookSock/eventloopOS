@@ -76,6 +76,7 @@ export function routeNameForPath(method: string | undefined, pathname: string): 
     [/^\/master\/fan-out$/, "master_fan_out"],
     [/^\/modes\/manual$/, "modes_manual"],
     [/^\/agents\/codex\/auto-bind$/, "agents_codex_auto_bind"],
+    [/^\/agents\/codex\/resolve-foreground$/, "agents_codex_resolve_foreground"],
     [/^\/agents\/codex\/inspect\/[^/]+$/, "agents_codex_inspect"],
     [/^\/agents\/claude\/inspect\/[^/]+$/, "agents_claude_inspect"],
     [/^\/review-packets\/[^/]+$/, "review_packet_get"],

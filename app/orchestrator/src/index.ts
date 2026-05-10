@@ -51,6 +51,13 @@ const terminalSendExecutor: TerminalSendExecutor = (command: TerminalSendCommand
     execFile(command.file, command.args, (error) => (error ? reject(error) : resolve()));
   });
 
+const runOsascript = process.platform === "darwin"
+  ? async (args: string[]) => {
+      const { stdout, stderr } = await execFilePromise("osascript", args);
+      return { stdout, stderr };
+    }
+  : undefined;
+
 const server = createGatewayServer({
   store: gatewayRuntime.store,
   taskSessions,
@@ -61,6 +68,7 @@ const server = createGatewayServer({
   terminalSendExecutor,
   terminalSendEnabled: terminalSendEnabledFromEnv(process.env),
   codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
+  runOsascript,
 });
 
 server.listen(config.value.port, config.value.host, () => {

@@ -858,6 +858,18 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         lock.withLock { tasks }
     }
 
+    public func getTaskWithLayout(taskId: String) async throws -> TaskGetEnvelope {
+        try lock.withLock {
+            guard let record = tasks.first(where: { $0.taskId == taskId }) else {
+                throw QueueClientError.packetNotFound(taskId)
+            }
+            let layoutRecord = taskLayouts[taskId].map { layout in
+                TaskLayoutRecord(taskId: taskId, layout: layout, updatedAt: record.updatedAt)
+            }
+            return TaskGetEnvelope(task: record, layout: layoutRecord)
+        }
+    }
+
     public func updateTaskLayout(taskId: String, layout: WorkspaceSnapshot) async throws -> TaskRecord {
         try lock.withLock {
             updateTaskLayoutCalls.append((taskId: taskId, layout: layout))

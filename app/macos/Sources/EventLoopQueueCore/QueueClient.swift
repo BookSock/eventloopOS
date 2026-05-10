@@ -33,6 +33,7 @@ public protocol QueueClient: Sendable {
     func getCurrentTask() async throws -> CurrentTaskState
     func setCurrentTask(taskId: String?) async throws -> CurrentTaskState
     func listTasks() async throws -> [TaskRecord]
+    func getTaskWithLayout(taskId: String) async throws -> TaskGetEnvelope
     func updateTaskLayout(taskId: String, layout: WorkspaceSnapshot) async throws -> TaskRecord
 }
 
@@ -519,6 +520,13 @@ public struct HTTPQueueClient: QueueClient {
         let (data, response) = try await session.data(from: url)
         try validate(response: response)
         return try decoder.decode(TasksListEnvelope.self, from: data).tasks
+    }
+
+    public func getTaskWithLayout(taskId: String) async throws -> TaskGetEnvelope {
+        let url = baseURL.appending(path: "tasks/\(taskId)")
+        let (data, response) = try await session.data(from: url)
+        try validate(response: response)
+        return try decoder.decode(TaskGetEnvelope.self, from: data)
     }
 
     public func updateTaskLayout(taskId: String, layout: WorkspaceSnapshot) async throws -> TaskRecord {

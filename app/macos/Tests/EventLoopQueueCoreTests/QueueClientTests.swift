@@ -1182,6 +1182,123 @@ final class QueueClientTests: XCTestCase {
         XCTAssertNil(json?["selectorHint"])
     }
 
+    func testHTTPQueueClientFetchesTaskWithLayout() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.url?.path, "/tasks/task_blog_feedback")
+            XCTAssertEqual(request.httpMethod, "GET")
+            return """
+            {
+              "task": {
+                "task_id": "task_blog_feedback",
+                "primary_anchor_kind": "codex_thread",
+                "primary_anchor_id": "thr_blog",
+                "created_at": "2026-05-10T12:00:00.000Z",
+                "updated_at": "2026-05-10T12:00:00.000Z",
+                "auto_paper_idle_seconds": 60
+              },
+              "layout": {
+                "task_id": "task_blog_feedback",
+                "layout": {
+                  "backend": "aerospace",
+                  "windows": [{"id": 1, "app": "Ghostty", "title": "[task:blog]", "workspace": "ws_blog"}],
+                  "activeWorkspace": "ws_blog",
+                  "focusedWindowId": 1
+                },
+                "updated_at": "2026-05-10T12:00:01.000Z"
+              }
+            }
+            """
+        }
+        _ = recorder
+
+        let envelope = try await client.getTaskWithLayout(taskId: "task_blog_feedback")
+        XCTAssertEqual(envelope.task.taskId, "task_blog_feedback")
+        XCTAssertEqual(envelope.layout?.layout.activeWorkspace, "ws_blog")
+        XCTAssertEqual(envelope.layout?.layout.windows.first?.app, "Ghostty")
+    }
+
+    func testHTTPCodexForegroundResolverDecodesTitleResolverResponse() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let recorder = HTTPClientRecorder()
+        MockURLProtocol.registry.setHandler { request in
+            recorder.requests.append(request)
+            let body = """
+            {"codex_thread_id": null, "ghostty_window_id": "ghost-blog-101", "source": "title_resolver"}
+            """
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, body.data(using: .utf8)!)
+        }
+
+        let resolver = HTTPCodexForegroundResolver(
+            baseURL: URL(string: "http://127.0.0.1:4377")!,
+            session: session
+        )
+        let result = await resolver.resolveForeground()
+
+        XCTAssertEqual(result.codexThreadId, nil)
+        XCTAssertEqual(result.ghosttyWindowId, "ghost-blog-101")
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertEqual(recorder.requests.first?.url?.path, "/agents/codex/resolve-foreground")
+        XCTAssertEqual(recorder.requests.first?.httpMethod, "POST")
+    }
+
+    func testHTTPCodexForegroundResolverDecodesCodexSessionResponse() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        MockURLProtocol.registry.setHandler { request in
+            let body = """
+            {"codex_thread_id": "thr-aaaa", "ghostty_window_id": "ghost-front", "source": "codex_session"}
+            """
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, body.data(using: .utf8)!)
+        }
+
+        let resolver = HTTPCodexForegroundResolver(
+            baseURL: URL(string: "http://127.0.0.1:4377")!,
+            session: session
+        )
+        let result = await resolver.resolveForeground()
+
+        XCTAssertEqual(result.codexThreadId, "thr-aaaa")
+        XCTAssertEqual(result.ghosttyWindowId, "ghost-front")
+    }
+
+    func testHTTPCodexForegroundResolverReturnsNoneOnHTTPError() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        MockURLProtocol.registry.setHandler { request in
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 500,
+                httpVersion: nil,
+                headerFields: nil
+            )!
+            return (response, Data())
+        }
+
+        let resolver = HTTPCodexForegroundResolver(
+            baseURL: URL(string: "http://127.0.0.1:4377")!,
+            session: session
+        )
+        let result = await resolver.resolveForeground()
+
+        XCTAssertEqual(result, .none)
+    }
+
     private func loadFixturePackets() throws -> [ReviewPacket] {
         let url = Bundle.module.url(forResource: "fake_orchestrator_queue", withExtension: "json")!
         let data = try Data(contentsOf: url)

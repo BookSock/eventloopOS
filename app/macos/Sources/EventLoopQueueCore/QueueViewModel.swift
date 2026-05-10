@@ -552,10 +552,20 @@ public final class QueueViewModel: ObservableObject {
         let queue = (try? await client.fetchQueue()) ?? []
         let foreground = await codexForegroundResolver.resolveForeground()
 
+        var relevantTaskIds = Set<String>()
+        if let currentTaskId = currentTaskState.task?.taskId {
+            relevantTaskIds.insert(currentTaskId)
+        }
+        for packet in queue {
+            if let taskId = packet.taskId {
+                relevantTaskIds.insert(taskId)
+            }
+        }
+
         var tasksByWorkspace: [String: TaskRecord] = [:]
-        for task in allTasks {
-            let workspaceId = await workspaceIdForTask(task) ?? ""
-            if !workspaceId.isEmpty, tasksByWorkspace[workspaceId] == nil {
+        for task in allTasks where relevantTaskIds.contains(task.taskId) {
+            guard let workspaceId = await workspaceIdForTask(task) else { continue }
+            if tasksByWorkspace[workspaceId] == nil {
                 tasksByWorkspace[workspaceId] = task
             }
         }
@@ -574,21 +584,10 @@ public final class QueueViewModel: ObservableObject {
     }
 
     private func workspaceIdForTask(_ task: TaskRecord) async -> String? {
-        guard let snapshot = try? await fetchTaskLayoutSnapshot(taskId: task.taskId) else {
+        guard let envelope = try? await client.getTaskWithLayout(taskId: task.taskId) else {
             return nil
         }
-        return snapshot.activeWorkspace
-    }
-
-    private func fetchTaskLayoutSnapshot(taskId: String) async throws -> WorkspaceSnapshot? {
-        // The fake/HTTP clients expose layout via getTask responses. For Phase 3 we read it
-        // best-effort from the layout-bearing get-task envelope. To avoid adding another
-        // client method, we synthesize from the create/update flows or the layout in the
-        // existing snapshot. Here we surface nil if not available; coordinators tolerate it.
-        if let fake = client as? FakeQueueClient {
-            return fake.taskLayout(taskId: taskId)
-        }
-        return nil
+        return envelope.layout?.layout.activeWorkspace
     }
 
     private func execute(advanceAction: AdvanceAction, snapshot: AdvanceServerSnapshot) async {

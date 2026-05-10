@@ -2,6 +2,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { randomUUID } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import type { GhosttyWindowResolver } from "./agents/codex/auto_bind.js";
+import type { ListRolloutFiles } from "./agents/codex/foreground_resolver.js";
+import type { RunOsascript } from "./agents/codex/ghostty_window_resolver.js";
 import type { GatewayStore } from "./gateway_store.js";
 import { routeNameForPath, sendObservedRouteResult } from "./http/route_observability.js";
 import { createInMemoryObservability, type Observability } from "./observability.js";
@@ -35,6 +37,8 @@ export type GatewayServerOptions = {
   terminalSendEnabled?: boolean;
   codexHome?: string;
   ghosttyResolver?: GhosttyWindowResolver;
+  runOsascript?: RunOsascript;
+  listRolloutFiles?: ListRolloutFiles;
   now?: () => Date;
 };
 
@@ -57,6 +61,8 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
     terminalSendEnabled: options.terminalSendEnabled,
     codexHome: options.codexHome,
     ghosttyResolver: options.ghosttyResolver,
+    runOsascript: options.runOsascript,
+    listRolloutFiles: options.listRolloutFiles,
     now: options.now,
   });
   const now = runtime.now;
