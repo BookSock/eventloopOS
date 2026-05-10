@@ -20,6 +20,7 @@ describe("Postgres migrations", () => {
       "0010_task_session_terminal_refs.sql",
       "0011_onboarding_rejections.sql",
       "0012_manual_mode_state.sql",
+      "0013_tasks.sql",
     ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
@@ -58,5 +59,9 @@ describe("Postgres migrations", () => {
     assert.match(sql, /CREATE TABLE onboarding_rejections/);
     assert.match(sql, /proposal_key text PRIMARY KEY/);
     assert.match(sql, /CREATE TABLE onboarding_approval_batches/);
+    assert.match(sql, /CREATE TABLE tasks/);
+    assert.match(sql, /tasks_primary_anchor_uidx/);
+    assert.match(sql, /CREATE TABLE task_layouts/);
+    assert.match(sql, /CREATE TABLE current_task_state/);
   });
 });

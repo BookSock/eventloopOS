@@ -3,7 +3,7 @@ import { after, before, describe, it, type TestContext } from "node:test";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { createInMemoryGatewayStore, createPostgresGatewayStore, type GatewayStore } from "../src/gateway_store.js";
 import { PostgresQueueStore } from "../src/db/postgres_queue_store.js";
-import type { AgentRun } from "../src/contracts.js";
+import type { AgentRun, WorkspaceSnapshot } from "../src/contracts.js";
 import type { McpEvent } from "../src/integrations/mcp_poll/types.js";
 import type { ContextRestoreRequestRecord, InMemoryStore } from "../src/store.js";
 
@@ -717,6 +717,96 @@ function runGatewayStoreContract(
         await harness.cleanup();
       }
     });
+
+    it("creates tasks idempotently by primary anchor and tracks current-task singleton", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        const layoutA: WorkspaceSnapshot = {
+          backend: "aerospace",
+          activeWorkspace: "eventloop-blog",
+          focusedWindowId: 11,
+          windows: [{ id: 11, app: "Ghostty", title: "codex blog", workspace: "eventloop-blog" }],
+        };
+        const layoutB: WorkspaceSnapshot = {
+          backend: "aerospace",
+          activeWorkspace: "eventloop-reports",
+          focusedWindowId: 22,
+          windows: [{ id: 22, app: "Ghostty", title: "codex reports", workspace: "eventloop-reports" }],
+        };
+
+        const initialState = await harness.store.getCurrentTaskState();
+        assert.equal(initialState.current_task_id, null);
+
+        const first = await harness.store.createTask({
+          primaryAnchor: { kind: "codex_thread", id: "thread-aaaa" },
+          capturedLayout: layoutA,
+          autoPaperIdleSeconds: 90,
+          now,
+        });
+        assert.equal(first.created, true);
+        assert.equal(first.task.primary_anchor_kind, "codex_thread");
+        assert.equal(first.task.primary_anchor_id, "thread-aaaa");
+        assert.equal(first.task.auto_paper_idle_seconds, 90);
+        assert.equal(first.layout.layout.activeWorkspace, "eventloop-blog");
+
+        const replay = await harness.store.createTask({
+          primaryAnchor: { kind: "codex_thread", id: "thread-aaaa" },
+          capturedLayout: layoutB,
+          now: new Date("2026-05-06T12:01:00.000Z"),
+        });
+        assert.equal(replay.created, false);
+        assert.equal(replay.task.task_id, first.task.task_id);
+        assert.equal(replay.layout.layout.activeWorkspace, "eventloop-blog", "layout must not be overwritten on idempotent replay");
+
+        const fetchedByAnchor = await harness.store.getTaskByAnchor("codex_thread", "thread-aaaa");
+        assert.equal(fetchedByAnchor?.task_id, first.task.task_id);
+
+        const second = await harness.store.createTask({
+          primaryAnchor: { kind: "ghostty_window", id: "win-7" },
+          capturedLayout: layoutB,
+          now: new Date("2026-05-06T12:02:00.000Z"),
+        });
+        assert.equal(second.created, true);
+        assert.notEqual(second.task.task_id, first.task.task_id);
+        assert.equal(second.task.auto_paper_idle_seconds, 60);
+
+        const list = await harness.store.listTasks();
+        assert.deepEqual(list.map((entry) => entry.task_id).sort(), [first.task.task_id, second.task.task_id].sort());
+
+        const setA = await harness.store.setCurrentTaskId(first.task.task_id, new Date("2026-05-06T12:03:00.000Z"));
+        assert.equal(setA.current_task_id, first.task.task_id);
+        assert.equal(setA.entered_at, "2026-05-06T12:03:00.000Z");
+
+        const reEnterSame = await harness.store.setCurrentTaskId(first.task.task_id, new Date("2026-05-06T12:04:00.000Z"));
+        assert.equal(reEnterSame.entered_at, "2026-05-06T12:03:00.000Z", "entered_at must pin while same task remains current");
+
+        const switchToB = await harness.store.setCurrentTaskId(second.task.task_id, new Date("2026-05-06T12:05:00.000Z"));
+        assert.equal(switchToB.current_task_id, second.task.task_id);
+        assert.equal(switchToB.entered_at, "2026-05-06T12:05:00.000Z");
+
+        const cleared = await harness.store.setCurrentTaskId(null, new Date("2026-05-06T12:06:00.000Z"));
+        assert.equal(cleared.current_task_id, null);
+        assert.equal(cleared.entered_at, undefined);
+
+        const layoutUpdated = await harness.store.updateTaskLayout(first.task.task_id, layoutB, new Date("2026-05-06T12:07:00.000Z"));
+        assert.equal(layoutUpdated?.task_id, first.task.task_id);
+        assert.equal(layoutUpdated?.updated_at, "2026-05-06T12:07:00.000Z");
+        const layoutAfter = await harness.store.getTaskLayout(first.task.task_id);
+        assert.equal(layoutAfter?.layout.activeWorkspace, "eventloop-reports");
+
+        const paperEmitted = await harness.store.recordTaskPaperEmitted(first.task.task_id, new Date("2026-05-06T12:08:00.000Z"));
+        assert.equal(paperEmitted?.last_paper_emitted_at, "2026-05-06T12:08:00.000Z");
+
+        const missingTaskUpdate = await harness.store.updateTaskLayout("task_missing", layoutA, now);
+        assert.equal(missingTaskUpdate, undefined);
+        const missingPaper = await harness.store.recordTaskPaperEmitted("task_missing", now);
+        assert.equal(missingPaper, undefined);
+      } finally {
+        await harness.cleanup();
+      }
+    });
   });
 }
 
@@ -852,7 +942,10 @@ async function clearPostgresTestData(store: PostgresQueueStore): Promise<void> {
       task_session_terminal_refs,
       onboarding_rejections,
       onboarding_approval_batches,
-      manual_mode_state
+      manual_mode_state,
+      task_layouts,
+      current_task_state,
+      tasks
     RESTART IDENTITY CASCADE
   `);
 }

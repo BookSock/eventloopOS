@@ -39,6 +39,10 @@ import {
   type OnboardingRejectionRecord,
   type OnboardingApprovalBatchRecord,
   type ManualModeStateRecord,
+  type TaskRecord,
+  type TaskLayoutRecord,
+  type TaskAnchorKind,
+  type CurrentTaskStateRecord,
 } from "../store.js";
 import { stableId } from "../store/ids.js";
 import { runMigrations } from "./migrations.js";
@@ -597,6 +601,203 @@ export class PostgresQueueStore {
       [timestamp],
     );
     return rowToManualModeStateRecord(result.rows[0]);
+  }
+
+  async createTask(input: {
+    primaryAnchor: { kind: TaskAnchorKind; id: string };
+    capturedLayout: WorkspaceSnapshot;
+    autoPaperIdleSeconds?: number;
+    now: Date;
+  }): Promise<{ task: TaskRecord; layout: TaskLayoutRecord; created: boolean }> {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const existingResult = await client.query(
+        `
+          SELECT task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+          FROM tasks
+          WHERE primary_anchor_kind = $1 AND primary_anchor_id = $2
+        `,
+        [input.primaryAnchor.kind, input.primaryAnchor.id],
+      );
+      if (existingResult.rows[0]) {
+        const task = rowToTaskRecord(existingResult.rows[0]);
+        const layoutResult = await client.query(
+          `SELECT task_id, layout_json, updated_at FROM task_layouts WHERE task_id = $1`,
+          [task.task_id],
+        );
+        await client.query("COMMIT");
+        const layoutRow = layoutResult.rows[0];
+        const layout = layoutRow
+          ? rowToTaskLayoutRecord(layoutRow)
+          : { task_id: task.task_id, layout: input.capturedLayout, updated_at: task.updated_at };
+        return { task, layout, created: false };
+      }
+      const timestamp = input.now.toISOString();
+      const taskId = `task_${stableId(`${input.primaryAnchor.kind}_${input.primaryAnchor.id}_${timestamp}`)}`;
+      const idleSeconds =
+        typeof input.autoPaperIdleSeconds === "number" && Number.isFinite(input.autoPaperIdleSeconds)
+          ? Math.max(1, Math.floor(input.autoPaperIdleSeconds))
+          : 60;
+      const inserted = await client.query(
+        `
+          INSERT INTO tasks (task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, auto_paper_idle_seconds)
+          VALUES ($1, $2, $3, $4::timestamptz, $4::timestamptz, $5)
+          RETURNING task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        `,
+        [taskId, input.primaryAnchor.kind, input.primaryAnchor.id, timestamp, idleSeconds],
+      );
+      const layoutInserted = await client.query(
+        `
+          INSERT INTO task_layouts (task_id, layout_json, updated_at)
+          VALUES ($1, $2::jsonb, $3::timestamptz)
+          RETURNING task_id, layout_json, updated_at
+        `,
+        [taskId, JSON.stringify(input.capturedLayout), timestamp],
+      );
+      await client.query("COMMIT");
+      return {
+        task: rowToTaskRecord(inserted.rows[0]),
+        layout: rowToTaskLayoutRecord(layoutInserted.rows[0]),
+        created: true,
+      };
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async getTask(taskId: string): Promise<TaskRecord | undefined> {
+    const result = await this.pool.query(
+      `
+        SELECT task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        FROM tasks
+        WHERE task_id = $1
+      `,
+      [taskId],
+    );
+    const row = result.rows[0];
+    return row ? rowToTaskRecord(row) : undefined;
+  }
+
+  async getTaskByAnchor(kind: TaskAnchorKind, id: string): Promise<TaskRecord | undefined> {
+    const result = await this.pool.query(
+      `
+        SELECT task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        FROM tasks
+        WHERE primary_anchor_kind = $1 AND primary_anchor_id = $2
+      `,
+      [kind, id],
+    );
+    const row = result.rows[0];
+    return row ? rowToTaskRecord(row) : undefined;
+  }
+
+  async listTasks(): Promise<TaskRecord[]> {
+    const result = await this.pool.query(
+      `
+        SELECT task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+        FROM tasks
+        ORDER BY created_at ASC, task_id ASC
+      `,
+    );
+    return result.rows.map(rowToTaskRecord);
+  }
+
+  async getTaskLayout(taskId: string): Promise<TaskLayoutRecord | undefined> {
+    const result = await this.pool.query(
+      `SELECT task_id, layout_json, updated_at FROM task_layouts WHERE task_id = $1`,
+      [taskId],
+    );
+    const row = result.rows[0];
+    return row ? rowToTaskLayoutRecord(row) : undefined;
+  }
+
+  async updateTaskLayout(taskId: string, layout: WorkspaceSnapshot, now: Date): Promise<TaskRecord | undefined> {
+    const timestamp = now.toISOString();
+    const updated = await this.pool.query(
+      `
+        UPDATE tasks SET updated_at = $2::timestamptz
+        WHERE task_id = $1
+        RETURNING task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+      `,
+      [taskId, timestamp],
+    );
+    if (!updated.rows[0]) return undefined;
+    await this.pool.query(
+      `
+        INSERT INTO task_layouts (task_id, layout_json, updated_at)
+        VALUES ($1, $2::jsonb, $3::timestamptz)
+        ON CONFLICT (task_id) DO UPDATE SET
+          layout_json = EXCLUDED.layout_json,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [taskId, JSON.stringify(layout), timestamp],
+    );
+    return rowToTaskRecord(updated.rows[0]);
+  }
+
+  async getCurrentTaskState(): Promise<CurrentTaskStateRecord> {
+    const result = await this.pool.query(
+      `SELECT current_task_id, entered_at, updated_at FROM current_task_state WHERE id = 'singleton'`,
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return { current_task_id: null, updated_at: new Date(0).toISOString() };
+    }
+    return rowToCurrentTaskStateRecord(row);
+  }
+
+  async setCurrentTaskId(taskId: string | null, now: Date): Promise<CurrentTaskStateRecord> {
+    const timestamp = now.toISOString();
+    if (taskId === null) {
+      const result = await this.pool.query(
+        `
+          INSERT INTO current_task_state (id, current_task_id, entered_at, updated_at)
+          VALUES ('singleton', NULL, NULL, $1::timestamptz)
+          ON CONFLICT (id) DO UPDATE SET
+            current_task_id = NULL,
+            entered_at = NULL,
+            updated_at = EXCLUDED.updated_at
+          RETURNING current_task_id, entered_at, updated_at
+        `,
+        [timestamp],
+      );
+      return rowToCurrentTaskStateRecord(result.rows[0]);
+    }
+    const result = await this.pool.query(
+      `
+        INSERT INTO current_task_state (id, current_task_id, entered_at, updated_at)
+        VALUES ('singleton', $1, $2::timestamptz, $2::timestamptz)
+        ON CONFLICT (id) DO UPDATE SET
+          current_task_id = EXCLUDED.current_task_id,
+          entered_at = CASE
+            WHEN current_task_state.current_task_id = EXCLUDED.current_task_id AND current_task_state.entered_at IS NOT NULL
+              THEN current_task_state.entered_at
+            ELSE EXCLUDED.entered_at
+          END,
+          updated_at = EXCLUDED.updated_at
+        RETURNING current_task_id, entered_at, updated_at
+      `,
+      [taskId, timestamp],
+    );
+    return rowToCurrentTaskStateRecord(result.rows[0]);
+  }
+
+  async recordTaskPaperEmitted(taskId: string, now: Date): Promise<TaskRecord | undefined> {
+    const timestamp = now.toISOString();
+    const result = await this.pool.query(
+      `
+        UPDATE tasks SET last_paper_emitted_at = $2::timestamptz, updated_at = $2::timestamptz
+        WHERE task_id = $1
+        RETURNING task_id, primary_anchor_kind, primary_anchor_id, created_at, updated_at, last_paper_emitted_at, auto_paper_idle_seconds
+      `,
+      [taskId, timestamp],
+    );
+    const row = result.rows[0];
+    return row ? rowToTaskRecord(row) : undefined;
   }
 
   async recordWorkspaceRestoreReceipt(input: {
@@ -1737,6 +1938,47 @@ function rowToTaskWorkspaceSnapshotRecord(row: Record<string, unknown>): TaskWor
     updated_at: requiredDateToIso(row.updated_at),
     source_queue_item_id: row.source_queue_item_id ? String(row.source_queue_item_id) : undefined,
     actor_id: row.actor_id ? String(row.actor_id) : undefined,
+  };
+}
+
+function rowToTaskRecord(row: Record<string, unknown>): TaskRecord {
+  const lastPaper = row.last_paper_emitted_at;
+  return {
+    task_id: String(row.task_id),
+    primary_anchor_kind: row.primary_anchor_kind as TaskAnchorKind,
+    primary_anchor_id: String(row.primary_anchor_id),
+    created_at: requiredDateToIso(row.created_at),
+    updated_at: requiredDateToIso(row.updated_at),
+    last_paper_emitted_at:
+      lastPaper instanceof Date
+        ? lastPaper.toISOString()
+        : typeof lastPaper === "string" && lastPaper
+          ? new Date(lastPaper).toISOString()
+          : undefined,
+    auto_paper_idle_seconds: Number(row.auto_paper_idle_seconds),
+  };
+}
+
+function rowToTaskLayoutRecord(row: Record<string, unknown>): TaskLayoutRecord {
+  return {
+    task_id: String(row.task_id),
+    layout: row.layout_json as WorkspaceSnapshot,
+    updated_at: requiredDateToIso(row.updated_at),
+  };
+}
+
+function rowToCurrentTaskStateRecord(row: Record<string, unknown>): CurrentTaskStateRecord {
+  const enteredAt = row.entered_at;
+  const currentTaskId = row.current_task_id;
+  return {
+    current_task_id: currentTaskId === null || currentTaskId === undefined ? null : String(currentTaskId),
+    entered_at:
+      enteredAt instanceof Date
+        ? enteredAt.toISOString()
+        : typeof enteredAt === "string" && enteredAt
+          ? new Date(enteredAt).toISOString()
+          : undefined,
+    updated_at: requiredDateToIso(row.updated_at),
   };
 }
 

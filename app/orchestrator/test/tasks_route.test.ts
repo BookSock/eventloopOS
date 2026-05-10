@@ -1,0 +1,244 @@
+import assert from "node:assert/strict";
+import { after, before, describe, it } from "node:test";
+import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
+import { createInMemoryGatewayStore } from "../src/gateway_store.js";
+import { createGatewayServer } from "../src/server.js";
+import { createSeededStore } from "../src/store.js";
+import type { WorkspaceSnapshot } from "../src/contracts.js";
+
+const fixedNow = new Date("2026-05-10T12:00:00.000Z");
+
+const layoutA: WorkspaceSnapshot = {
+  backend: "aerospace",
+  activeWorkspace: "eventloop-blog",
+  focusedWindowId: 11,
+  windows: [{ id: 11, app: "Ghostty", title: "codex blog", workspace: "eventloop-blog" }],
+};
+
+const layoutB: WorkspaceSnapshot = {
+  backend: "aerospace",
+  activeWorkspace: "eventloop-reports",
+  focusedWindowId: 22,
+  windows: [{ id: 22, app: "Ghostty", title: "codex reports", workspace: "eventloop-reports" }],
+};
+
+describe("tasks route — phase 2 of hotkey state machine", () => {
+  let server: Server;
+  let baseUrl: string;
+
+  before(async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    server = createGatewayServer({ store, now: () => fixedNow });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  after(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  });
+
+  it("creates a task and reports current=false until /tasks/current is set", async () => {
+    const response = await fetch(`${baseUrl}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        primary_anchor: { kind: "codex_thread", id: "thread-route-1" },
+        captured_layout: layoutA,
+        auto_paper_idle_seconds: 45,
+      }),
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json() as {
+      task: { task_id: string; primary_anchor_id: string; auto_paper_idle_seconds: number };
+      created: boolean;
+      current: boolean;
+    };
+    assert.equal(body.task.primary_anchor_id, "thread-route-1");
+    assert.equal(body.task.auto_paper_idle_seconds, 45);
+    assert.equal(body.created, true);
+    assert.equal(body.current, false);
+  });
+
+  it("re-POSTing the same anchor returns the same task with created=false", async () => {
+    const replay = await fetch(`${baseUrl}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        primary_anchor: { kind: "codex_thread", id: "thread-route-1" },
+        captured_layout: layoutB,
+      }),
+    });
+    assert.equal(replay.status, 200);
+    const body = await replay.json() as { task: { task_id: string }; created: boolean };
+    assert.equal(body.created, false);
+
+    const list = await fetch(`${baseUrl}/tasks`).then((r) => r.json()) as { tasks: Array<{ task_id: string }> };
+    const matching = list.tasks.filter((task) => task.task_id === body.task.task_id);
+    assert.equal(matching.length, 1, "duplicate anchor must not create a second task");
+  });
+
+  it("PUT /tasks/:id/layout updates the stored layout", async () => {
+    const created = await fetch(`${baseUrl}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        primary_anchor: { kind: "ghostty_window", id: "win-route-2" },
+        captured_layout: layoutA,
+      }),
+    }).then((r) => r.json()) as { task: { task_id: string } };
+
+    const updated = await fetch(`${baseUrl}/tasks/${created.task.task_id}/layout`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(layoutB),
+    });
+    assert.equal(updated.status, 200);
+    const updatedBody = await updated.json() as { ok: boolean; layout: { layout: WorkspaceSnapshot } };
+    assert.equal(updatedBody.ok, true);
+    assert.equal(updatedBody.layout.layout.activeWorkspace, "eventloop-reports");
+
+    const fetched = await fetch(`${baseUrl}/tasks/${created.task.task_id}`).then((r) => r.json()) as {
+      layout: { layout: WorkspaceSnapshot } | null;
+    };
+    assert.equal(fetched.layout?.layout.activeWorkspace, "eventloop-reports");
+  });
+
+  it("POST /tasks/current sets the singleton, GET reflects it, null clears it", async () => {
+    const created = await fetch(`${baseUrl}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        primary_anchor: { kind: "codex_thread", id: "thread-route-current" },
+        captured_layout: layoutA,
+      }),
+    }).then((r) => r.json()) as { task: { task_id: string } };
+
+    const setResponse = await fetch(`${baseUrl}/tasks/current`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task_id: created.task.task_id }),
+    });
+    assert.equal(setResponse.status, 200);
+    const setBody = await setResponse.json() as { ok: boolean; task: { task_id: string } | null };
+    assert.equal(setBody.ok, true);
+    assert.equal(setBody.task?.task_id, created.task.task_id);
+
+    const getBody = await fetch(`${baseUrl}/tasks/current`).then((r) => r.json()) as {
+      task: { task_id: string } | null;
+      entered_at?: string;
+    };
+    assert.equal(getBody.task?.task_id, created.task.task_id);
+    assert.ok(getBody.entered_at);
+
+    const cleared = await fetch(`${baseUrl}/tasks/current`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task_id: null }),
+    });
+    assert.equal(cleared.status, 200);
+    const clearedGet = await fetch(`${baseUrl}/tasks/current`).then((r) => r.json()) as {
+      task: { task_id: string } | null;
+    };
+    assert.equal(clearedGet.task, null);
+  });
+
+  it("rejects unknown task_id on POST /tasks/current", async () => {
+    const response = await fetch(`${baseUrl}/tasks/current`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task_id: "task_does_not_exist" }),
+    });
+    assert.equal(response.status, 404);
+  });
+
+  it("rejects malformed bodies with schema_error", async () => {
+    const missingAnchor = await fetch(`${baseUrl}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ captured_layout: layoutA }),
+    });
+    assert.equal(missingAnchor.status, 400);
+
+    const badKind = await fetch(`${baseUrl}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        primary_anchor: { kind: "what", id: "x" },
+        captured_layout: layoutA,
+      }),
+    });
+    assert.equal(badKind.status, 400);
+  });
+});
+
+describe("tasks route — full-flow integration proof", () => {
+  let server: Server;
+  let baseUrl: string;
+
+  before(async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    server = createGatewayServer({ store, now: () => fixedNow });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address() as AddressInfo;
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  });
+
+  after(async () => {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  });
+
+  it("create A → set current → create B → set current B → list → clear current", async () => {
+    const a = await fetch(`${baseUrl}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        primary_anchor: { kind: "codex_thread", id: "thread-flow-a" },
+        captured_layout: layoutA,
+      }),
+    }).then((r) => r.json()) as { task: { task_id: string } };
+
+    await fetch(`${baseUrl}/tasks/current`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task_id: a.task.task_id }),
+    });
+
+    const b = await fetch(`${baseUrl}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        primary_anchor: { kind: "ghostty_window", id: "win-flow-b" },
+        captured_layout: layoutB,
+      }),
+    }).then((r) => r.json()) as { task: { task_id: string }; current: boolean };
+    assert.equal(b.current, false, "creating B does not auto-promote it to current");
+
+    await fetch(`${baseUrl}/tasks/current`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task_id: b.task.task_id }),
+    });
+
+    const list = await fetch(`${baseUrl}/tasks`).then((r) => r.json()) as { tasks: Array<{ task_id: string }> };
+    const ids = list.tasks.map((task) => task.task_id);
+    assert.ok(ids.includes(a.task.task_id));
+    assert.ok(ids.includes(b.task.task_id));
+
+    const current = await fetch(`${baseUrl}/tasks/current`).then((r) => r.json()) as { task: { task_id: string } | null };
+    assert.equal(current.task?.task_id, b.task.task_id);
+
+    await fetch(`${baseUrl}/tasks/current`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task_id: null }),
+    });
+    const finalCurrent = await fetch(`${baseUrl}/tasks/current`).then((r) => r.json()) as { task: { task_id: string } | null };
+    assert.equal(finalCurrent.task, null);
+  });
+});

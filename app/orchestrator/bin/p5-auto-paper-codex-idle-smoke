@@ -1,0 +1,121 @@
+#!/usr/bin/env node
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = fileURLToPath(import.meta.url);
+const orchestratorRoot = resolve(here, "../..");
+const distServer = resolve(orchestratorRoot, "dist/src/server.js");
+const distStore = resolve(orchestratorRoot, "dist/src/store.js");
+const distGateway = resolve(orchestratorRoot, "dist/src/gateway_store.js");
+const distWatcher = resolve(orchestratorRoot, "dist/src/agents/auto_paper_codex_idle.js");
+
+const { createGatewayServer } = await import(distServer);
+const { createSeededStore } = await import(distStore);
+const { createInMemoryGatewayStore } = await import(distGateway);
+const { AutoPaperCodexIdleWatcher } = await import(distWatcher);
+
+const NOW = new Date("2026-05-10T14:00:00.000Z");
+const codexHome = await mkdtemp(join(tmpdir(), "p5-auto-paper-smoke-"));
+const threadId = "thread_p5_smoke_idle2h";
+const taskId = "task_p5_smoke";
+
+let server;
+let passed = false;
+
+try {
+  const dayPath = join(codexHome, "sessions", "2026", "05", "10");
+  await mkdir(dayPath, { recursive: true });
+  const rolloutPath = join(dayPath, `rollout-2026-05-10T11-50-00-${threadId}.jsonl`);
+  const lines = [
+    JSON.stringify({ timestamp: "2026-05-10T11:50:00.000Z", type: "session_meta", payload: {} }),
+    JSON.stringify({ timestamp: "2026-05-10T11:55:00.000Z", type: "user_input", payload: { text: "kickoff" } }),
+    JSON.stringify({ timestamp: "2026-05-10T12:00:00.000Z", type: "event_msg", payload: { type: "agent_message" } }),
+  ];
+  await writeFile(rolloutPath, lines.join("\n") + "\n");
+
+  const seeded = await createSeededStore("fixtures/empty-review-packets.json");
+  const store = createInMemoryGatewayStore(seeded);
+
+  server = createGatewayServer({
+    store,
+    now: () => NOW,
+    codexHome,
+  });
+
+  const baseUrl = await new Promise((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      resolveListen(`http://127.0.0.1:${addr.port}`);
+    });
+  });
+
+  const tasks = [
+    { id: taskId, primary_anchor_kind: "codex_thread", primary_anchor_id: threadId },
+  ];
+  const emitted = [];
+  const watcher = new AutoPaperCodexIdleWatcher({
+    registry: {
+      async listTasks() { return tasks; },
+      async recordTaskPaperEmitted(id, at) { emitted.push({ id, at: at.toISOString() }); },
+    },
+    ingestor: {
+      ingestEventAsReviewPacket: (event, n) => store.ingestEventAsReviewPacket(event, n),
+    },
+    manualMode: {
+      getManualModeState: () => store.getManualModeState(),
+    },
+    codexHome,
+    now: () => NOW,
+  });
+
+  const queueBefore = await fetch(`${baseUrl}/queue`).then((r) => r.json());
+  const beforeCount = queueBefore.items.length;
+
+  const result = await watcher.tick();
+  assertEqual(result.paused, false, "not paused");
+  assertEqual(result.considered, 1, "considered 1 task");
+  assertEqual(result.emitted.length, 1, "emitted 1 paper");
+  assertEqual(result.emitted[0].task_id, taskId, "emitted correct task_id");
+  assertEqual(emitted.length, 1, "registry record called once");
+
+  const queueAfter = await fetch(`${baseUrl}/queue`).then((r) => r.json());
+  assertEqual(queueAfter.items.length, beforeCount + 1, "queue grew by 1");
+  const item = queueAfter.items.find((i) => i.task_id === taskId);
+  if (!item) throw new Error("expected queue item with task_id present");
+  if (!/Codex thread idle/i.test(item.review_packet.title)) {
+    throw new Error(`expected paper title to mention idle, got: ${item.review_packet.title}`);
+  }
+
+  // Second tick: throttled.
+  const second = await watcher.tick();
+  assertEqual(second.emitted.length, 0, "second tick emits nothing");
+
+  passed = true;
+  console.log("PASS p5 auto-paper codex idle smoke");
+  console.log(`  codexHome:         ${codexHome}`);
+  console.log(`  rolloutPath:       ${rolloutPath}`);
+  console.log(`  emitted task_id:   ${result.emitted[0].task_id}`);
+  console.log(`  idle_seconds:      ${result.emitted[0].idle_seconds}`);
+  console.log(`  queue item id:     ${item.id}`);
+  console.log(`  paper title:       ${item.review_packet.title}`);
+} catch (error) {
+  passed = false;
+  console.error("FAIL p5 auto-paper codex idle smoke");
+  console.error(error instanceof Error ? error.stack : String(error));
+  process.exitCode = 1;
+} finally {
+  if (server) {
+    await new Promise((res) => server.close(() => res()));
+  }
+  await rm(codexHome, { recursive: true, force: true });
+  if (!passed && process.exitCode === 0) process.exitCode = 1;
+}
+
+function assertEqual(actual, expected, label) {
+  if (actual !== expected) {
+    throw new Error(`assertion failed [${label}]: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
+}

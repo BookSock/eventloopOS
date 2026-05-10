@@ -17,6 +17,7 @@ import { handleModesRoute } from "./routes/modes.js";
 import { handleQueueRoute } from "./routes/queue.js";
 import { handleReadingQueueRoute } from "./routes/reading_queue.js";
 import { handleTaskSessionsRoute } from "./routes/task_sessions.js";
+import { handleTasksRoute } from "./routes/tasks.js";
 import { handleWorkspaceRoute } from "./routes/workspace.js";
 import { createRuntime, type Runtime } from "./runtime.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
@@ -263,6 +264,26 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           observability,
           routeNameForPath(request.method, context.url.pathname) ?? "mcp_sources",
           mcpSourcesRoute,
+          startedAt,
+        );
+      }
+
+      const tasksRoute = await handleTasksRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        readJsonBody: () => readJsonBody(request),
+        runtime,
+        now: now(),
+        requestId: context.requestId,
+        idempotencyKey: context.idempotencyKey,
+      });
+      if (tasksRoute) {
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "tasks",
+          tasksRoute,
           startedAt,
         );
       }

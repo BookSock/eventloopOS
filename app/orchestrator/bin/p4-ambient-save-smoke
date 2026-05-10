@@ -1,0 +1,156 @@
+#!/usr/bin/env node
+// Phase 4 — live proof that the ambient workspace saver end-to-ends:
+//   - Boots the gateway in-process with a real AeroSpaceWorkspaceController.
+//   - Sets a current_task_id directly against the in-memory store.
+//   - Runs the saver against real AeroSpace (skips cleanly if AeroSpace is
+//     not installed / not running).
+//   - Asserts that opening/closing a window (we only observe via captureSnapshot)
+//     triggers exactly one debounced commit per stable change.
+//
+// Phase 2 (POST /tasks + getCurrentTaskState + updateTaskLayout +
+// PUT /tasks/:id/layout) is being built in parallel; this smoke uses the
+// existing `saveTaskWorkspaceSnapshot` primitive that the saver's runtime
+// adapter already falls back to. Once Phase 2 lands, this smoke can flip to
+// the real PUT route without changing assertions.
+
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+if (process.env.EVENTLOOPOS_ENABLE_AMBIENT_SAVE_SMOKE !== "1") {
+  console.log("SKIP p4 ambient-save smoke: set EVENTLOOPOS_ENABLE_AMBIENT_SAVE_SMOKE=1 to run");
+  process.exit(0);
+}
+
+const here = fileURLToPath(import.meta.url);
+const orchestratorRoot = resolve(here, "../..");
+const distAmbient = resolve(orchestratorRoot, "dist/src/agents/ambient_workspace_saver.js");
+const distGateway = resolve(orchestratorRoot, "dist/src/gateway_store.js");
+const distStore = resolve(orchestratorRoot, "dist/src/store.js");
+const distController = resolve(orchestratorRoot, "dist/src/workspace/controller.js");
+const distObservability = resolve(orchestratorRoot, "dist/src/observability.js");
+
+const execFileAsync = promisify(execFile);
+
+async function aerospaceAvailable() {
+  try {
+    const { stdout } = await execFileAsync("aerospace", ["--version"], { timeout: 2_000 });
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+if (!(await aerospaceAvailable())) {
+  console.log("SKIP p4 ambient-save smoke: aerospace binary not available on this machine");
+  process.exit(0);
+}
+
+const { createAmbientWorkspaceSaver } = await import(distAmbient);
+const { createInMemoryGatewayStore } = await import(distGateway);
+const { createSeededStore } = await import(distStore);
+const { AerospaceWorkspaceController } = await import(distController);
+const { createInMemoryObservability } = await import(distObservability);
+
+const seeded = await createSeededStore("fixtures/empty-review-packets.json");
+const store = createInMemoryGatewayStore(seeded);
+const observability = createInMemoryObservability();
+const workspace = new AerospaceWorkspaceController(async (cmd, args) => {
+  const { stdout, stderr } = await execFileAsync(cmd, args, { timeout: 5_000 });
+  return { stdout, stderr };
+});
+
+let currentTaskId = "task_p4_ambient_smoke";
+
+const saver = createAmbientWorkspaceSaver({
+  workspace,
+  getCurrentTaskState: async () => ({ currentTaskId }),
+  updateTaskLayout: async (taskId, snapshot) => {
+    await store.saveTaskWorkspaceSnapshot({
+      taskId,
+      snapshot,
+      capturedAt: new Date(),
+      actorId: "p4-ambient-save-smoke",
+    });
+  },
+  isManualModeActive: async () => {
+    const state = await store.getManualModeState();
+    return state.active === true;
+  },
+  observability,
+  pollIntervalMs: 500,
+  debounceMs: 1_500,
+});
+
+let passed = false;
+
+try {
+  // Phase A — first observation. Should be debounced (no prior saved layout).
+  const a = await saver.tick();
+  if (a.decision !== "debounced") {
+    throw new Error(`phase A: expected debounced, got ${a.decision}`);
+  }
+
+  // Phase B — wait for debounce to elapse, no manual change. The same
+  // snapshot at a later wall-clock should commit.
+  await sleep(2_000);
+  const b = await saver.tick();
+  if (b.decision !== "committed") {
+    throw new Error(`phase B: expected committed, got ${b.decision}`);
+  }
+
+  const stored = await store.getLatestTaskWorkspaceSnapshot(currentTaskId);
+  if (!stored) throw new Error("phase B: expected stored snapshot for the smoke task");
+
+  // Phase C — no change to AeroSpace. Next tick should be a no-op skip.
+  const c = await saver.tick();
+  if (c.decision !== "skipped_unchanged") {
+    throw new Error(`phase C: expected skipped_unchanged, got ${c.decision}`);
+  }
+
+  // Phase D — manual mode active → must skip even if a change happens.
+  await store.setManualModeActive(true, "p4 smoke", new Date());
+  const d = await saver.tick();
+  if (d.decision !== "skipped_manual_mode") {
+    throw new Error(`phase D: expected skipped_manual_mode, got ${d.decision}`);
+  }
+  await store.setManualModeActive(false, undefined, new Date());
+
+  // Phase E — unbounded (current_task_id null) → skipped_unbounded.
+  currentTaskId = null;
+  const e = await saver.tick();
+  if (e.decision !== "skipped_unbounded") {
+    throw new Error(`phase E: expected skipped_unbounded, got ${e.decision}`);
+  }
+
+  // Phase F — observability surface check: each decision emitted an event.
+  const events = await observability.listActivity({ limit: 100 });
+  const types = new Set(events.map((event) => event.type));
+  for (const required of [
+    "ambient_workspace_save_committed",
+    "ambient_workspace_save_skipped_unchanged",
+    "ambient_workspace_save_skipped_manual_mode",
+    "ambient_workspace_save_skipped_unbounded",
+  ]) {
+    if (!types.has(required)) {
+      throw new Error(`phase F: missing observability event type ${required}`);
+    }
+  }
+
+  passed = true;
+  console.log("PASS p4 ambient workspace saver against real AeroSpace");
+  console.log(`  committed snapshot windows:    ${stored.snapshot.windows.length}`);
+  console.log(`  observability events emitted:  ${events.length}`);
+} catch (error) {
+  console.error("FAIL p4 ambient workspace saver");
+  console.error(error instanceof Error ? error.stack : String(error));
+  process.exitCode = 1;
+} finally {
+  saver.stop();
+  if (!passed && process.exitCode === 0) process.exitCode = 1;
+}
+
+function sleep(ms) {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}

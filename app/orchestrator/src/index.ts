@@ -1,7 +1,16 @@
 import { execFile } from "node:child_process";
+import { createAmbientWorkspaceSaverFromRuntime, type AmbientWorkspaceSaver } from "./agents/ambient_workspace_saver.js";
+import {
+  startAutoPaperCodexIdleWatcher,
+  type AutoPaperCodexIdleHandle,
+  type AutoPaperTaskRecord,
+  type AutoPaperTaskRegistry,
+} from "./agents/auto_paper_codex_idle.js";
 import { loadConfig, type OrchestratorConfig } from "./config.js";
 import { PostgresQueueStore } from "./db/postgres_queue_store.js";
 import { createInMemoryGatewayStore, createPostgresGatewayStore } from "./gateway_store.js";
+import { createInMemoryObservability } from "./observability.js";
+import { createRuntime } from "./runtime.js";
 import {
   createSeededDevelopmentMcpSourceRegistry,
   DevelopmentMcpSourceRegistry,
@@ -79,6 +88,28 @@ if (autoBindIntervalMs && autoBindIntervalMs > 0) {
   console.log(`codex auto-bind enabled every ${autoBindIntervalMs}ms`);
 }
 
+let ambientWorkspaceSaver: AmbientWorkspaceSaver | undefined;
+if (process.env.EVENTLOOPOS_AMBIENT_WORKSPACE_SAVE === "1" && workspace) {
+  const observability = gatewayRuntime.observability ?? createInMemoryObservability();
+  const runtime = createRuntime({
+    store: gatewayRuntime.store,
+    workspace,
+    observability,
+  });
+  const pollIntervalMs = parsePositiveInteger(process.env.EVENTLOOPOS_AMBIENT_SAVE_POLL_MS);
+  const debounceMs = parsePositiveInteger(process.env.EVENTLOOPOS_AMBIENT_SAVE_DEBOUNCE_MS);
+  ambientWorkspaceSaver = createAmbientWorkspaceSaverFromRuntime(runtime, {
+    pollIntervalMs,
+    debounceMs,
+  });
+  ambientWorkspaceSaver?.start();
+  if (ambientWorkspaceSaver) {
+    console.log(
+      `ambient workspace saver enabled (poll=${pollIntervalMs ?? 5000}ms, debounce=${debounceMs ?? 3000}ms)`,
+    );
+  }
+}
+
 const autoPromoteIntervalMs = parsePositiveInteger(process.env.EVENTLOOPOS_READING_QUEUE_AUTO_PROMOTE_INTERVAL_MS);
 const autoPromoteMinAgeSeconds = parsePositiveInteger(process.env.EVENTLOOPOS_READING_QUEUE_AUTO_PROMOTE_MIN_AGE_SECONDS) ?? 300;
 let autoPromoteTimer: NodeJS.Timeout | undefined;
@@ -101,6 +132,50 @@ if (autoPromoteIntervalMs && autoPromoteIntervalMs > 0) {
   console.log(`reading-queue auto-promote enabled every ${autoPromoteIntervalMs}ms (min age ${autoPromoteMinAgeSeconds}s)`);
 }
 
+let autoPaperWatcher: AutoPaperCodexIdleHandle | undefined;
+if (process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED === "1") {
+  const tickMs = parsePositiveInteger(process.env.EVENTLOOPOS_AUTO_PAPER_TICK_MS);
+  const idleSeconds = parsePositiveInteger(process.env.EVENTLOOPOS_AUTO_PAPER_IDLE_SECONDS);
+  const observability = gatewayRuntime.observability ?? createInMemoryObservability();
+  const registry = createAutoPaperTaskRegistry(gatewayRuntime.store);
+  if (!registry) {
+    console.warn(
+      "EVENTLOOPOS_AUTO_PAPER_ENABLED=1 but the configured store does not yet expose listTasks/recordTaskPaperEmitted (phase 2 not landed). Auto-paper watcher disabled.",
+    );
+  } else {
+    autoPaperWatcher = startAutoPaperCodexIdleWatcher({
+      registry,
+      ingestor: gatewayRuntime.store,
+      manualMode: gatewayRuntime.store,
+      observability,
+      codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
+      defaultIdleSeconds: idleSeconds,
+      intervalMs: tickMs,
+      now: () => new Date(),
+    });
+    console.log(
+      `auto-paper codex idle watcher enabled (tick=${tickMs ?? 30_000}ms, idle_threshold=${idleSeconds ?? 60}s)`,
+    );
+  }
+}
+
+function createAutoPaperTaskRegistry(store: GatewayStore): AutoPaperTaskRegistry | undefined {
+  // TODO(phase-2-integration): replace this duck-typed adapter with a direct
+  // dependency on GatewayStore.listTasks / recordTaskPaperEmitted once the
+  // tasks table lands.
+  const candidate = store as unknown as {
+    listTasks?: () => Promise<AutoPaperTaskRecord[]>;
+    recordTaskPaperEmitted?: (taskId: string, emittedAt: Date) => Promise<void>;
+  };
+  if (typeof candidate.listTasks !== "function" || typeof candidate.recordTaskPaperEmitted !== "function") {
+    return undefined;
+  }
+  return {
+    listTasks: () => candidate.listTasks!(),
+    recordTaskPaperEmitted: (taskId, emittedAt) => candidate.recordTaskPaperEmitted!(taskId, emittedAt),
+  };
+}
+
 function parsePositiveInteger(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
@@ -111,6 +186,8 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
     if (autoPromoteTimer) clearInterval(autoPromoteTimer);
     if (autoBindTimer) clearInterval(autoBindTimer);
+    autoPaperWatcher?.close();
+    ambientWorkspaceSaver?.stop();
     taskSessionRuntime?.close?.();
     server.close(() => {
       gatewayRuntime.close?.().finally(() => process.exit(0));

@@ -61,6 +61,10 @@ import {
   type OnboardingRejectionRecord,
   type OnboardingApprovalBatchRecord,
   type ManualModeStateRecord,
+  type TaskRecord,
+  type TaskLayoutRecord,
+  type TaskAnchorKind,
+  type CurrentTaskStateRecord,
 } from "./store.js";
 import { eventToRecord } from "./db/postgres_queue_store.js";
 
@@ -146,6 +150,20 @@ export type GatewayStore = {
   }): Promise<OnboardingApprovalBatchRecord>;
   getManualModeState(): Promise<ManualModeStateRecord>;
   setManualModeActive(active: boolean, reason: string | undefined, now: Date): Promise<ManualModeStateRecord>;
+  createTask(input: {
+    primaryAnchor: { kind: TaskAnchorKind; id: string };
+    capturedLayout: WorkspaceSnapshot;
+    autoPaperIdleSeconds?: number;
+    now: Date;
+  }): Promise<{ task: TaskRecord; layout: TaskLayoutRecord; created: boolean }>;
+  getTask(taskId: string): Promise<TaskRecord | undefined>;
+  getTaskByAnchor(kind: TaskAnchorKind, id: string): Promise<TaskRecord | undefined>;
+  listTasks(): Promise<TaskRecord[]>;
+  getTaskLayout(taskId: string): Promise<TaskLayoutRecord | undefined>;
+  updateTaskLayout(taskId: string, layout: WorkspaceSnapshot, now: Date): Promise<TaskRecord | undefined>;
+  getCurrentTaskState(): Promise<CurrentTaskStateRecord>;
+  setCurrentTaskId(taskId: string | null, now: Date): Promise<CurrentTaskStateRecord>;
+  recordTaskPaperEmitted(taskId: string, now: Date): Promise<TaskRecord | undefined>;
 };
 
 export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
@@ -158,6 +176,11 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   const onboardingRejections = store.onboardingRejections ?? new Map<string, OnboardingRejectionRecord>();
   const onboardingApprovalBatches = store.onboardingApprovalBatches ?? new Map<string, OnboardingApprovalBatchRecord>();
   const manualModeState = store.manualModeState ?? { value: { active: false, updated_at: new Date(0).toISOString() } as ManualModeStateRecord };
+  const tasks = store.tasks ?? new Map<string, TaskRecord>();
+  const taskLayouts = store.taskLayouts ?? new Map<string, TaskLayoutRecord>();
+  const currentTaskState = store.currentTaskState ?? {
+    value: { current_task_id: null, updated_at: new Date(0).toISOString() } as CurrentTaskStateRecord,
+  };
   store.workspaceRestoreReceipts = workspaceRestoreReceipts;
   store.mcpPollStates = mcpPollStates;
   store.taskMessagesByIdempotencyKey = taskMessagesByIdempotencyKey;
@@ -167,6 +190,9 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   store.onboardingRejections = onboardingRejections;
   store.onboardingApprovalBatches = onboardingApprovalBatches;
   store.manualModeState = manualModeState;
+  store.tasks = tasks;
+  store.taskLayouts = taskLayouts;
+  store.currentTaskState = currentTaskState;
 
   const snapshotForTask = async (taskId: string) => getLatestTaskWorkspaceSnapshot(store, taskId);
   const contextEntriesForTask = async (taskId: string) => listContextEntries(store, { task_id: taskId, limit: 8 });
@@ -435,6 +461,99 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
       }
       return { ...manualModeState.value };
     },
+    async createTask(input) {
+      const anchorKey = `${input.primaryAnchor.kind}:${input.primaryAnchor.id}`;
+      const existing = Array.from(tasks.values()).find(
+        (record) => `${record.primary_anchor_kind}:${record.primary_anchor_id}` === anchorKey,
+      );
+      if (existing) {
+        const layout = taskLayouts.get(existing.task_id);
+        return {
+          task: { ...existing },
+          layout: layout ?? {
+            task_id: existing.task_id,
+            layout: input.capturedLayout,
+            updated_at: existing.updated_at,
+          },
+          created: false,
+        };
+      }
+      const timestamp = input.now.toISOString();
+      const taskId = `task_${stableId(`${input.primaryAnchor.kind}_${input.primaryAnchor.id}_${timestamp}`)}`;
+      const record: TaskRecord = {
+        task_id: taskId,
+        primary_anchor_kind: input.primaryAnchor.kind,
+        primary_anchor_id: input.primaryAnchor.id,
+        created_at: timestamp,
+        updated_at: timestamp,
+        auto_paper_idle_seconds:
+          typeof input.autoPaperIdleSeconds === "number" && Number.isFinite(input.autoPaperIdleSeconds)
+            ? Math.max(1, Math.floor(input.autoPaperIdleSeconds))
+            : 60,
+      };
+      tasks.set(record.task_id, record);
+      const layout: TaskLayoutRecord = {
+        task_id: record.task_id,
+        layout: input.capturedLayout,
+        updated_at: timestamp,
+      };
+      taskLayouts.set(record.task_id, layout);
+      return { task: { ...record }, layout: { ...layout }, created: true };
+    },
+    async getTask(taskId) {
+      const record = tasks.get(taskId);
+      return record ? { ...record } : undefined;
+    },
+    async getTaskByAnchor(kind, id) {
+      const record = Array.from(tasks.values()).find(
+        (entry) => entry.primary_anchor_kind === kind && entry.primary_anchor_id === id,
+      );
+      return record ? { ...record } : undefined;
+    },
+    async listTasks() {
+      return Array.from(tasks.values())
+        .map((record) => ({ ...record }))
+        .sort((left, right) => left.created_at.localeCompare(right.created_at));
+    },
+    async getTaskLayout(taskId) {
+      const layout = taskLayouts.get(taskId);
+      return layout ? { ...layout } : undefined;
+    },
+    async updateTaskLayout(taskId, layout, now) {
+      const existing = tasks.get(taskId);
+      if (!existing) return undefined;
+      const timestamp = now.toISOString();
+      taskLayouts.set(taskId, { task_id: taskId, layout, updated_at: timestamp });
+      const updated: TaskRecord = { ...existing, updated_at: timestamp };
+      tasks.set(taskId, updated);
+      return { ...updated };
+    },
+    async getCurrentTaskState() {
+      return { ...currentTaskState.value };
+    },
+    async setCurrentTaskId(taskId, now) {
+      const previous = currentTaskState.value;
+      const timestamp = now.toISOString();
+      if (taskId === null) {
+        currentTaskState.value = { current_task_id: null, updated_at: timestamp };
+        return { ...currentTaskState.value };
+      }
+      const enteredAt = previous.current_task_id === taskId && previous.entered_at ? previous.entered_at : timestamp;
+      currentTaskState.value = { current_task_id: taskId, entered_at: enteredAt, updated_at: timestamp };
+      return { ...currentTaskState.value };
+    },
+    async recordTaskPaperEmitted(taskId, now) {
+      const existing = tasks.get(taskId);
+      if (!existing) return undefined;
+      const timestamp = now.toISOString();
+      const updated: TaskRecord = {
+        ...existing,
+        last_paper_emitted_at: timestamp,
+        updated_at: timestamp,
+      };
+      tasks.set(taskId, updated);
+      return { ...updated };
+    },
   };
 }
 
@@ -608,6 +727,33 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async setManualModeActive(active, reason, now) {
       return store.setManualModeActive(active, reason, now);
+    },
+    async createTask(input) {
+      return store.createTask(input);
+    },
+    async getTask(taskId) {
+      return store.getTask(taskId);
+    },
+    async getTaskByAnchor(kind, id) {
+      return store.getTaskByAnchor(kind, id);
+    },
+    async listTasks() {
+      return store.listTasks();
+    },
+    async getTaskLayout(taskId) {
+      return store.getTaskLayout(taskId);
+    },
+    async updateTaskLayout(taskId, layout, now) {
+      return store.updateTaskLayout(taskId, layout, now);
+    },
+    async getCurrentTaskState() {
+      return store.getCurrentTaskState();
+    },
+    async setCurrentTaskId(taskId, now) {
+      return store.setCurrentTaskId(taskId, now);
+    },
+    async recordTaskPaperEmitted(taskId, now) {
+      return store.recordTaskPaperEmitted(taskId, now);
     },
   };
 }

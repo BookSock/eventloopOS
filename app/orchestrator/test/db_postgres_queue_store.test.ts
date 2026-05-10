@@ -71,6 +71,7 @@ describe("PostgresQueueStore", () => {
       { id: "0010_task_session_terminal_refs.sql" },
       { id: "0011_onboarding_rejections.sql" },
       { id: "0012_manual_mode_state.sql" },
+      { id: "0013_tasks.sql" },
     ]);
   });
 

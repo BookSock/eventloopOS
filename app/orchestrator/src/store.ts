@@ -87,6 +87,33 @@ export type InMemoryStore = {
   onboardingRejections?: Map<string, OnboardingRejectionRecord>;
   onboardingApprovalBatches?: Map<string, OnboardingApprovalBatchRecord>;
   manualModeState?: { value: ManualModeStateRecord };
+  tasks?: Map<string, TaskRecord>;
+  taskLayouts?: Map<string, TaskLayoutRecord>;
+  currentTaskState?: { value: CurrentTaskStateRecord };
+};
+
+export type TaskAnchorKind = "codex_thread" | "ghostty_window";
+
+export type TaskRecord = {
+  task_id: string;
+  primary_anchor_kind: TaskAnchorKind;
+  primary_anchor_id: string;
+  created_at: string;
+  updated_at: string;
+  last_paper_emitted_at?: string;
+  auto_paper_idle_seconds: number;
+};
+
+export type TaskLayoutRecord = {
+  task_id: string;
+  layout: WorkspaceSnapshot;
+  updated_at: string;
+};
+
+export type CurrentTaskStateRecord = {
+  current_task_id: string | null;
+  entered_at?: string;
+  updated_at: string;
 };
 
 export type ManualModeStateRecord = {
