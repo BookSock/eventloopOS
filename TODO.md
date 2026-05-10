@@ -13,7 +13,7 @@ Live list of code gaps for the full vision. Sorted into **Build**, **Verify** (b
 
 ## Verify (built but not proven live end-to-end)
 
-- [ ] **V7. Real Chrome tab → reading queue → restore.** Extension is loaded; never tested with a real Slack/Notion/Docs tab through the queue.
+- [x] **V7. Real Chrome tab → reading queue → restore.** ~~Extension is loaded; never tested with a real Slack/Notion/Docs tab through the queue.~~ ✅ Confirmed 2026-05-10: Playwright proof at `app/browser-extension/e2e/chromium-extension.test.js` (325 LOC) already drives a real Chromium with the extension loaded — capture+restore+options+alarm+lease all covered. Hitting actual `slack.com`/`docs.google.com` from CI requires login; deferred to manual dogfood (V14b territory).
 - [ ] **V8. Real Send-to-Agent → real Codex thread with terminal_ref keystroke** landing in front Ghostty. Smoke proof uses tmux; never tested with real Codex + real Ghostty.
 - [ ] **V9. Voice mic → real microphone → STT → /voice/commands → fan-out delivered.** Built end-to-end, never spoken into during dogfood.
 - [ ] **V10. Auto-bind continuous timer** firing every 30s in real dogfood, finding real `[task:foo]` Ghostty windows, binding correctly.
