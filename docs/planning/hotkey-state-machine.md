@@ -1,4 +1,4 @@
-# Hotkey State Machine — iteration 3
+# Hotkey State Machine — iteration 4
 
 Decisions locked across iterations:
 
@@ -115,6 +115,93 @@ Optional later (Phase 7): an MCP skill `eventloopos.enqueue_paper` exposed to Co
 - Time-based advance ("auto-advance every 30 min if no human input").
 - Existing-Codex-thread import flow on first launch.
 
+## Window sharing — the AeroSpace reality
+
+**AeroSpace assigns each window to exactly one workspace.** It has no native "this window appears on multiple workspaces" concept. So eventloopOS necessarily builds a thin layer on top.
+
+The mental model that fits this:
+
+- A "shared" window in eventloopOS terms is really a **window that follows the user across workspaces.**
+- On every AeroSpace workspace-switch (we observe via `aerospace focused-workspace` polling, or AeroSpace's `on-workspace-change` event hook), eventloopOS finds windows marked "follow" and issues `aerospace move-node-to-workspace <new-ws> --window-id <id>` to bring them along.
+- From the user's perspective, those windows are simply "always there." They never disappeared.
+
+### How a window becomes "follows" — implicit, no UI
+
+Match the user's intuition: *"if I drag a window to another task's desktop, it should be shared, not moved away from the old one."*
+
+Mechanism:
+- When user uses AeroSpace's native `move-node-to-workspace` to bring a window from desktop A to desktop B, eventloopOS observes the move (workspace-change events).
+- If the same window has been observed on **2+ distinct task desktops** within the last N hours, mark it as `follows`. From now on, it gets pulled along on every switch.
+- Once `follows`, the window is implicitly present on every task desktop the user visits. AeroSpace shows it. Other tasks' saved layouts include its position.
+- User can "un-share" by closing the window or by an explicit reverse hotkey (TBD — not in iteration 4).
+
+This is a single-source-of-truth model: the user manipulates AeroSpace natively, eventloopOS observes and amplifies. No `[shared]` title tag. No right-click menu. No new UI.
+
+### Edge case: pulling a window mid-paper
+
+User is in State C (reading a paper), realizes they need a window from another task. They press AeroSpace's "switch to workspace X" hotkey, navigate to the other task's desktop, grab the window via AeroSpace's `move-node-to-workspace`, switch back. eventloopOS observes:
+- Workspace switched to X (auto-paper cooldown for X resumes; current_task_id changes to whatever task is bound to X).
+- Window moved from X to current paper's workspace.
+- Eventloopos doesn't kick the user out of paper-reading mode — the paper UI stays open. AeroSpace just changed what's behind it.
+- On switch back, current_task_id changes again. Paper UI continues showing the paper (the paper isn't bound to a workspace; it's a separate floating layer).
+
+The lesson: **the paper UI is workspace-independent.** It floats on whatever desktop the user is currently on. When the user dismisses the paper (advance press), the system uses the user's *current* desktop as the "where they want to be," not the desktop the paper was originally for.
+
+This means if the user wandered to a different desktop while reading a paper, dismissing it advances them from there, not from the original.
+
+## Example user experience — a Tuesday
+
+Concrete walk-through to pressure-test the design:
+
+**8:30 AM.** Jason starts his Mac. eventloopOS service starts (LaunchAgent). AeroSpace shows workspace 1, his default. He opens Ghostty manually, runs `codex resume thread-blog-Q3-launch` in a tab. He starts working.
+
+**8:32 AM.** Jason presses `⌘⌥⇧J`. State A → State B:
+- System sees the Codex thread in foreground Ghostty (V10c-style title resolver).
+- Calls `POST /tasks { codex_thread_id: thread-blog-..., aerospace_workspace_id: "1" }`. Task created, bound to workspace 1.
+- `current_task_id` set. Toast (or no toast) confirms.
+- Ambient saver starts capturing this workspace's layout every 5s.
+
+**8:50 AM.** Codex finishes Jason's current ask and goes idle. ~60s later, auto-paper watcher emits a paper for this task. The paper sits in the queue. Jason doesn't notice — he's reading something.
+
+**9:15 AM.** Jason wants to start a different task on Slack work. He uses AeroSpace's `workspace 2` hotkey (his existing muscle memory). AeroSpace switches him to empty workspace 2. He opens Ghostty, runs `codex` (fresh thread). Starts a conversation about the Slack work.
+
+**9:18 AM.** He presses `⌘⌥⇧J`. State A → B:
+- New thread detected, new task created, bound to workspace 2. Now two tasks exist.
+
+**9:45 AM.** This Codex thread also goes idle. Another paper. Two papers queued total.
+
+**9:50 AM.** Jason needs his Slack window (currently on workspace 2) to reference while doing the blog work. He uses AeroSpace's hotkey to switch to workspace 1. He notices Slack isn't there. He uses AeroSpace's `back-and-forth` hotkey to flip to 2, grabs Slack via AeroSpace's `move-node-to-workspace 1` hotkey, flips back to 1. Slack is now on workspace 1.
+
+eventloopOS observes: Slack window has been on workspaces {2, 1}. **Marks Slack as `follows`.** From now on, every workspace switch pulls Slack along.
+
+**10:00 AM.** Jason presses `⌘⌥⇧J`. State B → C:
+- Layout saved (with Slack now part of workspace 1's saved state).
+- Highest-priority paper popped — it's the workspace-1 task's idle paper.
+- AeroSpace switches to workspace 1 (already there, no-op).
+- Paper UI surfaces.
+
+**10:02 AM.** Jason reviews, hits Send to Agent. Existing flow. Paper marked done. Press again → State C → next paper:
+- Next paper is workspace-2's task. AeroSpace switches to workspace 2.
+- Slack is automatically moved to workspace 2 (because it's `follows`).
+- Paper UI shows on top of workspace 2.
+
+**10:30 AM.** Jason finishes both papers. Press → State C → no more papers → return to State B on the last paper's task (workspace 2). Press again → State B → no papers → State A. AeroSpace switches to limbo (designated empty workspace, e.g. workspace 9).
+
+**11:00 AM.** Lunch. Jason toggles `⌘⌥⇧M` (manual mode). AeroSpace switches to manual-personal workspace. Server pauses auto-promote/auto-bind. He browses YouTube. Toggle off → returns.
+
+**14:00 PM.** Codex thread on workspace 1 finishes another work cycle, goes idle, emits paper. Jason is in limbo (State A). Press → State A → State C (paper popped, switch to workspace 1, Slack follows along).
+
+**End of day.** Jason has implicitly accumulated 2 tasks, each with their own desktop, each with their own work history, with Slack as a shared `follows` window. Tomorrow he can wake up, open Mac, press `⌘⌥⇧J` from limbo and immediately resume work — the system pulls his most recent paper or, if none queued, switches to his last-active task's desktop.
+
+### What "feels Apple" about this
+
+- The user does AeroSpace things they already know (workspace switching, window-move).
+- One hotkey for "advance the loop" — predictable.
+- No clicking around in a Mac UI for normal flow.
+- Sharing happens implicitly — no menu-diving.
+- Manual mode is a familiar "step away" toggle.
+- The system is aggressive about saving state but quiet about it. The user notices when things resume in the right place, not when things save.
+
 ## Sequencing for the actual refactor
 
 1. ✓ Spec locked at iteration 3.
@@ -122,8 +209,15 @@ Optional later (Phase 7): an MCP skill `eventloopos.enqueue_paper` exposed to Co
 3. **Phase 3: Mac advance hotkey state machine** (desktop-aware). Depends on phase 2.
 4. **Phase 4: Ambient AeroSpace saver.** ✓ shipped (needs phase-2-integration to wire).
 5. **Phase 5: Auto-paper-on-Codex-idle watcher.** ✓ shipped (needs phase-2-integration to wire).
-6. **Phase 6: Implicit shared-window aggregation.** Server-side SQL view + restoration logic.
+6. **Phase 6: Implicit shared-window "follows" layer.** Observe `(window_id × workspace_id)` membership; mark windows seen on 2+ workspaces as `follows`; on every workspace switch, AeroSpace `move-node-to-workspace` the follows windows along. The paper UI floats workspace-independently.
 7. **Phase 7 (future): MCP skill for Codex self-reporting + custom triggers.**
+
+## What's still open after iteration 4
+
+- **Limbo workspace identity.** Iteration 4 says "designated workspace 9" but real value should be configurable. AeroSpace doesn't have a concept of "the unbound workspace" — eventloopOS picks one (default: highest-numbered workspace; user can override).
+- **Un-sharing a follows window.** Closing or right-click "stop following" — defer until dogfood reveals if it's painful.
+- **What if AeroSpace isn't running?** eventloopOS today already requires AeroSpace as a hard prerequisite (per README). Reaffirm: graceful skip for any flow that needs AeroSpace; clear startup error if AeroSpace is missing.
+- **Does the paper UI float over AeroSpace gracefully?** SwiftUI sheet that's not bound to a workspace. Need to confirm AeroSpace doesn't try to assign it. Test in dogfood.
 
 ## Decisions log
 
