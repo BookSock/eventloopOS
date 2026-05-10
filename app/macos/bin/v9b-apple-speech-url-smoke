@@ -1,0 +1,313 @@
+#!/usr/bin/env node
+// V9b — proof that Apple's Speech framework actually transcribes audio on this
+// Mac. Drives `SFSpeechURLRecognitionRequest` against a `say`+`ffmpeg` fixture
+// WAV (mirroring V9). Does NOT exercise the buffer-based
+// AppleSpeechVoiceTranscriptionService (which needs a live mic + tap), but it
+// does prove: (a) Speech.framework loads, (b) the Speech entitlement / TCC
+// consent is granted, (c) SFSpeechRecognizer can transcribe a known phrase.
+//
+// Gate: skipped unless EVENTLOOPOS_ENABLE_APPLE_SPEECH_URL_SMOKE=1.
+// Skips with PASS-NOOP if not on darwin or if `say`/`ffmpeg`/`swift` missing.
+//
+// Honest gap: SFSpeechRecognizer.requestAuthorization presents a TCC consent
+// dialog the FIRST time it runs against a given executable. Inside a
+// non-interactive shell that dialog cannot be answered, so the first run
+// typically resolves to .denied/.restricted/.notDetermined and we skip
+// cleanly. To grant consent, run this bin once from Terminal.app where the
+// dialog is allowed to appear. Subsequent runs reuse the granted decision.
+//
+// Optional env:
+//   EVENTLOOPOS_VOICE_FAN_OUT_PHRASE      override fixture phrase
+//   EVENTLOOPOS_VOICE_STT_SAY_VOICE       macOS `say` voice (default Samantha)
+//   EVENTLOOPOS_APPLE_SPEECH_EXPECT_TOKEN expected substring (default "email")
+//   EVENTLOOPOS_APPLE_SPEECH_TIMEOUT_MS   recognition timeout (default 30000)
+
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+
+if (process.env.EVENTLOOPOS_ENABLE_APPLE_SPEECH_URL_SMOKE !== "1") {
+  console.log("v9b apple speech url smoke skipped: set EVENTLOOPOS_ENABLE_APPLE_SPEECH_URL_SMOKE=1");
+  process.exit(0);
+}
+
+if (process.platform !== "darwin") {
+  console.log("v9b apple speech url smoke skipped: requires darwin");
+  process.exit(0);
+}
+
+const phrase = process.env.EVENTLOOPOS_VOICE_FAN_OUT_PHRASE
+  ?? "all email tasks should use the new sign off";
+const sayVoice = process.env.EVENTLOOPOS_VOICE_STT_SAY_VOICE ?? "Samantha";
+const expectedToken = (process.env.EVENTLOOPOS_APPLE_SPEECH_EXPECT_TOKEN ?? "email").trim().toLowerCase();
+const timeoutMs = Number.parseInt(process.env.EVENTLOOPOS_APPLE_SPEECH_TIMEOUT_MS ?? "30000", 10);
+
+for (const tool of ["say", "ffmpeg", "swift"]) {
+  if (!(await toolOnPath(tool))) {
+    console.log(`v9b apple speech url smoke skipped: missing tool '${tool}' on PATH`);
+    process.exit(0);
+  }
+}
+
+let tempDir;
+try {
+  tempDir = await mkdtemp(path.join(tmpdir(), "eventloopos-v9b-apple-speech-"));
+  const aiffPath = path.join(tempDir, "fixture.aiff");
+  const wavPath = path.join(tempDir, "fixture.wav");
+  const swiftPath = path.join(tempDir, "speech_url_proof.swift");
+
+  console.log(`v9b phrase: ${JSON.stringify(phrase)}`);
+  console.log(`v9b expected_token: ${JSON.stringify(expectedToken)}`);
+
+  await spawnChecked("say", ["-v", sayVoice, "-o", aiffPath, phrase]);
+  await spawnChecked("ffmpeg", ["-y", "-loglevel", "error", "-i", aiffPath, "-ar", "16000", "-ac", "1", wavPath]);
+
+  await writeFile(swiftPath, swiftSource(timeoutMs));
+
+  const swiftResult = await spawnAllowFail("swift", [swiftPath, wavPath]);
+  process.stdout.write(swiftResult.stdout);
+  if (swiftResult.stderr.trim().length > 0) {
+    process.stderr.write(swiftResult.stderr);
+  }
+
+  const parsed = parseSwiftOutput(swiftResult.stdout);
+  if (!parsed) {
+    throw new Error(`swift proof produced no parseable result. exit=${swiftResult.exitCode}`);
+  }
+
+  console.log(`v9b swift_version: ${(await spawnChecked("swift", ["--version"])).stdout.split("\n")[0]}`);
+  console.log(`v9b auth_status: ${parsed.authStatus}`);
+  console.log(`v9b recognizer_available: ${parsed.recognizerAvailable}`);
+  console.log(`v9b transcript: ${JSON.stringify(parsed.transcript ?? "")}`);
+
+  if (parsed.outcome === "skipped_unauthorized") {
+    console.log("v9b apple speech url smoke: SKIP (Speech authorization not granted).");
+    console.log("To grant consent, run this bin from Terminal.app interactively once:");
+    console.log("  EVENTLOOPOS_ENABLE_APPLE_SPEECH_URL_SMOKE=1 app/macos/bin/v9b-apple-speech-url-smoke");
+    console.log("Then approve the prompt in System Settings -> Privacy & Security -> Speech Recognition.");
+    process.exit(0);
+  }
+
+  if (parsed.outcome === "skipped_unavailable") {
+    console.log("v9b apple speech url smoke: SKIP (SFSpeechRecognizer reports unavailable on this Mac).");
+    process.exit(0);
+  }
+
+  if (parsed.outcome !== "ok") {
+    throw new Error(`swift proof reported outcome=${parsed.outcome} error=${parsed.error ?? "<none>"}`);
+  }
+
+  if (typeof parsed.transcript !== "string" || parsed.transcript.length === 0) {
+    throw new Error("Speech recognition returned empty transcript");
+  }
+
+  if (!parsed.transcript.toLowerCase().includes(expectedToken)) {
+    throw new Error(`expected transcript to include "${expectedToken}", got ${JSON.stringify(parsed.transcript)}`);
+  }
+
+  console.log(JSON.stringify({
+    ok: true,
+    test: "v9b-apple-speech-url-smoke",
+    phrase,
+    transcript: parsed.transcript,
+    auth_status: parsed.authStatus,
+    expected_token: expectedToken,
+  }, null, 2));
+  console.log("v9b apple speech url smoke: PASS");
+} catch (error) {
+  console.error("v9b apple speech url smoke: FAIL");
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  if (tempDir) {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+function swiftSource(timeoutMs) {
+  return `import Foundation
+import Speech
+
+let args = CommandLine.arguments
+guard args.count >= 2 else {
+    print("V9B_RESULT={\\"outcome\\":\\"error\\",\\"error\\":\\"missing_wav_path\\"}")
+    exit(0)
+}
+let wavPath = args[1]
+let wavURL = URL(fileURLWithPath: wavPath)
+guard FileManager.default.fileExists(atPath: wavPath) else {
+    print("V9B_RESULT={\\"outcome\\":\\"error\\",\\"error\\":\\"wav_missing\\"}")
+    exit(0)
+}
+
+let authSemaphore = DispatchSemaphore(value: 0)
+var authStatus: SFSpeechRecognizerAuthorizationStatus = .notDetermined
+SFSpeechRecognizer.requestAuthorization { status in
+    authStatus = status
+    authSemaphore.signal()
+}
+authSemaphore.wait()
+
+let authLabel: String
+switch authStatus {
+case .notDetermined: authLabel = "notDetermined"
+case .denied: authLabel = "denied"
+case .restricted: authLabel = "restricted"
+case .authorized: authLabel = "authorized"
+@unknown default: authLabel = "unknown"
+}
+
+func emit(_ payload: [String: Any]) {
+    var merged = payload
+    merged["authStatus"] = authLabel
+    if let data = try? JSONSerialization.data(withJSONObject: merged, options: []),
+       let json = String(data: data, encoding: .utf8) {
+        print("V9B_RESULT=\\(json)")
+    } else {
+        print("V9B_RESULT={\\"outcome\\":\\"error\\",\\"error\\":\\"serialize_failed\\",\\"authStatus\\":\\"\\(authLabel)\\"}")
+    }
+}
+
+guard authStatus == .authorized else {
+    emit(["outcome": "skipped_unauthorized", "recognizerAvailable": false])
+    exit(0)
+}
+
+guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US")) ?? SFSpeechRecognizer() else {
+    emit(["outcome": "error", "error": "no_recognizer", "recognizerAvailable": false])
+    exit(0)
+}
+
+if !recognizer.isAvailable {
+    emit(["outcome": "skipped_unavailable", "recognizerAvailable": false])
+    exit(0)
+}
+
+let request = SFSpeechURLRecognitionRequest(url: wavURL)
+request.shouldReportPartialResults = false
+
+final class Box: @unchecked Sendable {
+    var transcript: String?
+    var error: String?
+    var resolved = false
+    let lock = NSLock()
+}
+let box = Box()
+
+let recognitionQueue = DispatchQueue(label: "v9b.recognition")
+recognitionQueue.async {
+    _ = recognizer.recognitionTask(with: request) { result, error in
+        box.lock.lock()
+        defer { box.lock.unlock() }
+        if box.resolved { return }
+        if let error = error as NSError? {
+            box.resolved = true
+            box.error = "domain=\\(error.domain) code=\\(error.code) desc=\\(error.localizedDescription)"
+            CFRunLoopStop(CFRunLoopGetMain())
+            return
+        }
+        if let result = result, result.isFinal {
+            box.resolved = true
+            box.transcript = result.bestTranscription.formattedString
+            CFRunLoopStop(CFRunLoopGetMain())
+            return
+        }
+    }
+}
+
+let deadline = Date().addingTimeInterval(${timeoutMs} / 1000.0)
+var timedOut = false
+DispatchQueue.global().async {
+    Thread.sleep(until: deadline)
+    box.lock.lock()
+    let stillRunning = !box.resolved
+    box.lock.unlock()
+    if stillRunning {
+        timedOut = true
+        CFRunLoopStop(CFRunLoopGetMain())
+    }
+}
+
+CFRunLoopRun()
+
+box.lock.lock()
+let outTranscript = box.transcript
+let outError = box.error
+box.lock.unlock()
+
+if timedOut && outTranscript == nil && outError == nil {
+    emit(["outcome": "error", "error": "timeout_after_${timeoutMs}ms", "recognizerAvailable": true])
+    exit(0)
+}
+
+if let err = outError {
+    emit(["outcome": "error", "error": err, "recognizerAvailable": true])
+    exit(0)
+}
+
+guard let transcript = outTranscript else {
+    emit(["outcome": "error", "error": "no_final_result", "recognizerAvailable": true])
+    exit(0)
+}
+
+emit(["outcome": "ok", "transcript": transcript, "recognizerAvailable": true])
+`;
+}
+
+function parseSwiftOutput(stdout) {
+  const lines = stdout.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    const idx = line.indexOf("V9B_RESULT=");
+    if (idx === -1) continue;
+    const json = line.slice(idx + "V9B_RESULT=".length).trim();
+    try {
+      return JSON.parse(json);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function toolOnPath(tool) {
+  return new Promise((resolve) => {
+    const child = spawn("which", [tool], { stdio: ["ignore", "ignore", "ignore"] });
+    child.on("error", () => resolve(false));
+    child.on("exit", (code) => resolve(code === 0));
+  });
+}
+
+async function spawnChecked(file, args) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}\n${stdout}${stderr}`));
+    });
+  });
+}
+
+async function spawnAllowFail(file, args) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      resolve({ stdout, stderr, exitCode: code, signal });
+    });
+  });
+}
