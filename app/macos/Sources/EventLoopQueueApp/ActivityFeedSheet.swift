@@ -6,6 +6,16 @@ struct ActivityFeedSheet: View {
     let refresh: () -> Void
 
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedChip: ActivityChipKind = .all
+    @State private var searchText: String = ""
+
+    private var filteredEvents: [ActivityEvent] {
+        filterActivity(events, chip: selectedChip, search: searchText)
+    }
+
+    private var hasActiveFilter: Bool {
+        selectedChip != .all || !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -33,6 +43,8 @@ struct ActivityFeedSheet: View {
                 .accessibilityIdentifier("activity-close-button")
             }
 
+            ActivityFeedFilterBar(selectedChip: $selectedChip, searchText: $searchText)
+
             if events.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "waveform")
@@ -44,10 +56,29 @@ struct ActivityFeedSheet: View {
                 }
                 .frame(maxWidth: .infinity, minHeight: 120)
                 .accessibilityIdentifier("activity-empty")
+            } else if filteredEvents.isEmpty {
+                VStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease.circle")
+                        .font(.title)
+                        .foregroundStyle(.secondary)
+                    Text("No activity matches your filter")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    if hasActiveFilter {
+                        Button("Clear filter") {
+                            selectedChip = .all
+                            searchText = ""
+                        }
+                        .buttonStyle(.link)
+                        .accessibilityIdentifier("activity-clear-filter")
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 120)
+                .accessibilityIdentifier("activity-no-matches")
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(events) { event in
+                        ForEach(filteredEvents) { event in
                             ActivityFeedRow(event: event)
                                 .accessibilityIdentifier("activity-row-\(event.id)")
                         }
@@ -58,6 +89,65 @@ struct ActivityFeedSheet: View {
         .padding(20)
         .frame(width: 600, height: 540)
         .accessibilityIdentifier("activity-sheet")
+    }
+}
+
+private struct ActivityFeedFilterBar: View {
+    @Binding var selectedChip: ActivityChipKind
+    @Binding var searchText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                ForEach(ActivityChipKind.allCases) { chip in
+                    Button {
+                        selectedChip = chip
+                    } label: {
+                        Text(chip.label)
+                            .font(.caption.weight(.medium))
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule().fill(selectedChip == chip ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08))
+                            )
+                            .overlay(
+                                Capsule().strokeBorder(selectedChip == chip ? Color.accentColor : Color.secondary.opacity(0.2), lineWidth: 1)
+                            )
+                            .foregroundStyle(selectedChip == chip ? Color.accentColor : Color.primary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier(chip.accessibilityIdentifier)
+                    .accessibilityAddTraits(selectedChip == chip ? .isSelected : [])
+                }
+                Spacer()
+            }
+
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search activity\u{2026}", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .accessibilityIdentifier("activity-search-field")
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("activity-search-clear")
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.18), lineWidth: 1)
+            )
+        }
     }
 }
 
