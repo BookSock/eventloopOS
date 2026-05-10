@@ -168,6 +168,7 @@ export type GatewayStore = {
   getManualModeState(): Promise<ManualModeStateRecord>;
   setManualModeActive(active: boolean, reason: string | undefined, now: Date): Promise<ManualModeStateRecord>;
   createTask(input: {
+    taskId?: string;
     primaryAnchor: { kind: TaskAnchorKind; id: string };
     capturedLayout: WorkspaceSnapshot;
     autoPaperIdleSeconds?: number;
@@ -504,9 +505,11 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     },
     async createTask(input) {
       const anchorKey = `${input.primaryAnchor.kind}:${input.primaryAnchor.id}`;
-      const existing = Array.from(tasks.values()).find(
-        (record) => `${record.primary_anchor_kind}:${record.primary_anchor_id}` === anchorKey,
-      );
+      const existing =
+        (input.taskId ? tasks.get(input.taskId) : undefined) ??
+        Array.from(tasks.values()).find(
+          (record) => `${record.primary_anchor_kind}:${record.primary_anchor_id}` === anchorKey,
+        );
       if (existing) {
         const timestamp = input.now.toISOString();
         let updatedExisting = existing;
@@ -535,7 +538,7 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
         };
       }
       const timestamp = input.now.toISOString();
-      const taskId = `task_${stableId(`${input.primaryAnchor.kind}_${input.primaryAnchor.id}_${timestamp}`)}`;
+      const taskId = input.taskId ?? `task_${stableId(`${input.primaryAnchor.kind}_${input.primaryAnchor.id}_${timestamp}`)}`;
       const record: TaskRecord = {
         task_id: taskId,
         primary_anchor_kind: input.primaryAnchor.kind,

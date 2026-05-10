@@ -610,6 +610,7 @@ export class PostgresQueueStore {
   }
 
   async createTask(input: {
+    taskId?: string;
     primaryAnchor: { kind: TaskAnchorKind; id: string };
     capturedLayout: WorkspaceSnapshot;
     autoPaperIdleSeconds?: number;
@@ -619,14 +620,20 @@ export class PostgresQueueStore {
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
-      const existingResult = await client.query(
-        `
-          SELECT task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds
-          FROM tasks
-          WHERE primary_anchor_kind = $1 AND primary_anchor_id = $2
-        `,
-        [input.primaryAnchor.kind, input.primaryAnchor.id],
-      );
+      const taskSelectColumns = "task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, last_paper_emitted_at, dormant_at, auto_paper_idle_seconds";
+      const existingByIdResult = input.taskId
+        ? await client.query(`SELECT ${taskSelectColumns} FROM tasks WHERE task_id = $1`, [input.taskId])
+        : { rows: [] };
+      const existingResult = existingByIdResult.rows[0]
+        ? existingByIdResult
+        : await client.query(
+            `
+              SELECT ${taskSelectColumns}
+              FROM tasks
+              WHERE primary_anchor_kind = $1 AND primary_anchor_id = $2
+            `,
+            [input.primaryAnchor.kind, input.primaryAnchor.id],
+          );
       if (existingResult.rows[0]) {
         let row = existingResult.rows[0];
         const timestamp = input.now.toISOString();
@@ -661,11 +668,11 @@ export class PostgresQueueStore {
         return { task, layout, created: false };
       }
       const timestamp = input.now.toISOString();
-      const taskId = `task_${stableId(`${input.primaryAnchor.kind}_${input.primaryAnchor.id}_${timestamp}`)}`;
       const idleSeconds =
         typeof input.autoPaperIdleSeconds === "number" && Number.isFinite(input.autoPaperIdleSeconds)
           ? Math.max(1, Math.floor(input.autoPaperIdleSeconds))
           : 60;
+      const taskId = input.taskId ?? `task_${stableId(`${input.primaryAnchor.kind}_${input.primaryAnchor.id}_${timestamp}`)}`;
       const inserted = await client.query(
         `
           INSERT INTO tasks (task_id, primary_anchor_kind, primary_anchor_id, aerospace_workspace_id, created_at, updated_at, auto_paper_idle_seconds)

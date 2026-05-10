@@ -2662,6 +2662,21 @@ describe("orchestrator gateway API", () => {
         };
         bindings: Array<{ task_session_id: string; task_id: string }>;
         browser_context_bindings: Array<{ browser_context_id: string; event_id: string; task_id: string }>;
+        task?: {
+          task_id: string;
+          primary_anchor_kind: string;
+          primary_anchor_id: string;
+          aerospace_workspace_id?: string;
+        };
+        task_layout?: {
+          task_id: string;
+          layout: {
+            activeWorkspace?: string;
+            focusedWindowId?: number;
+            windows: Array<{ id: number; workspace: string }>;
+          };
+        };
+        task_created?: boolean;
         queue_item?: {
           id: string;
           task_id: string;
@@ -2684,6 +2699,18 @@ describe("orchestrator gateway API", () => {
       assert.deepEqual(body.workspace_snapshot.snapshot.windows.map((window) => window.id), [101, 102]);
       assert.equal(body.workspace_snapshot.snapshot.activeWorkspace, "blog-workspace");
       assert.equal(body.workspace_snapshot.snapshot.focusedWindowId, 101);
+      assert.equal(body.task?.task_id, "task_blog");
+      assert.equal(body.task?.primary_anchor_kind, "ghostty_window");
+      assert.equal(body.task?.primary_anchor_id, "101");
+      assert.equal(body.task?.aerospace_workspace_id, "blog-workspace");
+      assert.equal(body.task_created, true);
+      assert.equal(body.task_layout?.task_id, "task_blog");
+      assert.equal(body.task_layout?.layout.activeWorkspace, "blog-workspace");
+      assert.deepEqual(body.task_layout?.layout.windows.map((window) => window.id), [101, 102]);
+      const createdTask = await store.getTask("task_blog");
+      assert.equal(createdTask?.aerospace_workspace_id, "blog-workspace");
+      const createdTaskLayout = await store.getTaskLayout("task_blog");
+      assert.equal(createdTaskLayout?.layout.activeWorkspace, "blog-workspace");
       assert.deepEqual(bindings, [{ task_session_id: "codex_thread_blog", task_id: "task_blog" }]);
       assert.deepEqual(body.bindings, [{ ok: true, task_session_id: "codex_thread_blog", task_id: "task_blog" }]);
       assert.equal(body.browser_context_bindings.length, 1);

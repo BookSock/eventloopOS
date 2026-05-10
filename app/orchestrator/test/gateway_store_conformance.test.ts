@@ -772,8 +772,35 @@ function runGatewayStoreContract(
         assert.notEqual(second.task.task_id, first.task.task_id);
         assert.equal(second.task.auto_paper_idle_seconds, 60);
 
+        const explicit = await harness.store.createTask({
+          taskId: "task_onboarded_blog",
+          primaryAnchor: { kind: "ghostty_window", id: "win-onboarded" },
+          capturedLayout: layoutA,
+          aerospaceWorkspaceId: "eventloop-blog",
+          now: new Date("2026-05-06T12:02:30.000Z"),
+        });
+        assert.equal(explicit.created, true);
+        assert.equal(explicit.task.task_id, "task_onboarded_blog");
+        assert.equal(explicit.task.aerospace_workspace_id, "eventloop-blog");
+
+        const explicitReplayById = await harness.store.createTask({
+          taskId: "task_onboarded_blog",
+          primaryAnchor: { kind: "ghostty_window", id: "win-onboarded-moved" },
+          capturedLayout: layoutB,
+          aerospaceWorkspaceId: "eventloop-reports",
+          now: new Date("2026-05-06T12:02:45.000Z"),
+        });
+        assert.equal(explicitReplayById.created, false);
+        assert.equal(explicitReplayById.task.task_id, "task_onboarded_blog");
+        assert.equal(explicitReplayById.task.primary_anchor_id, "win-onboarded", "explicit task id replay must not rewrite anchor identity");
+        assert.equal(explicitReplayById.task.aerospace_workspace_id, "eventloop-reports");
+        assert.equal(explicitReplayById.layout.layout.activeWorkspace, "eventloop-blog", "explicit task id replay must not overwrite layout");
+
         const list = await harness.store.listTasks();
-        assert.deepEqual(list.map((entry) => entry.task_id).sort(), [first.task.task_id, second.task.task_id].sort());
+        assert.deepEqual(
+          list.map((entry) => entry.task_id).sort(),
+          [first.task.task_id, second.task.task_id, explicit.task.task_id].sort(),
+        );
 
         const setA = await harness.store.setCurrentTaskId(first.task.task_id, new Date("2026-05-06T12:03:00.000Z"));
         assert.equal(setA.current_task_id, first.task.task_id);

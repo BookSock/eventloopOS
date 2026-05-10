@@ -3,9 +3,10 @@ import type { GatewayStore } from "../gateway_store.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
 import type { Runtime } from "../runtime.js";
-import type { RouteDecision } from "../store.js";
+import type { RouteDecision, TaskAnchorKind } from "../store.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
 import type { WorkspaceController } from "../workspace/controller.js";
+import type { WorkspaceSnapshot } from "../workspace/aerospace.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
 
@@ -216,6 +217,9 @@ type ApprovalSuccess = {
     workspace_snapshot?: unknown;
     bindings: unknown[];
     browser_context_bindings: unknown[];
+    task?: unknown;
+    task_layout?: unknown;
+    task_created?: boolean;
     queue_item?: unknown;
     review_packet?: unknown;
     warnings: string[];
@@ -238,6 +242,7 @@ async function processOnboardingApproval(
   if (!validation.ok) return { ok: false, error: schemaError(validation.message) };
 
   const warnings: string[] = [];
+  let selectedSnapshot: WorkspaceSnapshot | undefined;
   let workspaceRecord;
   if (validation.windowIds.length > 0) {
     if (!workspace) return { ok: false, error: error(409, "workspace_not_configured", "workspace controller is not configured") };
@@ -248,14 +253,15 @@ async function processOnboardingApproval(
       return { ok: false, error: error(404, "window_not_found", "one or more requested windows were not found", { missing_window_ids: missingWindowIds }) };
     }
 
+    selectedSnapshot = {
+      backend: "aerospace",
+      windows: selected,
+      activeWorkspace: preferredWorkspaceForWindows(selected, snapshot.focusedWindowId) ?? snapshot.activeWorkspace,
+      focusedWindowId: selected.some((window) => window.id === snapshot.focusedWindowId) ? snapshot.focusedWindowId : undefined,
+    };
     workspaceRecord = await store.saveTaskWorkspaceSnapshot({
       taskId: validation.taskId,
-      snapshot: {
-        backend: "aerospace",
-        windows: selected,
-        activeWorkspace: snapshot.activeWorkspace,
-        focusedWindowId: selected.some((window) => window.id === snapshot.focusedWindowId) ? snapshot.focusedWindowId : undefined,
-      },
+      snapshot: selectedSnapshot,
       capturedAt: input.now,
       actorId: validation.actorId,
     });
@@ -278,12 +284,19 @@ async function processOnboardingApproval(
     }
   }
 
+  const taskCreation = await createOnboardingTaskIfPossible({
+    runtime: input.runtime,
+    validation,
+    bindings,
+    selectedSnapshot,
+    now: input.now,
+  });
   const browserContextBindings = await bindBrowserContextsToTask(input, validation, resolved.browserContexts);
   const queuedPaper = validation.queuePaper
     ? await queueOnboardingPaper(input, validation, resolved.proposalTitle)
     : undefined;
 
-  if (!workspaceRecord && bindings.length === 0 && browserContextBindings.length === 0 && !queuedPaper?.queue_item) {
+  if (!workspaceRecord && bindings.length === 0 && browserContextBindings.length === 0 && !queuedPaper?.queue_item && !taskCreation) {
     warnings.push("approval accepted but no windows or task sessions were provided");
   }
 
@@ -300,6 +313,7 @@ async function processOnboardingApproval(
       task_session_ids: validation.taskSessionIds,
       browser_context_ids: browserContextBindings.map((binding) => binding.browser_context_id),
       queue_paper_created: Boolean(queuedPaper?.queue_item),
+      task_created: taskCreation?.created,
       workspace_snapshot_saved: Boolean(workspaceRecord),
       binding_count: bindings.length,
       browser_context_binding_count: browserContextBindings.length,
@@ -315,11 +329,74 @@ async function processOnboardingApproval(
       workspace_snapshot: workspaceRecord,
       bindings,
       browser_context_bindings: browserContextBindings,
+      task: taskCreation?.task,
+      task_layout: taskCreation?.layout,
+      task_created: taskCreation?.created,
       queue_item: queuedPaper?.queue_item,
       review_packet: queuedPaper?.review_packet,
       warnings,
     },
   };
+}
+
+async function createOnboardingTaskIfPossible(input: {
+  runtime: Runtime;
+  validation: {
+    taskId: string;
+    windowIds: number[];
+    taskSessionIds: string[];
+  };
+  bindings: unknown[];
+  selectedSnapshot?: WorkspaceSnapshot;
+  now: Date;
+}): Promise<{ task: unknown; layout: unknown; created: boolean } | undefined> {
+  const anchor = onboardingPrimaryAnchor(input.validation, input.bindings, input.selectedSnapshot);
+  if (!anchor) return undefined;
+  const capturedLayout = input.selectedSnapshot ?? { backend: "aerospace" as const, windows: [] };
+  const result = await input.runtime.store.createTask({
+    taskId: input.validation.taskId,
+    primaryAnchor: anchor,
+    capturedLayout,
+    aerospaceWorkspaceId: input.selectedSnapshot?.activeWorkspace,
+    now: input.now,
+  });
+  return result;
+}
+
+function onboardingPrimaryAnchor(
+  validation: { taskId: string; windowIds: number[] },
+  bindings: unknown[],
+  selectedSnapshot: WorkspaceSnapshot | undefined,
+): { kind: TaskAnchorKind; id: string } | undefined {
+  for (const binding of bindings) {
+    if (!isRecord(binding)) continue;
+    const session = isRecord(binding.session) ? binding.session : undefined;
+    const nativeThreadId = readOptionalString(session?.native_thread_id);
+    if (nativeThreadId) return { kind: "codex_thread", id: nativeThreadId };
+    const sessionId = readOptionalString(binding.task_session_id);
+    const provider = readOptionalString(session?.provider)?.toLowerCase();
+    if (sessionId && provider?.includes("codex")) return { kind: "codex_thread", id: sessionId };
+  }
+
+  const focusedWindowId = selectedSnapshot?.focusedWindowId;
+  if (focusedWindowId && validation.windowIds.includes(focusedWindowId)) {
+    return { kind: "ghostty_window", id: String(focusedWindowId) };
+  }
+  const firstWindow = selectedSnapshot?.windows[0]?.id ?? validation.windowIds[0];
+  if (firstWindow) return { kind: "ghostty_window", id: String(firstWindow) };
+  return undefined;
+}
+
+function preferredWorkspaceForWindows(windows: WorkspaceSnapshot["windows"], focusedWindowId?: number): string | undefined {
+  const focusedWindow = focusedWindowId === undefined ? undefined : windows.find((window) => window.id === focusedWindowId);
+  if (focusedWindow?.workspace) return focusedWindow.workspace;
+
+  const counts = new Map<string, number>();
+  for (const window of windows) {
+    if (!window.workspace) continue;
+    counts.set(window.workspace, (counts.get(window.workspace) ?? 0) + 1);
+  }
+  return [...counts.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))[0]?.[0];
 }
 
 async function resolveProposalApprovalIfNeeded(

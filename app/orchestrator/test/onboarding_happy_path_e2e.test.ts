@@ -80,15 +80,24 @@ describe("onboarding happy path end-to-end", () => {
         proposal_id: string;
         queue_item?: { id: string };
         workspace_snapshot?: { task_id: string };
+        task?: { task_id: string };
+        task_created?: boolean;
       };
       assert.equal(approveResponse.status, 200, `approve failed for ${proposal.task_id}`);
       assert.equal(approveBody.ok, true);
       assert.equal(approveBody.task_id, proposal.task_id);
       assert.equal(approveBody.workspace_snapshot?.task_id, proposal.task_id);
+      assert.equal(approveBody.task?.task_id, proposal.task_id);
+      assert.equal(approveBody.task_created, true);
       assert.ok(approveBody.queue_item?.id, `queue_item missing for ${proposal.task_id}`);
       queueItemIds.push(approveBody.queue_item!.id);
     }
     assert.equal(queueItemIds.length, 3);
+
+    const tasksResponse = await fetch(`${baseUrl}/tasks`);
+    const tasksBody = await tasksResponse.json() as { tasks: Array<{ task_id: string }> };
+    assert.equal(tasksResponse.status, 200);
+    assert.deepEqual(tasksBody.tasks.map((task) => task.task_id).sort(), taskIds);
 
     const queueResponse = await fetch(`${baseUrl}/queue`);
     const queueBody = await queueResponse.json() as {
