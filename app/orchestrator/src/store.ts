@@ -82,6 +82,18 @@ export type InMemoryStore = {
   mcpPollStates?: Map<string, McpPollStateSnapshot>;
   taskMessagesByIdempotencyKey?: Map<string, DurableTaskMessageRecord>;
   taskWorkspaceSnapshots?: Map<string, TaskWorkspaceSnapshotRecord>;
+  queueActionAttempts?: Map<string, StoredActionAttempt>;
+};
+
+export type StoredActionAttempt = {
+  idempotency_key: string;
+  queue_item_id: string;
+  terminal_send_ok: boolean;
+  completed: boolean;
+  action_result?: Record<string, unknown>;
+  terminal_send_result?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
 };
 
 export type TaskWorkspaceSnapshotRecord = {

@@ -25,6 +25,7 @@ export async function handleQueueRoute(input: {
   runtime: Runtime;
   now: Date;
   requestId: string;
+  idempotencyKey?: string;
 }): Promise<RouteResult | undefined> {
   const { store, taskSessions, observability, terminalSendExecutor, terminalSendEnabled } = input.runtime;
   if (input.method === "GET" && input.pathname === "/queue") {
@@ -249,12 +250,40 @@ export async function handleQueueRoute(input: {
     const queueItemId = decodeURIComponent(recommendedActionMatch[1] ?? "");
     const item = await findQueueItem(store, queueItemId);
     if (!item) return error(404, "not_found", `queue item ${queueItemId} was not found`);
+
+    const idempotencyKey = resolveQueueActionIdempotencyKey({
+      bodyValue: parsed.value.idempotency_key,
+      headerValue: input.idempotencyKey,
+      queueItemId,
+      actionId: item.review_packet.recommended_action.id,
+    });
+
+    const attempt = await store.recordQueueActionAttempt({
+      idempotencyKey,
+      queueItemId,
+      now: input.now,
+    });
+
+    // Full retry: previous attempt already completed end-to-end. Return cached result.
+    if (attempt.existing?.completed && attempt.existing.action_result) {
+      const cachedItem = await findQueueItem(store, queueItemId);
+      return ok(200, {
+        ok: true,
+        action_result: attempt.existing.action_result,
+        item: cachedItem,
+        idempotent_replay: true,
+        request_id: input.requestId,
+      });
+    }
+
     const workspaceSave = await saveTaskWorkspaceSnapshotFromQueueAction(input, item, parsed.value, validation.actorId);
     if (!workspaceSave.ok) return schemaError(workspaceSave.message);
 
     const actionResult = await executeQueueAction({
       runtime: input.runtime,
       now: input.now,
+      idempotencyKey,
+      priorAttempt: attempt.existing,
     }, item, item.review_packet.recommended_action);
     if (!actionResult.ok) {
       return error(actionResult.status, actionResult.code, actionResult.message, actionResult.details);
@@ -267,6 +296,11 @@ export async function handleQueueRoute(input: {
         actionResult: actionResult.result,
       });
     }
+    await store.markQueueActionCompleted({
+      idempotencyKey,
+      actionResult: actionResult.result,
+      now: input.now,
+    });
     return ok(200, {
       ok: true,
       action_result: actionResult.result,
@@ -512,6 +546,21 @@ function validateQueueActionRequest(input: unknown): { ok: true; actorId: string
   };
 }
 
+function resolveQueueActionIdempotencyKey(input: {
+  bodyValue: unknown;
+  headerValue?: string;
+  queueItemId: string;
+  actionId: string;
+}): string {
+  if (typeof input.bodyValue === "string" && input.bodyValue.trim()) {
+    return input.bodyValue.trim();
+  }
+  if (typeof input.headerValue === "string" && input.headerValue.trim()) {
+    return input.headerValue.trim();
+  }
+  return `queue_action_${input.queueItemId}_${input.actionId}`;
+}
+
 async function findQueueItem(store: GatewayStore, queueItemId: string): Promise<QueueItemWithPacket | undefined> {
   const visible = (await store.listQueue()).find((item) => item.id === queueItemId);
   if (visible) return visible;
@@ -545,6 +594,8 @@ async function executeQueueAction(
   input: {
     runtime: Runtime;
     now: Date;
+    idempotencyKey?: string;
+    priorAttempt?: { terminal_send_ok: boolean; terminal_send_result?: Record<string, unknown> };
   },
   item: QueueItemWithPacket,
   action: Action,
@@ -621,17 +672,32 @@ async function executeQueueAction(
   }
 
   const terminalRef = isRecord(session) && typeof session.terminal_ref === "string" ? session.terminal_ref : undefined;
-  const terminalSendResult = terminalRef
-    ? await triggerTerminalKeystroke({
-      terminalRef,
-      text: taskActionFollowupText(item, eventResult?.event),
-      submit: true,
-      enabled: terminalSendEnabled !== false,
-      executor: terminalSendExecutor,
-    })
-    : undefined;
+  let terminalSendResult: Awaited<ReturnType<typeof triggerTerminalKeystroke>> | undefined;
+  let terminalSendReplayed = false;
+  if (terminalRef) {
+    if (input.priorAttempt?.terminal_send_ok && input.priorAttempt.terminal_send_result) {
+      // Idempotent retry: terminal keystroke already succeeded. Reuse cached result.
+      terminalSendResult = input.priorAttempt.terminal_send_result as Awaited<ReturnType<typeof triggerTerminalKeystroke>>;
+      terminalSendReplayed = true;
+    } else {
+      terminalSendResult = await triggerTerminalKeystroke({
+        terminalRef,
+        text: taskActionFollowupText(item, eventResult?.event),
+        submit: true,
+        enabled: terminalSendEnabled !== false,
+        executor: terminalSendExecutor,
+      });
+      if (terminalSendResult.ok && input.idempotencyKey) {
+        await store.markQueueActionTerminalSent({
+          idempotencyKey: input.idempotencyKey,
+          terminalSendResult: terminalSendResult as unknown as Record<string, unknown>,
+          now: input.now,
+        });
+      }
+    }
+  }
 
-  if (terminalSendResult) {
+  if (terminalSendResult && !terminalSendReplayed) {
     await observability.recordActivity({
       type: "terminal_keystroke_attempted",
       occurred_at: input.now.toISOString(),

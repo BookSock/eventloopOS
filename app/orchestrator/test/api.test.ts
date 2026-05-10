@@ -4089,6 +4089,105 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("skips terminal keystroke and reuses cached action_result on idempotent retry", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const taskSessions = new DevelopmentTaskSessionController({ clock: () => new Date("2026-05-06T17:00:00.000Z") });
+    taskSessions.seedSession({ id: "task_session_idem", task_id: "task_blog_feedback" });
+    taskSessions.bindTaskSession({ task_session_id: "task_session_idem", task_id: "task_blog_feedback", terminal_ref: "ghostty:front" });
+
+    const executorCalls: Array<{ file: string; args: string[] }> = [];
+    const idemServer = createGatewayServer({
+      store,
+      taskSessions,
+      terminalSendExecutor: async (command) => { executorCalls.push(command); },
+      terminalSendEnabled: true,
+      now: () => new Date("2026-05-06T18:00:00.000Z"),
+    });
+    await new Promise<void>((resolve) => idemServer.listen(0, "127.0.0.1", resolve));
+    const address = idemServer.address() as AddressInfo;
+    const idemBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const event = {
+        id: "evt_idempotent_blog_action",
+        source: "manual",
+        source_id: "manual:idem-blog",
+        idempotency_key: "manual:idem-blog",
+        occurred_at: "2026-05-06T17:59:00.000Z",
+        received_at: "2026-05-06T18:00:00.000Z",
+        actor: { id: "user_jason", type: "human" },
+        task_hint: "blog feedback",
+        type: "manual.review_requested",
+        title: "Idempotent blog review",
+        summary: "Idempotent retry should not re-keystroke.",
+        raw_ref: { id: "raw_idem_blog", uri: "manual://idem-blog", media_type: "text/plain" },
+        links: [],
+        resources: [],
+      };
+      const eventResponse = await fetch(`${idemBaseUrl}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ event }),
+      });
+      const eventBody = await eventResponse.json() as { queue_item: { id: string } };
+      assert.equal(eventResponse.status, 202);
+
+      const idempotencyKey = `idem-queue-action-${eventBody.queue_item.id}`;
+
+      const firstResponse = await fetch(`${idemBaseUrl}/queue/${eventBody.queue_item.id}/actions/recommended`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": idempotencyKey,
+        },
+        body: JSON.stringify({ actor_id: "mac_queue_app" }),
+      });
+      assert.equal(firstResponse.status, 200);
+      const firstBody = await firstResponse.json() as {
+        action_result: {
+          task_session_id: string;
+          terminal_send: { ok: boolean };
+          task_message: { status: string };
+        };
+        item: { state: string };
+      };
+      assert.equal(firstBody.action_result.terminal_send.ok, true);
+      assert.equal(firstBody.action_result.task_session_id, "task_session_idem");
+      assert.equal(firstBody.item.state, "done");
+      assert.equal(executorCalls.length, 1);
+
+      // Replay the same request: must NOT call the executor again, and must
+      // return the same action_result. Body of the response should also flag
+      // idempotent_replay so callers can observe it if they care.
+      const replayResponse = await fetch(`${idemBaseUrl}/queue/${eventBody.queue_item.id}/actions/recommended`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "idempotency-key": idempotencyKey,
+        },
+        body: JSON.stringify({ actor_id: "mac_queue_app" }),
+      });
+      assert.equal(replayResponse.status, 200);
+      const replayBody = await replayResponse.json() as {
+        ok: boolean;
+        idempotent_replay?: boolean;
+        action_result: {
+          task_session_id: string;
+          terminal_send: { ok: boolean };
+        };
+      };
+      assert.equal(replayBody.ok, true);
+      assert.equal(replayBody.idempotent_replay, true);
+      assert.equal(replayBody.action_result.task_session_id, firstBody.action_result.task_session_id);
+      assert.equal(replayBody.action_result.terminal_send.ok, true);
+      assert.equal(executorCalls.length, 1, "terminal executor must not run again on idempotent replay");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        idemServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("normalizes voice commands into task-session followups", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const messages = new Map<string, Record<string, unknown>>();
@@ -4378,6 +4477,58 @@ describe("orchestrator gateway API", () => {
     } finally {
       await new Promise<void>((resolve, reject) => {
         rerankServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
+  it("defers matching queue items when voice command is a defer intent", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore());
+    const fixedNow = new Date("2026-05-09T12:00:00.000Z");
+    const deferServer = createGatewayServer({
+      store,
+      now: () => fixedNow,
+    });
+    await new Promise<void>((resolve) => deferServer.listen(0, "127.0.0.1", resolve));
+    const address = deferServer.address() as AddressInfo;
+    const deferBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${deferBaseUrl}/voice/commands`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "idempotency-key": "idem_voice_defer_seed" },
+        body: JSON.stringify({ transcript: "defer all seed for an hour" }),
+      });
+      const body = await response.json() as {
+        ok: boolean;
+        intent?: string;
+        defer_seconds?: number;
+        due_at?: string;
+        deferred?: Array<{ id: string; task_id?: string; due_at?: string }>;
+      };
+      assert.equal(response.status, 200);
+      assert.equal(body.intent, "defer");
+      assert.equal(body.defer_seconds, 3600);
+      assert.ok(Array.isArray(body.deferred) && body.deferred.length >= 1, "expected at least one item deferred");
+
+      const expectedDueAt = new Date(fixedNow.getTime() + 3600 * 1000).toISOString();
+      assert.equal(body.due_at, expectedDueAt);
+      for (const entry of body.deferred ?? []) {
+        assert.equal(entry.due_at, expectedDueAt);
+      }
+
+      // Verify state in the queue.
+      const queueResponse = await fetch(`${deferBaseUrl}/queue?state=deferred`);
+      const queueBody = await queueResponse.json() as {
+        items: Array<{ id: string; state: string; due_at?: string }>;
+      };
+      const deferredItem = queueBody.items.find((item) => body.deferred?.some((entry) => entry.id === item.id));
+      assert.ok(deferredItem, "expected the deferred queue item to be visible in /queue?state=deferred");
+      assert.equal(deferredItem!.state, "deferred");
+      const dueDelta = new Date(deferredItem!.due_at ?? "").getTime() - fixedNow.getTime();
+      assert.ok(Math.abs(dueDelta - 3600 * 1000) < 1000, `expected due_at ~3600s ahead, got delta ${dueDelta}ms`);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        deferServer.close((error) => (error ? reject(error) : resolve()));
       });
     }
   });

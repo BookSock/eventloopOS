@@ -15,6 +15,18 @@ export type VoiceIntent =
     transcript: string;
     selector: string;
     message: string;
+  }
+  | {
+    kind: "defer";
+    transcript: string;
+    selector: string;
+    defer_seconds: number;
+  }
+  | {
+    kind: "pause";
+    transcript: string;
+    selector?: string;
+    defer_seconds: number;
   };
 
 const RAISE_TOKENS = ["raise", "bump", "boost", "increase", "higher", "promote"];
@@ -27,6 +39,12 @@ export function classifyVoiceIntent(transcript: string): VoiceIntent {
     return { kind: "note", transcript: cleaned };
   }
   const lowered = cleaned.toLowerCase();
+
+  const pause = detectPause(cleaned, lowered);
+  if (pause) return pause;
+
+  const defer = detectDefer(cleaned, lowered);
+  if (defer) return defer;
 
   const fanOut = detectFanOut(cleaned, lowered);
   if (fanOut) return fanOut;
@@ -82,6 +100,153 @@ function detectFanOut(original: string, lowered: string): VoiceIntent | undefine
     };
   }
   return undefined;
+}
+
+// Defer requires a verb at the start ("defer"/"snooze"/"hold off on"/"postpone") and an
+// explicit `all|every|each` quantifier so we don't fire on plain notes like
+// "we should defer talking to legal".
+const DEFER_VERB = /^(?:please\s+)?(?:can you\s+)?(?:defer|snooze|postpone|hold off on)\b/i;
+const DEFER_PATTERN = /^(?:please\s+)?(?:can you\s+)?(?:defer|snooze|postpone|hold off on)\s+(?:all|every|each)\s+(?:of\s+)?(?:the\s+)?(.+?)(?:\s+(?:tasks?|papers?|threads?|items?|agents?))?(?:\s+for\s+(.+?))?[.!?]?\s*$/i;
+
+function detectDefer(original: string, lowered: string): VoiceIntent | undefined {
+  if (!DEFER_VERB.test(lowered)) return undefined;
+  const match = original.match(DEFER_PATTERN);
+  if (!match) return undefined;
+  const selectorRaw = (match[1] ?? "").trim();
+  const selector = extractSelectorTokens(selectorRaw);
+  if (!selector) return undefined;
+  const durationToken = (match[2] ?? "").trim();
+  const seconds = durationToken ? parseDurationToSeconds(durationToken) : 3600;
+  return {
+    kind: "defer",
+    transcript: original.trim(),
+    selector,
+    defer_seconds: seconds ?? 3600,
+  };
+}
+
+// Pause matches "pause everything|all|all tasks for Y" and "pause for Y".
+// Selector is optional (missing means "all ready"). Like defer, we anchor on
+// "pause" at the start of the utterance so a stray mention in a note doesn't fire.
+const PAUSE_VERB = /^(?:please\s+)?(?:can you\s+)?(?:pause|stop|halt|wrap up)\b/i;
+const PAUSE_PATTERNS: Array<{ regex: RegExp; selectorIndex: number; durationIndex: number }> = [
+  // "pause everything for 30 minutes" / "stop everything for 1h"
+  {
+    regex: /^(?:please\s+)?(?:can you\s+)?(?:pause|stop|halt)\s+(everything|all|all\s+(?:tasks?|papers?|threads?|items?|agents?))(?:\s+for\s+(.+?))?[.!?]?\s*$/i,
+    selectorIndex: 1,
+    durationIndex: 2,
+  },
+  // "pause for 30 minutes"
+  {
+    regex: /^(?:please\s+)?(?:can you\s+)?(?:pause|stop|halt)(?:\s+for\s+(.+?))?[.!?]?\s*$/i,
+    selectorIndex: 0,
+    durationIndex: 1,
+  },
+  // "wrap up by 3pm" / "wrap up for 30 minutes"
+  {
+    regex: /^(?:please\s+)?(?:can you\s+)?wrap up(?:\s+(?:for|by)\s+(.+?))?[.!?]?\s*$/i,
+    selectorIndex: 0,
+    durationIndex: 1,
+  },
+];
+
+function detectPause(original: string, lowered: string): VoiceIntent | undefined {
+  if (!PAUSE_VERB.test(lowered)) return undefined;
+  for (const candidate of PAUSE_PATTERNS) {
+    const match = original.match(candidate.regex);
+    if (!match) continue;
+    const selectorRaw = candidate.selectorIndex > 0 ? (match[candidate.selectorIndex] ?? "").trim() : "";
+    const durationToken = (match[candidate.durationIndex] ?? "").trim();
+    // "everything" / "all" / "all tasks" all collapse to no specific selector.
+    const isUniversalSelector = !selectorRaw || /^(everything|all)$/i.test(selectorRaw) || /^all\s+(tasks?|papers?|threads?|items?|agents?)$/i.test(selectorRaw);
+    const selector = isUniversalSelector ? undefined : extractSelectorTokens(selectorRaw) || undefined;
+    const seconds = durationToken ? parseDurationToSeconds(durationToken) : 3600;
+    return {
+      kind: "pause",
+      transcript: original.trim(),
+      selector,
+      defer_seconds: seconds ?? 3600,
+    };
+  }
+  return undefined;
+}
+
+// Parses common spoken duration phrases. Returns undefined when the token
+// is not a recognized duration so callers can decide on a sensible default.
+export function parseDurationToSeconds(input: string): number | undefined {
+  const normalized = input.trim().toLowerCase().replace(/[.,!?]+$/, "");
+  if (!normalized) return undefined;
+
+  // Word-form numerics like "an hour", "one hour", "half an hour", "a couple of hours".
+  if (/^(?:an?|one)\s+hour$/.test(normalized)) return 3600;
+  if (/^half\s+an?\s+hour$/.test(normalized)) return 1800;
+  if (/^a\s+couple\s+(?:of\s+)?hours?$/.test(normalized)) return 7200;
+  if (/^a\s+few\s+hours?$/.test(normalized)) return 10800;
+  if (/^(?:an?|one)\s+minute$/.test(normalized)) return 60;
+  if (/^a\s+(?:bit|moment|sec|second)$/.test(normalized)) return 60;
+  if (/^the\s+rest\s+of\s+the\s+day$/.test(normalized)) return 4 * 3600;
+  if (/^tomorrow$/.test(normalized)) return 86400;
+  if (/^tonight$/.test(normalized)) return 6 * 3600;
+  if (/^a\s+day$/.test(normalized) || /^one\s+day$/.test(normalized)) return 86400;
+  if (/^a\s+week$/.test(normalized) || /^one\s+week$/.test(normalized)) return 7 * 86400;
+
+  // Compact forms: "30m", "1h", "2h30m", "90s", "2d".
+  const compact = normalized.match(/^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)$/);
+  if (compact) {
+    return scaleNumeric(Number(compact[1]), compact[2]);
+  }
+
+  // "1 hour", "30 minutes", "2 days"
+  const spaced = normalized.match(/^(\d+(?:\.\d+)?)\s+(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)$/);
+  if (spaced) {
+    return scaleNumeric(Number(spaced[1]), spaced[2]);
+  }
+
+  // Compound: "1h30m", "2 hours 15 minutes" — best-effort.
+  let total = 0;
+  let matched = false;
+  const compound = normalized.matchAll(/(\d+(?:\.\d+)?)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|week|weeks)/g);
+  for (const part of compound) {
+    const scaled = scaleNumeric(Number(part[1]), part[2]);
+    if (scaled === undefined) continue;
+    total += scaled;
+    matched = true;
+  }
+  return matched ? total : undefined;
+}
+
+function scaleNumeric(value: number, unit: string): number | undefined {
+  if (!Number.isFinite(value) || value < 0) return undefined;
+  switch (unit) {
+    case "s":
+    case "sec":
+    case "secs":
+    case "second":
+    case "seconds":
+      return Math.round(value);
+    case "m":
+    case "min":
+    case "mins":
+    case "minute":
+    case "minutes":
+      return Math.round(value * 60);
+    case "h":
+    case "hr":
+    case "hrs":
+    case "hour":
+    case "hours":
+      return Math.round(value * 3600);
+    case "d":
+    case "day":
+    case "days":
+      return Math.round(value * 86400);
+    case "w":
+    case "week":
+    case "weeks":
+      return Math.round(value * 7 * 86400);
+    default:
+      return undefined;
+  }
 }
 
 const SELECTOR_STOP_WORDS = new Set([
@@ -171,6 +336,41 @@ export function pickRerankCandidate(
   }
   if (!best || best.score < 0.5) return undefined;
   return best;
+}
+
+// Returns every queue item whose task_id, title, or summary matches the selector
+// above the same 0.5 score threshold used by pickRerankCandidate. Unlike rerank
+// (which picks one), defer/pause want to act on the whole matched set.
+export function pickDeferCandidates(
+  selector: string,
+  items: QueueItemWithPacket[],
+): Array<{ item: QueueItemWithPacket; score: number }> {
+  if (items.length === 0) return [];
+  const targetTokens = tokenize(selector);
+  if (targetTokens.length === 0) return [];
+
+  const matches: Array<{ item: QueueItemWithPacket; score: number }> = [];
+  for (const item of items) {
+    const haystack = [
+      item.task_id ?? "",
+      item.review_packet?.title ?? "",
+      item.review_packet?.summary ?? "",
+    ].join(" ");
+    const haystackTokens = tokenize(haystack);
+    if (haystackTokens.length === 0) continue;
+    const haystackSet = new Set(haystackTokens);
+
+    let hits = 0;
+    for (const token of targetTokens) {
+      if (haystackSet.has(token)) hits += 1;
+    }
+    if (hits === 0) continue;
+    const score = hits / targetTokens.length;
+    if (score < 0.5) continue;
+    matches.push({ item, score });
+  }
+  matches.sort((left, right) => right.score - left.score);
+  return matches;
 }
 
 function tokenize(input: string): string[] {

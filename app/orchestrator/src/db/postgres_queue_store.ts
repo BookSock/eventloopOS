@@ -32,6 +32,7 @@ import {
   type ContextQuery,
   type ContextRestoreRequestRecord,
   type RouteDecision,
+  type StoredActionAttempt,
   type StoredEventResult,
   type TaskWorkspaceSnapshotRecord,
 } from "../store.js";
@@ -344,6 +345,97 @@ export class PostgresQueueStore {
       ],
     );
     return result.rows[0] ? rowToTaskMessageRecord(result.rows[0]) : undefined;
+  }
+
+  async getQueueActionAttempt(idempotencyKey: string): Promise<StoredActionAttempt | undefined> {
+    const result = await this.pool.query(
+      `
+        SELECT idempotency_key, queue_item_id, terminal_send_ok, completed, action_result, terminal_send_result, created_at, updated_at
+        FROM queue_action_attempts
+        WHERE idempotency_key = $1
+      `,
+      [idempotencyKey],
+    );
+    const row = result.rows[0];
+    return row ? rowToStoredActionAttempt(row) : undefined;
+  }
+
+  async recordQueueActionAttempt(input: {
+    idempotencyKey: string;
+    queueItemId: string;
+    now: Date;
+  }): Promise<{ existing?: StoredActionAttempt; record: StoredActionAttempt }> {
+    const timestamp = input.now.toISOString();
+    const result = await this.pool.query(
+      `
+        INSERT INTO queue_action_attempts (
+          idempotency_key,
+          queue_item_id,
+          terminal_send_ok,
+          completed,
+          action_result,
+          terminal_send_result,
+          created_at,
+          updated_at
+        )
+        VALUES ($1, $2, false, false, NULL, NULL, $3::timestamptz, $3::timestamptz)
+        ON CONFLICT (idempotency_key) DO NOTHING
+        RETURNING idempotency_key, queue_item_id, terminal_send_ok, completed, action_result, terminal_send_result, created_at, updated_at
+      `,
+      [input.idempotencyKey, input.queueItemId, timestamp],
+    );
+
+    if (result.rows[0]) {
+      return { record: rowToStoredActionAttempt(result.rows[0]) };
+    }
+
+    const existing = await this.getQueueActionAttempt(input.idempotencyKey);
+    if (!existing) {
+      throw new Error(`queue action attempt ${input.idempotencyKey} was not found after conflict`);
+    }
+    return { existing, record: existing };
+  }
+
+  async markQueueActionTerminalSent(input: {
+    idempotencyKey: string;
+    terminalSendResult?: Record<string, unknown>;
+    now: Date;
+  }): Promise<StoredActionAttempt | undefined> {
+    const result = await this.pool.query(
+      `
+        UPDATE queue_action_attempts
+        SET terminal_send_ok = true,
+            terminal_send_result = $2::jsonb,
+            updated_at = $3::timestamptz
+        WHERE idempotency_key = $1
+        RETURNING idempotency_key, queue_item_id, terminal_send_ok, completed, action_result, terminal_send_result, created_at, updated_at
+      `,
+      [
+        input.idempotencyKey,
+        input.terminalSendResult ? JSON.stringify(input.terminalSendResult) : null,
+        input.now.toISOString(),
+      ],
+    );
+    return result.rows[0] ? rowToStoredActionAttempt(result.rows[0]) : undefined;
+  }
+
+  async markQueueActionCompleted(input: {
+    idempotencyKey: string;
+    actionResult: Record<string, unknown>;
+    now: Date;
+  }): Promise<StoredActionAttempt | undefined> {
+    const result = await this.pool.query(
+      `
+        UPDATE queue_action_attempts
+        SET completed = true,
+            action_result = $2::jsonb,
+            updated_at = $3::timestamptz
+        WHERE idempotency_key = $1
+        RETURNING idempotency_key, queue_item_id, terminal_send_ok, completed, action_result, terminal_send_result, created_at, updated_at
+      `,
+      [input.idempotencyKey, JSON.stringify(input.actionResult), input.now.toISOString()],
+    );
+    return result.rows[0] ? rowToStoredActionAttempt(result.rows[0]) : undefined;
   }
 
   async recordWorkspaceRestoreReceipt(input: {
@@ -1420,6 +1512,19 @@ export class PostgresQueueStore {
 
     return result.rows[0] ? rowToQueueItemWithPacket(result.rows[0]) : undefined;
   }
+}
+
+function rowToStoredActionAttempt(row: Record<string, unknown>): StoredActionAttempt {
+  return {
+    idempotency_key: String(row.idempotency_key),
+    queue_item_id: String(row.queue_item_id),
+    terminal_send_ok: Boolean(row.terminal_send_ok),
+    completed: Boolean(row.completed),
+    action_result: row.action_result ? row.action_result as Record<string, unknown> : undefined,
+    terminal_send_result: row.terminal_send_result ? row.terminal_send_result as Record<string, unknown> : undefined,
+    created_at: requiredDateToIso(row.created_at),
+    updated_at: requiredDateToIso(row.updated_at),
+  };
 }
 
 function rowToTaskWorkspaceSnapshotRecord(row: Record<string, unknown>): TaskWorkspaceSnapshotRecord {

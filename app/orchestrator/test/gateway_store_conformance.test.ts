@@ -395,6 +395,82 @@ function runGatewayStoreContract(
       }
     });
 
+    it("records, terminal-sends, and completes queue action attempts consistently", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        const idempotencyKey = "queue_action_qit_blog_act_blog_review";
+        const queueItemId = "qit_blog";
+
+        const first = await harness.store.recordQueueActionAttempt({
+          idempotencyKey,
+          queueItemId,
+          now,
+        });
+        assert.equal(first.existing, undefined);
+        assert.equal(first.record.idempotency_key, idempotencyKey);
+        assert.equal(first.record.queue_item_id, queueItemId);
+        assert.equal(first.record.terminal_send_ok, false);
+        assert.equal(first.record.completed, false);
+        assert.equal(first.record.action_result, undefined);
+        assert.equal(first.record.terminal_send_result, undefined);
+
+        const replay = await harness.store.recordQueueActionAttempt({
+          idempotencyKey,
+          queueItemId,
+          now: new Date("2026-05-06T12:00:01.000Z"),
+        });
+        assert.equal(replay.existing?.idempotency_key, idempotencyKey);
+        assert.equal(replay.record.created_at, first.record.created_at);
+
+        const sent = await harness.store.markQueueActionTerminalSent({
+          idempotencyKey,
+          terminalSendResult: { ok: true, transport: "ghostty", commandCount: 1 },
+          now: new Date("2026-05-06T12:00:02.000Z"),
+        });
+        assert.equal(sent?.terminal_send_ok, true);
+        assert.equal(sent?.completed, false);
+        assert.deepEqual(sent?.terminal_send_result, { ok: true, transport: "ghostty", commandCount: 1 });
+        assert.equal(sent?.updated_at, "2026-05-06T12:00:02.000Z");
+
+        const completed = await harness.store.markQueueActionCompleted({
+          idempotencyKey,
+          actionResult: {
+            type: "resume_agent",
+            queue_item_id: queueItemId,
+            task_session_id: "task_session_blog",
+          },
+          now: new Date("2026-05-06T12:00:03.000Z"),
+        });
+        assert.equal(completed?.completed, true);
+        assert.equal(completed?.terminal_send_ok, true);
+        assert.equal((completed?.action_result as Record<string, unknown>)?.task_session_id, "task_session_blog");
+        assert.equal(completed?.updated_at, "2026-05-06T12:00:03.000Z");
+
+        const fetched = await harness.store.getQueueActionAttempt(idempotencyKey);
+        assert.deepEqual(fetched, completed);
+
+        const missing = await harness.store.getQueueActionAttempt("queue_action_unknown");
+        assert.equal(missing, undefined);
+
+        const missingTerminalSent = await harness.store.markQueueActionTerminalSent({
+          idempotencyKey: "queue_action_unknown",
+          now,
+        });
+        assert.equal(missingTerminalSent, undefined);
+
+        const missingCompleted = await harness.store.markQueueActionCompleted({
+          idempotencyKey: "queue_action_unknown",
+          actionResult: { type: "resume_agent" },
+          now,
+        });
+        assert.equal(missingCompleted, undefined);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     it("dedupes and finalizes task message history consistently", async (t) => {
       const harness = await createHarness(t);
       if (!harness) return;
@@ -616,7 +692,8 @@ async function clearPostgresTestData(store: PostgresQueueStore): Promise<void> {
       review_packets,
       agent_runs,
       events,
-      context_restore_requests
+      context_restore_requests,
+      queue_action_attempts
     RESTART IDENTITY CASCADE
   `);
 }

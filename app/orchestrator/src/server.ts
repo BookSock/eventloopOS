@@ -98,6 +98,7 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
         runtime,
         now: now(),
         requestId: context.requestId,
+        idempotencyKey: context.idempotencyKey,
       });
       if (queueRoute) {
         return sendObservedRouteResult(response, context, observability, routeNameForPath(request.method, context.url.pathname) ?? "queue", queueRoute, startedAt);

@@ -54,6 +54,7 @@ import {
   type ContextQuery,
   type ContextRestoreRequestRecord,
   type RouteDecision,
+  type StoredActionAttempt,
   type StoredEventResult,
   type TaskWorkspaceSnapshotRecord,
 } from "./store.js";
@@ -111,6 +112,22 @@ export type GatewayStore = {
   listTaskMessages(query?: TaskMessageHistoryQuery): Promise<DurableTaskMessageRecord[]>;
   recordTaskMessageAttempt(input: DurableTaskMessageAttemptInput): Promise<DurableTaskMessageRecord>;
   finalizeTaskMessage(input: DurableTaskMessageFinalInput): Promise<DurableTaskMessageRecord | undefined>;
+  getQueueActionAttempt(idempotencyKey: string): Promise<StoredActionAttempt | undefined>;
+  recordQueueActionAttempt(input: {
+    idempotencyKey: string;
+    queueItemId: string;
+    now: Date;
+  }): Promise<{ existing?: StoredActionAttempt; record: StoredActionAttempt }>;
+  markQueueActionTerminalSent(input: {
+    idempotencyKey: string;
+    terminalSendResult?: Record<string, unknown>;
+    now: Date;
+  }): Promise<StoredActionAttempt | undefined>;
+  markQueueActionCompleted(input: {
+    idempotencyKey: string;
+    actionResult: Record<string, unknown>;
+    now: Date;
+  }): Promise<StoredActionAttempt | undefined>;
 };
 
 export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
@@ -118,10 +135,12 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   const mcpPollStates = store.mcpPollStates ?? new Map<string, McpPollStateSnapshot>();
   const taskMessagesByIdempotencyKey = store.taskMessagesByIdempotencyKey ?? new Map<string, DurableTaskMessageRecord>();
   const taskWorkspaceSnapshots = store.taskWorkspaceSnapshots ?? new Map<string, TaskWorkspaceSnapshotRecord>();
+  const queueActionAttempts = store.queueActionAttempts ?? new Map<string, StoredActionAttempt>();
   store.workspaceRestoreReceipts = workspaceRestoreReceipts;
   store.mcpPollStates = mcpPollStates;
   store.taskMessagesByIdempotencyKey = taskMessagesByIdempotencyKey;
   store.taskWorkspaceSnapshots = taskWorkspaceSnapshots;
+  store.queueActionAttempts = queueActionAttempts;
 
   const snapshotForTask = async (taskId: string) => getLatestTaskWorkspaceSnapshot(store, taskId);
   const contextEntriesForTask = async (taskId: string) => listContextEntries(store, { task_id: taskId, limit: 8 });
@@ -272,6 +291,50 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
       taskMessagesByIdempotencyKey.set(record.idempotency_key, record);
       return record;
     },
+    async getQueueActionAttempt(idempotencyKey) {
+      return queueActionAttempts.get(idempotencyKey);
+    },
+    async recordQueueActionAttempt(input) {
+      const existing = queueActionAttempts.get(input.idempotencyKey);
+      if (existing) {
+        return { existing, record: existing };
+      }
+      const timestamp = input.now.toISOString();
+      const record: StoredActionAttempt = {
+        idempotency_key: input.idempotencyKey,
+        queue_item_id: input.queueItemId,
+        terminal_send_ok: false,
+        completed: false,
+        created_at: timestamp,
+        updated_at: timestamp,
+      };
+      queueActionAttempts.set(record.idempotency_key, record);
+      return { record };
+    },
+    async markQueueActionTerminalSent(input) {
+      const existing = queueActionAttempts.get(input.idempotencyKey);
+      if (!existing) return undefined;
+      const updated: StoredActionAttempt = {
+        ...existing,
+        terminal_send_ok: true,
+        terminal_send_result: input.terminalSendResult,
+        updated_at: input.now.toISOString(),
+      };
+      queueActionAttempts.set(updated.idempotency_key, updated);
+      return updated;
+    },
+    async markQueueActionCompleted(input) {
+      const existing = queueActionAttempts.get(input.idempotencyKey);
+      if (!existing) return undefined;
+      const updated: StoredActionAttempt = {
+        ...existing,
+        completed: true,
+        action_result: input.actionResult,
+        updated_at: input.now.toISOString(),
+      };
+      queueActionAttempts.set(updated.idempotency_key, updated);
+      return updated;
+    },
   };
 }
 
@@ -403,6 +466,18 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async finalizeTaskMessage(input) {
       return store.finalizeTaskMessage(input);
+    },
+    async getQueueActionAttempt(idempotencyKey) {
+      return store.getQueueActionAttempt(idempotencyKey);
+    },
+    async recordQueueActionAttempt(input) {
+      return store.recordQueueActionAttempt(input);
+    },
+    async markQueueActionTerminalSent(input) {
+      return store.markQueueActionTerminalSent(input);
+    },
+    async markQueueActionCompleted(input) {
+      return store.markQueueActionCompleted(input);
     },
   };
 }

@@ -7,7 +7,7 @@ import type { Runtime } from "../runtime.js";
 import type { RouteDecision } from "../store.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
-import { classifyVoiceIntent, pickRerankCandidate } from "../voice/intent_classifier.js";
+import { classifyVoiceIntent, pickDeferCandidates, pickRerankCandidate } from "../voice/intent_classifier.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
 
@@ -83,6 +83,79 @@ export async function handleEventsRoute(input: {
         request_id: input.requestId,
       });
     }
+    if (intent.kind === "defer" || intent.kind === "pause") {
+      const queue = await store.listQueue("ready", input.now);
+      const matches = intent.kind === "pause" && !intent.selector
+        ? queue.map((item) => ({ item, score: 1 }))
+        : pickDeferCandidates(intent.selector ?? "", queue);
+      const dueAt = new Date(input.now.getTime() + intent.defer_seconds * 1000);
+      const counterKey = intent.kind === "defer" ? "voice_defer_total" : "voice_pause_total";
+      const noMatchCounter = intent.kind === "defer" ? "voice_defer_no_match_total" : "voice_pause_no_match_total";
+      const activityType = intent.kind === "defer" ? "voice_defer" : "voice_pause";
+      const activityNoMatchType = intent.kind === "defer" ? "voice_defer_no_match" : "voice_pause_no_match";
+      const reason = intent.kind === "defer" ? "voice_defer" : "voice_pause";
+
+      if (matches.length === 0) {
+        await observability.incrementCounter(noMatchCounter);
+        await observability.recordActivity({
+          type: activityNoMatchType,
+          occurred_at: input.now.toISOString(),
+          actor: "human",
+          status: "ok",
+          summary: `Voice ${intent.kind} had no matching paper for "${intent.selector ?? "all"}".`,
+          details: sanitizeActivityDetails({
+            transcript: intent.transcript,
+            selector: intent.selector,
+            defer_seconds: intent.defer_seconds,
+          }),
+        });
+        // Fall through to note routing so user still gets feedback recorded.
+      } else {
+        const deferred: Array<{ id: string; task_id?: string; due_at?: string }> = [];
+        const skipped: string[] = [];
+        for (const match of matches) {
+          const updated = await store.deferQueueItem(match.item.id, reason, dueAt, input.now);
+          if (updated) {
+            deferred.push({ id: updated.id, task_id: updated.task_id, due_at: updated.due_at });
+          } else {
+            skipped.push(match.item.id);
+          }
+        }
+        await observability.incrementCounter(counterKey);
+        await observability.recordActivity({
+          type: activityType,
+          occurred_at: input.now.toISOString(),
+          actor: "human",
+          status: "ok",
+          summary: intent.kind === "defer"
+            ? `Voice defer: ${deferred.length} item(s) for selector "${intent.selector}".`
+            : `Voice pause: ${deferred.length} item(s) for ${intent.selector ? `selector "${intent.selector}"` : "all ready papers"}.`,
+          details: sanitizeActivityDetails({
+            transcript: intent.transcript,
+            selector: intent.selector,
+            defer_seconds: intent.defer_seconds,
+            due_at: dueAt.toISOString(),
+            matched_task_ids: deferred.map((entry) => entry.task_id).filter((id): id is string => typeof id === "string"),
+            matched_queue_item_ids: deferred.map((entry) => entry.id),
+            skipped_queue_item_ids: skipped,
+          }),
+        });
+        const responseBody: Record<string, unknown> = {
+          ok: true,
+          intent: intent.kind,
+          selector: intent.selector,
+          defer_seconds: intent.defer_seconds,
+          due_at: dueAt.toISOString(),
+          deferred,
+          request_id: input.requestId,
+        };
+        if (intent.kind === "defer") {
+          responseBody.skipped = skipped;
+        }
+        return ok(200, responseBody);
+      }
+    }
+
     if (intent.kind === "rerank") {
       const queue = await store.listQueue("ready", input.now);
       const match = pickRerankCandidate(intent, queue);

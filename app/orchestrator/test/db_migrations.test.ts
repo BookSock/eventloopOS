@@ -16,6 +16,7 @@ describe("Postgres migrations", () => {
       "0006_task_messages.sql",
       "0007_agent_runs.sql",
       "0008_task_workspace_snapshots.sql",
+      "0009_queue_action_attempts.sql",
     ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
@@ -45,5 +46,8 @@ describe("Postgres migrations", () => {
     assert.match(sql, /snapshot jsonb NOT NULL/);
     assert.match(sql, /queue_items_ready_rank_idx/);
     assert.match(sql, /queue_items_stale_lease_idx/);
+    assert.match(sql, /CREATE TABLE queue_action_attempts/);
+    assert.match(sql, /idempotency_key text PRIMARY KEY/);
+    assert.match(sql, /queue_action_attempts_queue_item_id_idx/);
   });
 });

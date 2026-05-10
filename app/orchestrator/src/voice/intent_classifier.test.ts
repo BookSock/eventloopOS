@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { QueueItemWithPacket } from "../contracts.js";
-import { classifyVoiceIntent, pickRerankCandidate } from "./intent_classifier.js";
+import {
+  classifyVoiceIntent,
+  parseDurationToSeconds,
+  pickDeferCandidates,
+  pickRerankCandidate,
+} from "./intent_classifier.js";
 
 describe("classifyVoiceIntent", () => {
   it("classifies a plain note as note", () => {
@@ -63,6 +68,102 @@ describe("classifyVoiceIntent fan-out", () => {
   });
 });
 
+describe("classifyVoiceIntent defer", () => {
+  it("classifies 'defer all blog tasks for one hour' as defer", () => {
+    const intent = classifyVoiceIntent("defer all blog tasks for one hour");
+    if (intent.kind !== "defer") return assert.fail(`expected defer, got ${intent.kind}`);
+    assert.equal(intent.selector, "blog");
+    assert.equal(intent.defer_seconds, 3600);
+  });
+
+  it("classifies 'defer all non-critical for an hour' as defer", () => {
+    const intent = classifyVoiceIntent("defer all non-critical for an hour");
+    if (intent.kind !== "defer") return assert.fail(`expected defer, got ${intent.kind}`);
+    assert.match(intent.selector, /critical/);
+    assert.equal(intent.defer_seconds, 3600);
+  });
+
+  it("snooze synonym with 30 minute spoken duration parses correctly", () => {
+    const intent = classifyVoiceIntent("snooze every recruiting paper for 30 minutes");
+    if (intent.kind !== "defer") return assert.fail(`expected defer, got ${intent.kind}`);
+    assert.equal(intent.selector, "recruiting");
+    assert.equal(intent.defer_seconds, 1800);
+  });
+
+  it("defaults to one hour when no duration is given", () => {
+    const intent = classifyVoiceIntent("defer all marketing tasks");
+    if (intent.kind !== "defer") return assert.fail(`expected defer, got ${intent.kind}`);
+    assert.equal(intent.defer_seconds, 3600);
+  });
+
+  it("does not fire defer when 'defer' appears mid-sentence in a note", () => {
+    const intent = classifyVoiceIntent("we should defer talking to legal until later");
+    assert.equal(intent.kind, "note");
+  });
+
+  it("does not fire defer without a quantifier", () => {
+    const intent = classifyVoiceIntent("defer the blog launch task");
+    // No "all/every/each" so this is ambiguous and should not auto-fire defer.
+    assert.equal(intent.kind, "note");
+  });
+});
+
+describe("classifyVoiceIntent pause", () => {
+  it("classifies 'pause everything for 30 minutes' as pause with no selector", () => {
+    const intent = classifyVoiceIntent("pause everything for 30 minutes");
+    if (intent.kind !== "pause") return assert.fail(`expected pause, got ${intent.kind}`);
+    assert.equal(intent.selector, undefined);
+    assert.equal(intent.defer_seconds, 1800);
+  });
+
+  it("classifies 'pause all tasks for 1h' as pause with no selector", () => {
+    const intent = classifyVoiceIntent("pause all tasks for 1h");
+    if (intent.kind !== "pause") return assert.fail(`expected pause, got ${intent.kind}`);
+    assert.equal(intent.selector, undefined);
+    assert.equal(intent.defer_seconds, 3600);
+  });
+
+  it("classifies bare 'pause for 15 minutes' as pause with no selector", () => {
+    const intent = classifyVoiceIntent("pause for 15 minutes");
+    if (intent.kind !== "pause") return assert.fail(`expected pause, got ${intent.kind}`);
+    assert.equal(intent.selector, undefined);
+    assert.equal(intent.defer_seconds, 900);
+  });
+
+  it("classifies 'wrap up for an hour' as pause", () => {
+    const intent = classifyVoiceIntent("wrap up for an hour");
+    if (intent.kind !== "pause") return assert.fail(`expected pause, got ${intent.kind}`);
+    assert.equal(intent.defer_seconds, 3600);
+  });
+
+  it("does not fire pause when 'pause' appears mid-sentence", () => {
+    const intent = classifyVoiceIntent("let's pause and think before sending");
+    assert.equal(intent.kind, "note");
+  });
+
+  it("does not fire pause when only 'stop' is followed by other prose", () => {
+    const intent = classifyVoiceIntent("stop the spam from the slack channel");
+    assert.equal(intent.kind, "note");
+  });
+});
+
+describe("parseDurationToSeconds", () => {
+  it("parses common spoken durations", () => {
+    assert.equal(parseDurationToSeconds("an hour"), 3600);
+    assert.equal(parseDurationToSeconds("one hour"), 3600);
+    assert.equal(parseDurationToSeconds("half an hour"), 1800);
+    assert.equal(parseDurationToSeconds("30 minutes"), 1800);
+    assert.equal(parseDurationToSeconds("1h"), 3600);
+    assert.equal(parseDurationToSeconds("2h30m"), 9000);
+    assert.equal(parseDurationToSeconds("tomorrow"), 86400);
+  });
+
+  it("returns undefined for unrecognized tokens", () => {
+    assert.equal(parseDurationToSeconds("a while"), undefined);
+    assert.equal(parseDurationToSeconds(""), undefined);
+  });
+});
+
 describe("pickRerankCandidate", () => {
   const buildItem = (id: string, taskId: string, title: string): QueueItemWithPacket => ({
     id,
@@ -106,5 +207,22 @@ describe("pickRerankCandidate", () => {
     const items = [buildItem("qit_1", "task_blog", "Blog launch")];
     const match = pickRerankCandidate({ target: "completely unrelated topic"  }, items);
     assert.equal(match, undefined);
+  });
+
+  it("pickDeferCandidates returns every item that exceeds the score threshold", () => {
+    const items = [
+      buildItem("qit_1", "task_blog_email_draft", "Blog email draft"),
+      buildItem("qit_2", "task_blog_launch", "Blog launch"),
+      buildItem("qit_3", "task_recruiting_review", "Recruiting review"),
+    ];
+    const matches = pickDeferCandidates("blog", items);
+    assert.equal(matches.length, 2);
+    const ids = matches.map((entry) => entry.item.id).sort();
+    assert.deepEqual(ids, ["qit_1", "qit_2"]);
+  });
+
+  it("pickDeferCandidates returns nothing when selector is empty", () => {
+    const items = [buildItem("qit_1", "task_blog", "Blog launch")];
+    assert.deepEqual(pickDeferCandidates("", items), []);
   });
 });
