@@ -29,17 +29,19 @@ export function buildTmuxSendPlan({ targetPane, text, submit = false }) {
   return commands;
 }
 
-export function buildGhosttyAppleScript({ text, target = "front" }) {
+export function buildGhosttyAppleScript({ text, target = "front", targetApp = "Ghostty" }) {
   const terminalExpr = target === "front"
     ? "focused terminal of selected tab of front window"
     : `terminal id ${appleScriptString(target)}`;
 
   return [
-    "tell application \"Ghostty\"",
+    `tell application ${appleScriptString(targetApp)}`,
     `  input text ${appleScriptString(text)} to ${terminalExpr}`,
     "end tell",
   ].join("\n");
 }
+
+export { appleScriptString };
 
 export function buildGhosttySendPlan({ text, target = "front", submit = false }) {
   const scriptText = submit ? `${text}\n` : text;

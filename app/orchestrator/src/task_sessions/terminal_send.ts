@@ -70,18 +70,19 @@ function buildTerminalSendPlan(input: { terminalRef: string; text: string; submi
   throw new Error(`unsupported terminal_ref: ${input.terminalRef}`);
 }
 
-function buildGhosttyAppleScript(input: { text: string; target: string }): string {
+export function buildGhosttyAppleScript(input: { text: string; target: string; targetApp?: string }): string {
   const terminalExpr = input.target === "front"
     ? "focused terminal of selected tab of front window"
     : `terminal id ${appleScriptString(input.target)}`;
+  const targetApp = input.targetApp ?? "Ghostty";
   return [
-    "tell application \"Ghostty\"",
+    `tell application ${appleScriptString(targetApp)}`,
     `  input text ${appleScriptString(input.text)} to ${terminalExpr}`,
     "end tell",
   ].join("\n");
 }
 
-function appleScriptString(value: string): string {
+export function appleScriptString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
 }
 
