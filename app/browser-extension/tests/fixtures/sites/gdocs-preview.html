@@ -1,0 +1,35 @@
+<!--
+Synthetic Google Docs published-preview DOM (File > Share > Publish to web).
+Preserves the heading id="h.<token>" anchor pattern Google emits on published
+docs. Explicitly NOT the canvas-rendered editor (canvas is not anchorable).
+Class names simplified. Not a copy of any real document.
+-->
+<html>
+  <body>
+    <div id="contents">
+      <div class="doc-content">
+        <h1 id="h.title-anchor">
+          <span>Blog launch plan</span>
+        </h1>
+        <h2 id="h.angle1">
+          <span>Angle 1: Why eventloopOS exists</span>
+        </h2>
+        <p>
+          <span>The world is interrupt-driven; we make work resume-able.</span>
+        </p>
+        <h2 id="h.angle2">
+          <span>Angle 2: Should we ship Tuesday?</span>
+        </h2>
+        <p>
+          <span>Anchor target paragraph: Tuesday gives us a fresh week of feedback.</span>
+        </p>
+        <h2 id="h.risks">
+          <span>Risks</span>
+        </h2>
+        <p>
+          <span>Synthetic anchors degrade if Google rewrites the publish renderer.</span>
+        </p>
+      </div>
+    </div>
+  </body>
+</html>

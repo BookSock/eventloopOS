@@ -1,0 +1,23 @@
+<!--
+Synthetic Slack web thread DOM as of 2025-Q4.
+Preserves the data-qa / data-item-key / data-ts attribute patterns Slack
+emits on message rows; CSS classes elided. Not a copy of any real channel.
+-->
+<html>
+  <body>
+    <div role="main" data-qa="slack_kit_list" id="slack-kit-list">
+      <div data-qa="message_container" data-item-key="1715300000.000100" data-ts="1715300000.000100">
+        <span data-qa="message_sender_name">alice</span>
+        <span data-qa="message_content">Kicking off the launch retro thread. What worked, what hurt?</span>
+      </div>
+      <div data-qa="message_container" data-item-key="1715300050.000200" data-ts="1715300050.000200">
+        <span data-qa="message_sender_name">bob</span>
+        <span data-qa="message_content">Thread anchor target: rollout pacing felt too aggressive on Tuesday.</span>
+      </div>
+      <div data-qa="message_container" data-item-key="1715300100.000300" data-ts="1715300100.000300">
+        <span data-qa="message_sender_name">carol</span>
+        <span data-qa="message_content">+1 on pacing. Also docs lag bit us in support.</span>
+      </div>
+    </div>
+  </body>
+</html>
