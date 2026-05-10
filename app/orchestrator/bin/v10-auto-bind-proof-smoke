@@ -1,0 +1,229 @@
+#!/usr/bin/env node
+// V10 — live proof that the codex auto-bind continuous timer end-to-ends
+// against synthetic Ghostty windows. Boots the gateway in-process with a
+// fake workspace controller and a fake task-session controller, runs a real
+// setInterval that POSTs /agents/codex/auto-bind (mirroring the timer in
+// app/orchestrator/src/index.ts), mutates window state between phases, and
+// asserts:
+//
+//   Phase A: untagged windows → no bindings.
+//   Phase B: window gets [task:blog] title → first matching session binds
+//            with terminal_ref=ghostty:front; non-terminal apps + untagged
+//            terminals are ignored.
+//   Phase C: orphan task_session (no matching window) stays unbound.
+//   Phase D: ambiguity (two sessions for one tag) blocks the bind.
+
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = fileURLToPath(import.meta.url);
+const orchestratorRoot = resolve(here, "../..");
+const distEntry = resolve(orchestratorRoot, "dist/src/server.js");
+const distStore = resolve(orchestratorRoot, "dist/src/store.js");
+const distGateway = resolve(orchestratorRoot, "dist/src/gateway_store.js");
+
+const { createGatewayServer } = await import(distEntry);
+const { createSeededStore } = await import(distStore);
+const { createInMemoryGatewayStore } = await import(distGateway);
+
+let clock = new Date("2026-05-10T17:00:00.000Z");
+
+// Fake workspace — windows are mutable so phases can re-tag them.
+function makeFakeWorkspace(initial) {
+  let windows = [...initial];
+  return {
+    controller: {
+      status() { return { available: true, backend: "aerospace" }; },
+      capture() {
+        return { backend: "aerospace", windows: windows.map((w) => ({ ...w })) };
+      },
+      planRestore() { throw new Error("planRestore should not be called"); },
+    },
+    setWindows(next) { windows = [...next]; },
+  };
+}
+
+// Fake task-session controller — sessions mutable, bind calls recorded.
+function makeFakeTaskSessions(initial) {
+  let sessions = initial.map((s) => ({ ...s }));
+  const bindCalls = [];
+  return {
+    controller: {
+      listSessions() { return sessions.map((s) => ({ ...s })); },
+      sendFollowupMessage() { throw new Error("sendFollowupMessage should not be called"); },
+      bindTaskSession(input) {
+        bindCalls.push({ ...input });
+        const target = sessions.find((s) => s.id === input.task_session_id);
+        if (!target) {
+          return { ok: false, task_session_id: input.task_session_id, task_id: input.task_id, error: "session_not_found" };
+        }
+        target.terminal_ref = input.terminal_ref;
+        target.task_id = input.task_id;
+        return { ok: true, task_session_id: input.task_session_id, task_id: input.task_id, session: { ...target } };
+      },
+    },
+    setSessions(next) { sessions = next.map((s) => ({ ...s })); },
+    bindCalls,
+    snapshotSessions() { return sessions.map((s) => ({ ...s })); },
+  };
+}
+
+let server;
+let timer;
+let passed = false;
+const state = { tickCount: 0, lastTickError: undefined, lastResults: [] };
+
+try {
+  const seeded = await createSeededStore("fixtures/empty-review-packets.json");
+  const store = createInMemoryGatewayStore(seeded);
+
+  const fakeWorkspace = makeFakeWorkspace([
+    { id: 501, app: "Ghostty", title: "no tag yet", workspace: "main" },
+    { id: 502, app: "Mail", title: "Inbox 0 unread", workspace: "main" },
+    { id: 503, app: "Ghostty", title: "still no tag", workspace: "main" },
+  ]);
+  const fakeTaskSessions = makeFakeTaskSessions([
+    { id: "session_blog_smoke", task_id: "task_blog", provider: "codex", status: "idle" },
+    { id: "session_orphan_smoke", task_id: "task_no_window", provider: "codex", status: "idle" },
+  ]);
+
+  server = createGatewayServer({
+    store,
+    taskSessions: fakeTaskSessions.controller,
+    workspace: fakeWorkspace.controller,
+    now: () => clock,
+  });
+
+  const baseUrl = await new Promise((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      resolveListen(`http://127.0.0.1:${addr.port}`);
+    });
+  });
+
+  // Real setInterval timer mirroring app/orchestrator/src/index.ts.
+  timer = setInterval(async () => {
+    state.tickCount += 1;
+    try {
+      const r = await fetch(`${baseUrl}/agents/codex/auto-bind`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      if (!r.ok) {
+        state.lastTickError = new Error(`tick HTTP ${r.status}`);
+        return;
+      }
+      state.lastResults.push(await r.json());
+    } catch (error) {
+      state.lastTickError = error;
+    }
+  }, 50);
+
+  // Phase A: ≥3 ticks should fire with all-untagged windows. No bindings.
+  await waitUntil(() => state.tickCount >= 3, 2_000, "phase A: timer should tick at least 3 times");
+  if (state.lastTickError) throw state.lastTickError;
+  assertEqual(fakeTaskSessions.bindCalls.length, 0, "phase A: no bindings while windows are untagged");
+
+  // Phase B: re-tag a Ghostty window with [task:blog] mid-flight.
+  fakeWorkspace.setWindows([
+    { id: 501, app: "Ghostty", title: "[task:blog] - Ghostty", workspace: "main" },
+    { id: 502, app: "Mail", title: "Inbox 0 unread", workspace: "main" },
+    { id: 503, app: "Ghostty", title: "still no tag", workspace: "main" },
+  ]);
+  const tickAtRetag = state.tickCount;
+  await waitUntil(() => fakeTaskSessions.bindCalls.length >= 1, 2_000, "phase B: bind should land within 2s of re-tag");
+  if (state.lastTickError) throw state.lastTickError;
+  assertEqual(fakeTaskSessions.bindCalls.length, 1, "phase B: exactly one bind call after re-tag");
+  const bindCall = fakeTaskSessions.bindCalls[0];
+  assertEqual(bindCall.task_session_id, "session_blog_smoke", "phase B: correct session bound");
+  assertEqual(bindCall.task_id, "task_blog", "phase B: correct task_id");
+  assertEqual(bindCall.terminal_ref, "ghostty:front", "phase B: terminal_ref defaults to ghostty:front");
+  assertGte(state.tickCount, tickAtRetag, "phase B: timer continued ticking");
+
+  // Confirm Mail (window 502) and untagged Ghostty (window 503) never showed
+  // up as bindings or even as 'multiple_sessions_for_task' skips — the regex
+  // and terminal-app filter exclude them upstream.
+  const lastResult = state.lastResults.at(-1) ?? {};
+  for (const skip of lastResult.skipped ?? []) {
+    if (skip.window_id === 502 || skip.window_id === 503) {
+      throw new Error(`phase B: non-terminal/untagged window leaked into skipped[]: ${JSON.stringify(skip)}`);
+    }
+  }
+  assertEqual(lastResult.scanned_window_count ?? 0, 3, "phase B: scanned all 3 windows");
+
+  // Phase C: orphan session stays unbound.
+  const sessionsAfterB = fakeTaskSessions.snapshotSessions();
+  const orphan = sessionsAfterB.find((s) => s.id === "session_orphan_smoke");
+  if (!orphan) throw new Error("phase C: orphan session disappeared");
+  if (orphan.terminal_ref !== undefined) {
+    throw new Error(`phase C: orphan session unexpectedly bound; terminal_ref=${orphan.terminal_ref}`);
+  }
+
+  // Phase D: ambiguity → no binding. Re-seed two sessions sharing task_blog
+  // and reset windows so just one tagged window exists.
+  fakeTaskSessions.setSessions([
+    { id: "session_blog_a_smoke", task_id: "task_blog", provider: "codex", status: "idle" },
+    { id: "session_blog_b_smoke", task_id: "task_blog", provider: "codex", status: "idle" },
+  ]);
+  const bindCallsBeforeD = fakeTaskSessions.bindCalls.length;
+  fakeWorkspace.setWindows([
+    { id: 600, app: "Ghostty", title: "[task:blog] both sessions claim me", workspace: "main" },
+  ]);
+  const tickAtD = state.tickCount;
+  await waitUntil(() => state.tickCount >= tickAtD + 2, 2_000, "phase D: at least 2 more ticks after ambiguity setup");
+  if (state.lastTickError) throw state.lastTickError;
+  assertEqual(
+    fakeTaskSessions.bindCalls.length,
+    bindCallsBeforeD,
+    "phase D: ambiguous match must not produce additional bind calls",
+  );
+  const dResult = state.lastResults.at(-1) ?? {};
+  const ambiguousReason = (dResult.skipped ?? []).some((s) => s.reason === "multiple_sessions_for_task");
+  if (!ambiguousReason) {
+    throw new Error(`phase D: expected at least one skipped[reason=multiple_sessions_for_task]; got ${JSON.stringify(dResult.skipped)}`);
+  }
+
+  passed = true;
+  console.log("PASS v10 codex auto-bind timer end-to-end");
+  console.log(`  ticks observed:           ${state.tickCount}`);
+  console.log(`  phase A: untagged windows → no bindings`);
+  console.log(`  phase B: [task:blog] window → bound session_blog_smoke @ ghostty:front`);
+  console.log(`  phase C: orphan session   → terminal_ref still undefined`);
+  console.log(`  phase D: ambiguous tag    → bind blocked, multiple_sessions_for_task logged`);
+} catch (error) {
+  passed = false;
+  console.error("FAIL v10 codex auto-bind timer end-to-end");
+  console.error(error instanceof Error ? error.stack : String(error));
+  process.exitCode = 1;
+} finally {
+  if (timer) clearInterval(timer);
+  if (server) await new Promise((res) => server.close(() => res()));
+  if (!passed && process.exitCode === 0) process.exitCode = 1;
+}
+
+async function waitUntil(predicate, timeoutMs, label) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await sleep(25);
+  }
+  if (!predicate()) throw new Error(`waitUntil[${label}]: predicate not true in ${timeoutMs}ms`);
+}
+
+function sleep(ms) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
+function assertEqual(actual, expected, label) {
+  if (actual !== expected) {
+    throw new Error(`assertion failed [${label}]: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
+}
+
+function assertGte(actual, expected, label) {
+  if (!(actual >= expected)) {
+    throw new Error(`assertion failed [${label}]: expected ${actual} >= ${expected}`);
+  }
+}
