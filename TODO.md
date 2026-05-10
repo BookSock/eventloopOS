@@ -45,3 +45,27 @@ Live list of code gaps for the full vision. Sorted into **Build**, **Verify** (b
 ---
 
 Last updated: 2026-05-10. Code-doable items all landed today; remaining V8b need Jason at the keyboard with real Ghostty + real microphone for the residual mic-tap leg of V9b/V9c.
+
+## Spec implementation (2026-05-10, hotkey state machine)
+
+Spec at `docs/planning/hotkey-state-machine.md` (iteration 4, locked). All implementation phases shipped today:
+
+- [x] **Phase 2** — `POST /tasks` + `current_task_id` singleton (migration 0013).
+- [x] **Phase 2b** — `aerospace_workspace_id` column + `GET /tasks?aerospace_workspace_id=X` filter (migration 0014).
+- [x] **Phase 3** — Mac `⌘⌥⇧J` advance hotkey state machine (`AdvanceCoordinator`); legacy `pullNextPaper` preserved for menu button.
+- [x] **Phase 3a** — `POST /agents/codex/resolve-foreground`; Mac `getTaskWithLayout` wired into advance snapshot.
+- [x] **Phase 4** — Ambient AeroSpace saver (5s poll, 3s debounce). `EVENTLOOPOS_AMBIENT_WORKSPACE_SAVE=1`.
+- [x] **Phase 5** — Auto-paper-on-Codex-idle (30s tick, 60s threshold). `EVENTLOOPOS_AUTO_PAPER_ENABLED=1`.
+- [x] **Phase 6** — Implicit follows-window layer (migration 0015). `EVENTLOOPOS_FOLLOWS_WINDOWS=1`.
+- [x] **Phase 6.5** — Follows survives app restarts via `(app_bundle, title_prefix)` slot (migration 0017).
+- [x] **Phase 7a** — `eventloopos.enqueue_paper` MCP skill (`docs/codex-mcp-skill.md`).
+- [x] **Phase 7b** — User-defined paper triggers (migration 0016) + voice `define_trigger` intent.
+
+## Dogfood polish (2026-05-10)
+
+- [x] **D1** — `slugifyTaskName` (TS + Swift) at every `[task:<slug>]` construction site.
+- [x] **D2** — Friendly Codex OAuth refresh error; orchestrator stays alive.
+- [x] **D3** — Send-to-Agent disabled UX: clearer text + inline `Bind Session` menu.
+- [x] **D4** — `SingleInstanceGuard`: new process foregrounds the existing one and exits.
+
+Final test counts (2026-05-10): orchestrator 585/585, browser-extension 75/75, mac-swift 197/197.
