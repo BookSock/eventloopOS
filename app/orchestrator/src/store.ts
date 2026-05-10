@@ -90,6 +90,7 @@ export type InMemoryStore = {
   tasks?: Map<string, TaskRecord>;
   taskLayouts?: Map<string, TaskLayoutRecord>;
   currentTaskState?: { value: CurrentTaskStateRecord };
+  windowWorkspaceObservations?: Map<string, WindowWorkspaceObservationRecord>;
 };
 
 export type TaskAnchorKind = "codex_thread" | "ghostty_window";
@@ -115,6 +116,19 @@ export type CurrentTaskStateRecord = {
   current_task_id: string | null;
   entered_at?: string;
   updated_at: string;
+};
+
+export type WindowWorkspaceObservationRecord = {
+  window_id: string;
+  workspace_id: string;
+  is_task_workspace: boolean;
+  first_seen_at: string;
+  last_seen_at: string;
+};
+
+export type FollowsWindowRecord = {
+  window_id: string;
+  known_workspaces: string[];
 };
 
 export type ManualModeStateRecord = {
@@ -533,6 +547,85 @@ export function saveTaskWorkspaceSnapshot(
   };
   snapshots.set(input.taskId, record);
   return record;
+}
+
+export function recordWindowWorkspaceObservation(
+  store: InMemoryStore,
+  input: {
+    windowId: string;
+    workspaceId: string;
+    isTaskWorkspace: boolean;
+    observedAt: Date;
+  },
+): WindowWorkspaceObservationRecord {
+  const observations = store.windowWorkspaceObservations ?? new Map<string, WindowWorkspaceObservationRecord>();
+  store.windowWorkspaceObservations = observations;
+  const key = observationKey(input.windowId, input.workspaceId);
+  const timestamp = input.observedAt.toISOString();
+  const existing = observations.get(key);
+  const record: WindowWorkspaceObservationRecord = existing
+    ? {
+        ...existing,
+        is_task_workspace: existing.is_task_workspace || input.isTaskWorkspace,
+        last_seen_at: timestamp,
+      }
+    : {
+        window_id: input.windowId,
+        workspace_id: input.workspaceId,
+        is_task_workspace: input.isTaskWorkspace,
+        first_seen_at: timestamp,
+        last_seen_at: timestamp,
+      };
+  observations.set(key, record);
+  return record;
+}
+
+export function listFollowsWindows(
+  store: InMemoryStore,
+  options: { now: Date; ttlMs: number },
+): FollowsWindowRecord[] {
+  const observations = store.windowWorkspaceObservations;
+  if (!observations) return [];
+  const cutoff = options.now.getTime() - options.ttlMs;
+  const groups = new Map<string, Set<string>>();
+  for (const record of observations.values()) {
+    if (!record.is_task_workspace) continue;
+    if (Date.parse(record.last_seen_at) < cutoff) continue;
+    const set = groups.get(record.window_id) ?? new Set<string>();
+    set.add(record.workspace_id);
+    groups.set(record.window_id, set);
+  }
+  const result: FollowsWindowRecord[] = [];
+  for (const [windowId, workspaces] of groups.entries()) {
+    if (workspaces.size < 2) continue;
+    result.push({
+      window_id: windowId,
+      known_workspaces: Array.from(workspaces).sort(),
+    });
+  }
+  result.sort((a, b) => a.window_id.localeCompare(b.window_id));
+  return result;
+}
+
+export function pruneWindowWorkspaceObservations(
+  store: InMemoryStore,
+  olderThan: Date,
+): number {
+  const observations = store.windowWorkspaceObservations;
+  if (!observations) return 0;
+  const cutoff = olderThan.getTime();
+  let removed = 0;
+  for (const [key, record] of observations.entries()) {
+    if (Date.parse(record.last_seen_at) < cutoff) {
+      observations.delete(key);
+      removed += 1;
+    }
+  }
+  return removed;
+}
+
+function observationKey(windowId: string, workspaceId: string): string {
+  return `${windowId} ${workspaceId}`;
 }
 
 export function buildReviewArtifactsFromEvent(

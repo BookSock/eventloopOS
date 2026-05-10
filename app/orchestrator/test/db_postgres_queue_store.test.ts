@@ -73,6 +73,7 @@ describe("PostgresQueueStore", () => {
       { id: "0012_manual_mode_state.sql" },
       { id: "0013_tasks.sql" },
       { id: "0014_tasks_aerospace_workspace.sql" },
+      { id: "0015_window_workspace_observations.sql" },
     ]);
 
     const column = await store.pool.query(

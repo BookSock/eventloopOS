@@ -337,4 +337,42 @@ describe("ambient_workspace_saver", () => {
       "should emit error activity",
     );
   });
+
+  it("records window-workspace observations on every snapshot capture", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "ws-2",
+      windows: [
+        { id: 100, app: "Slack", title: "Slack", workspace: "ws-2" },
+        { id: 200, app: "Ghostty", title: "codex", workspace: "ws-1" },
+      ],
+    };
+    const workspace = makeFakeWorkspace(snapshot);
+    const obs = makeFakeObservability();
+    const observations: Array<{ windowId: string; workspaceId: string; isTaskWorkspace: boolean }> = [];
+    const saver = createAmbientWorkspaceSaver({
+      workspace,
+      getCurrentTaskState: async () => ({ currentTaskId: "task_a" }),
+      updateTaskLayout: async () => {},
+      isManualModeActive: () => false,
+      recordWindowObservation: async (input) => {
+        observations.push({
+          windowId: input.windowId,
+          workspaceId: input.workspaceId,
+          isTaskWorkspace: input.isTaskWorkspace,
+        });
+      },
+      observability: obs.recorder,
+      now: () => new Date("2026-05-10T15:00:00.000Z"),
+    });
+
+    await saver.tick();
+    assert.equal(observations.length, 2);
+    const slack = observations.find((entry) => entry.windowId === "100");
+    const ghostty = observations.find((entry) => entry.windowId === "200");
+    assert.equal(slack?.workspaceId, "ws-2");
+    assert.equal(slack?.isTaskWorkspace, true, "window on the active task workspace must be marked is_task_workspace=true");
+    assert.equal(ghostty?.workspaceId, "ws-1");
+    assert.equal(ghostty?.isTaskWorkspace, false, "window on a non-active workspace must not be marked is_task_workspace");
+  });
 });

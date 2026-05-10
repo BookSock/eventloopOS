@@ -1,6 +1,10 @@
 import { execFile } from "node:child_process";
 import { createAmbientWorkspaceSaverFromRuntime, type AmbientWorkspaceSaver } from "./agents/ambient_workspace_saver.js";
 import {
+  createFollowsWindowOrchestratorFromRuntime,
+  type FollowsWindowOrchestrator,
+} from "./agents/follows_window_orchestrator.js";
+import {
   startAutoPaperCodexIdleWatcher,
   type AutoPaperCodexIdleHandle,
   type AutoPaperTaskRecord,
@@ -51,13 +55,6 @@ const terminalSendExecutor: TerminalSendExecutor = (command: TerminalSendCommand
     execFile(command.file, command.args, (error) => (error ? reject(error) : resolve()));
   });
 
-const runOsascript = process.platform === "darwin"
-  ? async (args: string[]) => {
-      const { stdout, stderr } = await execFilePromise("osascript", args);
-      return { stdout, stderr };
-    }
-  : undefined;
-
 const server = createGatewayServer({
   store: gatewayRuntime.store,
   taskSessions,
@@ -68,7 +65,6 @@ const server = createGatewayServer({
   terminalSendExecutor,
   terminalSendEnabled: terminalSendEnabledFromEnv(process.env),
   codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
-  runOsascript,
 });
 
 server.listen(config.value.port, config.value.host, () => {
@@ -140,6 +136,41 @@ if (autoPromoteIntervalMs && autoPromoteIntervalMs > 0) {
   console.log(`reading-queue auto-promote enabled every ${autoPromoteIntervalMs}ms (min age ${autoPromoteMinAgeSeconds}s)`);
 }
 
+let followsWindowOrchestrator: FollowsWindowOrchestrator | undefined;
+if (process.env.EVENTLOOPOS_FOLLOWS_WINDOWS === "1" && workspace) {
+  const observability = gatewayRuntime.observability ?? createInMemoryObservability();
+  const runtime = createRuntime({
+    store: gatewayRuntime.store,
+    workspace,
+    observability,
+  });
+  const pollIntervalMs = parsePositiveInteger(process.env.EVENTLOOPOS_FOLLOWS_POLL_MS);
+  const ttlMs = parsePositiveInteger(process.env.EVENTLOOPOS_FOLLOWS_TTL_MS);
+  const pruneIntervalMs = parsePositiveInteger(process.env.EVENTLOOPOS_FOLLOWS_PRUNE_MS);
+  followsWindowOrchestrator = createFollowsWindowOrchestratorFromRuntime(
+    runtime,
+    async () => {
+      try {
+        const { stdout } = await execFilePromise("aerospace", ["list-workspaces", "--focused"], { timeoutMs: 2_000 });
+        const value = stdout.trim();
+        return value.length > 0 ? value : undefined;
+      } catch {
+        return undefined;
+      }
+    },
+    async (command) => {
+      await execFilePromise(command.command, command.args, { timeoutMs: 5_000 });
+    },
+    { pollIntervalMs, ttlMs, pruneIntervalMs },
+  );
+  followsWindowOrchestrator?.start();
+  if (followsWindowOrchestrator) {
+    console.log(
+      `follows-window orchestrator enabled (poll=${pollIntervalMs ?? 1000}ms, ttl=${ttlMs ?? 24 * 60 * 60 * 1000}ms)`,
+    );
+  }
+}
+
 let autoPaperWatcher: AutoPaperCodexIdleHandle | undefined;
 if (process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED === "1") {
   const tickMs = parsePositiveInteger(process.env.EVENTLOOPOS_AUTO_PAPER_TICK_MS);
@@ -196,6 +227,7 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     if (autoBindTimer) clearInterval(autoBindTimer);
     autoPaperWatcher?.close();
     ambientWorkspaceSaver?.stop();
+    followsWindowOrchestrator?.stop();
     taskSessionRuntime?.close?.();
     server.close(() => {
       gatewayRuntime.close?.().finally(() => process.exit(0));

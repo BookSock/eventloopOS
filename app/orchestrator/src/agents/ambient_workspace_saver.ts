@@ -17,12 +17,19 @@ export type CurrentTaskState = {
 export type CurrentTaskStateReader = () => Promise<CurrentTaskState> | CurrentTaskState;
 export type TaskLayoutWriter = (taskId: string, snapshot: WorkspaceSnapshot) => Promise<unknown> | unknown;
 export type ManualModeReader = () => Promise<boolean> | boolean;
+export type WindowWorkspaceObservationWriter = (input: {
+  windowId: string;
+  workspaceId: string;
+  isTaskWorkspace: boolean;
+  observedAt: Date;
+}) => Promise<unknown> | unknown;
 
 export type AmbientWorkspaceSaverDeps = {
   workspace: Pick<WorkspaceController, "capture">;
   getCurrentTaskState: CurrentTaskStateReader;
   updateTaskLayout: TaskLayoutWriter;
   isManualModeActive: ManualModeReader;
+  recordWindowObservation?: WindowWorkspaceObservationWriter;
   observability?: Observability;
   pollIntervalMs?: number;
   debounceMs?: number;
@@ -85,6 +92,7 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
       }
 
       const snapshot = await deps.workspace.capture();
+      await recordWindowObservations(deps, snapshot, currentTaskId, tickNow);
       const fingerprint = snapshotFingerprint(snapshot);
       const lastFingerprint = lastSavedSnapshotByTask.get(currentTaskId);
 
@@ -203,6 +211,32 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
   };
 }
 
+async function recordWindowObservations(
+  deps: AmbientWorkspaceSaverDeps,
+  snapshot: WorkspaceSnapshot,
+  currentTaskId: string,
+  observedAt: Date,
+): Promise<void> {
+  if (!deps.recordWindowObservation) return;
+  const activeWorkspace = snapshot.activeWorkspace;
+  for (const window of snapshot.windows) {
+    if (!window.workspace) continue;
+    const isActiveWorkspace = activeWorkspace !== undefined && window.workspace === activeWorkspace;
+    const isTaskWorkspace = isActiveWorkspace && currentTaskId.length > 0;
+    try {
+      await deps.recordWindowObservation({
+        windowId: String(window.id),
+        workspaceId: window.workspace,
+        isTaskWorkspace,
+        observedAt,
+      });
+    } catch {
+      // Swallow per-window observation failures so the saver is never blocked
+      // by Phase 6 storage hiccups; the saver's primary job is layout capture.
+    }
+  }
+}
+
 export function snapshotFingerprint(snapshot: WorkspaceSnapshot): string {
   const windows = snapshot.windows
     .map((window) => `${window.id}|${window.app}|${window.title}|${window.workspace}|${window.monitorId ?? ""}`)
@@ -276,11 +310,17 @@ export function createAmbientWorkspaceSaverFromRuntime(
     return state.active === true;
   };
 
+  const recordWindowObservation: WindowWorkspaceObservationWriter | undefined =
+    typeof (runtime.store as unknown as { recordWindowWorkspaceObservation?: unknown }).recordWindowWorkspaceObservation === "function"
+      ? (input) => runtime.store.recordWindowWorkspaceObservation(input)
+      : undefined;
+
   return createAmbientWorkspaceSaver({
     workspace,
     getCurrentTaskState,
     updateTaskLayout,
     isManualModeActive,
+    recordWindowObservation,
     observability: runtime.observability,
     pollIntervalMs: overrides.pollIntervalMs,
     debounceMs: overrides.debounceMs,

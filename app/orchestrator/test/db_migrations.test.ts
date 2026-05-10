@@ -22,6 +22,7 @@ describe("Postgres migrations", () => {
       "0012_manual_mode_state.sql",
       "0013_tasks.sql",
       "0014_tasks_aerospace_workspace.sql",
+      "0015_window_workspace_observations.sql",
     ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);

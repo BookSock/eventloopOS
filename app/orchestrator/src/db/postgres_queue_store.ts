@@ -43,6 +43,8 @@ import {
   type TaskLayoutRecord,
   type TaskAnchorKind,
   type CurrentTaskStateRecord,
+  type WindowWorkspaceObservationRecord,
+  type FollowsWindowRecord,
 } from "../store.js";
 import { stableId } from "../store/ids.js";
 import { runMigrations } from "./migrations.js";
@@ -829,6 +831,61 @@ export class PostgresQueueStore {
     );
     const row = result.rows[0];
     return row ? rowToTaskRecord(row) : undefined;
+  }
+
+  async recordWindowWorkspaceObservation(input: {
+    windowId: string;
+    workspaceId: string;
+    isTaskWorkspace: boolean;
+    observedAt: Date;
+  }): Promise<WindowWorkspaceObservationRecord> {
+    const timestamp = input.observedAt.toISOString();
+    const result = await this.pool.query(
+      `
+        INSERT INTO window_workspace_observations (
+          window_id,
+          workspace_id,
+          is_task_workspace,
+          first_seen_at,
+          last_seen_at
+        )
+        VALUES ($1, $2, $3, $4::timestamptz, $4::timestamptz)
+        ON CONFLICT (window_id, workspace_id) DO UPDATE SET
+          is_task_workspace = window_workspace_observations.is_task_workspace OR EXCLUDED.is_task_workspace,
+          last_seen_at = EXCLUDED.last_seen_at
+        RETURNING window_id, workspace_id, is_task_workspace, first_seen_at, last_seen_at
+      `,
+      [input.windowId, input.workspaceId, input.isTaskWorkspace, timestamp],
+    );
+    return rowToWindowWorkspaceObservation(result.rows[0]);
+  }
+
+  async listFollowsWindows(input: { now: Date; ttlMs: number }): Promise<FollowsWindowRecord[]> {
+    const cutoff = new Date(input.now.getTime() - input.ttlMs).toISOString();
+    const result = await this.pool.query(
+      `
+        SELECT window_id, array_agg(workspace_id ORDER BY workspace_id) AS workspaces
+        FROM window_workspace_observations
+        WHERE is_task_workspace = TRUE
+          AND last_seen_at >= $1::timestamptz
+        GROUP BY window_id
+        HAVING count(DISTINCT workspace_id) >= 2
+        ORDER BY window_id ASC
+      `,
+      [cutoff],
+    );
+    return result.rows.map((row) => ({
+      window_id: String(row.window_id),
+      known_workspaces: Array.isArray(row.workspaces) ? row.workspaces.map(String) : [],
+    }));
+  }
+
+  async pruneWindowWorkspaceObservations(olderThan: Date): Promise<number> {
+    const result = await this.pool.query(
+      `DELETE FROM window_workspace_observations WHERE last_seen_at < $1::timestamptz`,
+      [olderThan.toISOString()],
+    );
+    return result.rowCount ?? 0;
   }
 
   async recordWorkspaceRestoreReceipt(input: {
@@ -1998,6 +2055,16 @@ function rowToTaskLayoutRecord(row: Record<string, unknown>): TaskLayoutRecord {
     task_id: String(row.task_id),
     layout: row.layout_json as WorkspaceSnapshot,
     updated_at: requiredDateToIso(row.updated_at),
+  };
+}
+
+function rowToWindowWorkspaceObservation(row: Record<string, unknown>): WindowWorkspaceObservationRecord {
+  return {
+    window_id: String(row.window_id),
+    workspace_id: String(row.workspace_id),
+    is_task_workspace: row.is_task_workspace === true,
+    first_seen_at: requiredDateToIso(row.first_seen_at),
+    last_seen_at: requiredDateToIso(row.last_seen_at),
   };
 }
 

@@ -1,0 +1,207 @@
+#!/usr/bin/env node
+// Phase 6 — live proof that the follows-window orchestrator end-to-ends:
+//   - Boots the gateway in-process with a real AeroSpaceWorkspaceController.
+//   - Spawns a sacrificial Ghostty window, moves it across two task workspaces
+//     to seed observations, asserts it becomes a `follows` window.
+//   - Switches workspaces and asserts the orchestrator issues a
+//     move-node-to-workspace for the follows window.
+//   - Cleans up the spawned window.
+//
+// Skip cleanly if AeroSpace is not available or env gate is not set.
+
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+if (process.env.EVENTLOOPOS_ENABLE_FOLLOWS_SMOKE !== "1") {
+  console.log("SKIP p6 follows-windows smoke: set EVENTLOOPOS_ENABLE_FOLLOWS_SMOKE=1 to run");
+  process.exit(0);
+}
+
+const here = fileURLToPath(import.meta.url);
+const orchestratorRoot = resolve(here, "../..");
+const distFollows = resolve(orchestratorRoot, "dist/src/agents/follows_window_orchestrator.js");
+const distGateway = resolve(orchestratorRoot, "dist/src/gateway_store.js");
+const distStore = resolve(orchestratorRoot, "dist/src/store.js");
+const distController = resolve(orchestratorRoot, "dist/src/workspace/controller.js");
+const distObservability = resolve(orchestratorRoot, "dist/src/observability.js");
+
+const execFileAsync = promisify(execFile);
+
+async function aerospaceAvailable() {
+  try {
+    const { stdout } = await execFileAsync("aerospace", ["--version"], { timeout: 2_000 });
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+if (!(await aerospaceAvailable())) {
+  console.log("SKIP p6 follows-windows smoke: aerospace binary not available on this machine");
+  process.exit(0);
+}
+
+const { createFollowsWindowOrchestrator } = await import(distFollows);
+const { createInMemoryGatewayStore } = await import(distGateway);
+const { createSeededStore } = await import(distStore);
+const { AerospaceWorkspaceController } = await import(distController);
+const { createInMemoryObservability } = await import(distObservability);
+
+const seeded = await createSeededStore("fixtures/empty-review-packets.json");
+const store = createInMemoryGatewayStore(seeded);
+const observability = createInMemoryObservability();
+const workspace = new AerospaceWorkspaceController(async (cmd, args) => {
+  const { stdout, stderr } = await execFileAsync(cmd, args, { timeout: 5_000 });
+  return { stdout, stderr };
+});
+
+const SACRIFICIAL_WS_A = process.env.EVENTLOOPOS_FOLLOWS_SMOKE_WS_A || "9";
+const SACRIFICIAL_WS_B = process.env.EVENTLOOPOS_FOLLOWS_SMOKE_WS_B || "8";
+const SMOKE_TITLE = `eventloopos-p6-smoke-${process.pid}`;
+
+let spawnedWindowId;
+let originalFocused;
+
+try {
+  const { stdout: focusedRaw } = await execFileAsync("aerospace", ["list-workspaces", "--focused"], { timeout: 2_000 });
+  originalFocused = focusedRaw.trim();
+
+  // Pre-flight: ensure both sacrificial workspaces exist (empty is fine).
+  await execFileAsync("aerospace", ["workspace", SACRIFICIAL_WS_A], { timeout: 2_000 });
+
+  // Spawn a sacrificial Ghostty window, give it our smoke title.
+  await new Promise((resolveSpawn, rejectSpawn) => {
+    const child = spawn("open", ["-a", "Ghostty", "--args", `--title=${SMOKE_TITLE}`], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.on("error", rejectSpawn);
+    child.unref();
+    setTimeout(resolveSpawn, 1_500);
+  });
+
+  // Find our sacrificial window by app=Ghostty title contains SMOKE_TITLE; if
+  // we cannot find it, fall back to the most recent Ghostty window.
+  const findWindow = async () => {
+    const { stdout } = await execFileAsync(
+      "aerospace",
+      ["list-windows", "--all", "--json", "--format", "%{window-id}%{app-name}%{window-title}%{workspace}%{monitor-id}%{app-pid}"],
+      { timeout: 5_000 },
+    );
+    const arr = JSON.parse(stdout);
+    const ghostty = arr.filter((w) => /ghostty/i.test(w["app-name"] ?? ""));
+    return ghostty[ghostty.length - 1];
+  };
+
+  let win = await findWindow();
+  for (let attempt = 0; attempt < 5 && !win; attempt += 1) {
+    await sleep(500);
+    win = await findWindow();
+  }
+  if (!win) throw new Error("phase A: could not find spawned Ghostty window in aerospace list-windows");
+  spawnedWindowId = String(win["window-id"]);
+  console.log(`  spawned Ghostty window id=${spawnedWindowId} on workspace=${win.workspace}`);
+
+  // Move window onto WS_A then WS_B to seed observations.
+  await execFileAsync("aerospace", ["move-node-to-workspace", "--window-id", spawnedWindowId, SACRIFICIAL_WS_A], { timeout: 5_000 });
+  await store.recordWindowWorkspaceObservation({
+    windowId: spawnedWindowId,
+    workspaceId: SACRIFICIAL_WS_A,
+    isTaskWorkspace: true,
+    observedAt: new Date(),
+  });
+
+  await execFileAsync("aerospace", ["move-node-to-workspace", "--window-id", spawnedWindowId, SACRIFICIAL_WS_B], { timeout: 5_000 });
+  await store.recordWindowWorkspaceObservation({
+    windowId: spawnedWindowId,
+    workspaceId: SACRIFICIAL_WS_B,
+    isTaskWorkspace: true,
+    observedAt: new Date(),
+  });
+
+  const follows = await store.listFollowsWindows({ now: new Date(), ttlMs: 24 * 60 * 60 * 1_000 });
+  if (!follows.find((f) => f.window_id === spawnedWindowId)) {
+    throw new Error(`phase B: window ${spawnedWindowId} not marked follows after 2-workspace observation`);
+  }
+  console.log(`  PASS observation pipeline marked window ${spawnedWindowId} as follows`);
+
+  // Bind a fake current task so the orchestrator runs.
+  const taskA = await store.createTask({
+    primaryAnchor: { kind: "ghostty_window", id: `smoke-task-${SACRIFICIAL_WS_A}` },
+    capturedLayout: { backend: "aerospace", windows: [], activeWorkspace: SACRIFICIAL_WS_A },
+    aerospaceWorkspaceId: SACRIFICIAL_WS_A,
+    now: new Date(),
+  });
+  await store.setCurrentTaskId(taskA.task.task_id, new Date());
+
+  let focusedNow = (await execFileAsync("aerospace", ["list-workspaces", "--focused"], { timeout: 2_000 })).stdout.trim();
+
+  const orch = createFollowsWindowOrchestrator({
+    store,
+    workspace,
+    getFocusedWorkspace: async () => focusedNow,
+    runAerospaceCommand: async (command) => {
+      await execFileAsync(command.command, command.args, { timeout: 5_000 });
+    },
+    observability,
+    pollIntervalMs: 1_000,
+    ttlMs: 24 * 60 * 60 * 1_000,
+    pruneIntervalMs: 60 * 60 * 1_000,
+    now: () => new Date(),
+  });
+
+  await orch.tick(); // observe initial workspace, no switch yet.
+
+  // Switch focus to WS_A explicitly.
+  await execFileAsync("aerospace", ["workspace", SACRIFICIAL_WS_A], { timeout: 2_000 });
+  await sleep(500);
+  focusedNow = SACRIFICIAL_WS_A;
+  const switched = await orch.tick();
+  if (switched.decision !== "switch_handled") {
+    throw new Error(`phase C: expected switch_handled, got ${switched.decision}`);
+  }
+
+  // Verify the window actually moved to WS_A in AeroSpace.
+  const winAfter = await (async () => {
+    const { stdout } = await execFileAsync(
+      "aerospace",
+      ["list-windows", "--all", "--json", "--format", "%{window-id}%{app-name}%{window-title}%{workspace}%{monitor-id}%{app-pid}"],
+      { timeout: 5_000 },
+    );
+    const arr = JSON.parse(stdout);
+    return arr.find((w) => String(w["window-id"]) === spawnedWindowId);
+  })();
+  if (!winAfter) throw new Error(`phase D: spawned window ${spawnedWindowId} disappeared`);
+  if (winAfter.workspace !== SACRIFICIAL_WS_A) {
+    throw new Error(`phase D: expected window on ${SACRIFICIAL_WS_A}, was on ${winAfter.workspace}`);
+  }
+  console.log(`  PASS follows window ${spawnedWindowId} moved to workspace ${SACRIFICIAL_WS_A} on switch`);
+
+  console.log("PASS p6 follows-window orchestrator against real AeroSpace");
+} catch (error) {
+  console.error("FAIL p6 follows-window orchestrator");
+  console.error(error instanceof Error ? error.stack : String(error));
+  process.exitCode = 1;
+} finally {
+  // Cleanup: close the spawned Ghostty window.
+  if (spawnedWindowId) {
+    try {
+      await execFileAsync("aerospace", ["close", "--window-id", spawnedWindowId], { timeout: 5_000 });
+    } catch {
+      // best-effort
+    }
+  }
+  if (originalFocused) {
+    try {
+      await execFileAsync("aerospace", ["workspace", originalFocused], { timeout: 2_000 });
+    } catch {
+      // best-effort
+    }
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}

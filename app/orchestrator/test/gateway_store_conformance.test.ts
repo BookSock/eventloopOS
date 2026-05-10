@@ -808,6 +808,84 @@ function runGatewayStoreContract(
       }
     });
 
+    it("records window-workspace observations and surfaces multi-workspace follows", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        const baseTime = new Date("2026-05-06T12:00:00.000Z");
+        const initial = await harness.store.listFollowsWindows({ now: baseTime, ttlMs: 24 * 60 * 60 * 1_000 });
+        assert.deepEqual(initial, []);
+
+        await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-100",
+          workspaceId: "ws-alpha",
+          isTaskWorkspace: true,
+          observedAt: baseTime,
+        });
+        const second = await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-100",
+          workspaceId: "ws-alpha",
+          isTaskWorkspace: true,
+          observedAt: new Date("2026-05-06T12:00:30.000Z"),
+        });
+        assert.equal(second.window_id, "win-100");
+        assert.equal(second.workspace_id, "ws-alpha");
+        assert.equal(second.first_seen_at, "2026-05-06T12:00:00.000Z");
+        assert.equal(second.last_seen_at, "2026-05-06T12:00:30.000Z");
+
+        const stillSingle = await harness.store.listFollowsWindows({
+          now: new Date("2026-05-06T12:00:30.000Z"),
+          ttlMs: 24 * 60 * 60 * 1_000,
+        });
+        assert.deepEqual(stillSingle, [], "single-workspace observation must not become follows");
+
+        await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-100",
+          workspaceId: "ws-beta",
+          isTaskWorkspace: true,
+          observedAt: new Date("2026-05-06T12:01:00.000Z"),
+        });
+        await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-200",
+          workspaceId: "ws-alpha",
+          isTaskWorkspace: false,
+          observedAt: new Date("2026-05-06T12:01:00.000Z"),
+        });
+        await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-200",
+          workspaceId: "ws-beta",
+          isTaskWorkspace: false,
+          observedAt: new Date("2026-05-06T12:01:00.000Z"),
+        });
+
+        const follows = await harness.store.listFollowsWindows({
+          now: new Date("2026-05-06T12:01:00.000Z"),
+          ttlMs: 24 * 60 * 60 * 1_000,
+        });
+        assert.equal(follows.length, 1);
+        assert.equal(follows[0]?.window_id, "win-100");
+        assert.deepEqual(follows[0]?.known_workspaces, ["ws-alpha", "ws-beta"]);
+
+        const expired = await harness.store.listFollowsWindows({
+          now: new Date("2026-05-08T12:00:00.000Z"),
+          ttlMs: 60 * 60 * 1_000,
+        });
+        assert.deepEqual(expired, [], "expired observations must drop out of follows");
+
+        const removed = await harness.store.pruneWindowWorkspaceObservations(new Date("2026-05-06T12:00:45.000Z"));
+        assert.ok(removed >= 1, "prune should remove observations older than cutoff");
+
+        const followsAfterPrune = await harness.store.listFollowsWindows({
+          now: new Date("2026-05-06T12:01:00.000Z"),
+          ttlMs: 24 * 60 * 60 * 1_000,
+        });
+        assert.equal(followsAfterPrune.length, 0, "after pruning win-100 ws-alpha row, win-100 only on ws-beta");
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     it("binds tasks to aerospace workspaces and looks them up by workspace id", async (t) => {
       const harness = await createHarness(t);
       if (!harness) return;
@@ -1016,7 +1094,8 @@ async function clearPostgresTestData(store: PostgresQueueStore): Promise<void> {
       manual_mode_state,
       task_layouts,
       current_task_state,
-      tasks
+      tasks,
+      window_workspace_observations
     RESTART IDENTITY CASCADE
   `);
 }

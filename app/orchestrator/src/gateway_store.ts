@@ -43,6 +43,9 @@ import {
   nextQueueItem,
   peekNextContextRestoreRequest,
   recordEventRoute,
+  recordWindowWorkspaceObservation,
+  listFollowsWindows,
+  pruneWindowWorkspaceObservations,
   saveTaskWorkspaceSnapshot,
   upsertAgentRun,
   reapExpiredLeases,
@@ -65,6 +68,8 @@ import {
   type TaskLayoutRecord,
   type TaskAnchorKind,
   type CurrentTaskStateRecord,
+  type WindowWorkspaceObservationRecord,
+  type FollowsWindowRecord,
 } from "./store.js";
 import { eventToRecord } from "./db/postgres_queue_store.js";
 
@@ -166,6 +171,14 @@ export type GatewayStore = {
   getCurrentTaskState(): Promise<CurrentTaskStateRecord>;
   setCurrentTaskId(taskId: string | null, now: Date): Promise<CurrentTaskStateRecord>;
   recordTaskPaperEmitted(taskId: string, now: Date): Promise<TaskRecord | undefined>;
+  recordWindowWorkspaceObservation(input: {
+    windowId: string;
+    workspaceId: string;
+    isTaskWorkspace: boolean;
+    observedAt: Date;
+  }): Promise<WindowWorkspaceObservationRecord>;
+  listFollowsWindows(input: { now: Date; ttlMs: number }): Promise<FollowsWindowRecord[]>;
+  pruneWindowWorkspaceObservations(olderThan: Date): Promise<number>;
 };
 
 export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
@@ -576,6 +589,15 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
       tasks.set(taskId, updated);
       return { ...updated };
     },
+    async recordWindowWorkspaceObservation(input) {
+      return recordWindowWorkspaceObservation(store, input);
+    },
+    async listFollowsWindows(input) {
+      return listFollowsWindows(store, input);
+    },
+    async pruneWindowWorkspaceObservations(olderThan) {
+      return pruneWindowWorkspaceObservations(store, olderThan);
+    },
   };
 }
 
@@ -779,6 +801,15 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async recordTaskPaperEmitted(taskId, now) {
       return store.recordTaskPaperEmitted(taskId, now);
+    },
+    async recordWindowWorkspaceObservation(input) {
+      return store.recordWindowWorkspaceObservation(input);
+    },
+    async listFollowsWindows(input) {
+      return store.listFollowsWindows(input);
+    },
+    async pruneWindowWorkspaceObservations(olderThan) {
+      return store.pruneWindowWorkspaceObservations(olderThan);
     },
   };
 }
