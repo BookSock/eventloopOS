@@ -20,6 +20,7 @@ import { handleQueueRoute } from "./routes/queue.js";
 import { handleReadingQueueRoute } from "./routes/reading_queue.js";
 import { handleTaskSessionsRoute } from "./routes/task_sessions.js";
 import { handleTasksRoute } from "./routes/tasks.js";
+import { handleTriggersRoute } from "./routes/triggers.js";
 import { handleWorkspaceRoute } from "./routes/workspace.js";
 import { createRuntime, type Runtime } from "./runtime.js";
 import type { TaskSessionController } from "./task_sessions/types.js";
@@ -331,6 +332,26 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           observability,
           routeNameForPath(request.method, context.url.pathname) ?? "agent_runs",
           agentRunsRoute,
+          startedAt,
+        );
+      }
+
+      const triggersRoute = await handleTriggersRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        url: context.url,
+        readJsonBody: () => readJsonBody(request),
+        runtime,
+        now: now(),
+        requestId: context.requestId,
+      });
+      if (triggersRoute) {
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "triggers",
+          triggersRoute,
           startedAt,
         );
       }

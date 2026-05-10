@@ -23,6 +23,7 @@ describe("Postgres migrations", () => {
       "0013_tasks.sql",
       "0014_tasks_aerospace_workspace.sql",
       "0015_window_workspace_observations.sql",
+      "0016_paper_triggers.sql",
     ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
@@ -67,5 +68,8 @@ describe("Postgres migrations", () => {
     assert.match(sql, /CREATE TABLE current_task_state/);
     assert.match(sql, /ALTER TABLE tasks ADD COLUMN aerospace_workspace_id text/);
     assert.match(sql, /tasks_aerospace_workspace_idx/);
+    assert.match(sql, /CREATE TABLE paper_triggers/);
+    assert.match(sql, /paper_triggers_enabled_event_type_idx/);
+    assert.match(sql, /CREATE TABLE paper_trigger_firings/);
   });
 });

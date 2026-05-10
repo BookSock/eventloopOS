@@ -27,6 +27,13 @@ export type VoiceIntent =
     transcript: string;
     selector?: string;
     defer_seconds: number;
+  }
+  | {
+    kind: "define_trigger";
+    transcript: string;
+    event_type: string;
+    body_substring: string;
+    target: "current_task";
   };
 
 const RAISE_TOKENS = ["raise", "bump", "boost", "increase", "higher", "promote"];
@@ -39,6 +46,9 @@ export function classifyVoiceIntent(transcript: string): VoiceIntent {
     return { kind: "note", transcript: cleaned };
   }
   const lowered = cleaned.toLowerCase();
+
+  const trigger = detectDefineTrigger(cleaned, lowered);
+  if (trigger) return trigger;
 
   const pause = detectPause(cleaned, lowered);
   if (pause) return pause;
@@ -83,6 +93,35 @@ const FAN_OUT_PATTERNS = [
   /\b(?:all|every|each|any)\s+(?:of\s+)?(?:the\s+)?(.+?)\s+(?:tasks?|papers?|threads?|agents?)\b\s*(?:should|need to|must|please|to)?\s*[:,]?\s*(.+)/i,
   /\b(?:tell|let|inform|broadcast(?: to)?)\s+(?:all|every|each|any)\s+(?:of\s+)?(?:the\s+)?(.+?)\s+(?:tasks?|papers?|threads?|agents?)\s+(?:to|that)\s+(.+)/i,
 ];
+
+// Recognizes "if I get a slack message about X, paper this task"
+// (and variants: "when I receive a slack message about X, paper that task").
+const DEFINE_TRIGGER_PATTERN =
+  /^(?:if|when|whenever)\s+(?:i|we)\s+(?:get|receive|see)\s+(?:a|an|the)?\s*(slack|gmail|email|github|browser)\s+(?:message|email|notification|event)\s+about\s+(.+?)\s*[,;]?\s*paper\s+(?:this|that|the\s+current)\s+task[.!?]?\s*$/i;
+
+const DEFINE_TRIGGER_EVENT_TYPES: Record<string, string> = {
+  slack: "slack.message",
+  gmail: "gmail.message",
+  email: "gmail.message",
+  github: "github.notification",
+  browser: "browser.review_requested",
+};
+
+function detectDefineTrigger(original: string, _lowered: string): VoiceIntent | undefined {
+  const match = original.match(DEFINE_TRIGGER_PATTERN);
+  if (!match) return undefined;
+  const sourceWord = (match[1] ?? "").toLowerCase();
+  const bodySubstring = (match[2] ?? "").trim();
+  const eventType = DEFINE_TRIGGER_EVENT_TYPES[sourceWord];
+  if (!eventType || !bodySubstring) return undefined;
+  return {
+    kind: "define_trigger",
+    transcript: original.trim(),
+    event_type: eventType,
+    body_substring: bodySubstring,
+    target: "current_task",
+  };
+}
 
 function detectFanOut(original: string, lowered: string): VoiceIntent | undefined {
   if (!FAN_OUT_QUANTIFIERS.test(lowered)) return undefined;

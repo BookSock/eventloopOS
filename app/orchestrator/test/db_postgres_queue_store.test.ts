@@ -74,6 +74,7 @@ describe("PostgresQueueStore", () => {
       { id: "0013_tasks.sql" },
       { id: "0014_tasks_aerospace_workspace.sql" },
       { id: "0015_window_workspace_observations.sql" },
+      { id: "0016_paper_triggers.sql" },
     ]);
 
     const column = await store.pool.query(

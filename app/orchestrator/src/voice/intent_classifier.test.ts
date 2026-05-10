@@ -108,6 +108,33 @@ describe("classifyVoiceIntent defer", () => {
   });
 });
 
+describe("classifyVoiceIntent define_trigger", () => {
+  it("classifies 'if I get a slack message about deploy, paper this task'", () => {
+    const intent = classifyVoiceIntent("if I get a slack message about deploy, paper this task");
+    if (intent.kind !== "define_trigger") return assert.fail(`expected define_trigger, got ${intent.kind}`);
+    assert.equal(intent.event_type, "slack.message");
+    assert.equal(intent.body_substring, "deploy");
+    assert.equal(intent.target, "current_task");
+  });
+
+  it("classifies 'when I receive a gmail message about invoices, paper that task'", () => {
+    const intent = classifyVoiceIntent("when I receive a gmail message about invoices, paper that task");
+    if (intent.kind !== "define_trigger") return assert.fail(`expected define_trigger, got ${intent.kind}`);
+    assert.equal(intent.event_type, "gmail.message");
+    assert.match(intent.body_substring, /invoices/);
+  });
+
+  it("falls through to note if pattern is incomplete", () => {
+    const intent = classifyVoiceIntent("if I get a slack message about deploy");
+    assert.equal(intent.kind, "note");
+  });
+
+  it("does not match unrelated 'if' notes", () => {
+    const intent = classifyVoiceIntent("if we ship today, lunch is on me");
+    assert.equal(intent.kind, "note");
+  });
+});
+
 describe("classifyVoiceIntent pause", () => {
   it("classifies 'pause everything for 30 minutes' as pause with no selector", () => {
     const intent = classifyVoiceIntent("pause everything for 30 minutes");

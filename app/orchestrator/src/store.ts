@@ -91,9 +91,41 @@ export type InMemoryStore = {
   taskLayouts?: Map<string, TaskLayoutRecord>;
   currentTaskState?: { value: CurrentTaskStateRecord };
   windowWorkspaceObservations?: Map<string, WindowWorkspaceObservationRecord>;
+  paperTriggers?: Map<string, PaperTriggerRecord>;
+  paperTriggerFirings?: Map<string, true>;
 };
 
 export type TaskAnchorKind = "codex_thread" | "ghostty_window";
+
+export type PaperTriggerRecord = {
+  trigger_id: string;
+  task_id: string;
+  name: string;
+  match_event_type: string;
+  match_source_id_pattern?: string;
+  match_body_substring?: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+  last_fired_at?: string;
+};
+
+export type PaperTriggerCreateInput = {
+  task_id: string;
+  name: string;
+  match_event_type: string;
+  match_source_id_pattern?: string;
+  match_body_substring?: string;
+  enabled?: boolean;
+};
+
+export type PaperTriggerPatch = {
+  name?: string;
+  match_event_type?: string;
+  match_source_id_pattern?: string | null;
+  match_body_substring?: string | null;
+  enabled?: boolean;
+};
 
 export type TaskRecord = {
   task_id: string;
@@ -995,4 +1027,123 @@ function priorityReasonsForEvent(event: McpEvent): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+export function createPaperTrigger(
+  store: InMemoryStore,
+  input: PaperTriggerCreateInput,
+  now: Date,
+): PaperTriggerRecord {
+  const triggers = store.paperTriggers ?? new Map<string, PaperTriggerRecord>();
+  store.paperTriggers = triggers;
+  const timestamp = now.toISOString();
+  const triggerId = `trg_${stableId(`${input.task_id}_${input.name}_${timestamp}_${triggers.size}`)}`;
+  const record: PaperTriggerRecord = {
+    trigger_id: triggerId,
+    task_id: input.task_id,
+    name: input.name,
+    match_event_type: input.match_event_type,
+    match_source_id_pattern: input.match_source_id_pattern,
+    match_body_substring: input.match_body_substring,
+    enabled: input.enabled ?? true,
+    created_at: timestamp,
+    updated_at: timestamp,
+  };
+  triggers.set(triggerId, record);
+  return { ...record };
+}
+
+export function listPaperTriggers(
+  store: InMemoryStore,
+  filter?: { task_id?: string; only_enabled?: boolean },
+): PaperTriggerRecord[] {
+  const triggers = store.paperTriggers;
+  if (!triggers) return [];
+  return Array.from(triggers.values())
+    .filter((record) => {
+      if (filter?.task_id && record.task_id !== filter.task_id) return false;
+      if (filter?.only_enabled && !record.enabled) return false;
+      return true;
+    })
+    .map((record) => ({ ...record }))
+    .sort((left, right) => left.created_at.localeCompare(right.created_at));
+}
+
+export function getPaperTrigger(store: InMemoryStore, triggerId: string): PaperTriggerRecord | undefined {
+  const record = store.paperTriggers?.get(triggerId);
+  return record ? { ...record } : undefined;
+}
+
+export function updatePaperTrigger(
+  store: InMemoryStore,
+  triggerId: string,
+  patch: PaperTriggerPatch,
+  now: Date,
+): PaperTriggerRecord | undefined {
+  const triggers = store.paperTriggers;
+  if (!triggers) return undefined;
+  const existing = triggers.get(triggerId);
+  if (!existing) return undefined;
+  const next: PaperTriggerRecord = {
+    ...existing,
+    name: patch.name ?? existing.name,
+    match_event_type: patch.match_event_type ?? existing.match_event_type,
+    match_source_id_pattern:
+      patch.match_source_id_pattern === null
+        ? undefined
+        : patch.match_source_id_pattern ?? existing.match_source_id_pattern,
+    match_body_substring:
+      patch.match_body_substring === null
+        ? undefined
+        : patch.match_body_substring ?? existing.match_body_substring,
+    enabled: patch.enabled ?? existing.enabled,
+    updated_at: now.toISOString(),
+  };
+  triggers.set(triggerId, next);
+  return { ...next };
+}
+
+export function deletePaperTrigger(store: InMemoryStore, triggerId: string): PaperTriggerRecord | undefined {
+  const triggers = store.paperTriggers;
+  if (!triggers) return undefined;
+  const existing = triggers.get(triggerId);
+  if (!existing) return undefined;
+  triggers.delete(triggerId);
+  // Also remove related firing dedupes.
+  const firings = store.paperTriggerFirings;
+  if (firings) {
+    const prefix = `${triggerId}:`;
+    for (const key of firings.keys()) {
+      if (key.startsWith(prefix)) firings.delete(key);
+    }
+  }
+  return { ...existing };
+}
+
+export function recordPaperTriggerFired(
+  store: InMemoryStore,
+  triggerId: string,
+  at: Date,
+): PaperTriggerRecord | undefined {
+  const triggers = store.paperTriggers;
+  if (!triggers) return undefined;
+  const existing = triggers.get(triggerId);
+  if (!existing) return undefined;
+  const timestamp = at.toISOString();
+  const next: PaperTriggerRecord = { ...existing, last_fired_at: timestamp, updated_at: timestamp };
+  triggers.set(triggerId, next);
+  return { ...next };
+}
+
+export function tryRegisterPaperTriggerFiring(
+  store: InMemoryStore,
+  triggerId: string,
+  dedupeKey: string,
+): boolean {
+  const firings = store.paperTriggerFirings ?? new Map<string, true>();
+  store.paperTriggerFirings = firings;
+  const key = `${triggerId}:${dedupeKey}`;
+  if (firings.has(key)) return false;
+  firings.set(key, true);
+  return true;
 }

@@ -956,6 +956,76 @@ function runGatewayStoreContract(
         await harness.cleanup();
       }
     });
+
+    it("creates, lists, updates, deletes paper triggers and dedupes firings", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+      try {
+        const layout: WorkspaceSnapshot = {
+          backend: "aerospace",
+          activeWorkspace: "ws-trig",
+          focusedWindowId: 42,
+          windows: [{ id: 42, app: "Ghostty", title: "trig", workspace: "ws-trig" }],
+        };
+        const task = await harness.store.createTask({
+          primaryAnchor: { kind: "codex_thread", id: "trig-thread-1" },
+          capturedLayout: layout,
+          now,
+        });
+
+        const trigger = await harness.store.createPaperTrigger(
+          {
+            task_id: task.task.task_id,
+            name: "deploy watch",
+            match_event_type: "slack.message_received",
+            match_body_substring: "deploy",
+          },
+          now,
+        );
+        assert.ok(trigger.trigger_id.startsWith("trg_"));
+        assert.equal(trigger.enabled, true);
+
+        const listed = await harness.store.listPaperTriggers({ task_id: task.task.task_id });
+        assert.equal(listed.length, 1);
+
+        const onlyEnabled = await harness.store.listPaperTriggers({ only_enabled: true });
+        assert.equal(onlyEnabled.length, 1);
+
+        const got = await harness.store.getPaperTrigger(trigger.trigger_id);
+        assert.equal(got?.name, "deploy watch");
+
+        const patched = await harness.store.updatePaperTrigger(
+          trigger.trigger_id,
+          { enabled: false, match_body_substring: null },
+          new Date("2026-05-06T12:30:00.000Z"),
+        );
+        assert.equal(patched?.enabled, false);
+        assert.equal(patched?.match_body_substring, undefined);
+
+        const onlyEnabledAfter = await harness.store.listPaperTriggers({ only_enabled: true });
+        assert.equal(onlyEnabledAfter.length, 0);
+
+        const fired = await harness.store.recordPaperTriggerFired(
+          trigger.trigger_id,
+          new Date("2026-05-06T12:35:00.000Z"),
+        );
+        assert.ok(fired?.last_fired_at);
+
+        const claimedFirst = await harness.store.tryRegisterPaperTriggerFiring(trigger.trigger_id, "dk-1");
+        const claimedDup = await harness.store.tryRegisterPaperTriggerFiring(trigger.trigger_id, "dk-1");
+        assert.equal(claimedFirst, true);
+        assert.equal(claimedDup, false);
+        const claimedDifferent = await harness.store.tryRegisterPaperTriggerFiring(trigger.trigger_id, "dk-2");
+        assert.equal(claimedDifferent, true);
+
+        const removed = await harness.store.deletePaperTrigger(trigger.trigger_id);
+        assert.ok(removed);
+        const afterDelete = await harness.store.getPaperTrigger(trigger.trigger_id);
+        assert.equal(afterDelete, undefined);
+      } finally {
+        await harness.cleanup();
+      }
+    });
   });
 }
 
@@ -1092,6 +1162,8 @@ async function clearPostgresTestData(store: PostgresQueueStore): Promise<void> {
       onboarding_rejections,
       onboarding_approval_batches,
       manual_mode_state,
+      paper_trigger_firings,
+      paper_triggers,
       task_layouts,
       current_task_state,
       tasks,

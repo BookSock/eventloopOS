@@ -1,0 +1,132 @@
+#!/usr/bin/env node
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+if (process.env.EVENTLOOPOS_ENABLE_TRIGGER_SMOKE !== "1") {
+  console.log("SKIP p7b-trigger-firing-smoke (set EVENTLOOPOS_ENABLE_TRIGGER_SMOKE=1 to run)");
+  process.exit(0);
+}
+
+const here = fileURLToPath(import.meta.url);
+const orchestratorRoot = resolve(here, "../..");
+const distServer = resolve(orchestratorRoot, "dist/src/server.js");
+const distStore = resolve(orchestratorRoot, "dist/src/store.js");
+const distGateway = resolve(orchestratorRoot, "dist/src/gateway_store.js");
+
+const { createGatewayServer } = await import(distServer);
+const { createSeededStore } = await import(distStore);
+const { createInMemoryGatewayStore } = await import(distGateway);
+
+const NOW = new Date("2026-05-10T14:00:00.000Z");
+let server;
+let passed = false;
+
+try {
+  const seeded = await createSeededStore("fixtures/empty-review-packets.json");
+  const store = createInMemoryGatewayStore(seeded);
+  server = createGatewayServer({ store, now: () => NOW });
+
+  const baseUrl = await new Promise((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      resolveListen(`http://127.0.0.1:${addr.port}`);
+    });
+  });
+
+  const layout = {
+    backend: "aerospace",
+    activeWorkspace: "ws-trig",
+    focusedWindowId: 1,
+    windows: [{ id: 1, app: "Ghostty", title: "trig", workspace: "ws-trig" }],
+  };
+
+  const taskResp = await fetch(`${baseUrl}/tasks`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      primary_anchor: { kind: "codex_thread", id: "thread-p7b-smoke" },
+      captured_layout: layout,
+    }),
+  }).then((r) => r.json());
+  const taskId = taskResp.task.task_id;
+
+  const triggerResp = await fetch(`${baseUrl}/triggers`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      task_id: taskId,
+      name: "smoke deploy watcher",
+      match_event_type: "slack.message_received",
+      match_body_substring: "deploy",
+    }),
+  }).then((r) => r.json());
+  const triggerId = triggerResp.trigger.trigger_id;
+
+  const matchEvent = {
+    id: "evt_p7b_match",
+    source: "slack",
+    source_id: "slack:T1:C1",
+    idempotency_key: "p7b-deploy-1",
+    occurred_at: NOW.toISOString(),
+    received_at: NOW.toISOString(),
+    actor: { id: "u", type: "human" },
+    type: "slack.message_received",
+    title: "deploy ready",
+    summary: "ship to staging please",
+    raw_ref: { id: "raw_p7b_1", uri: "slack://x/y", media_type: "application/json" },
+    links: [],
+    resources: [],
+  };
+  const matchResp = await fetch(`${baseUrl}/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(matchEvent),
+  }).then((r) => r.json());
+
+  if (!matchResp.trigger_fires || matchResp.trigger_fires.length !== 1) {
+    throw new Error(`expected 1 trigger fire, got ${JSON.stringify(matchResp.trigger_fires)}`);
+  }
+  if (matchResp.trigger_fires[0].task_id !== taskId) {
+    throw new Error(`fired trigger task_id mismatch: ${matchResp.trigger_fires[0].task_id} vs ${taskId}`);
+  }
+
+  const queueAfterMatch = await fetch(`${baseUrl}/queue`).then((r) => r.json());
+  const triggerPaper = queueAfterMatch.items.find(
+    (item) => item.task_id === taskId && /Trigger fired/i.test(item.review_packet.title),
+  );
+  if (!triggerPaper) {
+    throw new Error("expected a paper with title 'Trigger fired: ...' for the task");
+  }
+
+  const noMatchEvent = {
+    ...matchEvent,
+    id: "evt_p7b_nomatch",
+    idempotency_key: "p7b-lunch-1",
+    title: "lunch plans",
+    summary: "tacos at noon",
+  };
+  const nomatchResp = await fetch(`${baseUrl}/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(noMatchEvent),
+  }).then((r) => r.json());
+  if (nomatchResp.trigger_fires && nomatchResp.trigger_fires.length > 0) {
+    throw new Error("non-matching event must not fire trigger");
+  }
+
+  passed = true;
+  console.log("PASS p7b trigger firing smoke");
+  console.log(`  task_id:        ${taskId}`);
+  console.log(`  trigger_id:     ${triggerId}`);
+  console.log(`  paper title:    ${triggerPaper.review_packet.title}`);
+} catch (error) {
+  console.error("FAIL p7b trigger firing smoke");
+  console.error(error instanceof Error ? error.stack : String(error));
+  process.exitCode = 1;
+} finally {
+  if (server) {
+    await new Promise((res) => server.close(() => res()));
+  }
+  if (!passed && process.exitCode === 0) process.exitCode = 1;
+}

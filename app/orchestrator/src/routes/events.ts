@@ -7,6 +7,11 @@ import type { Runtime } from "../runtime.js";
 import type { RouteDecision } from "../store.js";
 import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
+import {
+  buildTriggerFiredEvent,
+  findMatchingTriggers,
+  paperTriggerDedupeKey,
+} from "../triggers/evaluator.js";
 import { classifyVoiceIntent, pickDeferCandidates, pickRerankCandidate } from "../voice/intent_classifier.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
@@ -53,6 +58,50 @@ export async function handleEventsRoute(input: {
 
     const transcriptValue = isRecord(parsed.value) && typeof parsed.value.transcript === "string" ? parsed.value.transcript : "";
     const intent = classifyVoiceIntent(transcriptValue);
+    if (intent.kind === "define_trigger") {
+      const currentState = await store.getCurrentTaskState();
+      const taskId = currentState.current_task_id;
+      if (!taskId) {
+        await observability.incrementCounter("voice_define_trigger_no_current_task_total");
+        return ok(200, {
+          ok: false,
+          intent: "define_trigger",
+          error: "no_current_task",
+          message: "Cannot create trigger: no current task is bound. Bind a task first with the advance hotkey.",
+          request_id: input.requestId,
+        });
+      }
+      const trigger = await store.createPaperTrigger(
+        {
+          task_id: taskId,
+          name: `voice: ${intent.event_type} about ${intent.body_substring}`,
+          match_event_type: intent.event_type,
+          match_body_substring: intent.body_substring,
+        },
+        input.now,
+      );
+      await observability.incrementCounter("voice_define_trigger_total");
+      await observability.recordActivity({
+        type: "voice_define_trigger",
+        occurred_at: input.now.toISOString(),
+        actor: "human",
+        task_id: taskId,
+        status: "ok",
+        summary: `Voice-defined trigger created for task ${taskId}.`,
+        details: sanitizeActivityDetails({
+          transcript: intent.transcript,
+          trigger_id: trigger.trigger_id,
+          event_type: intent.event_type,
+          body_substring: intent.body_substring,
+        }),
+      });
+      return ok(200, {
+        ok: true,
+        intent: "define_trigger",
+        trigger,
+        request_id: input.requestId,
+      });
+    }
     if (intent.kind === "fan_out") {
       await observability.incrementCounter("voice_fan_out_detected_total");
       await observability.recordActivity({
@@ -299,6 +348,7 @@ export async function routeEventThroughGateway(
   review_packet?: unknown;
   queue_item?: unknown;
   task_message?: unknown;
+  trigger_fires?: Array<{ trigger_id: string; task_id: string; queue_item_id?: string; event_id: string }>;
 }> {
   const existing = await options.store.getEventByIdempotencyKey(event.source, event.idempotency_key);
   if (existing) {
@@ -342,10 +392,12 @@ export async function routeEventThroughGateway(
         taskMessage: injected.taskMessage,
         queueItemId: undefined,
       });
+      const triggerFires = await fireMatchingPaperTriggers(options, event, now);
       return {
         event,
         route_decision: result.route_decision,
         task_message: injected.taskMessage,
+        ...(triggerFires.length > 0 ? { trigger_fires: triggerFires } : {}),
       };
     }
   }
@@ -356,12 +408,65 @@ export async function routeEventThroughGateway(
     taskMessage: injected?.taskMessage,
     taskMessageError,
   });
+  const triggerFires = await fireMatchingPaperTriggers(options, event, now);
   return {
     event,
     route_decision: result.route_decision,
     review_packet: result.review_packet,
     queue_item: result.queue_item,
+    ...(triggerFires.length > 0 ? { trigger_fires: triggerFires } : {}),
   };
+}
+
+async function fireMatchingPaperTriggers(
+  options: EventGatewayOptions,
+  event: McpEvent,
+  now: Date,
+): Promise<Array<{ trigger_id: string; task_id: string; queue_item_id?: string; event_id: string }>> {
+  if (event.source === "paper_trigger" || event.type === "paper_trigger.fired") return [];
+  const manualMode = await options.store.getManualModeState();
+  if (manualMode.active) return [];
+
+  const triggers = await options.store.listPaperTriggers({ only_enabled: true });
+  if (triggers.length === 0) return [];
+  const matches = findMatchingTriggers(event, triggers);
+  if (matches.length === 0) return [];
+
+  const dedupeKey = paperTriggerDedupeKey(event);
+  const fires: Array<{ trigger_id: string; task_id: string; queue_item_id?: string; event_id: string }> = [];
+  for (const trigger of matches) {
+    const claimed = await options.store.tryRegisterPaperTriggerFiring(trigger.trigger_id, dedupeKey);
+    if (!claimed) continue;
+    const synthetic = buildTriggerFiredEvent({ trigger, sourceEvent: event, now });
+    const ingested = await options.store.ingestEventAsReviewPacket(synthetic, now);
+    await options.store.recordPaperTriggerFired(trigger.trigger_id, now);
+    if (options.observability) {
+      await options.observability.incrementCounter("paper_triggers_fired_total");
+      await options.observability.recordActivity({
+        type: "paper_trigger_fired",
+        occurred_at: now.toISOString(),
+        actor: "system",
+        task_id: trigger.task_id,
+        event_id: synthetic.id,
+        queue_item_id: ingested.queue_item?.id,
+        status: "ok",
+        summary: `Paper trigger "${trigger.name}" fired for task ${trigger.task_id}.`,
+        details: sanitizeActivityDetails({
+          trigger_id: trigger.trigger_id,
+          source_event_id: event.id,
+          source_event_type: event.type,
+          source_event_source_id: event.source_id,
+        }),
+      });
+    }
+    fires.push({
+      trigger_id: trigger.trigger_id,
+      task_id: trigger.task_id,
+      queue_item_id: ingested.queue_item?.id,
+      event_id: synthetic.id,
+    });
+  }
+  return fires;
 }
 
 async function recordRoutedEventActivity(

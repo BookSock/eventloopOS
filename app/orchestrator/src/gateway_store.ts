@@ -52,6 +52,13 @@ import {
   reapDueDeferredItems,
   retryContextRestoreRequest,
   renewQueueLease,
+  createPaperTrigger,
+  listPaperTriggers,
+  getPaperTrigger,
+  updatePaperTrigger,
+  deletePaperTrigger,
+  recordPaperTriggerFired,
+  tryRegisterPaperTriggerFiring,
   type InMemoryStore,
   type ContextEntry,
   type ContextQuery,
@@ -70,6 +77,9 @@ import {
   type CurrentTaskStateRecord,
   type WindowWorkspaceObservationRecord,
   type FollowsWindowRecord,
+  type PaperTriggerRecord,
+  type PaperTriggerCreateInput,
+  type PaperTriggerPatch,
 } from "./store.js";
 import { eventToRecord } from "./db/postgres_queue_store.js";
 
@@ -179,6 +189,13 @@ export type GatewayStore = {
   }): Promise<WindowWorkspaceObservationRecord>;
   listFollowsWindows(input: { now: Date; ttlMs: number }): Promise<FollowsWindowRecord[]>;
   pruneWindowWorkspaceObservations(olderThan: Date): Promise<number>;
+  createPaperTrigger(input: PaperTriggerCreateInput, now: Date): Promise<PaperTriggerRecord>;
+  listPaperTriggers(filter?: { task_id?: string; only_enabled?: boolean }): Promise<PaperTriggerRecord[]>;
+  getPaperTrigger(triggerId: string): Promise<PaperTriggerRecord | undefined>;
+  updatePaperTrigger(triggerId: string, patch: PaperTriggerPatch, now: Date): Promise<PaperTriggerRecord | undefined>;
+  deletePaperTrigger(triggerId: string): Promise<PaperTriggerRecord | undefined>;
+  recordPaperTriggerFired(triggerId: string, at: Date): Promise<PaperTriggerRecord | undefined>;
+  tryRegisterPaperTriggerFiring(triggerId: string, dedupeKey: string): Promise<boolean>;
 };
 
 export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
@@ -598,6 +615,27 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     async pruneWindowWorkspaceObservations(olderThan) {
       return pruneWindowWorkspaceObservations(store, olderThan);
     },
+    async createPaperTrigger(input, now) {
+      return createPaperTrigger(store, input, now);
+    },
+    async listPaperTriggers(filter) {
+      return listPaperTriggers(store, filter);
+    },
+    async getPaperTrigger(triggerId) {
+      return getPaperTrigger(store, triggerId);
+    },
+    async updatePaperTrigger(triggerId, patch, now) {
+      return updatePaperTrigger(store, triggerId, patch, now);
+    },
+    async deletePaperTrigger(triggerId) {
+      return deletePaperTrigger(store, triggerId);
+    },
+    async recordPaperTriggerFired(triggerId, at) {
+      return recordPaperTriggerFired(store, triggerId, at);
+    },
+    async tryRegisterPaperTriggerFiring(triggerId, dedupeKey) {
+      return tryRegisterPaperTriggerFiring(store, triggerId, dedupeKey);
+    },
   };
 }
 
@@ -810,6 +848,27 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async pruneWindowWorkspaceObservations(olderThan) {
       return store.pruneWindowWorkspaceObservations(olderThan);
+    },
+    async createPaperTrigger(input, now) {
+      return store.createPaperTrigger(input, now);
+    },
+    async listPaperTriggers(filter) {
+      return store.listPaperTriggers(filter);
+    },
+    async getPaperTrigger(triggerId) {
+      return store.getPaperTrigger(triggerId);
+    },
+    async updatePaperTrigger(triggerId, patch, now) {
+      return store.updatePaperTrigger(triggerId, patch, now);
+    },
+    async deletePaperTrigger(triggerId) {
+      return store.deletePaperTrigger(triggerId);
+    },
+    async recordPaperTriggerFired(triggerId, at) {
+      return store.recordPaperTriggerFired(triggerId, at);
+    },
+    async tryRegisterPaperTriggerFiring(triggerId, dedupeKey) {
+      return store.tryRegisterPaperTriggerFiring(triggerId, dedupeKey);
     },
   };
 }

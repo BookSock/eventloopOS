@@ -95,7 +95,7 @@ For *every* Codex window in *every* task — not just task-anchors:
 - If `idle_seconds >= task.auto_paper_idle_seconds` (default 60s) AND we haven't already emitted a paper for this `(taskId, codexThreadId)` in the current idle period → emit a paper. Body = recent transcript summary; restore plan = task's saved window layout.
 - Throttle keys on the rollout's `last_event_at`. Once activity advances `last_event_at`, a new idle period starts and a new paper can fire.
 
-Optional later (Phase 7): an MCP skill `eventloopos.enqueue_paper` exposed to Codex itself, so an agent can self-report "I'm waiting on a human" without file-watching. Same skill could let agents define custom triggers (e.g., "watch this Slack channel for my-name mentions → paper for this task").
+Optional later (Phase 7): an MCP skill `eventloopos.enqueue_paper` exposed to Codex itself, so an agent can self-report "I'm waiting on a human" without file-watching. Same skill could let agents define custom triggers (e.g., "watch this Slack channel for my-name mentions → paper for this task"). Phase 7a ships the enqueue tool — see `docs/codex-mcp-skill.md` for the install snippet.
 
 ## What changes vs today
 

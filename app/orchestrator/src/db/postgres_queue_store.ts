@@ -45,6 +45,9 @@ import {
   type CurrentTaskStateRecord,
   type WindowWorkspaceObservationRecord,
   type FollowsWindowRecord,
+  type PaperTriggerRecord,
+  type PaperTriggerCreateInput,
+  type PaperTriggerPatch,
 } from "../store.js";
 import { stableId } from "../store/ids.js";
 import { runMigrations } from "./migrations.js";
@@ -886,6 +889,163 @@ export class PostgresQueueStore {
       [olderThan.toISOString()],
     );
     return result.rowCount ?? 0;
+  }
+
+  async createPaperTrigger(input: PaperTriggerCreateInput, now: Date): Promise<PaperTriggerRecord> {
+    const timestamp = now.toISOString();
+    const triggerId = `trg_${stableId(`${input.task_id}_${input.name}_${timestamp}_${Math.random()}`)}`;
+    const result = await this.pool.query(
+      `
+        INSERT INTO paper_triggers (
+          trigger_id, task_id, name, match_event_type,
+          match_source_id_pattern, match_body_substring,
+          enabled, created_at, updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $8::timestamptz)
+        RETURNING trigger_id, task_id, name, match_event_type,
+          match_source_id_pattern, match_body_substring,
+          enabled, created_at, updated_at, last_fired_at
+      `,
+      [
+        triggerId,
+        input.task_id,
+        input.name,
+        input.match_event_type,
+        input.match_source_id_pattern ?? null,
+        input.match_body_substring ?? null,
+        input.enabled ?? true,
+        timestamp,
+      ],
+    );
+    return rowToPaperTriggerRecord(result.rows[0]);
+  }
+
+  async listPaperTriggers(filter?: { task_id?: string; only_enabled?: boolean }): Promise<PaperTriggerRecord[]> {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (filter?.task_id) {
+      params.push(filter.task_id);
+      conditions.push(`task_id = $${params.length}`);
+    }
+    if (filter?.only_enabled) {
+      conditions.push(`enabled = TRUE`);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const result = await this.pool.query(
+      `
+        SELECT trigger_id, task_id, name, match_event_type,
+          match_source_id_pattern, match_body_substring,
+          enabled, created_at, updated_at, last_fired_at
+        FROM paper_triggers
+        ${where}
+        ORDER BY created_at ASC
+      `,
+      params,
+    );
+    return result.rows.map(rowToPaperTriggerRecord);
+  }
+
+  async getPaperTrigger(triggerId: string): Promise<PaperTriggerRecord | undefined> {
+    const result = await this.pool.query(
+      `
+        SELECT trigger_id, task_id, name, match_event_type,
+          match_source_id_pattern, match_body_substring,
+          enabled, created_at, updated_at, last_fired_at
+        FROM paper_triggers WHERE trigger_id = $1
+      `,
+      [triggerId],
+    );
+    const row = result.rows[0];
+    return row ? rowToPaperTriggerRecord(row) : undefined;
+  }
+
+  async updatePaperTrigger(
+    triggerId: string,
+    patch: PaperTriggerPatch,
+    now: Date,
+  ): Promise<PaperTriggerRecord | undefined> {
+    const timestamp = now.toISOString();
+    const result = await this.pool.query(
+      `
+        UPDATE paper_triggers
+           SET name = COALESCE($2, name),
+               match_event_type = COALESCE($3, match_event_type),
+               match_source_id_pattern = CASE
+                 WHEN $4::text = '__clear__' THEN NULL
+                 WHEN $4 IS NOT NULL THEN $4
+                 ELSE match_source_id_pattern
+               END,
+               match_body_substring = CASE
+                 WHEN $5::text = '__clear__' THEN NULL
+                 WHEN $5 IS NOT NULL THEN $5
+                 ELSE match_body_substring
+               END,
+               enabled = COALESCE($6, enabled),
+               updated_at = $7::timestamptz
+         WHERE trigger_id = $1
+        RETURNING trigger_id, task_id, name, match_event_type,
+          match_source_id_pattern, match_body_substring,
+          enabled, created_at, updated_at, last_fired_at
+      `,
+      [
+        triggerId,
+        patch.name ?? null,
+        patch.match_event_type ?? null,
+        patch.match_source_id_pattern === null
+          ? "__clear__"
+          : patch.match_source_id_pattern ?? null,
+        patch.match_body_substring === null
+          ? "__clear__"
+          : patch.match_body_substring ?? null,
+        patch.enabled ?? null,
+        timestamp,
+      ],
+    );
+    const row = result.rows[0];
+    return row ? rowToPaperTriggerRecord(row) : undefined;
+  }
+
+  async deletePaperTrigger(triggerId: string): Promise<PaperTriggerRecord | undefined> {
+    const result = await this.pool.query(
+      `
+        DELETE FROM paper_triggers WHERE trigger_id = $1
+        RETURNING trigger_id, task_id, name, match_event_type,
+          match_source_id_pattern, match_body_substring,
+          enabled, created_at, updated_at, last_fired_at
+      `,
+      [triggerId],
+    );
+    const row = result.rows[0];
+    return row ? rowToPaperTriggerRecord(row) : undefined;
+  }
+
+  async recordPaperTriggerFired(triggerId: string, at: Date): Promise<PaperTriggerRecord | undefined> {
+    const timestamp = at.toISOString();
+    const result = await this.pool.query(
+      `
+        UPDATE paper_triggers
+           SET last_fired_at = $2::timestamptz, updated_at = $2::timestamptz
+         WHERE trigger_id = $1
+        RETURNING trigger_id, task_id, name, match_event_type,
+          match_source_id_pattern, match_body_substring,
+          enabled, created_at, updated_at, last_fired_at
+      `,
+      [triggerId, timestamp],
+    );
+    const row = result.rows[0];
+    return row ? rowToPaperTriggerRecord(row) : undefined;
+  }
+
+  async tryRegisterPaperTriggerFiring(triggerId: string, dedupeKey: string): Promise<boolean> {
+    const result = await this.pool.query(
+      `
+        INSERT INTO paper_trigger_firings (trigger_id, dedupe_key, fired_at)
+        VALUES ($1, $2, now())
+        ON CONFLICT (trigger_id, dedupe_key) DO NOTHING
+      `,
+      [triggerId, dedupeKey],
+    );
+    return (result.rowCount ?? 0) > 0;
   }
 
   async recordWorkspaceRestoreReceipt(input: {
@@ -2065,6 +2225,31 @@ function rowToWindowWorkspaceObservation(row: Record<string, unknown>): WindowWo
     is_task_workspace: row.is_task_workspace === true,
     first_seen_at: requiredDateToIso(row.first_seen_at),
     last_seen_at: requiredDateToIso(row.last_seen_at),
+  };
+}
+
+function rowToPaperTriggerRecord(row: Record<string, unknown>): PaperTriggerRecord {
+  const sourcePattern = row.match_source_id_pattern;
+  const bodySubstring = row.match_body_substring;
+  const lastFired = row.last_fired_at;
+  return {
+    trigger_id: String(row.trigger_id),
+    task_id: String(row.task_id),
+    name: String(row.name),
+    match_event_type: String(row.match_event_type),
+    match_source_id_pattern:
+      typeof sourcePattern === "string" && sourcePattern ? sourcePattern : undefined,
+    match_body_substring:
+      typeof bodySubstring === "string" && bodySubstring ? bodySubstring : undefined,
+    enabled: row.enabled === true,
+    created_at: requiredDateToIso(row.created_at),
+    updated_at: requiredDateToIso(row.updated_at),
+    last_fired_at:
+      lastFired instanceof Date
+        ? lastFired.toISOString()
+        : typeof lastFired === "string" && lastFired
+          ? new Date(lastFired).toISOString()
+          : undefined,
   };
 }
 

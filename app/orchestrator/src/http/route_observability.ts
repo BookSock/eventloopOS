@@ -80,6 +80,8 @@ export function routeNameForPath(method: string | undefined, pathname: string): 
     [/^\/agents\/codex\/inspect\/[^/]+$/, "agents_codex_inspect"],
     [/^\/agents\/claude\/inspect\/[^/]+$/, "agents_claude_inspect"],
     [/^\/review-packets\/[^/]+$/, "review_packet_get"],
+    [/^\/triggers$/, "triggers"],
+    [/^\/triggers\/[^/]+$/, "trigger_by_id"],
   ];
   const route = entries.find(([pattern]) => pattern.test(pathname))?.[1];
   return route ? `${normalizedMethod}_${route}` : undefined;
