@@ -156,12 +156,26 @@ export type WindowWorkspaceObservationRecord = {
   is_task_workspace: boolean;
   first_seen_at: string;
   last_seen_at: string;
+  app_bundle?: string;
+  title_prefix?: string;
 };
 
 export type FollowsWindowRecord = {
   window_id: string;
   known_workspaces: string[];
+  app_bundle?: string;
+  title_prefix?: string;
+  slot_window_ids?: string[];
 };
+
+export const FOLLOWS_TITLE_PREFIX_MAX_LEN = 40;
+
+export function normalizeTitlePrefix(title: string | undefined | null): string | undefined {
+  if (typeof title !== "string") return undefined;
+  const trimmed = title.trim().toLowerCase();
+  if (trimmed.length === 0) return undefined;
+  return trimmed.slice(0, FOLLOWS_TITLE_PREFIX_MAX_LEN);
+}
 
 export type ManualModeStateRecord = {
   active: boolean;
@@ -588,6 +602,8 @@ export function recordWindowWorkspaceObservation(
     workspaceId: string;
     isTaskWorkspace: boolean;
     observedAt: Date;
+    appBundle?: string;
+    titlePrefix?: string;
   },
 ): WindowWorkspaceObservationRecord {
   const observations = store.windowWorkspaceObservations ?? new Map<string, WindowWorkspaceObservationRecord>();
@@ -595,11 +611,15 @@ export function recordWindowWorkspaceObservation(
   const key = observationKey(input.windowId, input.workspaceId);
   const timestamp = input.observedAt.toISOString();
   const existing = observations.get(key);
+  const appBundle = input.appBundle !== undefined && input.appBundle.length > 0 ? input.appBundle : undefined;
+  const titlePrefix = input.titlePrefix !== undefined && input.titlePrefix.length > 0 ? input.titlePrefix : undefined;
   const record: WindowWorkspaceObservationRecord = existing
     ? {
         ...existing,
         is_task_workspace: existing.is_task_workspace || input.isTaskWorkspace,
         last_seen_at: timestamp,
+        app_bundle: appBundle ?? existing.app_bundle,
+        title_prefix: titlePrefix ?? existing.title_prefix,
       }
     : {
         window_id: input.windowId,
@@ -607,6 +627,8 @@ export function recordWindowWorkspaceObservation(
         is_task_workspace: input.isTaskWorkspace,
         first_seen_at: timestamp,
         last_seen_at: timestamp,
+        app_bundle: appBundle,
+        title_prefix: titlePrefix,
       };
   observations.set(key, record);
   return record;
@@ -619,22 +641,78 @@ export function listFollowsWindows(
   const observations = store.windowWorkspaceObservations;
   if (!observations) return [];
   const cutoff = options.now.getTime() - options.ttlMs;
-  const groups = new Map<string, Set<string>>();
+
+  type WindowGroup = { workspaces: Set<string>; lastSeenMs: number };
+  const windowGroups = new Map<string, WindowGroup>();
+
+  type SlotGroup = {
+    app_bundle: string;
+    title_prefix: string;
+    workspaces: Set<string>;
+    windowIds: Map<string, number>;
+  };
+  const slotGroups = new Map<string, SlotGroup>();
+
   for (const record of observations.values()) {
     if (!record.is_task_workspace) continue;
-    if (Date.parse(record.last_seen_at) < cutoff) continue;
-    const set = groups.get(record.window_id) ?? new Set<string>();
-    set.add(record.workspace_id);
-    groups.set(record.window_id, set);
+    const lastSeenMs = Date.parse(record.last_seen_at);
+    if (lastSeenMs < cutoff) continue;
+    const wg = windowGroups.get(record.window_id) ?? { workspaces: new Set<string>(), lastSeenMs: 0 };
+    wg.workspaces.add(record.workspace_id);
+    if (lastSeenMs > wg.lastSeenMs) wg.lastSeenMs = lastSeenMs;
+    windowGroups.set(record.window_id, wg);
+
+    if (record.app_bundle && record.title_prefix) {
+      const slotKey = `${record.app_bundle} ${record.title_prefix}`;
+      const sg = slotGroups.get(slotKey) ?? {
+        app_bundle: record.app_bundle,
+        title_prefix: record.title_prefix,
+        workspaces: new Set<string>(),
+        windowIds: new Map<string, number>(),
+      };
+      sg.workspaces.add(record.workspace_id);
+      const prior = sg.windowIds.get(record.window_id) ?? 0;
+      if (lastSeenMs > prior) sg.windowIds.set(record.window_id, lastSeenMs);
+      slotGroups.set(slotKey, sg);
+    }
   }
+
+  const emittedWindowIds = new Set<string>();
   const result: FollowsWindowRecord[] = [];
-  for (const [windowId, workspaces] of groups.entries()) {
-    if (workspaces.size < 2) continue;
+
+  for (const [slotKey, sg] of slotGroups.entries()) {
+    if (sg.workspaces.size < 2) continue;
+    let currentWindowId: string | undefined;
+    let currentLastSeen = -1;
+    for (const [winId, lastSeen] of sg.windowIds.entries()) {
+      if (lastSeen > currentLastSeen) {
+        currentLastSeen = lastSeen;
+        currentWindowId = winId;
+      }
+    }
+    if (!currentWindowId) continue;
+    const slotWindowIds = Array.from(sg.windowIds.keys()).sort();
+    result.push({
+      window_id: currentWindowId,
+      known_workspaces: Array.from(sg.workspaces).sort(),
+      app_bundle: sg.app_bundle,
+      title_prefix: sg.title_prefix,
+      slot_window_ids: slotWindowIds,
+    });
+    for (const winId of slotWindowIds) emittedWindowIds.add(winId);
+    void slotKey;
+  }
+
+  for (const [windowId, wg] of windowGroups.entries()) {
+    if (wg.workspaces.size < 2) continue;
+    if (emittedWindowIds.has(windowId)) continue;
     result.push({
       window_id: windowId,
-      known_workspaces: Array.from(workspaces).sort(),
+      known_workspaces: Array.from(wg.workspaces).sort(),
     });
+    emittedWindowIds.add(windowId);
   }
+
   result.sort((a, b) => a.window_id.localeCompare(b.window_id));
   return result;
 }

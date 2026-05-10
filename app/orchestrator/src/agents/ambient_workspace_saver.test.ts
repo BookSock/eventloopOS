@@ -343,13 +343,25 @@ describe("ambient_workspace_saver", () => {
       backend: "aerospace",
       activeWorkspace: "ws-2",
       windows: [
-        { id: 100, app: "Slack", title: "Slack", workspace: "ws-2" },
+        {
+          id: 100,
+          app: "Slack",
+          title: "  Team-Eng | Slack",
+          workspace: "ws-2",
+          appBundleId: "com.tinyspeck.slackmacgap",
+        },
         { id: 200, app: "Ghostty", title: "codex", workspace: "ws-1" },
       ],
     };
     const workspace = makeFakeWorkspace(snapshot);
     const obs = makeFakeObservability();
-    const observations: Array<{ windowId: string; workspaceId: string; isTaskWorkspace: boolean }> = [];
+    const observations: Array<{
+      windowId: string;
+      workspaceId: string;
+      isTaskWorkspace: boolean;
+      appBundle?: string;
+      titlePrefix?: string;
+    }> = [];
     const saver = createAmbientWorkspaceSaver({
       workspace,
       getCurrentTaskState: async () => ({ currentTaskId: "task_a" }),
@@ -360,6 +372,8 @@ describe("ambient_workspace_saver", () => {
           windowId: input.windowId,
           workspaceId: input.workspaceId,
           isTaskWorkspace: input.isTaskWorkspace,
+          appBundle: input.appBundle,
+          titlePrefix: input.titlePrefix,
         });
       },
       observability: obs.recorder,
@@ -372,7 +386,11 @@ describe("ambient_workspace_saver", () => {
     const ghostty = observations.find((entry) => entry.windowId === "200");
     assert.equal(slack?.workspaceId, "ws-2");
     assert.equal(slack?.isTaskWorkspace, true, "window on the active task workspace must be marked is_task_workspace=true");
+    assert.equal(slack?.appBundle, "com.tinyspeck.slackmacgap", "app bundle id flows through when AeroSpace exposes it");
+    assert.equal(slack?.titlePrefix, "team-eng | slack", "title is normalized to lowercase + trimmed");
     assert.equal(ghostty?.workspaceId, "ws-1");
     assert.equal(ghostty?.isTaskWorkspace, false, "window on a non-active workspace must not be marked is_task_workspace");
+    assert.equal(ghostty?.appBundle, "Ghostty", "falls back to display name when bundle id absent");
+    assert.equal(ghostty?.titlePrefix, "codex");
   });
 });

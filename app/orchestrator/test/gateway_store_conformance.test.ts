@@ -886,6 +886,107 @@ function runGatewayStoreContract(
       }
     });
 
+    it("treats same (app_bundle, title_prefix) on different window_ids as one follows slot", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        const t0 = new Date("2026-05-09T09:00:00.000Z");
+        const t1 = new Date("2026-05-09T09:00:30.000Z");
+        const t2 = new Date("2026-05-09T09:01:00.000Z");
+        const t3 = new Date("2026-05-09T09:02:00.000Z");
+
+        await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-A1",
+          workspaceId: "ws-alpha",
+          isTaskWorkspace: true,
+          observedAt: t0,
+          appBundle: "com.tinyspeck.slackmacgap",
+          titlePrefix: "team-eng | slack",
+        });
+        await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-A1",
+          workspaceId: "ws-beta",
+          isTaskWorkspace: true,
+          observedAt: t1,
+          appBundle: "com.tinyspeck.slackmacgap",
+          titlePrefix: "team-eng | slack",
+        });
+        await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-A2",
+          workspaceId: "ws-alpha",
+          isTaskWorkspace: true,
+          observedAt: t3,
+          appBundle: "com.tinyspeck.slackmacgap",
+          titlePrefix: "team-eng | slack",
+        });
+
+        const follows = await harness.store.listFollowsWindows({
+          now: t3,
+          ttlMs: 24 * 60 * 60 * 1_000,
+        });
+        assert.equal(follows.length, 1, "slot path collapses A1+A2 into one follows record");
+        const slot = follows[0]!;
+        assert.equal(slot.window_id, "win-A2", "current window_id is the most-recently observed in the slot");
+        assert.equal(slot.app_bundle, "com.tinyspeck.slackmacgap");
+        assert.equal(slot.title_prefix, "team-eng | slack");
+        assert.deepEqual(slot.known_workspaces, ["ws-alpha", "ws-beta"]);
+        assert.deepEqual(slot.slot_window_ids?.slice().sort(), ["win-A1", "win-A2"]);
+
+        // Adding an unrelated single-workspace window must not affect the slot.
+        await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-B1",
+          workspaceId: "ws-alpha",
+          isTaskWorkspace: true,
+          observedAt: t2,
+          appBundle: "com.google.chrome",
+          titlePrefix: "issue 42",
+        });
+        const followsAgain = await harness.store.listFollowsWindows({
+          now: t3,
+          ttlMs: 24 * 60 * 60 * 1_000,
+        });
+        assert.equal(followsAgain.length, 1);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
+    it("preserves the legacy window_id-only follows path for observations without identity keys", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        const t0 = new Date("2026-05-09T10:00:00.000Z");
+        const t1 = new Date("2026-05-09T10:00:30.000Z");
+
+        await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-legacy",
+          workspaceId: "ws-alpha",
+          isTaskWorkspace: true,
+          observedAt: t0,
+        });
+        await harness.store.recordWindowWorkspaceObservation({
+          windowId: "win-legacy",
+          workspaceId: "ws-beta",
+          isTaskWorkspace: true,
+          observedAt: t1,
+        });
+
+        const follows = await harness.store.listFollowsWindows({
+          now: t1,
+          ttlMs: 24 * 60 * 60 * 1_000,
+        });
+        assert.equal(follows.length, 1);
+        assert.equal(follows[0]?.window_id, "win-legacy");
+        assert.equal(follows[0]?.app_bundle, undefined);
+        assert.equal(follows[0]?.title_prefix, undefined);
+        assert.deepEqual(follows[0]?.known_workspaces, ["ws-alpha", "ws-beta"]);
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     it("binds tasks to aerospace workspaces and looks them up by workspace id", async (t) => {
       const harness = await createHarness(t);
       if (!harness) return;

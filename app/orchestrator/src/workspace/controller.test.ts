@@ -34,6 +34,7 @@ describe("workspace controller", () => {
           workspace: "eventloop-blog",
           monitorId: undefined,
           pid: undefined,
+          appBundleId: undefined,
         },
       ],
     });

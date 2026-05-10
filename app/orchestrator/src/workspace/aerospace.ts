@@ -11,7 +11,7 @@ export type AerospaceCommand = {
 };
 
 export const AEROSPACE_WINDOW_CAPTURE_FORMAT =
-  "%{window-id}%{app-name}%{window-title}%{workspace}%{monitor-id}%{app-pid}";
+  "%{window-id}%{app-name}%{app-bundle-id}%{window-title}%{workspace}%{monitor-id}%{app-pid}";
 
 export type WorkspaceCapabilityStatus =
   | {
@@ -35,6 +35,7 @@ export type AerospaceWindow = {
   workspace: string;
   monitorId?: number;
   pid?: number;
+  appBundleId?: string;
 };
 
 export type WorkspaceSnapshot = {
@@ -231,6 +232,7 @@ function parseWindow(item: unknown, index: number): AerospaceWindow {
     workspace,
     monitorId: readOptionalNumber(record, ["monitor-id", "monitor_id"]),
     pid: readOptionalNumber(record, ["app-pid", "app_pid", "pid"]),
+    appBundleId: readOptionalString(record, ["app-bundle-id", "app_bundle_id"]),
   };
 }
 

@@ -75,6 +75,7 @@ describe("PostgresQueueStore", () => {
       { id: "0014_tasks_aerospace_workspace.sql" },
       { id: "0015_window_workspace_observations.sql" },
       { id: "0016_paper_triggers.sql" },
+      { id: "0017_window_identity_keys.sql" },
     ]);
 
     const column = await store.pool.query(
@@ -89,6 +90,24 @@ describe("PostgresQueueStore", () => {
       `SELECT indexname FROM pg_indexes WHERE tablename = 'tasks' AND indexname = 'tasks_aerospace_workspace_idx'`,
     );
     assert.equal(index.rows.length, 1);
+
+    const identityCols = await store.pool.query(
+      `SELECT column_name, data_type, is_nullable
+         FROM information_schema.columns
+        WHERE table_name = 'window_workspace_observations'
+          AND column_name IN ('app_bundle', 'title_prefix')
+        ORDER BY column_name`,
+    );
+    assert.equal(identityCols.rows.length, 2);
+    for (const row of identityCols.rows) {
+      assert.equal(row.data_type, "text");
+      assert.equal(row.is_nullable, "YES");
+    }
+
+    const slotIndex = await store.pool.query(
+      `SELECT indexname FROM pg_indexes WHERE tablename = 'window_workspace_observations' AND indexname = 'window_workspace_observations_slot_idx'`,
+    );
+    assert.equal(slotIndex.rows.length, 1);
   });
 
   it("persists latest task workspace snapshot", async (t) => {

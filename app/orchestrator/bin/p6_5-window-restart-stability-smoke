@@ -1,0 +1,267 @@
+#!/usr/bin/env node
+// Phase 6.5 — live proof that follows-window membership survives app restarts.
+//
+//   - Spawns a sacrificial Ghostty window A1 with title `[task:p6_5-test]`.
+//   - Moves A1 across two task workspaces to seed (app_bundle, title_prefix)
+//     observations on both.
+//   - Closes A1, spawns a fresh Ghostty window A2 with the same title.
+//   - Asserts listFollowsWindows now reports A2 as the slot's current id.
+//   - Switches workspace, asserts the orchestrator moves A2 (not A1) along.
+//
+// Gated by EVENTLOOPOS_ENABLE_FOLLOWS_RESTART_SMOKE=1.
+// Skips cleanly if AeroSpace is not available.
+
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+if (process.env.EVENTLOOPOS_ENABLE_FOLLOWS_RESTART_SMOKE !== "1") {
+  console.log("SKIP p6.5 follows-restart smoke: set EVENTLOOPOS_ENABLE_FOLLOWS_RESTART_SMOKE=1 to run");
+  process.exit(0);
+}
+
+const here = fileURLToPath(import.meta.url);
+const orchestratorRoot = resolve(here, "../..");
+const distFollows = resolve(orchestratorRoot, "dist/src/agents/follows_window_orchestrator.js");
+const distGateway = resolve(orchestratorRoot, "dist/src/gateway_store.js");
+const distStore = resolve(orchestratorRoot, "dist/src/store.js");
+const distController = resolve(orchestratorRoot, "dist/src/workspace/controller.js");
+const distObservability = resolve(orchestratorRoot, "dist/src/observability.js");
+
+const execFileAsync = promisify(execFile);
+
+async function aerospaceAvailable() {
+  try {
+    const { stdout } = await execFileAsync("aerospace", ["--version"], { timeout: 2_000 });
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+if (!(await aerospaceAvailable())) {
+  console.log("SKIP p6.5 follows-restart smoke: aerospace binary not available on this machine");
+  process.exit(0);
+}
+
+const { createFollowsWindowOrchestrator } = await import(distFollows);
+const { createInMemoryGatewayStore } = await import(distGateway);
+const { createSeededStore, normalizeTitlePrefix } = await import(distStore);
+const { AerospaceWorkspaceController } = await import(distController);
+const { createInMemoryObservability } = await import(distObservability);
+
+const seeded = await createSeededStore("fixtures/empty-review-packets.json");
+const store = createInMemoryGatewayStore(seeded);
+const observability = createInMemoryObservability();
+const workspace = new AerospaceWorkspaceController(async (cmd, args) => {
+  const { stdout, stderr } = await execFileAsync(cmd, args, { timeout: 5_000 });
+  return { stdout, stderr };
+});
+
+const SACRIFICIAL_WS_A = process.env.EVENTLOOPOS_FOLLOWS_SMOKE_WS_A || "9";
+const SACRIFICIAL_WS_B = process.env.EVENTLOOPOS_FOLLOWS_SMOKE_WS_B || "8";
+const SMOKE_TITLE = `[task:p6_5-test-${process.pid}]`;
+const titlePrefix = normalizeTitlePrefix(SMOKE_TITLE);
+
+let firstWindowId;
+let secondWindowId;
+let originalFocused;
+
+async function spawnGhostty(title) {
+  await new Promise((resolveSpawn, rejectSpawn) => {
+    const child = spawn("open", ["-na", "Ghostty", "--args", `--title=${title}`], {
+      detached: true,
+      stdio: "ignore",
+    });
+    child.on("error", rejectSpawn);
+    child.unref();
+    setTimeout(resolveSpawn, 1_800);
+  });
+}
+
+async function findGhosttyByTitle(title) {
+  const { stdout } = await execFileAsync(
+    "aerospace",
+    [
+      "list-windows",
+      "--all",
+      "--json",
+      "--format",
+      "%{window-id}%{app-name}%{app-bundle-id}%{window-title}%{workspace}",
+    ],
+    { timeout: 5_000 },
+  );
+  const arr = JSON.parse(stdout);
+  return arr.find(
+    (w) => /ghostty/i.test(w["app-name"] ?? "") && String(w["window-title"] ?? "").includes(title),
+  );
+}
+
+async function closeWindow(windowId) {
+  try {
+    await execFileAsync("aerospace", ["close", "--window-id", String(windowId)], { timeout: 5_000 });
+  } catch {
+    // best-effort
+  }
+}
+
+async function recordObservation(windowId, bundleId, workspaceId) {
+  await store.recordWindowWorkspaceObservation({
+    windowId: String(windowId),
+    workspaceId,
+    isTaskWorkspace: true,
+    observedAt: new Date(),
+    appBundle: bundleId,
+    titlePrefix,
+  });
+}
+
+try {
+  const { stdout: focusedRaw } = await execFileAsync("aerospace", ["list-workspaces", "--focused"], { timeout: 2_000 });
+  originalFocused = focusedRaw.trim();
+
+  await execFileAsync("aerospace", ["workspace", SACRIFICIAL_WS_A], { timeout: 2_000 });
+
+  // Phase A: spawn first window and seed observations on both workspaces.
+  await spawnGhostty(SMOKE_TITLE);
+  let first;
+  for (let attempt = 0; attempt < 8 && !first; attempt += 1) {
+    await sleep(400);
+    first = await findGhosttyByTitle(SMOKE_TITLE);
+  }
+  if (!first) throw new Error("phase A: could not find first spawned Ghostty window by title");
+  firstWindowId = String(first["window-id"]);
+  const bundleId = first["app-bundle-id"] ?? first["app-name"] ?? "Ghostty";
+  console.log(`  spawned first window id=${firstWindowId} bundle=${bundleId}`);
+
+  await execFileAsync("aerospace", ["move-node-to-workspace", "--window-id", firstWindowId, SACRIFICIAL_WS_A], { timeout: 5_000 });
+  await recordObservation(firstWindowId, bundleId, SACRIFICIAL_WS_A);
+
+  await execFileAsync("aerospace", ["move-node-to-workspace", "--window-id", firstWindowId, SACRIFICIAL_WS_B], { timeout: 5_000 });
+  await recordObservation(firstWindowId, bundleId, SACRIFICIAL_WS_B);
+
+  let follows = await store.listFollowsWindows({ now: new Date(), ttlMs: 24 * 60 * 60 * 1_000 });
+  let slot = follows.find((f) => f.title_prefix === titlePrefix);
+  if (!slot) throw new Error("phase A: slot not marked follows after 2-workspace seed");
+  if (slot.window_id !== firstWindowId) {
+    throw new Error(`phase A: expected slot current id=${firstWindowId}, got ${slot.window_id}`);
+  }
+  console.log(`  PASS slot tracked first window id=${firstWindowId}`);
+
+  // Phase B: close first window, spawn a replacement with the same title.
+  await closeWindow(firstWindowId);
+  await sleep(800);
+  await spawnGhostty(SMOKE_TITLE);
+  let second;
+  for (let attempt = 0; attempt < 8 && !second; attempt += 1) {
+    await sleep(400);
+    const candidate = await findGhosttyByTitle(SMOKE_TITLE);
+    if (candidate && String(candidate["window-id"]) !== firstWindowId) {
+      second = candidate;
+    }
+  }
+  if (!second) throw new Error("phase B: could not find second Ghostty window with same title");
+  secondWindowId = String(second["window-id"]);
+  if (secondWindowId === firstWindowId) {
+    throw new Error("phase B: replacement window inherited the original window-id (AeroSpace/CG should not do this)");
+  }
+  console.log(`  spawned replacement window id=${secondWindowId} (was ${firstWindowId})`);
+
+  // Observe the new window on workspace A only. The slot's other-workspace
+  // observation belongs to the previous window-id — that's exactly the
+  // restart-survival path under test.
+  await execFileAsync("aerospace", ["move-node-to-workspace", "--window-id", secondWindowId, SACRIFICIAL_WS_A], { timeout: 5_000 });
+  await recordObservation(secondWindowId, bundleId, SACRIFICIAL_WS_A);
+
+  follows = await store.listFollowsWindows({ now: new Date(), ttlMs: 24 * 60 * 60 * 1_000 });
+  slot = follows.find((f) => f.title_prefix === titlePrefix);
+  if (!slot) {
+    throw new Error("phase B: slot dropped out of follows after restart — restart-survival regression");
+  }
+  if (slot.window_id !== secondWindowId) {
+    throw new Error(`phase B: expected slot current id=${secondWindowId} after restart, got ${slot.window_id}`);
+  }
+  console.log(`  PASS slot now resolves to replacement window id=${secondWindowId}`);
+
+  // Phase C: bind a task and run the orchestrator over a workspace switch.
+  const taskA = await store.createTask({
+    primaryAnchor: { kind: "ghostty_window", id: `smoke-task-${SACRIFICIAL_WS_A}` },
+    capturedLayout: { backend: "aerospace", windows: [], activeWorkspace: SACRIFICIAL_WS_A },
+    aerospaceWorkspaceId: SACRIFICIAL_WS_A,
+    now: new Date(),
+  });
+  await store.setCurrentTaskId(taskA.task.task_id, new Date());
+
+  // Park the replacement window on B before the orchestrator's first tick so
+  // the assertable transition is "switch from B → A moves the window".
+  await execFileAsync("aerospace", ["move-node-to-workspace", "--window-id", secondWindowId, SACRIFICIAL_WS_B], { timeout: 5_000 });
+  await execFileAsync("aerospace", ["workspace", SACRIFICIAL_WS_B], { timeout: 2_000 });
+  await sleep(500);
+
+  let focusedNow = SACRIFICIAL_WS_B;
+  const orch = createFollowsWindowOrchestrator({
+    store,
+    workspace,
+    getFocusedWorkspace: async () => focusedNow,
+    runAerospaceCommand: async (command) => {
+      await execFileAsync(command.command, command.args, { timeout: 5_000 });
+    },
+    observability,
+    pollIntervalMs: 1_000,
+    ttlMs: 24 * 60 * 60 * 1_000,
+    pruneIntervalMs: 60 * 60 * 1_000,
+    now: () => new Date(),
+  });
+
+  await orch.tick(); // observe initial workspace (B), no switch yet.
+
+  await execFileAsync("aerospace", ["workspace", SACRIFICIAL_WS_A], { timeout: 2_000 });
+  await sleep(500);
+  focusedNow = SACRIFICIAL_WS_A;
+  const switched = await orch.tick();
+  if (switched.decision !== "switch_handled") {
+    throw new Error(`phase C: expected switch_handled, got ${switched.decision}`);
+  }
+
+  const winAfter = await (async () => {
+    const { stdout } = await execFileAsync(
+      "aerospace",
+      [
+        "list-windows",
+        "--all",
+        "--json",
+        "--format",
+        "%{window-id}%{app-name}%{window-title}%{workspace}",
+      ],
+      { timeout: 5_000 },
+    );
+    const arr = JSON.parse(stdout);
+    return arr.find((w) => String(w["window-id"]) === secondWindowId);
+  })();
+  if (!winAfter) throw new Error(`phase C: replacement window ${secondWindowId} disappeared`);
+  if (winAfter.workspace !== SACRIFICIAL_WS_A) {
+    throw new Error(`phase C: expected replacement on ${SACRIFICIAL_WS_A}, was on ${winAfter.workspace}`);
+  }
+  console.log(`  PASS orchestrator moved post-restart window ${secondWindowId} to ${SACRIFICIAL_WS_A}`);
+
+  console.log("PASS p6.5 follows-window membership survived app restart");
+} catch (error) {
+  console.error("FAIL p6.5 follows-restart smoke");
+  console.error(error instanceof Error ? error.stack : String(error));
+  process.exitCode = 1;
+} finally {
+  if (secondWindowId) await closeWindow(secondWindowId);
+  if (firstWindowId) await closeWindow(firstWindowId);
+  if (originalFocused) {
+    try {
+      await execFileAsync("aerospace", ["workspace", originalFocused], { timeout: 2_000 });
+    } catch {
+      // best-effort
+    }
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+}

@@ -3,6 +3,7 @@ import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js"
 import type { Runtime } from "../runtime.js";
 import type { WorkspaceController } from "../workspace/controller.js";
 import type { WorkspaceSnapshot } from "../workspace/aerospace.js";
+import { normalizeTitlePrefix } from "../store.js";
 
 export const DEFAULT_AMBIENT_SAVE_POLL_MS = 5_000;
 export const DEFAULT_AMBIENT_SAVE_DEBOUNCE_MS = 3_000;
@@ -22,6 +23,8 @@ export type WindowWorkspaceObservationWriter = (input: {
   workspaceId: string;
   isTaskWorkspace: boolean;
   observedAt: Date;
+  appBundle?: string;
+  titlePrefix?: string;
 }) => Promise<unknown> | unknown;
 
 export type AmbientWorkspaceSaverDeps = {
@@ -223,12 +226,21 @@ async function recordWindowObservations(
     if (!window.workspace) continue;
     const isActiveWorkspace = activeWorkspace !== undefined && window.workspace === activeWorkspace;
     const isTaskWorkspace = isActiveWorkspace && currentTaskId.length > 0;
+    const appBundle =
+      typeof window.appBundleId === "string" && window.appBundleId.length > 0
+        ? window.appBundleId
+        : typeof window.app === "string" && window.app.length > 0
+          ? window.app
+          : undefined;
+    const titlePrefix = normalizeTitlePrefix(window.title);
     try {
       await deps.recordWindowObservation({
         windowId: String(window.id),
         workspaceId: window.workspace,
         isTaskWorkspace,
         observedAt,
+        appBundle,
+        titlePrefix,
       });
     } catch {
       // Swallow per-window observation failures so the saver is never blocked

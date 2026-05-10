@@ -186,6 +186,8 @@ export type GatewayStore = {
     workspaceId: string;
     isTaskWorkspace: boolean;
     observedAt: Date;
+    appBundle?: string;
+    titlePrefix?: string;
   }): Promise<WindowWorkspaceObservationRecord>;
   listFollowsWindows(input: { now: Date; ttlMs: number }): Promise<FollowsWindowRecord[]>;
   pruneWindowWorkspaceObservations(olderThan: Date): Promise<number>;

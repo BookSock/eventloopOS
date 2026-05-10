@@ -30,12 +30,14 @@ describe("workspace restore flow routes", () => {
         ...window,
         monitorId: undefined,
         pid: undefined,
+        appBundleId: undefined,
       })),
     };
     const parsedCurrentWindows = currentWindows.map((window) => ({
       ...window,
       monitorId: undefined,
       pid: undefined,
+      appBundleId: undefined,
     }));
     const workspace: WorkspaceController = {
       status() {

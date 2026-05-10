@@ -40,6 +40,7 @@ describe("Aerospace workspace adapter", () => {
         workspace: "web",
         monitorId: undefined,
         pid: undefined,
+        appBundleId: undefined,
       },
       {
         id: 42,
@@ -48,8 +49,24 @@ describe("Aerospace workspace adapter", () => {
         workspace: "dev",
         monitorId: 2,
         pid: 1234,
+        appBundleId: undefined,
       },
     ]);
+  });
+
+  it("parses app-bundle-id when AeroSpace exposes it", () => {
+    const windows = parseAerospaceWindows(
+      JSON.stringify([
+        {
+          "window-id": 11,
+          "app-name": "Slack",
+          "app-bundle-id": "com.tinyspeck.slackmacgap",
+          "window-title": "team-eng",
+          workspace: "ws-1",
+        },
+      ]),
+    );
+    assert.equal(windows[0]?.appBundleId, "com.tinyspeck.slackmacgap");
   });
 
   it("reports missing aerospace binary from injected exec", async () => {
@@ -122,6 +139,7 @@ describe("Aerospace workspace adapter", () => {
         workspace: "dev",
         monitorId: undefined,
         pid: undefined,
+        appBundleId: undefined,
       },
     ]);
   });

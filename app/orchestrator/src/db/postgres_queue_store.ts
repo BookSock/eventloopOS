@@ -841,8 +841,12 @@ export class PostgresQueueStore {
     workspaceId: string;
     isTaskWorkspace: boolean;
     observedAt: Date;
+    appBundle?: string;
+    titlePrefix?: string;
   }): Promise<WindowWorkspaceObservationRecord> {
     const timestamp = input.observedAt.toISOString();
+    const appBundle = input.appBundle !== undefined && input.appBundle.length > 0 ? input.appBundle : null;
+    const titlePrefix = input.titlePrefix !== undefined && input.titlePrefix.length > 0 ? input.titlePrefix : null;
     const result = await this.pool.query(
       `
         INSERT INTO window_workspace_observations (
@@ -850,15 +854,19 @@ export class PostgresQueueStore {
           workspace_id,
           is_task_workspace,
           first_seen_at,
-          last_seen_at
+          last_seen_at,
+          app_bundle,
+          title_prefix
         )
-        VALUES ($1, $2, $3, $4::timestamptz, $4::timestamptz)
+        VALUES ($1, $2, $3, $4::timestamptz, $4::timestamptz, $5, $6)
         ON CONFLICT (window_id, workspace_id) DO UPDATE SET
           is_task_workspace = window_workspace_observations.is_task_workspace OR EXCLUDED.is_task_workspace,
-          last_seen_at = EXCLUDED.last_seen_at
-        RETURNING window_id, workspace_id, is_task_workspace, first_seen_at, last_seen_at
+          last_seen_at = EXCLUDED.last_seen_at,
+          app_bundle = COALESCE(EXCLUDED.app_bundle, window_workspace_observations.app_bundle),
+          title_prefix = COALESCE(EXCLUDED.title_prefix, window_workspace_observations.title_prefix)
+        RETURNING window_id, workspace_id, is_task_workspace, first_seen_at, last_seen_at, app_bundle, title_prefix
       `,
-      [input.windowId, input.workspaceId, input.isTaskWorkspace, timestamp],
+      [input.windowId, input.workspaceId, input.isTaskWorkspace, timestamp, appBundle, titlePrefix],
     );
     return rowToWindowWorkspaceObservation(result.rows[0]);
   }
@@ -867,20 +875,72 @@ export class PostgresQueueStore {
     const cutoff = new Date(input.now.getTime() - input.ttlMs).toISOString();
     const result = await this.pool.query(
       `
-        SELECT window_id, array_agg(workspace_id ORDER BY workspace_id) AS workspaces
-        FROM window_workspace_observations
-        WHERE is_task_workspace = TRUE
-          AND last_seen_at >= $1::timestamptz
-        GROUP BY window_id
-        HAVING count(DISTINCT workspace_id) >= 2
+        WITH live AS (
+          SELECT window_id, workspace_id, last_seen_at, app_bundle, title_prefix
+          FROM window_workspace_observations
+          WHERE is_task_workspace = TRUE
+            AND last_seen_at >= $1::timestamptz
+        ),
+        slot_groups AS (
+          SELECT
+            app_bundle,
+            title_prefix,
+            array_agg(DISTINCT workspace_id ORDER BY workspace_id) AS workspaces,
+            count(DISTINCT workspace_id) AS workspace_count,
+            (
+              array_agg(window_id ORDER BY last_seen_at DESC, window_id DESC)
+            )[1] AS current_window_id,
+            array_agg(DISTINCT window_id ORDER BY window_id) AS slot_window_ids
+          FROM live
+          WHERE app_bundle IS NOT NULL AND title_prefix IS NOT NULL
+          GROUP BY app_bundle, title_prefix
+          HAVING count(DISTINCT workspace_id) >= 2
+        ),
+        window_groups AS (
+          SELECT
+            window_id,
+            array_agg(DISTINCT workspace_id ORDER BY workspace_id) AS workspaces,
+            count(DISTINCT workspace_id) AS workspace_count
+          FROM live
+          GROUP BY window_id
+          HAVING count(DISTINCT workspace_id) >= 2
+        ),
+        slot_emitted AS (
+          SELECT DISTINCT unnest(slot_window_ids) AS window_id FROM slot_groups
+        )
+        SELECT
+          current_window_id AS window_id,
+          workspaces,
+          app_bundle,
+          title_prefix,
+          slot_window_ids
+        FROM slot_groups
+        UNION ALL
+        SELECT
+          wg.window_id,
+          wg.workspaces,
+          NULL::text AS app_bundle,
+          NULL::text AS title_prefix,
+          NULL::text[] AS slot_window_ids
+        FROM window_groups wg
+        WHERE wg.window_id NOT IN (SELECT window_id FROM slot_emitted)
         ORDER BY window_id ASC
       `,
       [cutoff],
     );
-    return result.rows.map((row) => ({
-      window_id: String(row.window_id),
-      known_workspaces: Array.isArray(row.workspaces) ? row.workspaces.map(String) : [],
-    }));
+    return result.rows.map((row) => {
+      const appBundle = row.app_bundle;
+      const titlePrefix = row.title_prefix;
+      const slotIds = row.slot_window_ids;
+      const record: FollowsWindowRecord = {
+        window_id: String(row.window_id),
+        known_workspaces: Array.isArray(row.workspaces) ? row.workspaces.map(String) : [],
+      };
+      if (typeof appBundle === "string" && appBundle.length > 0) record.app_bundle = appBundle;
+      if (typeof titlePrefix === "string" && titlePrefix.length > 0) record.title_prefix = titlePrefix;
+      if (Array.isArray(slotIds)) record.slot_window_ids = slotIds.map(String);
+      return record;
+    });
   }
 
   async pruneWindowWorkspaceObservations(olderThan: Date): Promise<number> {
@@ -2219,13 +2279,18 @@ function rowToTaskLayoutRecord(row: Record<string, unknown>): TaskLayoutRecord {
 }
 
 function rowToWindowWorkspaceObservation(row: Record<string, unknown>): WindowWorkspaceObservationRecord {
-  return {
+  const appBundle = row.app_bundle;
+  const titlePrefix = row.title_prefix;
+  const record: WindowWorkspaceObservationRecord = {
     window_id: String(row.window_id),
     workspace_id: String(row.workspace_id),
     is_task_workspace: row.is_task_workspace === true,
     first_seen_at: requiredDateToIso(row.first_seen_at),
     last_seen_at: requiredDateToIso(row.last_seen_at),
   };
+  if (typeof appBundle === "string" && appBundle.length > 0) record.app_bundle = appBundle;
+  if (typeof titlePrefix === "string" && titlePrefix.length > 0) record.title_prefix = titlePrefix;
+  return record;
 }
 
 function rowToPaperTriggerRecord(row: Record<string, unknown>): PaperTriggerRecord {

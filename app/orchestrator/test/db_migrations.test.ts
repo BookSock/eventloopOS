@@ -24,6 +24,7 @@ describe("Postgres migrations", () => {
       "0014_tasks_aerospace_workspace.sql",
       "0015_window_workspace_observations.sql",
       "0016_paper_triggers.sql",
+      "0017_window_identity_keys.sql",
     ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
@@ -71,5 +72,8 @@ describe("Postgres migrations", () => {
     assert.match(sql, /CREATE TABLE paper_triggers/);
     assert.match(sql, /paper_triggers_enabled_event_type_idx/);
     assert.match(sql, /CREATE TABLE paper_trigger_firings/);
+    assert.match(sql, /ALTER TABLE window_workspace_observations[\s\S]*ADD COLUMN app_bundle text/);
+    assert.match(sql, /ADD COLUMN title_prefix text/);
+    assert.match(sql, /window_workspace_observations_slot_idx/);
   });
 });

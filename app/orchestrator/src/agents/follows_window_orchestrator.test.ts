@@ -170,6 +170,37 @@ describe("follows_window_orchestrator", () => {
     assert.equal(ranCommands.length, 0);
   });
 
+  it("moves the slot's current window_id after a window restart (app_bundle+title_prefix slot path)", async () => {
+    // Slot-resolved follows record: A1 was the original window, A2 is the new
+    // window observed after the user killed+reopened the app.
+    const follows: FollowsWindowRecord[] = [
+      {
+        window_id: "1002",
+        known_workspaces: ["ws-1", "ws-2"],
+        app_bundle: "com.tinyspeck.slackmacgap",
+        title_prefix: "team-eng | slack",
+        slot_window_ids: ["1001", "1002"],
+      },
+    ];
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "ws-2",
+      windows: [
+        { id: 1002, app: "Slack", title: "Slack — team-eng", workspace: "ws-1" },
+        { id: 999, app: "Ghostty", title: "codex", workspace: "ws-2" },
+      ],
+    };
+    const { deps, ranCommands, activities } = makeDeps({ follows, snapshot });
+    const orch = createFollowsWindowOrchestrator(deps);
+    const result = await orch.tick();
+    assert.equal(result.decision, "switch_handled");
+    if (result.decision !== "switch_handled") return;
+    assert.equal(result.moved, 1, "orchestrator must move the slot's current window_id, not the stale one");
+    assert.equal(ranCommands.length, 1);
+    assert.deepEqual(ranCommands[0]?.args, ["move-node-to-workspace", "--window-id", "1002", "ws-2"]);
+    assert.ok(activities.some((a) => a.type === "follows_window_moved"));
+  });
+
   it("skips follows windows not present in the snapshot", async () => {
     const snapshot: WorkspaceSnapshot = {
       backend: "aerospace",
