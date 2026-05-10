@@ -22,6 +22,7 @@ public struct ContextRestorePlan: Codable, Equatable, Sendable {
     public let path: String?
     public let line: Int?
     public let column: Int?
+    public let paper: ContextRestorePaper?
 
     public init(
         kind: String,
@@ -32,7 +33,8 @@ public struct ContextRestorePlan: Codable, Equatable, Sendable {
         url: String?,
         path: String?,
         line: Int?,
-        column: Int?
+        column: Int?,
+        paper: ContextRestorePaper? = nil
     ) {
         self.kind = kind
         self.sideEffect = sideEffect
@@ -43,6 +45,7 @@ public struct ContextRestorePlan: Codable, Equatable, Sendable {
         self.path = path
         self.line = line
         self.column = column
+        self.paper = paper
     }
 
     enum CodingKeys: String, CodingKey {
@@ -55,6 +58,25 @@ public struct ContextRestorePlan: Codable, Equatable, Sendable {
         case path
         case line
         case column
+        case paper
+    }
+}
+
+public struct ContextRestorePaper: Codable, Equatable, Sendable {
+    public let title: String?
+    public let sourceKind: String?
+    public let bodyMarkdown: String?
+
+    public init(title: String?, sourceKind: String?, bodyMarkdown: String?) {
+        self.title = title
+        self.sourceKind = sourceKind
+        self.bodyMarkdown = bodyMarkdown
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case title
+        case sourceKind = "source_kind"
+        case bodyMarkdown = "body_markdown"
     }
 }
 

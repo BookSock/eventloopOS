@@ -1018,6 +1018,33 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.restoreRequest.result?.highlightStrategy, "text")
     }
 
+    func testContextRestorePlanEnvelopeDecodesShowPaperKind() throws {
+        let data = """
+        {
+          "restore_plan": {
+            "kind": "show_paper",
+            "side_effect": "local",
+            "execute_supported": false,
+            "paper": {
+              "title": "Quick note",
+              "source_kind": "note",
+              "body_markdown": "Decide whether to bump pricing for Q3."
+            }
+          }
+        }
+        """.data(using: .utf8)!
+
+        let envelope = try QueueCoders.makeDecoder().decode(ContextRestorePlanEnvelope.self, from: data)
+
+        XCTAssertEqual(envelope.restorePlan.kind, "show_paper")
+        XCTAssertEqual(envelope.restorePlan.sideEffect, "local")
+        XCTAssertEqual(envelope.restorePlan.executeSupported, false)
+        XCTAssertEqual(envelope.restorePlan.paper?.title, "Quick note")
+        XCTAssertEqual(envelope.restorePlan.paper?.sourceKind, "note")
+        XCTAssertEqual(envelope.restorePlan.paper?.bodyMarkdown, "Decide whether to bump pricing for Q3.")
+        XCTAssertNil(envelope.restorePlan.url)
+    }
+
     func testContextResourceEncodesSnakeCaseRestoreFields() throws {
         let resource = ReviewContextResource(
             id: "ctx_browser_123",

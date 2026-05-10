@@ -4,6 +4,7 @@ import SwiftUI
 struct QueueWindowView: View {
     @ObservedObject var viewModel: QueueViewModel
     @State private var workspaceRestoreCandidate: WorkspaceSnapshot?
+    @State private var showPaperDismissed: Bool = false
 
     private var sidebarSummary: QueueWindowSidebarSummary {
         QueueWindowSidebarSummary(packets: viewModel.packets, state: viewModel.state)
@@ -23,6 +24,16 @@ struct QueueWindowView: View {
         } set: { isPresented in
             if !isPresented {
                 workspaceRestoreCandidate = nil
+            }
+        }
+    }
+
+    private var showPaperBinding: Binding<Bool> {
+        Binding {
+            !showPaperDismissed && ShowPaperPresentation.shouldPresent(for: viewModel.contextRestoreState)
+        } set: { isPresented in
+            if !isPresented {
+                showPaperDismissed = true
             }
         }
     }
@@ -372,6 +383,22 @@ struct QueueWindowView: View {
                     Task { await viewModel.refreshActivity() }
                 }
             }
+        }
+        .sheet(isPresented: showPaperBinding) {
+            if let paper = ShowPaperPresentation.paper(from: viewModel.contextRestoreState) {
+                ShowPaperSheet(
+                    paper: paper,
+                    markDone: {
+                        Task { await viewModel.doneAndNext() }
+                    },
+                    deferAction: {
+                        Task { await viewModel.deferSelectedPacketForOneHour() }
+                    }
+                )
+            }
+        }
+        .onChange(of: viewModel.selectedPacketID) { _ in
+            showPaperDismissed = false
         }
         .overlay(alignment: .topTrailing) {
             if viewModel.isManualMode {
