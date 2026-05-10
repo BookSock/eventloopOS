@@ -43,9 +43,9 @@ describe("autoBindCodexFromWindows", () => {
     assert.equal(result.matched_count, 1);
     assert.equal(result.bound.length, 1);
     assert.equal(result.bound[0].task_id, "task_blog_launch");
-    assert.equal(result.bound[0].terminal_ref, "ghostty:front");
+    assert.equal(result.bound[0].terminal_ref, "ghostty:win-101");
     assert.equal(bindCalls.length, 1);
-    assert.equal(bindCalls[0].terminal_ref, "ghostty:front");
+    assert.equal(bindCalls[0].terminal_ref, "ghostty:win-101");
   });
 
   it("skips when multiple sessions match a task tag", async () => {
@@ -72,9 +72,9 @@ describe("autoBindCodexFromWindows", () => {
     assert.equal(result.skipped[0]?.reason, "multiple_sessions_for_task");
   });
 
-  it("skips when terminal_ref is already set to default", async () => {
+  it("skips when terminal_ref is already set to the per-window ref", async () => {
     const sessions = [
-      { id: "session_x", task_id: "task_blog", provider: "codex", status: "idle", terminal_ref: "ghostty:front" },
+      { id: "session_x", task_id: "task_blog", provider: "codex", status: "idle", terminal_ref: "ghostty:win-300" },
     ];
     const taskSessions = {
       listSessions() { return sessions; },
@@ -92,5 +92,33 @@ describe("autoBindCodexFromWindows", () => {
 
     assert.equal(result.bound.length, 0);
     assert.equal(result.skipped[0]?.reason, "already_bound");
+  });
+
+  it("emits per-window terminal_ref so two [task:foo] windows do not collide on ghostty:front", async () => {
+    const sessions = [
+      { id: "session_blog_a", task_id: "task_blog_a", provider: "codex", status: "idle" },
+      { id: "session_blog_b", task_id: "task_blog_b", provider: "codex", status: "idle" },
+    ];
+    const bindCalls: Array<{ task_session_id: string; task_id: string; terminal_ref?: string }> = [];
+    const taskSessions = {
+      listSessions() { return sessions; },
+      sendFollowupMessage() { throw new Error("not used"); },
+      bindTaskSession(input: { task_session_id: string; task_id: string; terminal_ref?: string }) {
+        bindCalls.push(input);
+        return { ok: true, task_session_id: input.task_session_id, task_id: input.task_id };
+      },
+    };
+    const workspace = makeWorkspace([
+      { id: 501, app: "Ghostty", title: "[task:blog_a] codex", workspace: "main" },
+      { id: 502, app: "Ghostty", title: "[task:blog_b] codex", workspace: "main" },
+    ]);
+
+    const result = await autoBindCodexFromWindows({ workspace, taskSessions });
+
+    assert.equal(result.bound.length, 2);
+    const refs = new Set(result.bound.map((entry) => entry.terminal_ref));
+    assert.ok(refs.has("ghostty:win-501"), `expected ghostty:win-501, got ${[...refs].join(",")}`);
+    assert.ok(refs.has("ghostty:win-502"), `expected ghostty:win-502, got ${[...refs].join(",")}`);
+    assert.notEqual(result.bound[0].terminal_ref, result.bound[1].terminal_ref, "two windows must not collide on the same terminal_ref");
   });
 });

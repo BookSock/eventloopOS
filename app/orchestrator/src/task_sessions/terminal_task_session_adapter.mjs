@@ -29,10 +29,34 @@ export function buildTmuxSendPlan({ targetPane, text, submit = false }) {
   return commands;
 }
 
-export function buildGhosttyAppleScript({ text, target = "front", targetApp = "Ghostty" }) {
-  const terminalExpr = target === "front"
-    ? "focused terminal of selected tab of front window"
-    : `terminal id ${appleScriptString(target)}`;
+export function parseGhosttyTarget(terminalRef) {
+  if (typeof terminalRef !== "string" || !terminalRef.startsWith("ghostty:")) {
+    throw new Error(`ghostty terminal_ref must start with "ghostty:": ${terminalRef}`);
+  }
+  const suffix = terminalRef.slice("ghostty:".length);
+  if (suffix === "front" || suffix === "") return { kind: "front" };
+  if (suffix.startsWith("win-")) {
+    const id = suffix.slice("win-".length);
+    if (!id) throw new Error(`ghostty win-<id> ref missing id: ${terminalRef}`);
+    return { kind: "window-id", id };
+  }
+  return { kind: "terminal-id", id: suffix };
+}
+
+function renderGhosttyTerminalExpr(target) {
+  if (target.kind === "front") return "focused terminal of selected tab of front window";
+  if (target.kind === "window-id") return `focused terminal of selected tab of (first window whose id is ${appleScriptString(target.id)})`;
+  if (target.kind === "terminal-id") return `terminal id ${appleScriptString(target.id)}`;
+  throw new Error(`unsupported ghostty target kind: ${target?.kind}`);
+}
+
+export function buildGhosttyAppleScript({ text, target = "front", terminalRef, targetApp = "Ghostty" }) {
+  const resolvedTarget = terminalRef !== undefined
+    ? parseGhosttyTarget(terminalRef)
+    : target === "front"
+      ? { kind: "front" }
+      : { kind: "terminal-id", id: target };
+  const terminalExpr = renderGhosttyTerminalExpr(resolvedTarget);
 
   return [
     `tell application ${appleScriptString(targetApp)}`,
@@ -43,12 +67,12 @@ export function buildGhosttyAppleScript({ text, target = "front", targetApp = "G
 
 export { appleScriptString };
 
-export function buildGhosttySendPlan({ text, target = "front", submit = false }) {
+export function buildGhosttySendPlan({ text, target = "front", terminalRef, submit = false }) {
   const scriptText = submit ? `${text}\n` : text;
   return [
     {
       file: "osascript",
-      args: ["-e", buildGhosttyAppleScript({ text: scriptText, target })],
+      args: ["-e", buildGhosttyAppleScript({ text: scriptText, target, terminalRef })],
     },
   ];
 }
@@ -122,9 +146,8 @@ export function buildTerminalSendPlan({ terminalRef, text, submit = false }) {
     });
   }
 
-  if (terminalRef === "ghostty:front" || terminalRef.startsWith("ghostty:")) {
-    const target = terminalRef === "ghostty:front" ? "front" : terminalRef.slice("ghostty:".length);
-    return buildGhosttySendPlan({ text, target, submit });
+  if (terminalRef.startsWith("ghostty:")) {
+    return buildGhosttySendPlan({ text, terminalRef, submit });
   }
 
   throw new Error(`unsupported terminal_ref: ${terminalRef}`);

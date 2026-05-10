@@ -157,8 +157,10 @@ describe("codex auto-bind — V10 integration proof", () => {
     assert.ok(blog, "task_blog should be bound");
     assert.ok(recruiting, "task_recruiting should be bound");
     assert.equal(blog!.window_id, 101);
-    assert.equal(blog!.terminal_ref, "ghostty:front");
+    assert.equal(blog!.terminal_ref, "ghostty:win-101", "per-window ref derived from AeroSpace window-id, not the legacy ghostty:front");
     assert.equal(recruiting!.window_id, 104);
+    assert.equal(recruiting!.terminal_ref, "ghostty:win-104");
+    assert.notEqual(blog!.terminal_ref, recruiting!.terminal_ref, "two distinct windows must produce distinct terminal_refs");
 
     // Mail and the untagged Ghostty window must never appear in skipped — they
     // are filtered before the [task:] regex even runs.
@@ -320,6 +322,6 @@ describe("codex auto-bind — V10 real-timer end-to-end", () => {
     const lastCall = taskSessions.bindCalls.at(-1)!;
     assert.equal(lastCall.task_session_id, "session_blog_rt");
     assert.equal(lastCall.task_id, "task_blog");
-    assert.equal(lastCall.terminal_ref, "ghostty:front");
+    assert.equal(lastCall.terminal_ref, "ghostty:win-401");
   });
 });

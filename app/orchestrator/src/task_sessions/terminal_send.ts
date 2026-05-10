@@ -63,23 +63,55 @@ function buildTerminalSendPlan(input: { terminalRef: string; text: string; submi
     return commands;
   }
   if (lowered.startsWith("ghostty:")) {
-    const target = input.terminalRef === "ghostty:front" ? "front" : input.terminalRef.slice("ghostty:".length);
     const scriptText = input.submit ? `${input.text}\n` : input.text;
-    return [{ file: "osascript", args: ["-e", buildGhosttyAppleScript({ text: scriptText, target })] }];
+    return [{ file: "osascript", args: ["-e", buildGhosttyAppleScript({ text: scriptText, terminalRef: input.terminalRef })] }];
   }
   throw new Error(`unsupported terminal_ref: ${input.terminalRef}`);
 }
 
-export function buildGhosttyAppleScript(input: { text: string; target: string; targetApp?: string }): string {
-  const terminalExpr = input.target === "front"
-    ? "focused terminal of selected tab of front window"
-    : `terminal id ${appleScriptString(input.target)}`;
+export type GhosttyTarget =
+  | { kind: "front" }
+  | { kind: "window-id"; id: string }
+  | { kind: "terminal-id"; id: string };
+
+export function parseGhosttyTarget(terminalRef: string): GhosttyTarget {
+  if (!terminalRef.startsWith("ghostty:")) {
+    throw new Error(`ghostty terminal_ref must start with "ghostty:": ${terminalRef}`);
+  }
+  const suffix = terminalRef.slice("ghostty:".length);
+  if (suffix === "front" || suffix === "") return { kind: "front" };
+  if (suffix.startsWith("win-")) {
+    const id = suffix.slice("win-".length);
+    if (!id) throw new Error(`ghostty win-<id> ref missing id: ${terminalRef}`);
+    return { kind: "window-id", id };
+  }
+  return { kind: "terminal-id", id: suffix };
+}
+
+export function buildGhosttyAppleScript(input: { text: string; terminalRef?: string; target?: string; targetApp?: string }): string {
+  const target: GhosttyTarget = input.terminalRef !== undefined
+    ? parseGhosttyTarget(input.terminalRef)
+    : input.target === undefined || input.target === "front"
+      ? { kind: "front" }
+      : { kind: "terminal-id", id: input.target };
+  const terminalExpr = renderGhosttyTerminalExpr(target);
   const targetApp = input.targetApp ?? "Ghostty";
   return [
     `tell application ${appleScriptString(targetApp)}`,
     `  input text ${appleScriptString(input.text)} to ${terminalExpr}`,
     "end tell",
   ].join("\n");
+}
+
+function renderGhosttyTerminalExpr(target: GhosttyTarget): string {
+  switch (target.kind) {
+    case "front":
+      return "focused terminal of selected tab of front window";
+    case "window-id":
+      return `focused terminal of selected tab of (first window whose id is ${appleScriptString(target.id)})`;
+    case "terminal-id":
+      return `terminal id ${appleScriptString(target.id)}`;
+  }
 }
 
 export function appleScriptString(value: string): string {

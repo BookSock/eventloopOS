@@ -42,7 +42,7 @@ export async function autoBindCodexFromWindows(options: AutoBindFromWindowsOptio
   result.scanned_window_count = snapshot.windows.length;
   const sessions = await Promise.resolve(options.taskSessions.listSessions()).catch(() => [] as TaskRuntimeSession[]);
 
-  const defaultTerminalRef = options.defaultTerminalRef ?? "ghostty:front";
+  const fallbackTerminalRef = options.defaultTerminalRef ?? "ghostty:front";
 
   for (const window of snapshot.windows) {
     if (!TERMINAL_APP_PATTERN.test(window.app)) continue;
@@ -65,8 +65,11 @@ export async function autoBindCodexFromWindows(options: AutoBindFromWindowsOptio
       result.skipped.push({ task_id: slug, window_id: window.id, window_title: window.title, reason: "session_missing_id" });
       continue;
     }
+    const perWindowTerminalRef = Number.isFinite(window.id)
+      ? `ghostty:win-${window.id}`
+      : fallbackTerminalRef;
     const existingTerminalRef = isRecord(session) && typeof session.terminal_ref === "string" ? session.terminal_ref : undefined;
-    if (existingTerminalRef === defaultTerminalRef) {
+    if (existingTerminalRef === perWindowTerminalRef) {
       result.skipped.push({ task_id: slug, window_id: window.id, window_title: window.title, reason: "already_bound" });
       continue;
     }
@@ -75,7 +78,7 @@ export async function autoBindCodexFromWindows(options: AutoBindFromWindowsOptio
       const binding = await Promise.resolve(options.taskSessions.bindTaskSession({
         task_session_id: sessionId,
         task_id: slug,
-        terminal_ref: defaultTerminalRef,
+        terminal_ref: perWindowTerminalRef,
       }));
       if (isRecord(binding) && binding.ok === false) {
         result.skipped.push({ task_id: slug, window_id: window.id, reason: typeof binding.error === "string" ? binding.error : "binding_failed" });
@@ -84,7 +87,7 @@ export async function autoBindCodexFromWindows(options: AutoBindFromWindowsOptio
       result.bound.push({
         task_id: slug,
         task_session_id: sessionId,
-        terminal_ref: defaultTerminalRef,
+        terminal_ref: perWindowTerminalRef,
         window_id: window.id,
         window_app: window.app,
       });
