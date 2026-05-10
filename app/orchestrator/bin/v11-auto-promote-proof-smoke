@@ -1,0 +1,208 @@
+#!/usr/bin/env node
+// V11 — live proof that the reading-queue auto-promote timer end-to-ends
+// against fixture captured tabs. Boots the gateway in-process with an
+// injected clock, seeds tabs at multiple ages, runs a real setInterval that
+// POSTs /reading-queue/auto-promote (mirroring the timer in
+// app/orchestrator/src/index.ts), advances the simulated clock, and asserts
+// the active queue gains reading-queue papers in age-order.
+
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const here = fileURLToPath(import.meta.url);
+const orchestratorRoot = resolve(here, "../..");
+const distEntry = resolve(orchestratorRoot, "dist/src/server.js");
+const distStore = resolve(orchestratorRoot, "dist/src/store.js");
+const distGateway = resolve(orchestratorRoot, "dist/src/gateway_store.js");
+
+const { createGatewayServer } = await import(distEntry);
+const { createSeededStore } = await import(distStore);
+const { createInMemoryGatewayStore } = await import(distGateway);
+
+let clock = new Date("2026-05-10T14:00:00.000Z");
+
+async function seedCapturedTab(store, opts) {
+  const eventId = `evt_capture_${opts.id.replace(/[^a-z0-9]+/gi, "_")}`;
+  const idemKey = `browser:${opts.id}`;
+  await store.recordEventRoute(
+    {
+      id: eventId,
+      source: "browser",
+      source_id: idemKey,
+      idempotency_key: idemKey,
+      occurred_at: opts.capturedAt,
+      received_at: opts.capturedAt,
+      actor: { id: "chrome_extension", type: "system" },
+      type: "browser.context_captured",
+      task_hint: opts.taskHint,
+      title: opts.title,
+      summary: "Captured browser tab.",
+      raw_ref: { id: `raw_${eventId}`, uri: `browser://tabs/${opts.id}`, media_type: "application/json" },
+      links: [],
+      resources: [{
+        id: opts.id,
+        kind: "browser_tab",
+        title: opts.title,
+        url: opts.url,
+        source: "chrome-extension",
+        captured_at: opts.capturedAt,
+        restore_confidence: "high",
+      }],
+    },
+    {
+      id: `rte_${eventId}`,
+      event_id: eventId,
+      action: opts.routeAction ?? "store_only",
+      target_task_id: opts.targetTaskId,
+      confidence: "medium",
+      evidence: [],
+      created_at: opts.capturedAt,
+    },
+    new Date(opts.capturedAt),
+  );
+}
+
+let server;
+let timer;
+let passed = false;
+
+try {
+  const seeded = await createSeededStore("fixtures/empty-review-packets.json");
+  const store = createInMemoryGatewayStore(seeded);
+
+  server = createGatewayServer({
+    store,
+    now: () => clock,
+  });
+
+  const baseUrl = await new Promise((resolveListen, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      resolveListen(`http://127.0.0.1:${addr.port}`);
+    });
+  });
+
+  // Three captured tabs at simulated ages (relative to 14:00):
+  //   yesterday: 24h old   → always promotes
+  //   recent:   15m old   → promotes at threshold=300s
+  //   fresh:    30s old   → does NOT promote at threshold=300s, will after clock advance
+  // Plus one bound tab that must never appear on the active queue via auto-promote.
+  await seedCapturedTab(store, {
+    id: "browser_tab:smoke_yesterday",
+    capturedAt: "2026-05-09T14:00:00.000Z",
+    title: "Slack — overnight review",
+    url: "https://app.slack.test/overnight",
+  });
+  await seedCapturedTab(store, {
+    id: "browser_tab:smoke_recent",
+    capturedAt: "2026-05-10T13:45:00.000Z",
+    title: "Notion — design doc",
+    url: "https://notion.test/design",
+  });
+  await seedCapturedTab(store, {
+    id: "browser_tab:smoke_fresh",
+    capturedAt: "2026-05-10T13:59:30.000Z",
+    title: "Fresh tab",
+    url: "https://example.test/fresh",
+  });
+  await seedCapturedTab(store, {
+    id: "browser_tab:smoke_bound",
+    capturedAt: "2026-05-10T08:00:00.000Z",
+    title: "Bound to a task",
+    url: "https://example.test/bound",
+    taskHint: "blog",
+    routeAction: "attach_to_task",
+    targetTaskId: "task_blog",
+  });
+
+  // Real setInterval timer mirroring app/orchestrator/src/index.ts.
+  let tickCount = 0;
+  let lastTickError;
+  timer = setInterval(async () => {
+    tickCount += 1;
+    try {
+      const r = await fetch(`${baseUrl}/reading-queue/auto-promote`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ min_age_seconds: 300, actor_id: "v11-smoke-timer" }),
+      });
+      if (!r.ok) lastTickError = new Error(`tick HTTP ${r.status}`);
+    } catch (error) {
+      lastTickError = error;
+    }
+  }, 50);
+
+  // Wait for the timer to fire >= 3 times.
+  const deadlineA = Date.now() + 2_000;
+  while (tickCount < 3 && Date.now() < deadlineA) await sleep(25);
+  if (tickCount < 3) throw new Error(`timer did not tick 3+ times in 2s (tickCount=${tickCount})`);
+  if (lastTickError) throw lastTickError;
+
+  let queue = await fetchQueue(baseUrl);
+  let readingPapers = queue.items.filter((item) => item.task_id === "task_reading_queue");
+  assertEqual(readingPapers.length, 2, "phase A: 2 aged tabs (yesterday, recent) on queue");
+  const phaseAUrls = readingPapers.map((p) => p.review_packet?.context?.find((c) => c.kind === "browser_tab")?.url).sort();
+  assertEqualJson(phaseAUrls, ["https://app.slack.test/overnight", "https://notion.test/design"], "phase A urls");
+
+  // Confirm the bound tab is NEVER on the active queue.
+  const boundOnQueue = readingPapers.some((p) => p.review_packet?.context?.some((c) => c.url === "https://example.test/bound"));
+  if (boundOnQueue) throw new Error("bound tab leaked onto active queue via auto-promote");
+
+  // Advance the simulated clock by 10 minutes — fresh tab now 10m30s old.
+  clock = new Date("2026-05-10T14:10:00.000Z");
+  const tickAtAdvance = tickCount;
+  const deadlineB = Date.now() + 2_000;
+  while (tickCount < tickAtAdvance + 3 && Date.now() < deadlineB) await sleep(25);
+  if (tickCount < tickAtAdvance + 3) throw new Error("timer did not tick 3+ more times after clock advance");
+
+  queue = await fetchQueue(baseUrl);
+  readingPapers = queue.items.filter((item) => item.task_id === "task_reading_queue");
+  assertEqual(readingPapers.length, 3, "phase B: previously-fresh tab now promoted → 3 papers total");
+  const phaseBUrls = readingPapers.map((p) => p.review_packet?.context?.find((c) => c.kind === "browser_tab")?.url).sort();
+  assertEqualJson(
+    phaseBUrls,
+    ["https://app.slack.test/overnight", "https://example.test/fresh", "https://notion.test/design"],
+    "phase B urls",
+  );
+
+  passed = true;
+  console.log("PASS v11 reading-queue auto-promote timer end-to-end");
+  console.log(`  ticks observed:           ${tickCount}`);
+  console.log(`  phase A (clock 14:00):    promoted yesterday + recent (threshold=300s)`);
+  console.log(`  phase B (clock 14:10):    fresh tab now past threshold, promoted on next tick`);
+  console.log(`  bound tab leaked:         no`);
+} catch (error) {
+  passed = false;
+  console.error("FAIL v11 reading-queue auto-promote timer end-to-end");
+  console.error(error instanceof Error ? error.stack : String(error));
+  process.exitCode = 1;
+} finally {
+  if (timer) clearInterval(timer);
+  if (server) await new Promise((res) => server.close(() => res()));
+  if (!passed && process.exitCode === 0) process.exitCode = 1;
+}
+
+async function fetchQueue(baseUrl) {
+  const r = await fetch(`${baseUrl}/queue`);
+  if (!r.ok) throw new Error(`/queue HTTP ${r.status}`);
+  return await r.json();
+}
+
+function sleep(ms) {
+  return new Promise((res) => setTimeout(res, ms));
+}
+
+function assertEqual(actual, expected, label) {
+  if (actual !== expected) {
+    throw new Error(`assertion failed [${label}]: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
+}
+
+function assertEqualJson(actual, expected, label) {
+  const a = JSON.stringify(actual);
+  const e = JSON.stringify(expected);
+  if (a !== e) {
+    throw new Error(`assertion failed [${label}]: expected ${e}, got ${a}`);
+  }
+}
