@@ -1,0 +1,318 @@
+#!/usr/bin/env node
+// V9 — chained proof that a real WAV → whisper.cpp STT → POST /voice/commands
+// produces a fan-out intent and fires the matching observability events.
+//
+// Pipeline: `say` synthesizes an utterance → `ffmpeg` resamples to 16kHz mono
+// WAV → `whisper-cli` (whisper.cpp) transcribes → transcript is POSTed to the
+// orchestrator's /voice/commands endpoint → we poll /activity and assert the
+// `voice_fan_out_detected` event landed with the same transcript and selector.
+//
+// Gate: skipped unless EVENTLOOPOS_ENABLE_VOICE_FAN_OUT_SMOKE=1.
+// Skips with PASS-NOOP if `say`, `ffmpeg`, or `whisper-cli` is not on PATH.
+//
+// Required env when gated on:
+//   EVENTLOOPOS_WHISPER_MODEL  absolute path to a whisper.cpp ggml model
+//                              (e.g. /opt/homebrew/Cellar/whisper-cpp/1.8.4/share/whisper-cpp/for-tests-ggml-tiny.bin)
+//
+// Optional env:
+//   EVENTLOOPOS_VOICE_FAN_OUT_PHRASE   override fixture phrase (default below)
+//   EVENTLOOPOS_VOICE_FAN_OUT_SELECTOR expected selector token (default "email")
+//   EVENTLOOPOS_VOICE_STT_SAY_VOICE    macOS `say` voice (default "Samantha")
+//   EVENTLOOPOS_WHISPER_CLI_BIN        whisper-cli binary (default "whisper-cli")
+
+import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { createServer as createTcpServer } from "node:net";
+import { fileURLToPath } from "node:url";
+
+if (process.env.EVENTLOOPOS_ENABLE_VOICE_FAN_OUT_SMOKE !== "1") {
+  console.log("v9 voice STT fan-out smoke skipped: set EVENTLOOPOS_ENABLE_VOICE_FAN_OUT_SMOKE=1");
+  process.exit(0);
+}
+
+const here = fileURLToPath(import.meta.url);
+const orchestratorRoot = path.resolve(here, "../..");
+const repoRoot = path.resolve(orchestratorRoot, "../..");
+const orchestratorEntry = path.resolve(orchestratorRoot, "dist/src/index.js");
+
+if (!existsSync(orchestratorEntry)) {
+  console.error(`orchestrator dist not built: ${orchestratorEntry}`);
+  console.error("run: pnpm --filter @eventloopos/orchestrator run build");
+  process.exit(1);
+}
+
+const phrase = process.env.EVENTLOOPOS_VOICE_FAN_OUT_PHRASE
+  ?? "all email tasks should use the new sign off";
+const expectedSelector = (process.env.EVENTLOOPOS_VOICE_FAN_OUT_SELECTOR ?? "email").trim().toLowerCase();
+const sayVoice = process.env.EVENTLOOPOS_VOICE_STT_SAY_VOICE ?? "Samantha";
+const whisperCli = process.env.EVENTLOOPOS_WHISPER_CLI_BIN ?? "whisper-cli";
+const model = resolvePath(process.env.EVENTLOOPOS_WHISPER_MODEL);
+
+if (!model) {
+  console.error("EVENTLOOPOS_WHISPER_MODEL is required for v9 voice STT fan-out smoke");
+  process.exit(1);
+}
+
+const missingTool = await firstMissingTool(["say", "ffmpeg", whisperCli]);
+if (missingTool) {
+  console.log(`v9 voice STT fan-out smoke skipped: missing tool '${missingTool}' on PATH`);
+  process.exit(0);
+}
+
+let tempDir;
+let orchestrator;
+let port;
+const baseUrl = () => `http://127.0.0.1:${port}`;
+
+try {
+  port = await freePort();
+  tempDir = await mkdtemp(path.join(tmpdir(), "eventloopos-v9-voice-fanout-"));
+  const aiffPath = path.join(tempDir, "fixture.aiff");
+  const wavPath = path.join(tempDir, "fixture.wav");
+
+  console.log(`v9 phrase: ${JSON.stringify(phrase)}`);
+  console.log(`v9 expected selector: ${JSON.stringify(expectedSelector)}`);
+
+  // 1) say → AIFF
+  await spawnChecked("say", ["-v", sayVoice, "-o", aiffPath, phrase]);
+
+  // 2) ffmpeg → 16kHz mono WAV
+  await spawnChecked("ffmpeg", ["-y", "-loglevel", "error", "-i", aiffPath, "-ar", "16000", "-ac", "1", wavPath]);
+
+  // 3) whisper-cli → transcript
+  const whisperResult = await spawnChecked(whisperCli, ["-m", model, "-f", wavPath, "-nt", "-np"]);
+  const transcript = extractTranscript(whisperResult.stdout);
+  if (!transcript) {
+    throw new Error(`whisper-cli produced empty transcript; stdout: ${whisperResult.stdout}`);
+  }
+  console.log(`v9 transcript: ${JSON.stringify(transcript)}`);
+
+  // 4) Boot orchestrator on a free port (in-memory, no DB).
+  orchestrator = startOrchestrator(port);
+  await waitForHealth(baseUrl());
+
+  // 5) POST transcript to /voice/commands
+  const idempotencyKey = `v9-voice-fanout-${Date.now()}`;
+  const sourceId = `voice:v9-voice-fanout-${Date.now()}`;
+  const postResponse = await postJson("/voice/commands", {
+    transcript,
+    source_id: sourceId,
+  }, { "Idempotency-Key": idempotencyKey });
+
+  // Assert response shape: fan_out intent recognized, selector matches.
+  assert(postResponse.ok === true, `expected ok=true response: ${JSON.stringify(postResponse)}`);
+  assert(postResponse.intent === "fan_out", `expected intent=fan_out, got ${postResponse.intent}; body=${JSON.stringify(postResponse)}`);
+  assert(typeof postResponse.selector === "string" && postResponse.selector.includes(expectedSelector),
+    `expected selector to include "${expectedSelector}", got ${JSON.stringify(postResponse.selector)}`);
+  assert(typeof postResponse.message === "string" && postResponse.message.length > 0,
+    `expected non-empty fan-out message, got ${JSON.stringify(postResponse.message)}`);
+  assert(postResponse.next_action?.path === "/master/fan-out",
+    `expected next_action /master/fan-out, got ${JSON.stringify(postResponse.next_action)}`);
+
+  // 6) Poll /activity for the voice_fan_out_detected event.
+  const activityEvent = await waitForActivity({
+    type: "voice_fan_out_detected",
+    transcript,
+    selector: postResponse.selector,
+    timeoutMs: 5_000,
+  });
+
+  console.log(JSON.stringify({
+    ok: true,
+    test: "v9-voice-stt-fanout-smoke",
+    phrase,
+    transcript,
+    selector: postResponse.selector,
+    fan_out_message: postResponse.message,
+    activity: {
+      type: activityEvent.type,
+      summary: activityEvent.summary,
+      transcript_in_details: activityEvent.details?.transcript,
+      selector_in_details: activityEvent.details?.selector,
+    },
+  }, null, 2));
+  console.log("v9 voice STT fan-out smoke: PASS");
+} catch (error) {
+  console.error("v9 voice STT fan-out smoke: FAIL");
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  process.exitCode = 1;
+} finally {
+  await stopOrchestrator();
+  if (tempDir) {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function waitForActivity({ type, transcript, selector, timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let lastEvents = [];
+  while (Date.now() < deadline) {
+    const body = await getJson("/activity?limit=50");
+    const events = Array.isArray(body.events) ? body.events : [];
+    lastEvents = events;
+    const match = events.find((event) => {
+      if (event.type !== type) return false;
+      const detailsTranscript = event.details?.transcript;
+      const detailsSelector = event.details?.selector;
+      const transcriptMatches = typeof detailsTranscript === "string" && detailsTranscript.trim() === transcript.trim();
+      const selectorMatches = typeof detailsSelector === "string" && detailsSelector === selector;
+      return transcriptMatches && selectorMatches;
+    });
+    if (match) return match;
+    await sleep(150);
+  }
+  throw new Error(`timed out waiting for activity event '${type}' with matching transcript/selector. last events: ${JSON.stringify(lastEvents.slice(0, 5))}`);
+}
+
+function startOrchestrator(boundPort) {
+  const child = spawn("node", [orchestratorEntry], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      ORCHESTRATOR_HOST: "127.0.0.1",
+      ORCHESTRATOR_PORT: String(boundPort),
+      ORCHESTRATOR_SEED_FIXTURE: "app/orchestrator/fixtures/empty-review-packets.json",
+      ORCHESTRATOR_TASK_SESSIONS: "fake",
+      ORCHESTRATOR_MCP_SOURCES: "off",
+      ORCHESTRATOR_WORKSPACE: "off",
+    },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.on("data", (chunk) => process.stdout.write(`[orch] ${chunk}`));
+  child.stderr.on("data", (chunk) => process.stderr.write(`[orch] ${chunk}`));
+  return child;
+}
+
+async function stopOrchestrator() {
+  if (!orchestrator || orchestrator.killed || orchestrator.exitCode !== null) return;
+  orchestrator.kill("SIGTERM");
+  await new Promise((resolve) => orchestrator.once("exit", resolve));
+  orchestrator = undefined;
+}
+
+async function waitForHealth(url) {
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(new URL("/health", url));
+      if (res.ok) return;
+    } catch {
+      // still booting
+    }
+    await sleep(100);
+  }
+  throw new Error(`timed out waiting for orchestrator at ${url}/health`);
+}
+
+async function getJson(pathname) {
+  const res = await fetch(new URL(pathname, baseUrl()));
+  return parseResponse(res, "GET", pathname);
+}
+
+async function postJson(pathname, body, headers = {}) {
+  const res = await fetch(new URL(pathname, baseUrl()), {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+  return parseResponse(res, "POST", pathname);
+}
+
+async function parseResponse(res, method, pathname) {
+  const text = await res.text();
+  let body;
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch {
+    throw new Error(`${method} ${pathname} returned invalid JSON ${res.status}: ${text}`);
+  }
+  if (!res.ok) {
+    throw new Error(`${method} ${pathname} failed ${res.status}: ${JSON.stringify(body)}`);
+  }
+  return body;
+}
+
+function extractTranscript(stdout) {
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith("load_backend:"))
+    .filter((line) => !line.startsWith("ggml_"))
+    .filter((line) => !line.startsWith("whisper_"))
+    .filter((line) => !line.startsWith("system_info:"))
+    .filter((line) => !line.startsWith("main:"));
+  return lines.at(-1) ?? "";
+}
+
+function resolvePath(value) {
+  if (!value) return value;
+  if (path.isAbsolute(value)) return value;
+  const candidates = [
+    path.resolve(process.env.INIT_CWD ?? "", value),
+    path.resolve(process.cwd(), value),
+  ];
+  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
+}
+
+async function firstMissingTool(tools) {
+  for (const tool of tools) {
+    const ok = await toolOnPath(tool);
+    if (!ok) return tool;
+  }
+  return undefined;
+}
+
+function toolOnPath(tool) {
+  return new Promise((resolve) => {
+    const child = spawn("which", [tool], { stdio: ["ignore", "ignore", "ignore"] });
+    child.on("error", () => resolve(false));
+    child.on("exit", (code) => resolve(code === 0));
+  });
+}
+
+async function spawnChecked(file, args) {
+  return await new Promise((resolve, reject) => {
+    const child = spawn(file, args, {
+      cwd: process.cwd(),
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+        return;
+      }
+      reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}\n${stdout}${stderr}`));
+    });
+  });
+}
+
+async function freePort() {
+  const probe = createTcpServer();
+  await new Promise((resolveListen, rejectListen) => {
+    probe.once("error", rejectListen);
+    probe.listen(0, "127.0.0.1", resolveListen);
+  });
+  const address = probe.address();
+  await new Promise((resolveClose) => probe.close(resolveClose));
+  if (!address || typeof address === "string") {
+    throw new Error("failed to allocate free TCP port");
+  }
+  return address.port;
+}
+
+function assert(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
