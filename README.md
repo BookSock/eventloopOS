@@ -1,18 +1,27 @@
 # eventloopOS
 
-Human event loop for computer work.
+eventloopOS turns your Mac into an attention scheduler for agent-heavy work: a single ranked queue of "papers" that need a human, where pulling a paper restores its full workspace (windows, Codex thread, Chrome tabs, source thread) so the decision takes seconds instead of minutes of context-hunting. It is built for people running many parallel coding/email/research agents who feel review bandwidth — not agent execution — as the bottleneck.
 
 License: AGPL-3.0-only. See [LICENSE](LICENSE).
 
-This repo is structured as a planning-first MVP workspace:
+## 30-second quickstart
 
-- `external-resources/` - source links, research notes, API docs, competitive references.
-- `docs/planning/` - product, architecture, roadmap, and research synthesis.
-- `app/` - implementation workspace for the actual product.
+```sh
+brew install --cask nikitabobko/tap/aerospace   # required workspace backend
+pnpm install
+pnpm run dev:dogfood                            # builds + runs orchestrator + Mac queue app
+```
 
-Current MVP direction: build a Mac-native intake stack for agent-heavy work. The first version should not try to replace the OS or become a notification product. It should create a ranked review queue, capture/restore enough workspace context, route non-human-blocked events into background agents, and let the user advance through one human-blocked packet at a time with one hotkey and one done/next action.
+Once the queue app is up, `Cmd-Option-Shift-J` pulls the next paper, `Cmd-Option-Shift-K` opens the master command sheet (route / start task / rerank / broadcast), and `Cmd-Option-Shift-M` toggles manual mode. For the full path on a fresh clone, see [docs/try-on-mac.md](docs/try-on-mac.md).
 
-If you are trying this from a fresh clone on another Mac, start with [docs/try-on-mac.md](docs/try-on-mac.md).
+## Repo layout
+
+- `app/orchestrator/` — TypeScript HTTP gateway: queue, routing, MCP source polling, agent handoff, restore plans, observability.
+- `app/macos/` — Swift/SwiftUI Mac app: queue UI, hotkeys, workspace capture/restore, master command sheet, voice mic.
+- `app/browser-extension/` — Chrome extension: tab capture and scroll-anchor restore.
+- `app/native-host/` — native messaging bridge between extension and orchestrator.
+- `docs/planning/` — product brief, architecture, roadmap, research synthesis.
+- `external-resources/` — source links, API docs, competitive references.
 
 ## Current Proof
 

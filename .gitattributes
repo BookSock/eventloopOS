@@ -1,0 +1,56 @@
+# Default: normalize line endings to LF in the repo, leave checkout to platform default.
+* text=auto eol=lf
+
+# Source files: explicit text + LF
+*.ts        text eol=lf
+*.tsx       text eol=lf
+*.js        text eol=lf
+*.mjs       text eol=lf
+*.cjs       text eol=lf
+*.jsx       text eol=lf
+*.swift     text eol=lf
+*.py        text eol=lf
+*.rb        text eol=lf
+*.sh        text eol=lf
+*.bash      text eol=lf
+*.zsh       text eol=lf
+*.html      text eol=lf
+*.css       text eol=lf
+*.json      text eol=lf
+*.jsonc     text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.toml      text eol=lf
+*.md        text eol=lf
+*.sql       text eol=lf
+
+# Lockfiles + generated outputs: text but linguist should not skew language stats
+pnpm-lock.yaml      linguist-generated=true text eol=lf
+package-lock.json   linguist-generated=true text eol=lf
+yarn.lock           linguist-generated=true text eol=lf
+
+# Test fixtures and golden files: text, but linguist should not count toward language stats
+tests/fixtures/**       linguist-detectable=false text eol=lf
+tests/golden/**         linguist-detectable=false text eol=lf
+**/fixtures/**          text eol=lf
+
+# Mark generated dist directories as generated (in case any leak in)
+**/dist/**              linguist-generated=true
+**/.build/**            linguist-generated=true
+
+# Binary file types — never try to diff or merge as text
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.icns      binary
+*.pdf       binary
+*.zip       binary
+*.tar       binary
+*.tar.gz    binary
+*.tgz       binary
+*.gz        binary
+
+# Shell scripts in bin/: explicit LF + text
+bin/*       text eol=lf
