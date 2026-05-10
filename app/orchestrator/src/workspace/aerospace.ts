@@ -19,6 +19,7 @@ export type WorkspaceCapabilityStatus =
       backend: "aerospace";
       reason?: undefined;
       detail?: string;
+      monitorCount?: number;
     }
   | {
       available: false;
@@ -67,11 +68,12 @@ export class AerospaceWorkspaceAdapter {
   async capabilityStatus(): Promise<WorkspaceCapabilityStatus> {
     try {
       const result = await this.exec("aerospace", captureWorkspacePlan().args);
-      parseAerospaceWindows(result.stdout);
+      const windows = parseAerospaceWindows(result.stdout);
 
       return {
         available: true,
         backend: this.backend,
+        monitorCount: countDistinctMonitors(windows),
       };
     } catch (error) {
       return capabilityStatusFromError(error);
@@ -119,6 +121,16 @@ export function moveToWorkspacePlan(windowId: number, workspace: string): Aerosp
   };
 }
 
+export function moveToMonitorPlan(windowId: number, monitorId: number): AerospaceCommand {
+  assertSafeWindowId(windowId);
+  assertSafeMonitorId(monitorId);
+
+  return {
+    command: "aerospace",
+    args: ["move-node-to-monitor", "--window-id", String(windowId), String(monitorId)],
+  };
+}
+
 export function focusWindowPlan(windowId: number): AerospaceCommand {
   assertSafeWindowId(windowId);
 
@@ -150,18 +162,27 @@ export function layoutWindowPlan(windowId: number, layout: AerospaceLayout): Aer
 }
 
 export function restoreWorkspacePlan(snapshot: WorkspaceSnapshot, currentWindows: AerospaceWindow[]): RestorePlan {
-  const currentWindowIds = new Set(currentWindows.map((window) => window.id));
+  const currentWindowsById = new Map(currentWindows.map((window) => [window.id, window]));
   const commands: AerospaceCommand[] = [];
   const skipped: RestoreSkip[] = [];
 
   for (const window of snapshot.windows) {
-    if (!currentWindowIds.has(window.id)) {
+    const current = currentWindowsById.get(window.id);
+    if (!current) {
       skipped.push({
         reason: "stale_window_id",
         windowId: window.id,
         workspace: window.workspace,
       });
       continue;
+    }
+
+    if (
+      typeof window.monitorId === "number" &&
+      typeof current.monitorId === "number" &&
+      window.monitorId !== current.monitorId
+    ) {
+      commands.push(moveToMonitorPlan(window.id, window.monitorId));
     }
 
     commands.push(moveToWorkspacePlan(window.id, window.workspace));
@@ -171,7 +192,7 @@ export function restoreWorkspacePlan(snapshot: WorkspaceSnapshot, currentWindows
     commands.push(focusWorkspacePlan(snapshot.activeWorkspace));
   }
 
-  if (snapshot.focusedWindowId !== undefined && currentWindowIds.has(snapshot.focusedWindowId)) {
+  if (snapshot.focusedWindowId !== undefined && currentWindowsById.has(snapshot.focusedWindowId)) {
     commands.push(focusWindowPlan(snapshot.focusedWindowId));
   }
 
@@ -279,6 +300,22 @@ function assertSafeWorkspace(workspace: string): void {
   }
 }
 
+function assertSafeMonitorId(monitorId: number): void {
+  if (!Number.isInteger(monitorId) || monitorId <= 0) {
+    throw new Error(`unsafe aerospace monitor id: ${monitorId}`);
+  }
+}
+
+function countDistinctMonitors(windows: AerospaceWindow[]): number {
+  const monitors = new Set<number>();
+  for (const window of windows) {
+    if (typeof window.monitorId === "number") {
+      monitors.add(window.monitorId);
+    }
+  }
+  return monitors.size;
+}
+
 function assertSafeAerospaceCommand(command: AerospaceCommand): void {
   if (command.command !== "aerospace") {
     throw new Error(`unsafe aerospace command: ${command.command}`);
@@ -296,6 +333,11 @@ function assertSafeAerospaceCommand(command: AerospaceCommand): void {
   if (subcommand === "move-node-to-workspace" && rest.length === 3 && rest[0] === "--window-id") {
     assertSafeWindowId(Number(rest[1]));
     assertSafeWorkspace(rest[2] ?? "");
+    return;
+  }
+  if (subcommand === "move-node-to-monitor" && rest.length === 3 && rest[0] === "--window-id") {
+    assertSafeWindowId(Number(rest[1]));
+    assertSafeMonitorId(Number(rest[2]));
     return;
   }
   if (subcommand === "layout" && rest.length === 3 && rest[0] === "--window-id") {

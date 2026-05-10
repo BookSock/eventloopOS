@@ -143,11 +143,84 @@ function captureQuote(win, doc) {
     };
   }
 
+  const anchor = pickViewportAnchor(doc, win);
+  if (anchor?.text) {
+    return {
+      strategy: "viewport-anchor",
+      text: anchor.text,
+      selector_hint: anchor.selector_hint
+    };
+  }
+
   const visibleText = normalizeWhitespace(doc.body?.innerText ?? doc.body?.textContent ?? "");
   return {
     strategy: "document-body",
-    text: visibleText.slice(0, 240)
+    text: visibleText.slice(0, 120)
   };
+}
+
+const VIEWPORT_ANCHOR_SELECTORS = "h1, h2, h3, h4, h5, h6, [role=heading], main, [role=main], article, section[id], p";
+const VIEWPORT_ANCHOR_TEXT_LIMIT = 120;
+
+export function pickViewportAnchor(doc, win) {
+  if (!doc?.querySelectorAll) {
+    return null;
+  }
+  const innerHeight = Number.isFinite(win?.innerHeight) ? win.innerHeight : 0;
+  const candidates = [];
+  try {
+    for (const element of doc.querySelectorAll(VIEWPORT_ANCHOR_SELECTORS)) {
+      candidates.push(element);
+    }
+  } catch {
+    return null;
+  }
+
+  for (const element of candidates) {
+    const rect = safeBoundingRect(element);
+    if (!rect) continue;
+    // Must intersect viewport (top below screen-bottom would skip).
+    if (innerHeight > 0 && rect.top > innerHeight) continue;
+    if (rect.bottom !== undefined && rect.bottom < 0) continue;
+    const text = normalizeWhitespace(element.textContent ?? "");
+    if (!text) continue;
+    const selectorHint = selectorHintForElement(element);
+    return {
+      element,
+      selector_hint: selectorHint,
+      text: text.slice(0, VIEWPORT_ANCHOR_TEXT_LIMIT)
+    };
+  }
+  return null;
+}
+
+function safeBoundingRect(element) {
+  if (typeof element?.getBoundingClientRect !== "function") {
+    return { top: 0, bottom: 0 };
+  }
+  try {
+    const rect = element.getBoundingClientRect();
+    if (!rect) return null;
+    return rect;
+  } catch {
+    return null;
+  }
+}
+
+export function selectorHintForElement(element) {
+  if (!element) return undefined;
+  const id = typeof element.id === "string" ? element.id.trim() : "";
+  if (id && /^[A-Za-z][\w-]*$/.test(id)) {
+    return `#${id}`;
+  }
+  const role = element.getAttribute?.("role");
+  if (role === "main") return "[role=\"main\"]";
+  if (role === "heading") return "[role=\"heading\"]";
+  const tag = (element.tagName ?? "").toLowerCase();
+  if (tag === "main") return "main";
+  if (tag === "article") return "article";
+  if (tag && /^h[1-6]$/.test(tag)) return tag;
+  return undefined;
 }
 
 function textBefore(selection) {

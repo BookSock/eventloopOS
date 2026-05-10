@@ -51,6 +51,7 @@ describe("live AeroSpace smoke", () => {
       status: {
         available: true,
         backend: "aerospace",
+        monitorCount: 0,
       },
       window_count: 2,
       restore_plan_target_window_id: 8,

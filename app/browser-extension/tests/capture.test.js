@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { capturePageContext, restorePageContext } from "../src/capture-page.js";
+import { capturePageContext, pickViewportAnchor, restorePageContext, selectorHintForElement } from "../src/capture-page.js";
 import { buildContextResource, contextResourceToPageContext, normalizeContextResource, validateContextResource } from "../src/protocol.js";
 import { createExtensionController } from "../src/extension-controller.js";
 import { createMockNativeBridge } from "../src/mock-native-bridge.js";
@@ -354,6 +354,170 @@ test("restorePageContext scrolls page-like window", () => {
   assert.equal(result.restoredScroll, true);
   assert.deepEqual(result.scroll, { x: 0, y: 900 });
 });
+
+test("pickViewportAnchor selects first heading inside viewport with #id selector", () => {
+  const above = makeAnchorElement({ tag: "h2", id: "skipped", text: "Skipped heading", rect: { top: -800, bottom: -700 } });
+  const inView = makeAnchorElement({ tag: "h1", id: "lede", text: "  Lede heading text  ", rect: { top: 40, bottom: 80 } });
+  const below = makeAnchorElement({ tag: "h2", id: "later", text: "Below the fold", rect: { top: 4000, bottom: 4040 } });
+  const doc = {
+    querySelectorAll: () => [above, inView, below]
+  };
+  const win = { innerHeight: 600 };
+
+  const anchor = pickViewportAnchor(doc, win);
+
+  assert.ok(anchor);
+  assert.equal(anchor.selector_hint, "#lede");
+  assert.equal(anchor.text, "Lede heading text");
+});
+
+test("pickViewportAnchor falls back to tag-based hint when id is missing", () => {
+  const heading = makeAnchorElement({ tag: "h3", text: "Section title", rect: { top: 10, bottom: 30 } });
+  const doc = { querySelectorAll: () => [heading] };
+
+  const anchor = pickViewportAnchor(doc, { innerHeight: 800 });
+
+  assert.equal(anchor.selector_hint, "h3");
+  assert.equal(anchor.text, "Section title");
+});
+
+test("pickViewportAnchor uses [role=\"main\"] for landmark elements", () => {
+  const main = makeAnchorElement({ tag: "div", role: "main", text: "Main landmark text", rect: { top: 5, bottom: 20 } });
+  const doc = { querySelectorAll: () => [main] };
+
+  const anchor = pickViewportAnchor(doc, { innerHeight: 800 });
+
+  assert.equal(anchor.selector_hint, "[role=\"main\"]");
+});
+
+test("pickViewportAnchor truncates long text to 120 chars", () => {
+  const long = "x".repeat(200);
+  const element = makeAnchorElement({ tag: "p", text: long, rect: { top: 100, bottom: 140 } });
+  const doc = { querySelectorAll: () => [element] };
+
+  const anchor = pickViewportAnchor(doc, { innerHeight: 600 });
+
+  assert.equal(anchor.text.length, 120);
+});
+
+test("selectorHintForElement rejects ids with invalid CSS characters", () => {
+  const element = { id: "has space", tagName: "H2", getAttribute: () => null };
+  assert.equal(selectorHintForElement(element), "h2");
+});
+
+test("capturePageContext picks viewport anchor when no selection or fixture marker", () => {
+  const heading = makeAnchorElement({ tag: "h2", id: "topic", text: "Why eventloopOS exists", rect: { top: 12, bottom: 36 } });
+  const doc = {
+    title: "Anchor capture fixture",
+    location: { href: "http://127.0.0.1:4173/anchor" },
+    scrollingElement: { scrollWidth: 800, scrollHeight: 2400 },
+    documentElement: { scrollWidth: 800, scrollHeight: 2400 },
+    querySelector: (selector) => (selector === "[data-context-quote]" ? null : null),
+    querySelectorAll: () => [heading],
+    body: { textContent: "fallback" }
+  };
+  const win = {
+    scrollX: 0,
+    scrollY: 540,
+    innerWidth: 800,
+    innerHeight: 600,
+    getSelection: () => ({ toString: () => "" })
+  };
+
+  const page = capturePageContext(win, doc);
+
+  assert.equal(page.scroll.y, 540);
+  assert.equal(page.quote.strategy, "viewport-anchor");
+  assert.equal(page.quote.text, "Why eventloopOS exists");
+  assert.equal(page.quote.selector_hint, "#topic");
+});
+
+test("capture flow propagates scroll_y, text_quote, selector_hint from viewport anchor", async () => {
+  const page = {
+    url: "http://127.0.0.1:4173/anchor",
+    title: "Anchor flow",
+    scroll: { x: 0, y: 540, maxX: 0, maxY: 1800 },
+    quote: {
+      strategy: "viewport-anchor",
+      text: "Why eventloopOS exists",
+      selector_hint: "#topic"
+    }
+  };
+  const chromeApi = fakeChrome({
+    tabs: [{ id: 12, url: page.url, title: page.title, active: true, windowId: 4 }],
+    pageByTabId: new Map([[12, page]])
+  });
+  const nativeBridge = createMockNativeBridge();
+  const controller = createExtensionController({
+    chromeApi,
+    nativeBridge,
+    now: () => new Date("2026-05-09T12:00:00.000Z")
+  });
+
+  const result = await controller.captureActiveTab();
+
+  assert.equal(result.resource.scroll_y, 540);
+  assert.equal(result.resource.text_quote, "Why eventloopOS exists");
+  assert.equal(result.resource.selector_hint, "#topic");
+  assert.doesNotThrow(() => validateContextResource(result.resource));
+});
+
+test("captured-then-restored round-trip preserves scroll_y, text_quote, selector_hint", () => {
+  const tab = { id: 21, url: "https://example.test/round-trip", title: "Round-trip", windowId: 9 };
+  const page = {
+    url: tab.url,
+    title: tab.title,
+    scroll: { x: 0, y: 720, maxX: 0, maxY: 2000 },
+    quote: {
+      strategy: "viewport-anchor",
+      text: "Section heading text",
+      selector_hint: "#section-3"
+    }
+  };
+
+  const resource = buildContextResource({ tab, page, capturedAt: "2026-05-09T13:00:00.000Z" });
+
+  // Survives normalization round-trip (current shape).
+  const normalized = normalizeContextResource(resource);
+  assert.equal(normalized.scroll_y, 720);
+  assert.equal(normalized.text_quote, "Section heading text");
+  assert.equal(normalized.selector_hint, "#section-3");
+
+  // Survives legacy-shape round-trip.
+  const legacy = {
+    schemaVersion: "eventloop.contextResource.v1",
+    type: "browser.tab",
+    source: "chrome-extension",
+    capturedAt: "2026-05-09T13:00:00.000Z",
+    tab: { id: tab.id, url: tab.url, title: tab.title, windowId: tab.windowId },
+    page
+  };
+  const fromLegacy = validateContextResource(legacy);
+  assert.equal(fromLegacy.scroll_y, 720);
+  assert.equal(fromLegacy.text_quote, "Section heading text");
+  assert.equal(fromLegacy.selector_hint, "#section-3");
+
+  // Restoration page-context derived from the resource carries the same fields.
+  const restorePage = contextResourceToPageContext(resource);
+  assert.equal(restorePage.scroll.y, 720);
+  assert.equal(restorePage.quote.text, "Section heading text");
+  assert.equal(restorePage.quote.selector_hint, "#section-3");
+});
+
+function makeAnchorElement({ tag, id = "", text, rect, role = null }) {
+  return {
+    tagName: tag.toUpperCase(),
+    id,
+    textContent: text,
+    getAttribute(name) {
+      if (name === "role") return role;
+      return null;
+    },
+    getBoundingClientRect() {
+      return { top: rect.top, bottom: rect.bottom, left: 0, right: 0, width: 0, height: rect.bottom - rect.top };
+    }
+  };
+}
 
 function fakeChrome({ tabs, pageByTabId }) {
   const calls = {
