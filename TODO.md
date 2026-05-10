@@ -4,8 +4,8 @@ Live list of code gaps for the full vision. Sorted into **Build**, **Verify** (b
 
 ## Build
 
-- [ ] **B1. Tab scroll-anchor capture.** Chrome extension restores scroll, but capture currently records URL only, not the scroll position or selection. Vision says "scroll to exact paragraph" — capture-side needs to record scroll offset, optional CSS selector hint, and a quoted text snippet.
-- [ ] **B2. Multi-display workspace restore.** AeroSpace sees windows but workspace restore plans don't account for which monitor a window was on. Single-display works; multi probably broken.
+- [x] **B1. Tab scroll-anchor capture.** ~~Chrome extension restores scroll, but capture currently records URL only, not the scroll position or selection. Vision says "scroll to exact paragraph" — capture-side needs to record scroll offset, optional CSS selector hint, and a quoted text snippet.~~ ✅ Shipped 2026-05-09: capture-page + content-script now emit `text_quote` + `selector_hint` from a viewport anchor; restore round-trip verified by tests.
+- [x] **B2. Multi-display workspace restore.** ~~AeroSpace sees windows but workspace restore plans don't account for which monitor a window was on. Single-display works; multi probably broken.~~ ✅ Shipped 2026-05-09: restore plan emits `move-node-to-monitor` commands when saved `monitorId` differs from current; `capabilityStatus` reports `monitorCount`.
 - [ ] **B3. Postgres `task_session_terminal_refs` persistence.** File-based codex-task-map persists fine for Codex. In-memory dev controller still loses `terminal_ref` on restart. Add a Postgres table for non-codex sessions when running with Postgres backend.
 - [ ] **B4. Crash recovery for in-flight queue items.** If orchestrator dies mid-action (after terminal keystroke, before followup ack), resume on restart isn't proven. Need idempotency check on the recommended-action route + a postgres-backed proof.
 - [ ] **B5. Doc / PDF / image paper sources.** Only browser/slack/gmail/manual/agent-runs today. Vision implies "any blocked work." A simple `paper:` source that ingests a markdown blob with `task_hint` would unblock note-style intake.
