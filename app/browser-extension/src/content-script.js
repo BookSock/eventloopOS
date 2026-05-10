@@ -291,11 +291,18 @@ function safeBoundingRect(element) {
   }
 }
 
+const PROVIDER_DATA_ATTRIBUTES = ["data-block-id", "data-ts", "data-message-id", "data-qa"];
+
 function selectorHintForElement(element) {
   if (!element) return undefined;
+  for (const attr of PROVIDER_DATA_ATTRIBUTES) {
+    const value = element.getAttribute?.(attr);
+    if (value) return `[${attr}="${escapeAttrValue(value)}"]`;
+  }
   const id = typeof element.id === "string" ? element.id.trim() : "";
-  if (id && /^[A-Za-z][\w-]*$/.test(id)) {
-    return `#${id}`;
+  if (id) {
+    if (/^[A-Za-z][\w-]*$/.test(id)) return `#${id}`;
+    return `[id="${escapeAttrValue(id)}"]`;
   }
   const role = element.getAttribute?.("role");
   if (role === "main") return "[role=\"main\"]";
@@ -305,6 +312,10 @@ function selectorHintForElement(element) {
   if (tag === "article") return "article";
   if (tag && /^h[1-6]$/.test(tag)) return tag;
   return undefined;
+}
+
+function escapeAttrValue(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
 }
 
 function normalizeWhitespace(value) {

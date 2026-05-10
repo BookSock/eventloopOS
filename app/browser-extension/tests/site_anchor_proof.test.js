@@ -19,31 +19,30 @@ function readFixture(name) {
   return readFileSync(join(FIXTURE_DIR, name), "utf8");
 }
 
-test("slack-thread fixture: capture picks main landmark, restore highlights it", () => {
+test("slack-thread fixture: capture picks data-qa landmark, restore highlights it", () => {
   const { doc, win } = parseFixture(readFixture("slack-thread.html"), { innerHeight: 800 });
 
   const anchor = pickViewportAnchor(doc, win);
   assert.ok(anchor, "expected a viewport anchor");
-  assert.equal(anchor.selector_hint, "#slack-kit-list");
+  assert.equal(anchor.selector_hint, '[data-qa="slack_kit_list"]');
   assert.match(anchor.text, /Kicking off the launch retro thread/);
 
   const page = capturePageContext(win, doc);
   assert.equal(page.quote.strategy, "viewport-anchor");
-  assert.equal(page.quote.selector_hint, "#slack-kit-list");
+  assert.equal(page.quote.selector_hint, '[data-qa="slack_kit_list"]');
 
   const result = restorePageContext({ scroll: { x: 0, y: 0 }, quote: page.quote }, win, doc);
   assert.equal(result.ok, true);
   assert.equal(result.restoredHighlight, true);
   assert.equal(result.highlightStrategy, "selector");
   const highlighted = doc.querySelector("[data-eventloopos-restore-highlight]");
-  assert.equal(highlighted.getAttribute("id"), "slack-kit-list");
+  assert.equal(highlighted.getAttribute("data-qa"), "slack_kit_list");
 });
 
 test("slack-thread fixture: data-ts message anchor survives restore via custom hint", () => {
-  // Honest finding: selectorHintForElement does NOT emit [data-ts="..."] today,
-  // so capture loses the per-message anchor. We simulate the contract a future
-  // capture would honor (selector_hint = data-ts attribute) and prove the
-  // restore-time querySelector path resolves the right element on the live DOM.
+  // V14b shipped: selectorHintForElement now prefers data-qa/data-ts/data-block-id
+  // over plain ids and tags. The capture path emits these directly; this test
+  // additionally proves the restore-time querySelector path on a fabricated hint.
   const { doc, win } = parseFixture(readFixture("slack-thread.html"), { innerHeight: 800 });
 
   const targetTs = "1715300050.000200";
@@ -60,27 +59,24 @@ test("slack-thread fixture: data-ts message anchor survives restore via custom h
   assert.equal(highlighted.getAttribute("data-ts"), targetTs);
 });
 
-test("notion-page fixture: capture picks <main role='main'>, restore highlights it", () => {
+test("notion-page fixture: capture picks first data-block-id, restore highlights it", () => {
   const { doc, win } = parseFixture(readFixture("notion-page.html"), { innerHeight: 800 });
 
   const anchor = pickViewportAnchor(doc, win);
   assert.ok(anchor);
-  // <main role="main"> wins over later h1/h2 because document order; role hint
-  // takes precedence over tag in selectorHintForElement.
-  assert.equal(anchor.selector_hint, '[role="main"]');
-  assert.match(anchor.text, /Launch retro/);
+  // V14b shipped: selectorHintForElement now prefers data-block-id (more
+  // deterministic than the [role="main"] landmark which could match many pages).
+  assert.match(anchor.selector_hint, /^\[data-block-id="[0-9a-f-]+"\]$/);
 
   const result = restorePageContext({ scroll: { x: 0, y: 0 }, quote: anchor }, win, doc);
   assert.equal(result.highlightStrategy, "selector");
   const highlighted = doc.querySelector("[data-eventloopos-restore-highlight]");
-  assert.equal(highlighted.tagName.toLowerCase(), "main");
+  assert.ok(highlighted.getAttribute("data-block-id"));
 });
 
 test("notion-page fixture: data-block-id selector survives DOM mutation above the block", () => {
-  // Honest finding: capture does not emit [data-block-id="..."] selector_hint
-  // today (selectorHintForElement falls back to tag). We assert the future
-  // contract: given a data-block-id selector_hint, restore finds the same
-  // block even after a sibling block is inserted above it (shift in offsets).
+  // V14b shipped: capture now emits [data-block-id="..."] directly. This test
+  // proves the selector survives sibling insertion that would shift y-offsets.
   const { doc, win } = parseFixture(readFixture("notion-page.html"), { innerHeight: 800 });
   const targetBlockId = "44444444-aaaa-bbbb-cccc-000000000004";
 
@@ -108,23 +104,20 @@ test("notion-page fixture: data-block-id selector survives DOM mutation above th
   assert.equal(highlighted.getAttribute("data-block-id"), targetBlockId);
 });
 
-test("gdocs-preview fixture: heading id with dot is rejected by hint, falls back to tag", () => {
-  // Honest finding: Google Docs publishes heading anchors as id="h.<token>",
-  // but selectorHintForElement's regex /^[A-Za-z][\w-]*$/ excludes the dot, so
-  // the hint degrades to "h1". This is a real B1 follow-up: the regex should
-  // accept ids that contain a dot if we CSS.escape them on restore.
+test("gdocs-preview fixture: heading id with dot survives via [id=\"…\"] hint", () => {
+  // V14b shipped: ids that don't match the bare-#id regex now degrade to an
+  // [id="…"] attribute selector instead of a bare tag, preserving the anchor.
   const h1 = {
     id: "h.title-anchor",
     tagName: "H1",
     getAttribute: () => null
   };
-  assert.equal(selectorHintForElement(h1), "h1");
+  assert.equal(selectorHintForElement(h1), '[id="h.title-anchor"]');
 });
 
-test("gdocs-preview fixture: published heading anchors resolve via querySelector when emitted", () => {
-  // We assert the future-fix contract: if capture emits the gdocs heading id
-  // as an attribute selector, restore matches the right heading even though
-  // the dot prevents the bare "#h.angle2" form from being a valid CSS id.
+test("gdocs-preview fixture: published heading anchors resolve via [id=\"…\"]", () => {
+  // V14b shipped: capture emits [id="h.angle2"] for ids with dots; restore
+  // resolves the right heading via querySelector on the attribute form.
   const { doc, win } = parseFixture(readFixture("gdocs-preview.html"), { innerHeight: 800 });
 
   const quote = {

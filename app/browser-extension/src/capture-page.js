@@ -57,6 +57,7 @@ function highlightRestoredQuote(quote, doc) {
       if (element) {
         installHighlightStyle(doc);
         element.setAttribute(HIGHLIGHT_ATTRIBUTE, "selector");
+        scrollElementIntoView(element);
         return { ok: true, strategy: "selector" };
       }
     } catch {
@@ -83,6 +84,7 @@ function highlightRestoredQuote(quote, doc) {
       try {
         installHighlightStyle(doc);
         range.surroundContents(mark);
+        scrollElementIntoView(mark);
         return { ok: true, strategy: "text" };
       } catch {
         return { ok: false, strategy: "range_failed" };
@@ -92,6 +94,15 @@ function highlightRestoredQuote(quote, doc) {
   }
 
   return { ok: false, strategy: "quote_not_found" };
+}
+
+function scrollElementIntoView(element) {
+  if (typeof element?.scrollIntoView !== "function") return;
+  try {
+    element.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+  } catch {
+    try { element.scrollIntoView(); } catch { /* element detached */ }
+  }
 }
 
 function clearRestoreHighlights(doc) {
@@ -207,11 +218,18 @@ function safeBoundingRect(element) {
   }
 }
 
+const PROVIDER_DATA_ATTRIBUTES = ["data-block-id", "data-ts", "data-message-id", "data-qa"];
+
 export function selectorHintForElement(element) {
   if (!element) return undefined;
+  for (const attr of PROVIDER_DATA_ATTRIBUTES) {
+    const value = element.getAttribute?.(attr);
+    if (value) return `[${attr}="${escapeAttrValue(value)}"]`;
+  }
   const id = typeof element.id === "string" ? element.id.trim() : "";
-  if (id && /^[A-Za-z][\w-]*$/.test(id)) {
-    return `#${id}`;
+  if (id) {
+    if (/^[A-Za-z][\w-]*$/.test(id)) return `#${id}`;
+    return `[id="${escapeAttrValue(id)}"]`;
   }
   const role = element.getAttribute?.("role");
   if (role === "main") return "[role=\"main\"]";
@@ -221,6 +239,10 @@ export function selectorHintForElement(element) {
   if (tag === "article") return "article";
   if (tag && /^h[1-6]$/.test(tag)) return tag;
   return undefined;
+}
+
+function escapeAttrValue(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, "\\\"");
 }
 
 function textBefore(selection) {

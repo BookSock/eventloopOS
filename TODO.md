@@ -21,7 +21,7 @@ Live list of code gaps for the full vision. Sorted into **Build**, **Verify** (b
 - [ ] **V12. Onboarding scan → approve → first paper → done** as a real Mac flow with real windows and real Codex threads. Live proof exercises sub-steps; full happy path not done.
 - [ ] **V13. Manual mode → real desktop returns → return to loop → original workbench back.** Exists in code; never run with real personal layout.
 - [x] **V14. Browser extension anchor restore on actual Slack/Notion/Docs sites** ~~with real allowed-origins config. Handlers shipped; never opened against real sites.~~ ✅ Shipped 2026-05-10: fixture-DOM proof against synthesized Slack `data-qa`, Notion `data-block-id`, Google Docs `id="h.&lt;token&gt;"` shapes. Real-site click-test still needs Jason at the keyboard (V14b below).
-- [ ] **V14b. B1 follow-up bugs surfaced by V14 fixture proof.** (1) `selectorHintForElement` never emits provider data-attributes (`data-block-id`, `data-ts`, `data-message-id`, `data-qa`) — viewport-anchor loses the deterministic per-block/per-message hook. (2) Heading-id regex `^[A-Za-z][\w-]*$` rejects Google Docs `h.&lt;token&gt;` pattern → ambiguous bare-tag fallback. (3) `restorePageContext` highlights but does not `scrollIntoView` on the viewport-anchor path; relies on saved `scroll.y` even when content shifted.
+- [x] **V14b. B1 follow-up bugs surfaced by V14 fixture proof.** ~~(1) `selectorHintForElement` never emits provider data-attributes (`data-block-id`, `data-ts`, `data-message-id`, `data-qa`) — viewport-anchor loses the deterministic per-block/per-message hook. (2) Heading-id regex `^[A-Za-z][\w-]*$` rejects Google Docs `h.&lt;token&gt;` pattern → ambiguous bare-tag fallback. (3) `restorePageContext` highlights but does not `scrollIntoView` on the viewport-anchor path; relies on saved `scroll.y` even when content shifted.~~ ✅ Shipped 2026-05-10: `selectorHintForElement` now prefers provider data-attrs, falls back to `[id="…"]` for non-bare ids; `restorePageContext` scrolls the matched element into view.
 - [x] **V15. Master fan-out with `idle_min_seconds` filter against real running Codex threads** ~~(uses `inspectCodexSession` rollout file). Unit-tested, never run against real `~/.codex/sessions/`.~~ ✅ Shipped 2026-05-10: fixture-driven CI test + `bin/v15-master-fanout-idle-filter-smoke` proof. `codexHome` injection flows runtime → master route → inspector.
 
 ## Polish
@@ -34,4 +34,4 @@ Live list of code gaps for the full vision. Sorted into **Build**, **Verify** (b
 
 ---
 
-Last updated: 2026-05-10 (B3, B5, V15, P18, P19, P20, V14 landed today; V14b bugs filed).
+Last updated: 2026-05-10 (B3, B5, V15, P18, P19, P20, V14, V14b all landed today).

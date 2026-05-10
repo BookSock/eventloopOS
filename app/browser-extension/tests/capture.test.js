@@ -400,9 +400,18 @@ test("pickViewportAnchor truncates long text to 120 chars", () => {
   assert.equal(anchor.text.length, 120);
 });
 
-test("selectorHintForElement rejects ids with invalid CSS characters", () => {
+test("selectorHintForElement uses [id=\"…\"] form for ids with invalid bare-#id characters", () => {
   const element = { id: "has space", tagName: "H2", getAttribute: () => null };
-  assert.equal(selectorHintForElement(element), "h2");
+  assert.equal(selectorHintForElement(element), '[id="has space"]');
+});
+
+test("selectorHintForElement prefers data-block-id over tag", () => {
+  const element = {
+    id: "",
+    tagName: "DIV",
+    getAttribute: (name) => (name === "data-block-id" ? "uuid-123" : null)
+  };
+  assert.equal(selectorHintForElement(element), '[data-block-id="uuid-123"]');
 });
 
 test("capturePageContext picks viewport anchor when no selection or fixture marker", () => {
