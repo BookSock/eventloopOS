@@ -1,0 +1,166 @@
+#!/usr/bin/env node
+// V8 — extends the tmux keystroke smoke to drive a real `codex` CLI subprocess
+// in a sacrificial tmux pane. Proves that the orchestrator's terminal_send leg
+// (the same code path that backs Send-to-Agent) lands its message text into a
+// pane occupied by the actual Codex binary, not a no-op shell. The pane
+// content is captured back via `tmux capture-pane` and asserted to contain the
+// outgoing message — that's the keystroke proof. We do NOT assert anything
+// about Codex's reply (auth/network/model can vary).
+//
+// Gate: skipped unless EVENTLOOPOS_ENABLE_REAL_CODEX_HANDOFF_SMOKE=1.
+// Skips with PASS-NOOP if `codex` or `tmux` is not on PATH.
+//
+// Optional env:
+//   EVENTLOOPOS_REAL_CODEX_BIN     override codex binary (default "codex")
+//   EVENTLOOPOS_REAL_CODEX_ARGS    JSON array of args for the codex subprocess
+//                                  (default '[]' — interactive REPL mode).
+//                                  Example: '["exec","-"]' to keep codex
+//                                  reading stdin in non-interactive mode.
+//   EVENTLOOPOS_REAL_CODEX_BOOT_MS milliseconds to wait for codex to settle
+//                                  in the pane before keystroke (default 4000)
+//   EVENTLOOPOS_REAL_CODEX_SETTLE_MS milliseconds to wait after keystroke
+//                                  before capturing pane (default 1500)
+
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+const execFileP = promisify(execFile);
+
+if (process.env.EVENTLOOPOS_ENABLE_REAL_CODEX_HANDOFF_SMOKE !== "1") {
+  console.log("v8 real codex handoff smoke skipped: set EVENTLOOPOS_ENABLE_REAL_CODEX_HANDOFF_SMOKE=1");
+  process.exit(0);
+}
+
+const codexBin = process.env.EVENTLOOPOS_REAL_CODEX_BIN ?? "codex";
+const tmuxBin = "tmux";
+
+if (!(await toolOnPath(codexBin))) {
+  console.log(`v8 real codex handoff smoke skipped: '${codexBin}' not on PATH`);
+  process.exit(0);
+}
+if (!(await toolOnPath(tmuxBin))) {
+  console.log("v8 real codex handoff smoke skipped: 'tmux' not on PATH");
+  process.exit(0);
+}
+
+const here = fileURLToPath(import.meta.url);
+const orchestratorRoot = path.resolve(here, "../..");
+const adapterUrl = new URL("../src/task_sessions/terminal_task_session_adapter.mjs", import.meta.url);
+const { buildTerminalSendPlan, buildTaskMessageText } = await import(adapterUrl.href);
+
+const sessionName = `eventloopos-v8-${process.pid}`;
+const bootMs = Number.parseInt(process.env.EVENTLOOPOS_REAL_CODEX_BOOT_MS ?? "4000", 10);
+const settleMs = Number.parseInt(process.env.EVENTLOOPOS_REAL_CODEX_SETTLE_MS ?? "1500", 10);
+const codexArgs = parseJsonArrayEnv(process.env.EVENTLOOPOS_REAL_CODEX_ARGS, []);
+
+const marker = `V8-${process.pid}-${Date.now().toString(36)}`;
+const messageText = buildTaskMessageText({
+  mode: "followup",
+  text: `V8 smoke marker ${marker}: please reply with V8-ACK ${marker}`,
+  event_ids: [`evt_v8_${marker}`],
+});
+const terminalRef = `tmux:${sessionName}`;
+
+let cleanup = false;
+let captureSnippet = "";
+
+try {
+  console.log(`v8 codex bin: ${codexBin}`);
+  console.log(`v8 codex args: ${JSON.stringify(codexArgs)}`);
+  console.log(`v8 tmux session: ${sessionName}`);
+  console.log(`v8 marker: ${marker}`);
+
+  await runChecked(tmuxBin, [
+    "new-session", "-d", "-s", sessionName, "-x", "200", "-y", "50",
+    codexBin, ...codexArgs,
+  ]);
+  cleanup = true;
+
+  await sleep(bootMs);
+
+  const plan = buildTerminalSendPlan({ terminalRef, text: messageText, submit: false });
+  if (plan.length === 0) throw new Error("terminal_send plan is empty");
+  for (const command of plan) {
+    if (command.file !== tmuxBin) {
+      throw new Error(`unexpected non-tmux command in plan: ${command.file}`);
+    }
+    await execFileP(command.file, command.args);
+  }
+
+  await sleep(settleMs);
+
+  const { stdout: capture } = await execFileP(tmuxBin, ["capture-pane", "-p", "-t", sessionName]);
+  captureSnippet = capture.length > 4000 ? `${capture.slice(0, 2000)}\n...[truncated]...\n${capture.slice(-2000)}` : capture;
+
+  const messageLanded = capture.includes(marker);
+  if (!messageLanded) {
+    throw new Error(`tmux pane did not contain marker ${marker}. captured pane:\n${captureSnippet}`);
+  }
+
+  const result = {
+    ok: true,
+    test: "v8-real-codex-handoff-smoke",
+    codex_bin: codexBin,
+    codex_args: codexArgs,
+    tmux_session: sessionName,
+    marker,
+    message_text_first_line: messageText.split("\n")[0],
+    plan_command_count: plan.length,
+    pane_contained_marker: true,
+  };
+  console.log(JSON.stringify(result, null, 2));
+  console.log("v8 real codex handoff smoke: PASS");
+} catch (error) {
+  console.error("v8 real codex handoff smoke: FAIL");
+  console.error(error instanceof Error ? error.stack ?? error.message : String(error));
+  if (captureSnippet) {
+    console.error(`pane capture:\n${captureSnippet}`);
+  }
+  process.exitCode = 1;
+} finally {
+  if (cleanup) {
+    try {
+      await runChecked(tmuxBin, ["kill-session", "-t", sessionName]);
+    } catch {
+      // best effort
+    }
+  }
+}
+
+function parseJsonArrayEnv(value, fallback) {
+  if (!value) return fallback;
+  try {
+    const parsed = JSON.parse(value);
+    if (!Array.isArray(parsed)) throw new Error("not an array");
+    return parsed.map((item) => String(item));
+  } catch (caught) {
+    throw new Error(`EVENTLOOPOS_REAL_CODEX_ARGS must be a JSON array of strings: ${caught instanceof Error ? caught.message : String(caught)}`);
+  }
+}
+
+function toolOnPath(tool) {
+  return new Promise((resolve) => {
+    const child = spawn("which", [tool], { stdio: ["ignore", "ignore", "ignore"] });
+    child.on("error", () => resolve(false));
+    child.on("exit", (code) => resolve(code === 0));
+  });
+}
+
+async function runChecked(file, args) {
+  await new Promise((resolve, reject) => {
+    const child = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr?.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.on("error", reject);
+    child.on("exit", (code, signal) => {
+      if (code === 0) resolve();
+      else reject(new Error(`${file} ${args.join(" ")} exited with ${signal ?? code}\n${stderr}`));
+    });
+  });
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
