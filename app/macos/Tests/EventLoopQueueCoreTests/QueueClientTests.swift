@@ -715,6 +715,44 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(result.queuedPaper?.state, "ready")
     }
 
+    func testHTTPQueueClientApprovesEditedOnboardingProposal() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/onboarding/approvals")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: Any])
+            XCTAssertEqual(body["proposal_id"] as? String, "onboard_blog")
+            XCTAssertEqual(body["task_id"] as? String, "task_launch_blog")
+            XCTAssertEqual(body["window_ids"] as? [Int], [101])
+            XCTAssertEqual(body["task_session_ids"] as? [String], ["task_session_blog"])
+            XCTAssertEqual(body["browser_context_ids"] as? [String], ["browser_tab:77"])
+            XCTAssertEqual(body["queue_paper"] as? Bool, true)
+            return """
+            {
+              "ok": true,
+              "task_id": "task_launch_blog",
+              "proposal_id": "onboard_blog",
+              "bindings": [],
+              "browser_context_bindings": [],
+              "warnings": [],
+              "request_id": "req_approve"
+            }
+            """
+        }
+
+        let result = try await client.approveOnboardingProposal(OnboardingApprovalRequest(
+            proposalId: "onboard_blog",
+            taskId: "task_launch_blog",
+            windowIds: [101],
+            taskSessionIds: ["task_session_blog"],
+            browserContextIds: ["browser_tab:77"],
+            queuePaper: true
+        ))
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.taskId, "task_launch_blog")
+    }
+
     func testHTTPQueueClientBatchApprovesOnboardingProposals() async throws {
         let (client, recorder) = makeHTTPClient { request in
             XCTAssertEqual(request.httpMethod, "POST")

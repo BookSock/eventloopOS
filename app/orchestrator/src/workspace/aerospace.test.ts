@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   AerospaceWorkspaceAdapter,
+  captureFocusedWindowPlan,
+  captureFocusedWorkspacePlan,
   captureWorkspacePlan,
   focusWindowPlan,
   moveToWorkspacePlan,
@@ -122,6 +124,10 @@ describe("Aerospace workspace adapter", () => {
     const calls: { command: string; args: string[] }[] = [];
     const exec: ExecFunction = async (command, args) => {
       calls.push({ command, args });
+      if (args[0] === "list-workspaces") return { stdout: "dev\n" };
+      if (args[0] === "list-windows" && args.includes("--focused")) {
+        return { stdout: JSON.stringify([{ "window-id": 3, workspace: "dev" }]) };
+      }
       return {
         stdout: JSON.stringify([{ "window-id": 3, "app-name": "Terminal", "window-title": "shell", workspace: "dev" }]),
       };
@@ -130,7 +136,9 @@ describe("Aerospace workspace adapter", () => {
     const adapter = new AerospaceWorkspaceAdapter(exec);
     const snapshot = await adapter.capture();
 
-    assert.deepEqual(calls, [captureWorkspacePlan()]);
+    assert.deepEqual(calls, [captureWorkspacePlan(), captureFocusedWorkspacePlan(), captureFocusedWindowPlan()]);
+    assert.equal(snapshot.activeWorkspace, "dev");
+    assert.equal(snapshot.focusedWindowId, 3);
     assert.deepEqual(snapshot.windows, [
       {
         id: 3,

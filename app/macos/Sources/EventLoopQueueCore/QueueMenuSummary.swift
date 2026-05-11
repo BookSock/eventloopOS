@@ -73,6 +73,10 @@ public struct QueueMenuSummary: Equatable, Sendable {
             return "Workspace plan: \(plan.commands.count) commands"
         case let .executed(receipt):
             return "Workspace restored: \(receipt.commands.count) commands"
+        case let .savedTaskLayout(taskId):
+            return "Task layout saved: \(taskId)"
+        case .keptCurrentLayout:
+            return "Returned without moving windows"
         case .failed:
             return "Workspace restore failed"
         }

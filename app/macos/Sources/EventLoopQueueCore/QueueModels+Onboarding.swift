@@ -309,17 +309,37 @@ public enum OnboardingState: Equatable, Sendable {
 
 public struct OnboardingApprovalRequest: Encodable, Equatable, Sendable {
     public let proposalId: String
+    public let taskId: String?
+    public let windowIds: [Int]?
+    public let taskSessionIds: [String]?
+    public let browserContextIds: [String]?
     public let queuePaper: Bool
     public let actorId: String
 
-    public init(proposalId: String, queuePaper: Bool = false, actorId: String = "mac_queue_app") {
+    public init(
+        proposalId: String,
+        taskId: String? = nil,
+        windowIds: [Int]? = nil,
+        taskSessionIds: [String]? = nil,
+        browserContextIds: [String]? = nil,
+        queuePaper: Bool = false,
+        actorId: String = "mac_queue_app"
+    ) {
         self.proposalId = proposalId
+        self.taskId = taskId
+        self.windowIds = windowIds
+        self.taskSessionIds = taskSessionIds
+        self.browserContextIds = browserContextIds
         self.queuePaper = queuePaper
         self.actorId = actorId
     }
 
     enum CodingKeys: String, CodingKey {
         case proposalId = "proposal_id"
+        case taskId = "task_id"
+        case windowIds = "window_ids"
+        case taskSessionIds = "task_session_ids"
+        case browserContextIds = "browser_context_ids"
         case queuePaper = "queue_paper"
         case actorId = "actor_id"
     }

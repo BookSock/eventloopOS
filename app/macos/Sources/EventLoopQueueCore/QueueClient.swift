@@ -19,6 +19,7 @@ public protocol QueueClient: Sendable {
     func startMasterTask(text: String, taskHint: String?, cwd: String?, model: String?, workspaceSnapshot: WorkspaceSnapshot?) async throws -> TaskSessionStartResult
     func fetchOnboardingScan() async throws -> OnboardingScan
     func approveOnboardingProposal(id: String, queuePaper: Bool) async throws -> OnboardingApprovalResult
+    func approveOnboardingProposal(_ request: OnboardingApprovalRequest) async throws -> OnboardingApprovalResult
     func batchApproveOnboardingProposals(approvals: [OnboardingApprovalRequest], idempotencyKey: String) async throws -> OnboardingApprovalBatchResult
     func setManualMode(active: Bool, reason: String?) async throws -> ManualModeState
     func getManualMode() async throws -> ManualModeState
@@ -56,6 +57,10 @@ public extension QueueClient {
 
     func approveOnboardingProposal(id: String) async throws -> OnboardingApprovalResult {
         try await approveOnboardingProposal(id: id, queuePaper: false)
+    }
+
+    func approveOnboardingProposal(id: String, queuePaper: Bool) async throws -> OnboardingApprovalResult {
+        try await approveOnboardingProposal(OnboardingApprovalRequest(proposalId: id, queuePaper: queuePaper))
     }
 
     func bindTaskSession(sessionId: String, taskId: String) async throws -> TaskBinding {
@@ -339,15 +344,19 @@ public struct HTTPQueueClient: QueueClient {
     }
 
     public func approveOnboardingProposal(id: String, queuePaper: Bool = false) async throws -> OnboardingApprovalResult {
-        let url = baseURL.appending(path: "onboarding/approvals")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try encoder.encode(OnboardingApprovalRequest(
+        try await approveOnboardingProposal(OnboardingApprovalRequest(
             proposalId: id,
             queuePaper: queuePaper,
             actorId: "mac_queue_app"
         ))
+    }
+
+    public func approveOnboardingProposal(_ approval: OnboardingApprovalRequest) async throws -> OnboardingApprovalResult {
+        let url = baseURL.appending(path: "onboarding/approvals")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(approval)
 
         let (data, response) = try await session.data(for: request)
         try validate(response: response)

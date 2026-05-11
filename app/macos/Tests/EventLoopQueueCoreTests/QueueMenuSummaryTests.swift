@@ -107,6 +107,19 @@ final class QueueMenuSummaryTests: XCTestCase {
         XCTAssertEqual(summary.workspaceRestoreLabel, "Workspace restored: 2 commands")
     }
 
+    func testSummaryShowsReturnedHereStatus() {
+        let summary = QueueMenuSummary(
+            packets: SeededQueue.packets,
+            selectedPacket: SeededQueue.packets[0],
+            queueState: .loaded,
+            mode: .eventLoop,
+            contextRestoreState: .idle,
+            workspaceRestoreState: .keptCurrentLayout
+        )
+
+        XCTAssertEqual(summary.workspaceRestoreLabel, "Returned without moving windows")
+    }
+
     func testSummaryShowsRecommendedActionBlockReason() {
         let summary = QueueMenuSummary(
             packets: SeededQueue.packets,

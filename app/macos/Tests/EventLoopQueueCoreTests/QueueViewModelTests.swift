@@ -453,6 +453,56 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
     }
 
+    func testSaveSelectedTaskLayoutCapturesCurrentDeskForPacketTask() async {
+        let captured = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 71, app: "Ghostty", title: "Blog agent", workspace: "eventloop-blog"),
+                WorkspaceWindow(id: 72, app: "Google Chrome", title: "Blog draft", workspace: "eventloop-blog")
+            ],
+            activeWorkspace: "eventloop-blog",
+            focusedWindowId: 71
+        )
+        let packet = ReviewPacket(
+            id: "packet-blog",
+            reviewPacketId: "review-blog",
+            taskId: "task_blog",
+            title: "Blog",
+            summary: "Review blog",
+            decisionNeeded: "Review",
+            source: "test",
+            priority: 700,
+            riskLevel: "low",
+            confidence: "high",
+            riskTags: [],
+            contextResources: [],
+            recommendedAction: "Done",
+            recommendedActionType: "mark_done",
+            createdAt: Date(timeIntervalSince1970: 1_778_070_000)
+        )
+        let client = FakeQueueClient(packets: [packet])
+        client.setFakeTasks([
+            TaskRecord(
+                taskId: "task_blog",
+                primaryAnchorKind: .ghosttyWindow,
+                primaryAnchorId: "71",
+                createdAt: Date(timeIntervalSince1970: 1_778_070_000),
+                updatedAt: Date(timeIntervalSince1970: 1_778_070_000)
+            )
+        ])
+        let viewModel = QueueViewModel(
+            client: client,
+            workspaceClient: FakeWorkspaceClient(captureSnapshot: captured),
+            initialPackets: [packet]
+        )
+
+        await viewModel.saveSelectedTaskLayout()
+
+        XCTAssertEqual(client.updateTaskLayoutRequests.count, 1)
+        XCTAssertEqual(client.updateTaskLayoutRequests.first?.taskId, "task_blog")
+        XCTAssertEqual(client.updateTaskLayoutRequests.first?.layout, captured)
+        XCTAssertEqual(viewModel.workspaceRestoreState, WorkspaceRestoreState.savedTaskLayout("task_blog"))
+    }
+
     func testDeferSelectedPacketAdvances() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
@@ -901,7 +951,13 @@ final class QueueViewModelTests: XCTestCase {
             activeWorkspace: "eventloop-launch",
             focusedWindowId: 301
         )
-        let client = FakeQueueClient(packets: [])
+        let client = FakeQueueClient(
+            packets: [],
+            taskSessions: [
+                TaskSession(id: "session_blog", provider: "fake", status: "idle"),
+                TaskSession(id: "session_email", provider: "fake", status: "idle")
+            ]
+        )
         let workspaceClient = FakeWorkspaceClient(captureSnapshot: snapshot)
         let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
 
@@ -1438,6 +1494,67 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(workspaceClient.restorePlanSnapshots.first?.activeWorkspace, "eventloop-blog")
     }
 
+    func testApproveEditedOnboardingDraftSendsSelectedResources() async {
+        let client = FakeQueueClient(packets: [])
+        let scan = OnboardingScan(
+            ok: true,
+            capturedAt: Date(timeIntervalSince1970: 1_778_070_000),
+            summary: OnboardingScanSummary(
+                windowCount: 2,
+                groupedWindowCount: 2,
+                ungroupedWindowCount: 0,
+                taskSessionCount: 1,
+                browserContextCount: 1,
+                proposalCount: 1
+            ),
+            proposals: [
+                OnboardingTaskProposal(
+                    id: "onboard_blog",
+                    taskId: "task_blog_feedback",
+                    title: "Blog Feedback",
+                    confidence: "medium",
+                    reason: "window title",
+                    windows: [
+                        OnboardingWindow(id: 91, app: "Ghostty", title: "Blog agent", workspace: "eventloop-blog"),
+                        OnboardingWindow(id: 92, app: "Spotify", title: "Music", workspace: "eventloop-blog")
+                    ],
+                    browserContexts: [
+                        OnboardingBrowserContext(
+                            id: "browser_tab:77",
+                            title: "Blog draft",
+                            url: "https://example.test/blog",
+                            capturedAt: Date(timeIntervalSince1970: 1_778_070_000),
+                            restoreConfidence: "high"
+                        )
+                    ],
+                    taskSessions: [
+                        TaskSession(id: "task_session_blog", provider: "fake", status: "idle", name: "Blog thread")
+                    ],
+                    suggestedNextAction: "Approve."
+                )
+            ]
+        )
+        client.replaceOnboardingScan(scan)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.scanOnboarding()
+
+        let proposal = try! XCTUnwrap(scan.proposals.first)
+        await viewModel.approveOnboardingDraft(
+            proposal: proposal,
+            taskId: "Launch Blog",
+            windowIds: [91],
+            taskSessionIds: ["task_session_blog"],
+            browserContextIds: ["browser_tab:77"],
+            queuePaper: true
+        )
+
+        XCTAssertEqual(client.approvedOnboardingProposalIds, ["onboard_blog"])
+        XCTAssertEqual(client.boundTaskSessions.map(\.taskId), ["task_launch_blog"])
+        XCTAssertEqual(viewModel.packets.map(\.taskId), ["task_launch_blog"])
+        XCTAssertEqual(viewModel.selectedPacket?.workspaceSnapshot?.windows.map(\.id), [91])
+        XCTAssertEqual(viewModel.selectedPacket?.contextResources.map(\.id), ["browser_tab:77"])
+    }
+
     func testApproveAllOnboardingProposalsQueuesWorkbenchPapers() async {
         let scan = OnboardingScan(
             ok: true,
@@ -1473,7 +1590,13 @@ final class QueueViewModelTests: XCTestCase {
                 )
             ]
         )
-        let client = FakeQueueClient(packets: [])
+        let client = FakeQueueClient(
+            packets: [],
+            taskSessions: [
+                TaskSession(id: "session_blog", provider: "fake", status: "idle"),
+                TaskSession(id: "session_email", provider: "fake", status: "idle")
+            ]
+        )
         client.replaceOnboardingScan(scan)
         let viewModel = QueueViewModel(client: client)
         await viewModel.scanOnboarding()
@@ -1530,7 +1653,13 @@ final class QueueViewModelTests: XCTestCase {
                 )
             ]
         )
-        let client = FakeQueueClient(packets: [])
+        let client = FakeQueueClient(
+            packets: [],
+            taskSessions: [
+                TaskSession(id: "session_blog", provider: "fake", status: "idle"),
+                TaskSession(id: "session_email", provider: "fake", status: "idle")
+            ]
+        )
         client.replaceOnboardingScan(scan)
         let viewModel = QueueViewModel(client: client)
         await viewModel.scanOnboarding()
@@ -1600,6 +1729,105 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(client.batchApprovalRequests.first?.approvals.count, 3)
         XCTAssertEqual(client.batchApprovalRequests.first?.approvals.map(\.proposalId), ["onboard_a", "onboard_b", "onboard_c"])
         XCTAssertEqual(client.batchApprovalRequests.first?.approvals.allSatisfy(\.queuePaper), true)
+    }
+
+    func testApproveEditedOnboardingRequestsBatchesDrafts() async {
+        let scan = OnboardingScan(
+            ok: true,
+            capturedAt: Date(timeIntervalSince1970: 1_778_080_000),
+            activeWorkspace: "desk",
+            focusedWindowId: 501,
+            summary: OnboardingScanSummary(
+                windowCount: 2,
+                groupedWindowCount: 2,
+                ungroupedWindowCount: 0,
+                taskSessionCount: 2,
+                browserContextCount: 2,
+                proposalCount: 2
+            ),
+            proposals: [
+                OnboardingTaskProposal(
+                    id: "onboard_blog",
+                    taskId: "task_blog",
+                    title: "Blog",
+                    confidence: "medium",
+                    reason: "window title",
+                    windows: [
+                        OnboardingWindow(id: 501, app: "Ghostty", title: "Blog", workspace: "blog"),
+                        OnboardingWindow(id: 502, app: "Music", title: "Wrong", workspace: "blog")
+                    ],
+                    browserContexts: [
+                        OnboardingBrowserContext(
+                            id: "browser_tab:blog",
+                            title: "Blog draft",
+                            capturedAt: Date(timeIntervalSince1970: 1_778_080_000),
+                            restoreConfidence: "high"
+                        )
+                    ],
+                    taskSessions: [
+                        TaskSession(id: "session_blog", provider: "fake", status: "idle")
+                    ],
+                    suggestedNextAction: "Approve."
+                ),
+                OnboardingTaskProposal(
+                    id: "onboard_email",
+                    taskId: "task_email",
+                    title: "Email",
+                    confidence: "medium",
+                    reason: "window title",
+                    windows: [OnboardingWindow(id: 601, app: "Google Chrome", title: "Email", workspace: "email")],
+                    browserContexts: [
+                        OnboardingBrowserContext(
+                            id: "browser_tab:email",
+                            title: "Email",
+                            capturedAt: Date(timeIntervalSince1970: 1_778_080_000),
+                            restoreConfidence: "high"
+                        )
+                    ],
+                    taskSessions: [
+                        TaskSession(id: "session_email", provider: "fake", status: "idle")
+                    ],
+                    suggestedNextAction: "Approve."
+                )
+            ]
+        )
+        let client = FakeQueueClient(
+            packets: [],
+            taskSessions: [
+                TaskSession(id: "session_blog", provider: "fake", status: "idle"),
+                TaskSession(id: "session_email", provider: "fake", status: "idle")
+            ]
+        )
+        client.replaceOnboardingScan(scan)
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.approveOnboardingRequests([
+            OnboardingApprovalRequest(
+                proposalId: "onboard_blog",
+                taskId: "Launch Blog",
+                windowIds: [501],
+                taskSessionIds: ["session_blog"],
+                browserContextIds: ["browser_tab:blog"],
+                queuePaper: true
+            ),
+            OnboardingApprovalRequest(
+                proposalId: "onboard_email",
+                taskId: "Email Replies",
+                windowIds: [601],
+                taskSessionIds: ["session_email"],
+                browserContextIds: ["browser_tab:email"],
+                queuePaper: true
+            )
+        ])
+
+        XCTAssertEqual(client.batchApprovalRequests.count, 1)
+        XCTAssertEqual(client.batchApprovalRequests.first?.approvals.map(\.proposalId), ["onboard_blog", "onboard_email"])
+        XCTAssertEqual(client.batchApprovalRequests.first?.approvals.map(\.taskId), ["task_launch_blog", "task_email_replies"])
+        XCTAssertEqual(client.batchApprovalRequests.first?.approvals.first?.windowIds, [501])
+        XCTAssertEqual(client.batchApprovalRequests.first?.approvals.first?.taskSessionIds, ["session_blog"])
+        XCTAssertEqual(client.batchApprovalRequests.first?.approvals.first?.browserContextIds, ["browser_tab:blog"])
+        XCTAssertEqual(client.boundTaskSessions.map(\.taskId), ["task_launch_blog", "task_email_replies"])
+        XCTAssertEqual(viewModel.packets.map(\.taskId), ["task_launch_blog", "task_email_replies"])
     }
 
     func testApproveAllOnboardingProposalsRetriesTransientWithSameIdempotencyKey() async {
@@ -1887,6 +2115,33 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.confirmManualWorkspaceRestore()
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .failed("No manual workspace snapshot saved"))
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [])
+    }
+
+    func testReturnToEventLoopKeepingCurrentLayoutDoesNotRestoreWorkspace() async {
+        let manualSnapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 41, app: "Google Chrome", title: "Manual browsing", workspace: "manual")
+            ],
+            activeWorkspace: "manual",
+            focusedWindowId: 41
+        )
+        let workspaceClient = FakeWorkspaceClient(captureSnapshot: manualSnapshot)
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+
+        await viewModel.enterManualMode()
+        await viewModel.returnToEventLoopModeKeepingCurrentLayout()
+
+        XCTAssertEqual(viewModel.mode, .eventLoop)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
+        XCTAssertEqual(viewModel.manualWorkspaceSnapshot, manualSnapshot)
+        XCTAssertEqual(viewModel.manualWorkspaceCaptureState, .captured(manualSnapshot))
+        XCTAssertEqual(viewModel.workspaceRestoreState, .keptCurrentLayout)
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
+        XCTAssertEqual(workspaceClient.restorePlanSnapshots, [])
         XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [])
     }
 

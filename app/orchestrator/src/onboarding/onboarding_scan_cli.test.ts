@@ -16,6 +16,7 @@ describe("onboarding scan CLI", () => {
       proposalId: undefined,
       windowIds: [],
       taskSessionIds: [],
+      browserContextIds: [],
       queuePaper: false,
     });
   });
@@ -28,6 +29,7 @@ describe("onboarding scan CLI", () => {
       format: "text",
       windowIds: [],
       taskSessionIds: [],
+      browserContextIds: [],
       queuePaper: false,
       stdout: { write: (chunk: string) => { output += chunk; return true; } },
       fetchFn: async () => new Response(JSON.stringify({
@@ -62,6 +64,7 @@ describe("onboarding scan CLI", () => {
       format: "agent",
       windowIds: [],
       taskSessionIds: [],
+      browserContextIds: [],
       queuePaper: false,
       stdout: { write: (chunk: string) => { output += chunk; return true; } },
       fetchFn: async () => new Response(JSON.stringify({
@@ -103,6 +106,7 @@ describe("onboarding scan CLI", () => {
       proposalId: "onboard_blog",
       windowIds: [1, 2],
       taskSessionIds: ["codex_thread_abc"],
+      browserContextIds: ["browser_tab:42"],
       queuePaper: true,
       stdout: { write: (chunk: string) => { output += chunk; return true; } },
       fetchFn: async (url, init) => {
@@ -119,6 +123,7 @@ describe("onboarding scan CLI", () => {
       proposal_id: "onboard_blog",
       window_ids: [1, 2],
       task_session_ids: ["codex_thread_abc"],
+      browser_context_ids: ["browser_tab:42"],
       queue_paper: true,
       actor_id: "onboarding_cli",
     });
@@ -138,5 +143,17 @@ describe("onboarding scan CLI", () => {
     assert.equal(options.command, "apply");
     assert.equal(options.proposalId, "onboard_abc");
     assert.equal(options.queuePaper, true);
+  });
+
+  it("parses browser context selectors", () => {
+    const options = onboardingScanOptionsFromEnvAndArgv({}, [
+      "apply",
+      "--browser-context",
+      "browser_tab:1,browser_tab:2",
+      "--tab",
+      "browser_tab:3",
+    ]);
+
+    assert.deepEqual(options.browserContextIds, ["browser_tab:1", "browser_tab:2", "browser_tab:3"]);
   });
 });

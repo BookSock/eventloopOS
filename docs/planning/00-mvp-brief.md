@@ -35,7 +35,7 @@ Pain already sharp: agents create more output than user can inspect. Work gets l
 4. System creates review packet: evidence, risk, confidence, next decision.
 5. Queue ranks all human-blocked work.
 6. User presses one hotkey.
-7. System opens/focuses context: Slack thread, PR, doc, terminal, agent thread, browser tab.
+7. System switches/restores task workspace context: Slack thread, PR, doc, terminal, agent thread, browser tab. On one monitor this is usually one AeroSpace workspace; on multiple monitors it may be the visible set of workspaces.
 8. User approves, rejects, edits, defers, or marks done.
 9. System resumes agents, advances to next queue item.
 
@@ -45,6 +45,7 @@ UX model:
 - Queue is like incoming papers on a desk.
 - Only one paper is active at a time.
 - Background agents reshuffle intake by priority.
+- Useful windows may follow across task contexts by default until user dismisses or unshares them.
 - System does not aggressively interrupt normal computer use in MVP.
 
 Escape hatch:
@@ -52,8 +53,8 @@ Escape hatch:
 - User can press a manual-mode hotkey anytime.
 - Manual mode stops automatic workspace switching/restores.
 - Queue and background agents keep running.
-- Current windows stay where user left them unless user explicitly returns to event-loop mode.
-- Returning to event-loop mode snapshots the manual layout, then restores next queued task context. The user can later restore that normal-computer layout from Manual Mode.
+- Current windows stay where user left them unless user explicitly chooses restore.
+- Returning from manual mode has two paths: restore the saved pre-loop desktop, or keep the manual layout and resume the queue without moving windows.
 - If restore confidence is low, system shows briefing/links without moving windows.
 
 ## MVP Scope
@@ -66,7 +67,7 @@ Build:
 - MCP/poll-first ingestion for Slack/GitHub/local sources.
 - Push webhooks/Socket Mode later where setup friction worth it.
 - Codex adapter first, Claude adapter second.
-- Workspace restore that opens/focuses URLs, apps, files, tabs, terminals.
+- Workspace restore that opens/focuses URLs, apps, files, tabs, terminals, task workspaces, and best-effort focused window/stacking order.
 - Manual-mode escape hatch so user can leave event loop and use computer normally.
 - Local activity history and dogfood metrics so user can inspect what happened.
 

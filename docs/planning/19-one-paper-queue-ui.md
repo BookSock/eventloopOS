@@ -27,6 +27,13 @@ Current paper:
 - `Open source`
 - `Manual Mode`
 
+Manual Mode must offer two exits:
+
+- `Return + Restore` — resume event-loop mode and restore the saved pre-loop desktop snapshot.
+- `Return Here` — resume event-loop mode without moving windows.
+
+The user should never feel trapped in an event-loop layout. The app should preserve a reversible snapshot where possible and make the chosen restore behavior visible.
+
 Secondary stack:
 
 - Shows count and rough priority.
@@ -42,6 +49,7 @@ MVP UI is acceptable when:
 - Restore state is visible near the resource it affects.
 - Disabled agent actions explain missing binding, policy block, or runtime failure.
 - Manual Mode state is obvious and reversible.
+- Manual Mode exit choice is explicit: restore saved desktop or keep current manual layout.
 - Empty state does not look like marketing; it should show local daemon/source status and next setup step.
 - Lineage/history shows enough to answer "what happened before this paper reached me?" without exposing raw task-message text.
 - Task-session identity is visible enough that user knows which Codex/Claude thread will receive a send-back action.

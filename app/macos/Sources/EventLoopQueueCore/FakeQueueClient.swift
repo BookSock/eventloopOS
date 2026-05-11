@@ -469,20 +469,35 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func approveOnboardingProposal(id: String, queuePaper: Bool = false) async throws -> OnboardingApprovalResult {
+        try await approveOnboardingProposal(OnboardingApprovalRequest(proposalId: id, queuePaper: queuePaper))
+    }
+
+    public func approveOnboardingProposal(_ request: OnboardingApprovalRequest) async throws -> OnboardingApprovalResult {
         try lock.withLock {
-            guard let proposal = onboardingScan.proposals.first(where: { $0.id == id || $0.taskId == id }) else {
-                throw QueueClientError.packetNotFound(id)
+            guard let proposal = onboardingScan.proposals.first(where: { $0.id == request.proposalId || $0.taskId == request.proposalId }) else {
+                throw QueueClientError.packetNotFound(request.proposalId)
             }
-            approvedOnboardingIds.append(id)
-            for session in proposal.taskSessions {
-                _ = try bindTaskSessionInLock(sessionId: session.id, taskId: proposal.taskId)
+            let approvedTaskId = request.taskId ?? proposal.taskId
+            let selectedWindows = request.windowIds.map { ids in
+                proposal.windows.filter { ids.contains($0.id) }
+            } ?? proposal.windows
+            let selectedSessions = request.taskSessionIds.map { ids in
+                proposal.taskSessions.filter { ids.contains($0.id) }
+            } ?? proposal.taskSessions
+            let selectedBrowserContexts = request.browserContextIds.map { ids in
+                proposal.browserContexts.filter { ids.contains($0.id) }
+            } ?? proposal.browserContexts
+
+            approvedOnboardingIds.append(request.proposalId)
+            for session in selectedSessions {
+                _ = try bindTaskSessionInLock(sessionId: session.id, taskId: approvedTaskId)
             }
             let queuedPaper: OnboardingQueuedPaper?
-            if queuePaper {
-                let workspaceSnapshot = proposal.windows.isEmpty
+            if request.queuePaper {
+                let workspaceSnapshot = selectedWindows.isEmpty
                     ? nil
                     : WorkspaceSnapshot(
-                        windows: proposal.windows.map { window in
+                        windows: selectedWindows.map { window in
                             WorkspaceWindow(
                                 id: window.id,
                                 app: window.app,
@@ -490,13 +505,13 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
                                 workspace: window.workspace
                             )
                         },
-                        activeWorkspace: proposal.windows.first?.workspace,
-                        focusedWindowId: proposal.windows.first?.id
+                        activeWorkspace: selectedWindows.first?.workspace,
+                        focusedWindowId: selectedWindows.first?.id
                     )
                 let packet = ReviewPacket(
-                    id: "qit_onboarding_\(proposal.taskId)",
-                    reviewPacketId: "pkt_onboarding_\(proposal.taskId)",
-                    taskId: proposal.taskId,
+                    id: "qit_onboarding_\(approvedTaskId)",
+                    reviewPacketId: "pkt_onboarding_\(approvedTaskId)",
+                    taskId: approvedTaskId,
                     title: "\(proposal.title) workbench",
                     summary: "Approved onboarding workbench is ready for human processing.",
                     decisionNeeded: "Review bound workbench and decide next action.",
@@ -505,7 +520,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
                     riskLevel: "medium",
                     confidence: "high",
                     riskTags: ["onboarding_workbench"],
-                    contextResources: proposal.browserContexts.map { context in
+                    contextResources: selectedBrowserContexts.map { context in
                         ReviewContextResource(
                             id: context.id,
                             kind: "browser_tab",
@@ -539,14 +554,14 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
             return OnboardingApprovalResult(
                 ok: true,
-                taskId: proposal.taskId,
+                taskId: approvedTaskId,
                 proposalId: proposal.id,
-                bindings: taskBindings.filter { $0.taskId == proposal.taskId },
-                browserContextBindings: proposal.browserContexts.map { context in
+                bindings: taskBindings.filter { $0.taskId == approvedTaskId },
+                browserContextBindings: selectedBrowserContexts.map { context in
                     OnboardingBrowserContextBinding(
                         browserContextId: context.id,
                         eventId: "evt_onboarding_context_bind_\(context.id)",
-                        taskId: proposal.taskId
+                        taskId: approvedTaskId
                     )
                 },
                 queuedPaper: queuedPaper,
@@ -573,7 +588,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         var entries: [OnboardingApprovalBatchEntry] = []
         for approval in approvals {
             do {
-                let result = try await approveOnboardingProposal(id: approval.proposalId, queuePaper: approval.queuePaper)
+                let result = try await approveOnboardingProposal(approval)
                 entries.append(OnboardingApprovalBatchEntry(
                     ok: true,
                     proposalId: result.proposalId ?? approval.proposalId,

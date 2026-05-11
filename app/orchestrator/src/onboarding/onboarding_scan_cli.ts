@@ -9,6 +9,7 @@ export type OnboardingScanCliOptions = {
   proposalId?: string;
   windowIds: number[];
   taskSessionIds: string[];
+  browserContextIds: string[];
   queuePaper: boolean;
   fetchFn?: typeof fetch;
   stdout?: Pick<NodeJS.WriteStream, "write">;
@@ -29,6 +30,11 @@ export function onboardingScanOptionsFromEnvAndArgv(
     proposalId: readFlag(argv, "--proposal") ?? readFlag(argv, "--proposal-id"),
     windowIds: readAllFlags(argv, "--window-id").flatMap(splitCsv).map(Number).filter((value) => Number.isInteger(value) && value > 0),
     taskSessionIds: readAllFlags(argv, "--session").flatMap(splitCsv).filter(Boolean),
+    browserContextIds: [
+      ...readAllFlags(argv, "--browser-context"),
+      ...readAllFlags(argv, "--browser-context-id"),
+      ...readAllFlags(argv, "--tab"),
+    ].flatMap(splitCsv).filter(Boolean),
     queuePaper: argv.includes("--queue-paper") || argv.includes("--queue"),
   };
 }
@@ -49,6 +55,7 @@ export async function runOnboardingScanCli(options: OnboardingScanCliOptions): P
           proposal_id: options.proposalId,
           window_ids: options.windowIds,
           task_session_ids: options.taskSessionIds,
+          browser_context_ids: options.browserContextIds,
           queue_paper: options.queuePaper,
           actor_id: "onboarding_cli",
         }),
@@ -177,7 +184,7 @@ function agentSummary(body: Record<string, unknown>, baseUrl: string): string {
     "1. Ask user which proposed groups are real tasks.",
     "2. Approve an accepted group by saving its windows, binding sessions, and creating its first paper:",
     "   `pnpm run onboarding:apply -- --proposal onboard_abc123 --queue-paper`.",
-    "   Or use explicit ids: `pnpm run onboarding:apply -- --task-id task_blog --window-id 123 --window-id 456 --session codex_thread_abc --queue-paper`.",
+    "   Or use explicit ids: `pnpm run onboarding:apply -- --task-id task_blog --window-id 123 --window-id 456 --session codex_thread_abc --tab browser_tab:42 --queue-paper`.",
     "3. Bind extra visible Codex/Claude sessions with `pnpm run task:bind` if needed.",
     "4. Open the queue app and pull the queued onboarding paper to prove the approved workbench appears in the intake stack.",
     "5. If Slack/Gmail/todo sources exist, preview each source, then route one event.",

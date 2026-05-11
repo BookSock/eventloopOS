@@ -116,13 +116,44 @@ struct QueueWindowView: View {
 
                     Button {
                         Task {
-                            await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+                            await viewModel.saveSelectedTaskLayout()
                         }
                     } label: {
-                        Label(viewModel.isManualMode ? "Return to Loop" : "Manual Mode", systemImage: viewModel.isManualMode ? "play.circle" : "pause.circle")
+                        Label("Save Task Layout", systemImage: "square.and.arrow.down")
                     }
-                    .accessibilityIdentifier("queue-mode-toggle-button")
-                    .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+                    .disabled(!viewModel.canSaveSelectedTaskLayout)
+                    .accessibilityIdentifier("queue-save-task-layout-button")
+
+                    if viewModel.isManualMode {
+                        Button {
+                            Task {
+                                await viewModel.returnToEventLoopModeAndPrepareWorkspaceRestore()
+                            }
+                        } label: {
+                            Label("Return + Restore", systemImage: "play.circle")
+                        }
+                        .accessibilityIdentifier("queue-return-restore-button")
+                        .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+
+                        Button {
+                            Task {
+                                await viewModel.returnToEventLoopModeKeepingCurrentLayout()
+                            }
+                        } label: {
+                            Label("Return Here", systemImage: "arrow.down.right.and.arrow.up.left")
+                        }
+                        .accessibilityIdentifier("queue-return-here-button")
+                    } else {
+                        Button {
+                            Task {
+                                await viewModel.enterManualModeAndRestoreSavedWorkspaceIfAvailable()
+                            }
+                        } label: {
+                            Label("Manual Mode", systemImage: "pause.circle")
+                        }
+                        .accessibilityIdentifier("queue-mode-toggle-button")
+                        .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+                    }
 
                     Button {
                         Task {
@@ -367,14 +398,14 @@ struct QueueWindowView: View {
                             await viewModel.scanOnboarding()
                         }
                     },
-                    approve: { proposalId, queuePaper in
+                    approve: { request in
                         Task {
-                            await viewModel.approveOnboardingProposal(id: proposalId, queuePaper: queuePaper)
+                            await viewModel.approveOnboardingProposal(request)
                         }
                     },
-                    approveAll: { queuePaper in
+                    approveAll: { requests in
                         Task {
-                            await viewModel.approveAllOnboardingProposals(queuePaper: queuePaper)
+                            await viewModel.approveOnboardingRequests(requests)
                         }
                     }
                 )
@@ -736,6 +767,20 @@ private struct WorkspaceRestoreBanner: View {
                 .background(.green.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityIdentifier("workspace-restore-executed")
+        case let .savedTaskLayout(taskId):
+            Text("Task layout saved: \(taskId)")
+                .font(.caption)
+                .padding(8)
+                .background(.green.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("workspace-task-layout-saved")
+        case .keptCurrentLayout:
+            Text("Returned without moving windows")
+                .font(.caption)
+                .padding(8)
+                .background(.green.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("workspace-kept-current-layout")
         case let .failed(message):
             Text(message)
                 .font(.caption)

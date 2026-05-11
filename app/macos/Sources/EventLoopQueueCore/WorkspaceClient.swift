@@ -196,6 +196,8 @@ public enum WorkspaceRestoreState: Equatable, Sendable {
     case skippedManualMode
     case planned(WorkspaceRestorePlan)
     case executed(WorkspaceRestoreReceipt)
+    case savedTaskLayout(String)
+    case keptCurrentLayout
     case failed(String)
 }
 

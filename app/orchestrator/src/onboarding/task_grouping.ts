@@ -74,6 +74,7 @@ export function buildOnboardingScan(input: {
     confidence: "high" | "medium" | "low";
   }>();
   const browserContextTaskIds = new Map<string, string>();
+  const unassignedWindows: OnboardingWindow[] = [];
 
   for (const session of taskSessions) {
     const taskId = normalizeTaskId(readString(session.task_id) ?? "");
@@ -144,6 +145,17 @@ export function buildOnboardingScan(input: {
       group.windows.push(window);
       group.sessions.push(unboundCodingSession.session);
       group.confidence = maxConfidence(group.confidence, "medium");
+      continue;
+    }
+
+    unassignedWindows.push(window);
+  }
+
+  for (const window of unassignedWindows) {
+    const workspaceTaskGroup = matchingWorkspaceTaskGroup(window, groups);
+    if (workspaceTaskGroup) {
+      workspaceTaskGroup.windows.push(window);
+      workspaceTaskGroup.confidence = maxConfidence(workspaceTaskGroup.confidence, "medium");
       continue;
     }
 
@@ -267,6 +279,35 @@ function browserContextMatchesWindow(context: OnboardingBrowserContext, window: 
   const windowTokens = significantTokens(window.title);
   if (windowTokens.length >= 2 && windowTokens.every((token) => contextText.includes(token))) return true;
   return false;
+}
+
+function matchingWorkspaceTaskGroup(
+  window: OnboardingWindow,
+  groups: Map<string, { taskId: string; title: string; reason: string; windows: OnboardingWindow[]; browserContexts: OnboardingBrowserContext[]; sessions: TaskRuntimeSession[]; confidence: "high" | "medium" | "low" }>,
+): { taskId: string; title: string; reason: string; windows: OnboardingWindow[]; browserContexts: OnboardingBrowserContext[]; sessions: TaskRuntimeSession[]; confidence: "high" | "medium" | "low" } | undefined {
+  if (!window.workspace) return undefined;
+  const candidates = Array.from(groups.values()).filter((group) => {
+    if (group.taskId === "task_reading_queue" || group.taskId === "task_coding_unassigned") return false;
+    if (!group.windows.some((candidate) => candidate.workspace === window.workspace)) return false;
+    return taskWindowTokensOverlap(group, window);
+  });
+  if (candidates.length !== 1) return undefined;
+  return candidates[0];
+}
+
+function taskWindowTokensOverlap(
+  group: { taskId: string; title: string; browserContexts: OnboardingBrowserContext[]; sessions: TaskRuntimeSession[] },
+  window: OnboardingWindow,
+): boolean {
+  const taskTokens = significantTokens([
+    group.taskId,
+    group.title,
+    ...group.browserContexts.map((context) => `${context.title} ${context.url ?? ""}`),
+    ...group.sessions.map((session) => sessionMatchText(session, group.taskId)),
+  ].join(" "));
+  if (taskTokens.length === 0) return false;
+  const windowTokens = significantTokens(`${window.app} ${window.title}`);
+  return windowTokens.some((token) => taskTokens.includes(token));
 }
 
 function matchingUnboundCodingSession(

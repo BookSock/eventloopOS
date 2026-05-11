@@ -83,10 +83,14 @@ export class AerospaceWorkspaceAdapter {
 
   async capture(): Promise<WorkspaceSnapshot> {
     const result = await this.exec("aerospace", captureWorkspacePlan().args);
+    const activeWorkspace = await this.captureFocusedWorkspace().catch(() => undefined);
+    const focusedWindowId = await this.captureFocusedWindowId().catch(() => undefined);
 
     return {
       backend: this.backend,
       windows: parseAerospaceWindows(result.stdout),
+      activeWorkspace,
+      focusedWindowId,
     };
   }
 
@@ -103,12 +107,38 @@ export class AerospaceWorkspaceAdapter {
       skipped: plan.skipped,
     };
   }
+
+  private async captureFocusedWorkspace(): Promise<string | undefined> {
+    const result = await this.exec("aerospace", captureFocusedWorkspacePlan().args);
+    const workspace = result.stdout.trim();
+    return workspace.length > 0 ? workspace : undefined;
+  }
+
+  private async captureFocusedWindowId(): Promise<number | undefined> {
+    const result = await this.exec("aerospace", captureFocusedWindowPlan().args);
+    const focused = parseAerospaceWindows(result.stdout)[0];
+    return focused?.id;
+  }
 }
 
 export function captureWorkspacePlan(): AerospaceCommand {
   return {
     command: "aerospace",
     args: ["list-windows", "--all", "--json", "--format", AEROSPACE_WINDOW_CAPTURE_FORMAT],
+  };
+}
+
+export function captureFocusedWorkspacePlan(): AerospaceCommand {
+  return {
+    command: "aerospace",
+    args: ["list-workspaces", "--focused"],
+  };
+}
+
+export function captureFocusedWindowPlan(): AerospaceCommand {
+  return {
+    command: "aerospace",
+    args: ["list-windows", "--focused", "--json", "--format", "%{window-id}%{workspace}"],
   };
 }
 

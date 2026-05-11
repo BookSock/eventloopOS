@@ -6,13 +6,23 @@ import {
   parseRestorePlanRequest,
   parseWorkspaceSnapshot,
 } from "./controller.js";
-import { captureWorkspacePlan, type ExecFunction, type WorkspaceSnapshot } from "./aerospace.js";
+import {
+  captureFocusedWindowPlan,
+  captureFocusedWorkspacePlan,
+  captureWorkspacePlan,
+  type ExecFunction,
+  type WorkspaceSnapshot,
+} from "./aerospace.js";
 
 describe("workspace controller", () => {
   it("captures AeroSpace workspace snapshots through injected exec", async () => {
     const calls: Array<{ command: string; args: string[] }> = [];
     const exec: ExecFunction = async (command, args) => {
       calls.push({ command, args });
+      if (args[0] === "list-workspaces") return { stdout: "eventloop-blog\n" };
+      if (args[0] === "list-windows" && args.includes("--focused")) {
+        return { stdout: JSON.stringify([{ "window-id": 9, workspace: "eventloop-blog" }]) };
+      }
       return {
         stdout: JSON.stringify([
           { "window-id": 9, "app-name": "Ghostty", "window-title": "codex", workspace: "eventloop-blog" },
@@ -23,9 +33,11 @@ describe("workspace controller", () => {
     const controller = new AerospaceWorkspaceController(exec);
     const snapshot = await controller.capture();
 
-    assert.deepEqual(calls, [captureWorkspacePlan()]);
+    assert.deepEqual(calls, [captureWorkspacePlan(), captureFocusedWorkspacePlan(), captureFocusedWindowPlan()]);
     assert.deepEqual(snapshot, {
       backend: "aerospace",
+      activeWorkspace: "eventloop-blog",
+      focusedWindowId: 9,
       windows: [
         {
           id: 9,

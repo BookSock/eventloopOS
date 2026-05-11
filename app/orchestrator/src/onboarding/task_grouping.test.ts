@@ -134,6 +134,31 @@ describe("onboarding task grouping", () => {
     assert.equal(scan.proposals[0]?.browser_contexts[0]?.id, "browser_tab:42");
   });
 
+  it("pulls matching support windows on the same workspace into the task proposal", () => {
+    const scan = buildOnboardingScan({
+      capturedAt: "2026-05-07T00:00:00.000Z",
+      snapshot: {
+        backend: "aerospace",
+        activeWorkspace: "blog",
+        focusedWindowId: 11,
+        windows: [
+          { id: 11, app: "Ghostty", title: "[task:blog launch] codex", workspace: "blog" },
+          { id: 12, app: "Google Chrome", title: "Blog Launch Draft - Google Docs", workspace: "blog" },
+          { id: 13, app: "Google Chrome", title: "Unrelated Article", workspace: "blog" },
+        ],
+      },
+      taskSessions: [
+        { id: "thread_blog", task_id: "task_blog_launch", provider: "codex", status: "idle" },
+      ],
+    });
+
+    const blogProposal = scan.proposals.find((proposal) => proposal.task_id === "task_blog_launch");
+    assert.deepEqual(blogProposal?.windows.map((window) => window.id), [11, 12]);
+
+    const readingProposal = scan.proposals.find((proposal) => proposal.task_id === "task_reading_queue");
+    assert.deepEqual(readingProposal?.windows.map((window) => window.id), [13]);
+  });
+
   it("turns unassigned captured browser tabs into reading queue work", () => {
     const scan = buildOnboardingScan({
       capturedAt: "2026-05-07T00:00:00.000Z",

@@ -1,14 +1,21 @@
-# Hotkey State Machine — iteration 4
+# Hotkey State Machine — iteration 5
 
 Decisions locked across iterations:
 
-1. **Task = (Codex thread UUID, AeroSpace virtual desktop).** Each task has a dedicated Codex thread spawned at task creation. That thread's Ghostty window lives in the task's virtual desktop as a persistent background presence — never moved between tasks. Other Codex/Ghostty/Slack/Chrome windows are free to move; AeroSpace tracks them.
+1. **Task = agent thread + visible workspace context.** On one monitor, this usually means one AeroSpace workspace. On multiple monitors, a task may mean the set of AeroSpace workspaces visible together when the user is doing that task. The task-anchor Ghostty/Codex/Claude thread lives in that context as a persistent background presence.
 2. **Multiple Codex sessions per task allowed.** The task-anchor thread is just the "always there" one; additional Codex windows can be added freely. Each additional Codex window emits its own paper when idle. No "primary vs auxiliary" distinction beyond "one is the task-anchor that defines the desktop."
-3. **Shared windows tracked implicitly, no title tag.** Server records `(window_id → set_of_desktops_observed_on)`. A window seen on N>1 desktops is "shared." Restored on any desktop switch where it was previously seen. No user action required.
+3. **Shared windows are common, implicit, and reversible.** Default bias: keep useful context around across tasks until the user explicitly removes/dismisses it. Server records `(window_id → set_of_desktops_observed_on)` and window identity slots. A window seen on multiple task contexts can become "follows." No title tag required.
 4. **Auto-paper threshold = 60s of Codex idle**, per-task override. Applies to *every* Codex window in the task, not just the anchor.
-5. **Manual mode** = a designated personal AeroSpace virtual desktop. Toggle on → switch to it; server-side B7 flag pauses orchestrator auto-work. Toggle off → AeroSpace returns to the previous desktop. Advance pressed during manual mode → toast.
-6. **Onboarding scan dropped as primary path.** First-run UX = one screen: "press ⌘⌥⇧J in a Ghostty window to make your first task." Existing-thread import is a future skill (B-tier).
+5. **Manual mode has two exits.** User can restore the pre-loop desktop snapshot, or leave windows where manual work put them. Both paths should be explicit and reversible where possible; never destroy window state unless the user closed the window themselves.
+6. **Onboarding scan is a correction surface, not a dashboard.** Scan can propose current desktop groups and approve-all should be fast, but it must avoid forcing the user to classify hundreds of tabs. The natural path remains: work normally, press Advance, let eventloopOS infer/save task context.
 7. **Custom user triggers** (e.g., "Slack message matches X → paper for task Y") are first-class but later. Phase 7 / future. Surface should be "easy to set" without writing code.
+
+Iteration 5 clarifications from dogfood planning:
+
+- Workspace restore should preserve **focus and useful stacking order** as much as macOS/AeroSpace allow. Saved layout should include focused window. If z-order can be read reliably, restore should focus windows from back to front, then final focused window last.
+- Reading queue can be one shared task, but it must not become a giant setup chore. Unassigned tabs should become papers naturally over time or via explicit promotion, not a 100-row onboarding assignment problem.
+- When Codex or Claude goes idle and the task has an idle trigger, paper enters the queue automatically. Suppress papers for the current foreground task where possible so the app does not fight the user while they are already reading that agent.
+- Workspace reshuffle target: fast, deterministic, visible. Move only windows tied to the task context or follows layer; avoid surprising unrelated moves.
 
 ## What the user does in their day
 
@@ -21,10 +28,10 @@ The Mac queue UI exists for inspection and recovery, **not for normal use**. The
 A **task** is the central unit of saved-and-restored work. A task has:
 
 - A **task-anchor Codex thread** (UUID) — spawned at task creation, never reused, lives in this task's virtual desktop as a persistent background presence. Conceptually a "per-task agent" — not a master, not shared.
-- An **AeroSpace virtual desktop** ID — the literal desktop the user is on when working this task. Switching tasks = switching desktops. AeroSpace handles the actual screen change.
+- An **AeroSpace workspace context** — usually one workspace ID. On multi-monitor setups this may expand to the tuple/set of workspaces visible together while the task is active.
 - Zero or more **additional Codex sessions / Ghostty windows / arbitrary other windows** — anything else the user has open while working this task. Tracked but not anchoring.
 
-Restoring a task = AeroSpace switches to its virtual desktop. The task-anchor Codex thread's Ghostty window is already there (it never moved). Other windows are wherever AeroSpace last placed them. Any *shared* windows (windows observed on multiple tasks' desktops) get pulled into the new desktop too.
+Restoring a task = AeroSpace switches to its workspace context. The task-anchor Codex thread's Ghostty window is already there (or is restored there). Other task-owned windows return to their saved workspace/position when possible. Any *shared* windows (windows observed across multiple task contexts) get pulled along too.
 
 The task-anchor is *the* thing that gives the task its identity and its idle-paper trigger. Multiple Codex sessions per task is fine — each can produce papers independently when idle. The task-anchor is just the one we know is always present.
 
@@ -73,13 +80,20 @@ Current desktop is bound to a task and a paper is open. (The paper was generated
 4. Otherwise → AeroSpace returns to the desktop the user was on before the paper popped (often State B); if that desktop is gone, fallback to limbo (State A).
 
 ### State D — Manual mode
-Orthogonal toggle (`⌘⌥⇧M`). Manual mode = AeroSpace switched to the designated personal desktop + server-side B7 flag set. Auto-promote/auto-bind/auto-paper paused. Advance during manual mode → toast "exit manual mode first." Toggle off → AeroSpace returns + flag cleared.
+Orthogonal toggle (`⌘⌥⇧M`). Manual mode = server-side B7 flag set, auto-promote/auto-bind/auto-paper paused, and the user is free to use the computer normally. Advance during manual mode → toast "exit manual mode first."
+
+Exiting manual mode needs two clear choices:
+
+- **Restore pre-loop desktop** — use the snapshot from when event-loop mode/manual mode was entered, best-effort restore windows and focus.
+- **Keep manual layout** — clear pause flag and resume queue without moving windows.
+
+Both choices should be undoable by reapplying the held snapshot when possible.
 
 ## How shared windows work (implicit)
 
-Server-side, on every layout save, record `(window_id → desktop_id)` observations. A window seen on multiple distinct desktops over time is "shared." Restoration of any desktop pulls in all shared windows last seen on that desktop, in their last-known positions. No user tagging needed. No `[shared]` title required.
+Server-side, on every layout save, record `(window_id → desktop_id)` observations and stable identity slots where possible `(app_bundle, title_prefix)`. A window seen across multiple task contexts over time can become "shared." Restoration of any task context pulls shared windows along in their last-known positions. No user tagging needed. No `[shared]` title required.
 
-Edge case: a window the user genuinely *just* moved across desktops, that was once unique to one task, now becomes shared. That's correct behavior — the user implicitly opted-in by using it across desktops.
+Bias: useful windows should remain available across tasks until explicitly dismissed. A window that accidentally becomes shared needs an easy exit ramp later (voice/hotkey/UI command such as "stop sharing Chrome" or "pin this window to this task").
 
 ## Implicit ambient saves
 

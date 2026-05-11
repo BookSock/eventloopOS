@@ -3,6 +3,43 @@ import { describe, it } from "node:test";
 import { runLiveAerospaceSmoke } from "./live_aerospace_smoke.js";
 import { captureWorkspacePlan, type ExecFunction } from "./aerospace.js";
 
+type FakeAerospaceWindow = {
+  "window-id": number;
+  "app-name": string;
+  "window-title": string;
+  workspace: string;
+};
+
+function fakeAerospaceExec(windows: FakeAerospaceWindow[], calls?: Array<{ command: string; args: string[] }>): ExecFunction {
+  return async (command, args) => {
+    calls?.push({ command, args });
+    if (args[0] === "list-workspaces" && args.includes("--focused")) {
+      return { stdout: `${windows[0]?.workspace ?? ""}\n` };
+    }
+    if (args[0] === "list-windows" && args.includes("--focused")) {
+      const focused = windows[0];
+      return {
+        stdout: JSON.stringify(focused ? [{ "window-id": focused["window-id"], workspace: focused.workspace }] : []),
+      };
+    }
+    if (args[0] === "list-windows") {
+      return { stdout: JSON.stringify(windows) };
+    }
+    if (args[0] === "move-node-to-workspace") {
+      const windowId = Number(args[2]);
+      const workspace = args[3] ?? "";
+      const window = windows.find((item) => item["window-id"] === windowId);
+      if (!window) throw new Error(`missing fake window ${windowId}`);
+      window.workspace = workspace;
+      return { stdout: "" };
+    }
+    if (args[0] === "workspace" || args[0] === "focus") {
+      return { stdout: "" };
+    }
+    throw new Error(`unexpected command ${command} ${args.join(" ")}`);
+  };
+}
+
 describe("live AeroSpace smoke", () => {
   it("skips unless explicitly enabled", async () => {
     const result = await runLiveAerospaceSmoke({ enabled: false });
@@ -33,18 +70,18 @@ describe("live AeroSpace smoke", () => {
 
   it("captures and plans without executing workspace changes", async () => {
     const calls: Array<{ command: string; args: string[] }> = [];
-    const stdout = JSON.stringify([
+    const windows = [
       { "window-id": 8, "app-name": "Ghostty", "window-title": "codex", workspace: "eventloop-dev" },
       { "window-id": 9, "app-name": "Chrome", "window-title": "docs", workspace: "eventloop-web" },
-    ]);
-    const exec: ExecFunction = async (command, args) => {
-      calls.push({ command, args });
-      return { stdout };
-    };
+    ];
+    const exec = fakeAerospaceExec(windows, calls);
 
     const result = await runLiveAerospaceSmoke({ enabled: true, exec });
 
-    assert.deepEqual(calls, [captureWorkspacePlan(), captureWorkspacePlan(), captureWorkspacePlan()]);
+    assert.deepEqual(
+      calls.filter((call) => call.args[0] === "list-windows" && call.args.includes("--all")),
+      [captureWorkspacePlan(), captureWorkspacePlan(), captureWorkspacePlan()],
+    );
     assert.deepEqual(result, {
       ok: true,
       skipped: false,
@@ -55,7 +92,7 @@ describe("live AeroSpace smoke", () => {
       },
       window_count: 2,
       restore_plan_target_window_id: 8,
-      restore_plan_command_count: 2,
+      restore_plan_command_count: 4,
       restore_plan_skip_count: 0,
     });
   });
@@ -84,24 +121,7 @@ describe("live AeroSpace smoke", () => {
       { "window-id": 8, "app-name": "Ghostty", "window-title": "codex", workspace: "eventloop-dev" },
       { "window-id": 9, "app-name": "Chrome", "window-title": "docs", workspace: "eventloop-web" },
     ];
-    const exec: ExecFunction = async (command, args) => {
-      calls.push({ command, args });
-      if (args[0] === "list-windows") {
-        return { stdout: JSON.stringify(windows) };
-      }
-      if (args[0] === "move-node-to-workspace") {
-        const windowId = Number(args[2]);
-        const workspace = args[3] ?? "";
-        const window = windows.find((item) => item["window-id"] === windowId);
-        if (!window) throw new Error(`missing fake window ${windowId}`);
-        window.workspace = workspace;
-        return { stdout: "" };
-      }
-      if (args[0] === "workspace" || args[0] === "focus") {
-        return { stdout: "" };
-      }
-      throw new Error(`unexpected command ${command} ${args.join(" ")}`);
-    };
+    const exec = fakeAerospaceExec(windows, calls);
 
     const result = await runLiveAerospaceSmoke({
       enabled: true,
@@ -133,16 +153,7 @@ describe("live AeroSpace smoke", () => {
 
   it("uses a fallback scratch workspace when target is already in the requested scratch workspace", async () => {
     const windows = [{ "window-id": 8, "app-name": "Ghostty", "window-title": "codex", workspace: "eventloop-smoke" }];
-    const exec: ExecFunction = async (_command, args) => {
-      if (args[0] === "list-windows") {
-        return { stdout: JSON.stringify(windows) };
-      }
-      if (args[0] === "move-node-to-workspace") {
-        windows[0]!.workspace = args[3] ?? "";
-        return { stdout: "" };
-      }
-      return { stdout: "" };
-    };
+    const exec = fakeAerospaceExec(windows);
 
     const result = await runLiveAerospaceSmoke({
       enabled: true,

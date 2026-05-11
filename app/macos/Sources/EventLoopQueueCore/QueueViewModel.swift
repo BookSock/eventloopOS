@@ -252,6 +252,10 @@ public final class QueueViewModel: ObservableObject {
         shouldRestoreWorkspace && selectedWorkspaceSnapshot != nil
     }
 
+    public var canSaveSelectedTaskLayout: Bool {
+        selectedTaskId != nil && mode == .eventLoop
+    }
+
     public var canRestoreManualWorkspace: Bool {
         manualWorkspaceSnapshot != nil
     }
@@ -464,6 +468,22 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    public func returnToEventLoopModeKeepingCurrentLayout() async {
+        let wasManual = mode == .manual
+        if wasManual {
+            await captureManualWorkspaceSnapshot()
+        }
+        applyLocalReturnToEventLoopMode()
+        workspaceRestoreState = .keptCurrentLayout
+        if wasManual {
+            do {
+                _ = try await client.setManualMode(active: false, reason: nil)
+            } catch {
+                state = .failed("Manual mode failed to disengage on server: \(error.localizedDescription)")
+            }
+        }
+    }
+
     public func toggleManualMode() async {
         if mode == .eventLoop {
             await enterManualMode()
@@ -474,18 +494,22 @@ public final class QueueViewModel: ObservableObject {
 
     public func toggleManualModeAndPrepareWorkspaceRestoreIfNeeded() async {
         if mode == .eventLoop {
-            do {
-                try await saveSelectedTaskWorkspaceSnapshotIfNeeded()
-            } catch {
-                state = .failed(error.localizedDescription)
-            }
-            await enterManualMode()
-            guard mode == .manual else { return }
-            if manualWorkspaceSnapshot != nil {
-                await confirmManualWorkspaceRestore()
-            }
+            await enterManualModeAndRestoreSavedWorkspaceIfAvailable()
         } else {
             await returnToEventLoopModeAndPrepareWorkspaceRestore()
+        }
+    }
+
+    public func enterManualModeAndRestoreSavedWorkspaceIfAvailable() async {
+        do {
+            try await saveSelectedTaskWorkspaceSnapshotIfNeeded()
+        } catch {
+            state = .failed(error.localizedDescription)
+        }
+        await enterManualMode()
+        guard mode == .manual else { return }
+        if manualWorkspaceSnapshot != nil {
+            await confirmManualWorkspaceRestore()
         }
     }
 
@@ -1233,9 +1257,15 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func approveOnboardingProposal(id: String, queuePaper: Bool = false) async {
-        onboardingState = .approving(id)
+        await approveOnboardingProposal(OnboardingApprovalRequest(proposalId: id, queuePaper: queuePaper))
+    }
+
+    public func approveOnboardingProposal(_ request: OnboardingApprovalRequest) async {
+        let request = normalizedOnboardingApprovalRequest(request)
+        let label = request.taskId ?? request.proposalId
+        onboardingState = .approving(label)
         do {
-            let result = try await client.approveOnboardingProposal(id: id, queuePaper: queuePaper)
+            let result = try await client.approveOnboardingProposal(request)
             onboardingState = .approved(result)
             await loadTaskSessions()
             await refreshQueue()
@@ -1249,6 +1279,53 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    private func normalizedOnboardingApprovalRequest(_ request: OnboardingApprovalRequest) -> OnboardingApprovalRequest {
+        let normalizedTaskId = request.taskId.flatMap { raw -> String? in
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+            return normalizedTaskIdForApproval(trimmed, fallback: request.proposalId)
+        }
+        return OnboardingApprovalRequest(
+            proposalId: request.proposalId,
+            taskId: normalizedTaskId,
+            windowIds: request.windowIds,
+            taskSessionIds: request.taskSessionIds,
+            browserContextIds: request.browserContextIds,
+            queuePaper: request.queuePaper,
+            actorId: request.actorId
+        )
+    }
+
+    public func approveOnboardingDraft(
+        proposal: OnboardingTaskProposal,
+        taskId: String,
+        windowIds: [Int],
+        taskSessionIds: [String],
+        browserContextIds: [String],
+        queuePaper: Bool = false
+    ) async {
+        await approveOnboardingProposal(OnboardingApprovalRequest(
+            proposalId: proposal.id,
+            taskId: normalizedTaskIdForApproval(taskId, fallback: proposal.taskId),
+            windowIds: windowIds,
+            taskSessionIds: taskSessionIds,
+            browserContextIds: browserContextIds,
+            queuePaper: queuePaper
+        ))
+    }
+
+    private func normalizedTaskIdForApproval(_ raw: String, fallback: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return fallback }
+        let lowered = trimmed.lowercased()
+        let suffix = lowered.hasPrefix("task_") ? String(lowered.dropFirst(5)) : lowered
+        let pieces = suffix.split { character in
+            !(character.isLetter || character.isNumber)
+        }
+        let slug = pieces.joined(separator: "_")
+        return slug.isEmpty ? fallback : "task_\(slug)"
+    }
+
     public func approveAllOnboardingProposals(queuePaper: Bool = true) async {
         guard case let .loaded(scan) = onboardingState else {
             onboardingState = .failed("Load an onboarding scan before approving all proposals")
@@ -1259,10 +1336,20 @@ public final class QueueViewModel: ObservableObject {
             return
         }
 
-        onboardingState = .approving("all")
         let approvals = scan.proposals.map { proposal in
             OnboardingApprovalRequest(proposalId: proposal.id, queuePaper: queuePaper)
         }
+        await approveOnboardingRequests(approvals)
+    }
+
+    public func approveOnboardingRequests(_ requests: [OnboardingApprovalRequest]) async {
+        guard !requests.isEmpty else {
+            onboardingState = .failed("No onboarding proposals to approve")
+            return
+        }
+
+        onboardingState = .approving("all")
+        let approvals = requests.map(normalizedOnboardingApprovalRequest)
         let idempotencyKey = "mac_onboarding_batch_\(UUID().uuidString)"
 
         do {
@@ -1278,10 +1365,10 @@ public final class QueueViewModel: ObservableObject {
                 selectedPacketID = firstQueuedPaperId
             }
             if let lastEntry = batchResult.results.last {
-                let proposal = scan.proposals.first { $0.id == lastEntry.proposalId }
+                let request = approvals.first { $0.proposalId == lastEntry.proposalId }
                 onboardingState = .approved(OnboardingApprovalResult(
                     ok: lastEntry.ok,
-                    taskId: lastEntry.taskId ?? proposal?.taskId ?? "",
+                    taskId: lastEntry.taskId ?? request?.taskId ?? request?.proposalId ?? "",
                     proposalId: lastEntry.proposalId,
                     bindings: [],
                     browserContextBindings: [],
@@ -1468,6 +1555,25 @@ public final class QueueViewModel: ObservableObject {
         }
 
         await confirmWorkspaceRestore(snapshot: snapshot)
+    }
+
+    public func saveSelectedTaskLayout() async {
+        guard let taskId = selectedTaskId else {
+            workspaceRestoreState = .failed("Selected packet has no task id")
+            return
+        }
+        guard mode == .eventLoop else {
+            workspaceRestoreState = .skippedManualMode
+            return
+        }
+
+        do {
+            let captured = try await workspaceClient.capture()
+            _ = try await client.updateTaskLayout(taskId: taskId, layout: captured)
+            workspaceRestoreState = .savedTaskLayout(taskId)
+        } catch {
+            workspaceRestoreState = .failed(error.localizedDescription)
+        }
     }
 
     public func confirmManualWorkspaceRestore() async {

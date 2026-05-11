@@ -125,13 +125,30 @@ struct EventLoopQueueApp: App {
                 .disabled(viewModel.selectedPacket == nil)
                 .accessibilityIdentifier("queue-command-skip-next")
 
-                Button(viewModel.isManualMode ? "Return to Event Loop" : "Enter Manual Mode") {
-                    Task {
-                        await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+                if viewModel.isManualMode {
+                    Button("Return + Restore") {
+                        Task {
+                            await viewModel.returnToEventLoopModeAndPrepareWorkspaceRestore()
+                        }
                     }
+                    .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+                    .accessibilityIdentifier("queue-command-return-restore")
+
+                    Button("Return Here") {
+                        Task {
+                            await viewModel.returnToEventLoopModeKeepingCurrentLayout()
+                        }
+                    }
+                    .accessibilityIdentifier("queue-command-return-here")
+                } else {
+                    Button("Enter Manual Mode") {
+                        Task {
+                            await viewModel.enterManualModeAndRestoreSavedWorkspaceIfAvailable()
+                        }
+                    }
+                    .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+                    .accessibilityIdentifier("queue-command-mode-toggle")
                 }
-                .keyboardShortcut("m", modifiers: [.command, .option, .shift])
-                .accessibilityIdentifier("queue-command-mode-toggle")
 
                 Button("Restore Manual Workspace") {
                     Task {
@@ -334,13 +351,30 @@ private struct QueueMenuView: View {
             .disabled(viewModel.selectedPacket == nil)
             .accessibilityIdentifier("queue-menu-skip-next")
 
-            Button(viewModel.isManualMode ? "Return to Event Loop" : "Enter Manual Mode") {
-                Task {
-                    await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+            if viewModel.isManualMode {
+                Button("Return + Restore") {
+                    Task {
+                        await viewModel.returnToEventLoopModeAndPrepareWorkspaceRestore()
+                    }
                 }
+                .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+                .accessibilityIdentifier("queue-menu-return-restore")
+
+                Button("Return Here") {
+                    Task {
+                        await viewModel.returnToEventLoopModeKeepingCurrentLayout()
+                    }
+                }
+                .accessibilityIdentifier("queue-menu-return-here")
+            } else {
+                Button("Enter Manual Mode") {
+                    Task {
+                        await viewModel.enterManualModeAndRestoreSavedWorkspaceIfAvailable()
+                    }
+                }
+                .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+                .accessibilityIdentifier("queue-menu-mode-toggle")
             }
-            .keyboardShortcut("m", modifiers: [.command, .option, .shift])
-            .accessibilityIdentifier("queue-menu-mode-toggle")
 
             Button("Restore Manual Workspace") {
                 Task {
