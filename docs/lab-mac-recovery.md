@@ -124,18 +124,32 @@ should fail before rebooting so the lab is not stranded offline.
 Latest reboot proof failed because SSH went down and did not come back within 420 seconds:
 
 ```sh
-artifacts/lab-runs/20260601-220403-reboot-proof/manifest.json
+artifacts/lab-runs/20260602-162220-reboot-proof/manifest.json
 ```
 
-Latest fast gate preserves the connectivity failure:
+Latest release-fast gate preserves the reboot failure:
 
 ```sh
-artifacts/product-readiness/20260602T073643Z-53517-lab-quick/manifest.json
-artifacts/product-readiness/20260602T073643Z-53517-lab-quick/failed-lab-connectivity-status/manifest.json
+artifacts/product-readiness/20260602T230702Z-31779-lab-release/manifest.json
+artifacts/product-readiness/20260602T230702Z-31779-lab-release/reboot-proof/manifest.json
 ```
 
 Latest repair text points the in-person operator at:
 
 ```sh
 LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap
+```
+
+After lab reachability returns, retry dogfood first:
+
+```sh
+pnpm lab:wait-online:quick
+pnpm product:dogfood
+```
+
+Then retry release reboot proof with strict sudo mode and a password supplied
+from the controller environment or an untracked password file:
+
+```sh
+LAB_MAC_REBOOT=1 LAB_MAC_REBOOT_REQUIRE_SUDO=1 LAB_MAC_LOGIN_PASSWORD_FILE="$HOME/.eventloop-lab/mac-login-password" bin/lab-mac-reboot-proof
 ```
