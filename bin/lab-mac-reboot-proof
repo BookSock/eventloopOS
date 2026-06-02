@@ -15,6 +15,7 @@ Environment:
   LAB_MAC_KEY                    default: ~/.ssh/eventloop_lab_mac
   LAB_MAC_LOGIN_PASSWORD         optional: sudo reboot password
   LAB_MAC_LOGIN_PASSWORD_FILE    optional: file containing sudo reboot password
+  LAB_MAC_REBOOT_REQUIRE_SUDO    optional: 1 disables GUI reboot fallback
   LAB_DOGFOOD_URL                default: http://127.0.0.1:4480
   LAB_MAC_REBOOT_TIMEOUT_SECONDS default: 420
 EOF
@@ -48,6 +49,7 @@ lab_user="${LAB_MAC_USER:-claw}"
 lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
 lab_login_password="${LAB_MAC_LOGIN_PASSWORD:-}"
 lab_login_password_file="${LAB_MAC_LOGIN_PASSWORD_FILE:-}"
+require_sudo_reboot="${LAB_MAC_REBOOT_REQUIRE_SUDO:-0}"
 if [[ -z "$lab_login_password" && -n "$lab_login_password_file" && -f "$lab_login_password_file" ]]; then
   lab_login_password="$(head -n 1 "$lab_login_password_file")"
 fi
@@ -148,6 +150,9 @@ const manifest = {
 if (!manifest.checks.ssh_came_back) {
   manifest.fixes.push(`SSH did not return after reboot. On the lab Mac console, log into the lab user, confirm Tailscale is connected, confirm Remote Login and Screen Sharing are enabled, then run \`${localBootstrapCommand}\` from the eventloopOS checkout.`);
   manifest.fixes.push("From the controller, rerun `pnpm lab:wait-online:quick`; once reachable, run `pnpm product:dogfood` before retrying reboot proof.");
+}
+if (!manifest.checks.reboot_requested) {
+  manifest.fixes.push("Reboot was not requested. For release proof, set LAB_MAC_LOGIN_PASSWORD or LAB_MAC_LOGIN_PASSWORD_FILE so the harness can use sudo shutdown without GUI fallback.");
 }
 if (!manifest.checks.boot_time_changed && !manifest.checks.ssh_went_down) {
   manifest.fixes.push("Verify the lab user can request restart from SSH via System Events, or rerun with LAB_MAC_LOGIN_PASSWORD so the proof can use sudo shutdown fallback.");
@@ -263,13 +268,19 @@ request_sudo_reboot() {
   quoted_repo="$(printf "%q" "$remote_repo")"
   quoted_run="$(printf "%q" "$run_dir")"
   printf "%s\n" "$lab_login_password" | ssh "${ssh_opts[@]}" "$remote" \
-    "cd $quoted_repo && mkdir -p $quoted_run && sudo -S -p '' /sbin/shutdown -r now >$quoted_run/sudo-reboot.out 2>$quoted_run/sudo-reboot.err"
+    "cd $quoted_repo && mkdir -p $quoted_run && sudo -S -p '' -v >$quoted_run/sudo-validate.out 2>$quoted_run/sudo-validate.err" || return 1
+  ssh "${ssh_opts[@]}" "$remote" \
+    "cd $quoted_repo && mkdir -p $quoted_run && nohup bash -lc 'sleep 1; sudo -n /sbin/shutdown -r now' >$quoted_run/sudo-reboot.out 2>$quoted_run/sudo-reboot.err < /dev/null &"
 }
 
 request_reboot() {
   if request_sudo_reboot; then
     echo "sudo reboot requested for $remote"
     return 0
+  fi
+  if [[ "$require_sudo_reboot" == "1" ]]; then
+    echo "sudo reboot unavailable and LAB_MAC_REBOOT_REQUIRE_SUDO=1; refusing GUI reboot fallback for release proof" | tee "$run_dir/reboot-request.err" >&2
+    return 1
   fi
   echo "sudo reboot unavailable; requesting GUI reboot fallback for $remote"
   request_gui_reboot
@@ -326,8 +337,15 @@ collect_remote_state before
 sync_run
 cp "$run_dir/before-state.txt" "$run_dir/before-state.local-copy.txt" 2>/dev/null || true
 
-request_reboot
-reboot_requested=true
+if request_reboot; then
+  reboot_requested=true
+else
+  collect_controller_transport_state request-failed
+  write_manifest failed
+  jq '{passed, checks, evidence, fixes}' "$manifest"
+  echo "$run_dir"
+  exit 1
+fi
 echo "reboot requested for $remote"
 
 if wait_for_ssh_down; then

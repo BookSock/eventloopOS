@@ -112,8 +112,12 @@ Only after `product:lab-ready` proves the dogfood stack is up should
 `product:dogfood` passes should you retry reboot proof:
 
 ```sh
-LAB_MAC_REBOOT=1 LAB_MAC_LOGIN_PASSWORD='<lab-password>' bin/lab-mac-reboot-proof
+LAB_MAC_REBOOT=1 LAB_MAC_REBOOT_REQUIRE_SUDO=1 LAB_MAC_LOGIN_PASSWORD='<lab-password>' bin/lab-mac-reboot-proof
 ```
+
+Release readiness uses strict sudo reboot mode. Do not rely on GUI restart
+fallback for release proof; if the password is missing or invalid, the proof
+should fail before rebooting so the lab is not stranded offline.
 
 ## Current Known Outage
 

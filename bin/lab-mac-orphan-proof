@@ -82,6 +82,24 @@ end tell
 set AppleScript's text item delimiters to linefeed
 return outputLines as string
 APPLESCRIPT
+osascript >"$run/terminal-ui-windows.txt" 2>"$run/terminal-ui-windows.err" <<'APPLESCRIPT' || true
+tell application "System Events"
+  set outputLines to {}
+  if exists process "Terminal" then
+    tell process "Terminal"
+      repeat with candidateWindow in windows
+        set windowName to ""
+        try
+          set windowName to name of candidateWindow as string
+        end try
+        set end of outputLines to windowName
+      end repeat
+    end tell
+  end if
+end tell
+set AppleScript's text item delimiters to linefeed
+return outputLines as string
+APPLESCRIPT
 
 RUN="$run" node <<'NODE' >"$run/manifest.json"
 const fs = require("node:fs");
@@ -105,15 +123,18 @@ const processesText = read("processes-interesting.txt");
 const listenersText = read("listeners.txt");
 const windows = parseJson("windows.json", []);
 const terminalWindows = read("terminal-windows.txt").split(/\r?\n/).filter(Boolean);
+const terminalUiWindows = read("terminal-ui-windows.txt").split(/\r?\n/).filter(Boolean);
+const staleTerminalTitlePattern = /gui-screencapture\.command|run-dogfood-snapshot\.command|run-dogfood\.command|run-aerospace\.command/i;
 const eventloopWindowMatches = Array.isArray(windows)
   ? windows.filter((window) => {
       const app = String(window["app-name"] ?? "");
       const title = String(window["window-title"] ?? "");
       return /eventloop|EventLoopQueueApp|eventloopOS Queue/i.test(`${app} ${title}`)
-        || /gui-screencapture\.command|run-dogfood-snapshot\.command|run-dogfood\.command|run-aerospace\.command/i.test(title);
+        || staleTerminalTitlePattern.test(title);
     })
   : [];
-const terminalCaptureWindows = terminalWindows.filter((line) => /gui-screencapture\.command|run-dogfood-snapshot\.command|run-dogfood\.command|run-aerospace\.command/i.test(line));
+const terminalCaptureDictionaryWindows = terminalWindows.filter((line) => staleTerminalTitlePattern.test(line));
+const terminalCaptureUiWindows = terminalUiWindows.filter((line) => staleTerminalTitlePattern.test(line));
 const ghosttyEventloopWindows = Array.isArray(windows)
   ? windows.filter((window) => {
       const app = String(window["app-name"] ?? "");
@@ -144,8 +165,14 @@ const assertions = [
   },
   {
     name: "no_capture_terminal_windows_left",
-    ok: terminalCaptureWindows.length === 0,
-    details: { terminal_windows: terminalCaptureWindows },
+    ok: terminalCaptureUiWindows.length === 0,
+    details: {
+      terminal_ui_windows: terminalCaptureUiWindows,
+      terminal_dictionary_windows: terminalCaptureDictionaryWindows,
+      note: terminalCaptureDictionaryWindows.length > 0 && terminalCaptureUiWindows.length === 0
+        ? "Terminal AppleScript reported stale dictionary windows that were not visible through System Events or AeroSpace."
+        : undefined,
+    },
     fix: "Close stale Terminal capture runners or grant Terminal automation permissions so cleanup can close non-busy capture windows.",
   },
   {
@@ -169,6 +196,7 @@ const manifest = {
     listeners: "listeners.txt",
     windows: "windows.json",
     terminal_windows: "terminal-windows.txt",
+    terminal_ui_windows: "terminal-ui-windows.txt",
   },
 };
 fs.writeFileSync(path.join(run, "summary.json"), JSON.stringify({

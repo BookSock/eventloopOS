@@ -2804,7 +2804,7 @@ run_lab() {
   if [[ "$profile" != "release" ]]; then
     :
   elif [[ "$include_reboot" == "1" ]]; then
-    run_step "lab reboot proof" env LAB_MAC_REBOOT=1 LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-reboot-proof
+    run_step "lab reboot proof" env LAB_MAC_REBOOT=1 LAB_MAC_REBOOT_REQUIRE_SUDO=1 LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-reboot-proof
     local reboot_run
     reboot_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-reboot-proof.stdout.log")"
     if [[ -n "$reboot_run" ]]; then
