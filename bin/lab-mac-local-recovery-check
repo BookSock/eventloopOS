@@ -152,17 +152,17 @@ run_step tailscale_ip "Tailscale connected with 100.x IP" 1 "Open Tailscale, sig
 run_step tailscale_self_status "Tailscale self status visible" 1 "Open Tailscale, confirm it says connected, and rerun. If this fails while tailscale ip -4 works, restart Tailscale.app." \
   bash -lc 'export PATH="/Applications/Tailscale.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$PATH"; tailscale status --self | tee /tmp/eventloopos-local-tailscale-self.txt; grep -E "100\\." /tmp/eventloopos-local-tailscale-self.txt'
 
-run_step remote_login "Remote Login enabled" 1 "Open System Settings > General > Sharing, enable Remote Login, and allow administrators." \
-  bash -lc 'systemsetup -getremotelogin 2>/dev/null | tee /tmp/eventloopos-local-remote-login.txt; grep -qi "On" /tmp/eventloopos-local-remote-login.txt'
+run_step remote_login "Remote Login enabled or SSH reachable" 1 "Open System Settings > General > Sharing, enable Remote Login, and allow administrators." \
+  bash -lc 'export PATH="/Applications/Tailscale.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$PATH"; (systemsetup -getremotelogin 2>&1 | tee /tmp/eventloopos-local-remote-login.txt | grep -qi "On") || nc -G 3 -z 127.0.0.1 22 || { ip="$(tailscale ip -4 2>/dev/null | head -1)"; test -n "$ip" && nc -G 3 -z "$ip" 22; }'
 
-run_step ssh_listener "SSH port 22 listening" 1 "After enabling Remote Login, verify sshd is listening. If not, toggle Remote Login off/on." \
-  bash -lc 'lsof -nP -iTCP:22 -sTCP:LISTEN | tee /tmp/eventloopos-local-ssh-listener.txt; grep -q ":22" /tmp/eventloopos-local-ssh-listener.txt'
+run_step ssh_listener "SSH port 22 reachable" 1 "After enabling Remote Login, verify sshd is reachable. If not, toggle Remote Login off/on." \
+  bash -lc 'export PATH="/Applications/Tailscale.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$PATH"; (lsof -nP -iTCP:22 -sTCP:LISTEN 2>&1 | tee /tmp/eventloopos-local-ssh-listener.txt | grep -q ":22") || nc -G 3 -z 127.0.0.1 22 || { ip="$(tailscale ip -4 2>/dev/null | head -1)"; test -n "$ip" && nc -G 3 -z "$ip" 22; }'
 
 run_step tailscale_ssh_reachable "SSH reachable on Tailscale IP" 1 "Remote Login is not reachable on the tailnet IP. Verify Tailscale is connected, Remote Login is enabled, and local firewall/security software allows port 22 on the Tailscale interface." \
   bash -lc 'export PATH="/Applications/Tailscale.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$PATH"; ip="$(tailscale ip -4 | head -1)"; echo "tailscale_ip=$ip"; test -n "$ip"; nc -G 3 -z "$ip" 22'
 
-run_step screen_sharing_listener "Screen Sharing/VNC port 5900 listening" 1 "Open System Settings > General > Sharing, enable Screen Sharing or Remote Management, allow administrators to control the screen, then rerun this check." \
-  bash -lc 'launchctl print system/com.apple.screensharing >/tmp/eventloopos-local-screensharing-launchd.txt 2>&1 || true; lsof -nP -iTCP:5900 -sTCP:LISTEN | tee /tmp/eventloopos-local-vnc-listener.txt; grep -q ":5900" /tmp/eventloopos-local-vnc-listener.txt'
+run_step screen_sharing_listener "Screen Sharing/VNC port 5900 reachable" 1 "Open System Settings > General > Sharing, enable Screen Sharing or Remote Management, allow administrators to control the screen, then rerun this check." \
+  bash -lc 'export PATH="/Applications/Tailscale.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$PATH"; launchctl print system/com.apple.screensharing >/tmp/eventloopos-local-screensharing-launchd.txt 2>&1 || true; (lsof -nP -iTCP:5900 -sTCP:LISTEN 2>&1 | tee /tmp/eventloopos-local-vnc-listener.txt | grep -q ":5900") || nc -G 3 -z 127.0.0.1 5900 || { ip="$(tailscale ip -4 2>/dev/null | head -1)"; test -n "$ip" && nc -G 3 -z "$ip" 5900; }'
 
 run_step tailscale_vnc_reachable "VNC reachable on Tailscale IP" 1 "Screen Sharing/VNC is not reachable on the tailnet IP. Verify Screen Sharing or Remote Management is enabled, administrators can control the screen, and local firewall/security software allows port 5900 on the Tailscale interface." \
   bash -lc 'export PATH="/Applications/Tailscale.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$PATH"; ip="$(tailscale ip -4 | head -1)"; echo "tailscale_ip=$ip"; test -n "$ip"; nc -G 3 -z "$ip" 5900'

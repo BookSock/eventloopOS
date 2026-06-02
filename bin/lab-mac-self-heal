@@ -15,6 +15,7 @@ Environment:
   LAB_SELF_HEAL_START_INTERVAL default: 300 seconds
   LAB_SELF_HEAL_NO_LAUNCHCTL   default: 0; write plist without loading it
   LAB_SELF_HEAL_SKIP_OPEN      default: 0; do not open Tailscale/AeroSpace
+  LAB_SELF_HEAL_AEROSPACE_MODE default: auto; auto|launchservices|custom|skip
   LAB_SELF_HEAL_SKIP_CAFFEINATE default: 0; do not start caffeinate
   LAB_SELF_HEAL_PROOF_LOCK_TTL_SECONDS default: 7200; proof lock age treated active
   LAB_SELF_HEAL_RECOVERY_COMMAND optional bash command for harness tests
@@ -44,13 +45,19 @@ cd "$repo_root"
 export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
 label="com.eventloopos.lab-self-heal"
+aerospace_label="dev.eventloopos.aerospace-debug-server"
+terminal_aerospace_label="dev.eventloopos.aerospace-terminal-launcher"
 agent_dir="$HOME/Library/LaunchAgents"
 plist="$agent_dir/$label.plist"
+aerospace_plist="$agent_dir/$aerospace_label.plist"
+terminal_aerospace_plist="$agent_dir/$terminal_aerospace_label.plist"
 log_dir="$HOME/Library/Logs/eventloopOS"
 state_dir="$HOME/.eventloopos/lab-self-heal"
 proof_lock_dir="artifacts/.locks/product-readiness-lab.lock"
 start_interval="${LAB_SELF_HEAL_START_INTERVAL:-300}"
 controller_tailnet_ip="${LAB_CONTROLLER_TAILSCALE_IP:-}"
+aerospace_mode="${LAB_SELF_HEAL_AEROSPACE_MODE:-auto}"
+custom_aerospace_runner="$HOME/.eventloop-lab/bin/run-aerospace.command"
 
 plist_escape() {
   sed \
@@ -132,6 +139,13 @@ write_heartbeat() {
     echo "== listeners =="
     lsof -nP -iTCP:22 -sTCP:LISTEN 2>/dev/null || true
     lsof -nP -iTCP:5900 -sTCP:LISTEN 2>/dev/null || true
+    if command -v tailscale >/dev/null 2>&1; then
+      ip="$(tailscale ip -4 2>/dev/null | head -1 || true)"
+      if [[ -n "$ip" ]]; then
+        nc -G 3 -z "$ip" 22 >/dev/null 2>&1 && echo "ssh_tailnet_reachable=1" || echo "ssh_tailnet_reachable=0"
+        nc -G 3 -z "$ip" 5900 >/dev/null 2>&1 && echo "vnc_tailnet_reachable=1" || echo "vnc_tailnet_reachable=0"
+      fi
+    fi
     echo
     echo "== processes =="
     pgrep -fl "Tailscale|AeroSpace|screensharingd|ARDAgent|sshd|caffeinate -dims" || true
@@ -148,8 +162,8 @@ const checks = {
   command_completed: Number(process.env.HEARTBEAT_CODE) === 0,
   tailscale_cli_present: /tailscale_path=/.test(out),
   tailscale_ip_visible: tailscaleIps.some((ip) => ip.startsWith("100.")),
-  ssh_listener_visible: /TCP.*:22 .*LISTEN/i.test(out),
-  vnc_listener_visible: /TCP.*:5900 .*LISTEN/i.test(out),
+  ssh_listener_visible: /TCP.*:22 .*LISTEN/i.test(out) || /ssh_tailnet_reachable=1/.test(out),
+  vnc_listener_visible: /TCP.*:5900 .*LISTEN/i.test(out) || /vnc_tailnet_reachable=1/.test(out),
   tailscale_process_visible: /Tailscale/i.test(out),
   aerospace_process_visible: /AeroSpace/i.test(out),
   controller_ping_ok: /pong from|pong in|via DERP|direct=true/i.test(out),
@@ -233,6 +247,55 @@ EOF
   launchctl bootstrap "gui/$(id -u)" "$plist"
   launchctl kickstart -k "gui/$(id -u)/$label" >/dev/null 2>&1 || true
   echo "lab self-heal installed: $plist"
+  install_custom_aerospace_agent
+}
+
+install_custom_aerospace_agent() {
+  if [[ ! -x "$HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp" ]]; then
+    echo "custom AeroSpace debug app missing; skipped direct LaunchAgent: $HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp"
+    return
+  fi
+  mkdir -p "$agent_dir" "$log_dir"
+  cat >"$aerospace_plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$aerospace_label</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>export PATH=&quot;/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\$PATH&quot;; cd &quot;\$HOME/dev/2026/AeroSpace&quot; &amp;&amp; exec &quot;\$HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp&quot;</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>$log_dir/aerospace-debug-server.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>$log_dir/aerospace-debug-server.err.log</string>
+  <key>WorkingDirectory</key>
+  <string>$HOME/dev/2026/AeroSpace</string>
+</dict>
+</plist>
+EOF
+  launchctl bootout "gui/$(id -u)" "$terminal_aerospace_plist" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$(id -u)" "$aerospace_plist" >/dev/null 2>&1 || true
+  pkill -TERM -f "$HOME/.eventloop-lab/bin/run-aerospace.command" >/dev/null 2>&1 || true
+  sleep 1
+  pkill -KILL -f "$HOME/.eventloop-lab/bin/run-aerospace.command" >/dev/null 2>&1 || true
+  pkill -TERM -f "$HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp" >/dev/null 2>&1 || true
+  sleep 1
+  pkill -KILL -f "$HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp" >/dev/null 2>&1 || true
+  launchctl bootstrap "gui/$(id -u)" "$aerospace_plist"
+  launchctl kickstart -k "gui/$(id -u)/$aerospace_label" >/dev/null 2>&1 || true
+  echo "custom AeroSpace direct LaunchAgent installed: $aerospace_plist"
+  if [[ -f "$terminal_aerospace_plist" ]]; then
+    echo "old Terminal AeroSpace launcher unloaded: $terminal_aerospace_plist"
+  fi
 }
 
 status_agent() {
@@ -244,14 +307,26 @@ status_agent() {
   fi
   launchctl print "gui/$(id -u)/$label" 2>/dev/null || true
   echo
+  echo "aerospace_plist=$aerospace_plist"
+  if [[ -f "$aerospace_plist" ]]; then
+    echo "aerospace_plist_present=1"
+  else
+    echo "aerospace_plist_present=0"
+  fi
+  launchctl print "gui/$(id -u)/$aerospace_label" 2>/dev/null || true
+  echo
   echo "recent_logs=$log_dir"
   tail -n 80 "$log_dir/lab-self-heal.out.log" 2>/dev/null || true
   tail -n 80 "$log_dir/lab-self-heal.err.log" 2>/dev/null || true
+  tail -n 80 "$log_dir/aerospace-debug-server.out.log" 2>/dev/null || true
+  tail -n 80 "$log_dir/aerospace-debug-server.err.log" 2>/dev/null || true
 }
 
 uninstall_agent() {
   launchctl bootout "gui/$(id -u)" "$plist" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$(id -u)" "$aerospace_plist" >/dev/null 2>&1 || true
   rm -f "$plist"
+  rm -f "$aerospace_plist"
   echo "lab self-heal uninstalled: $plist"
 }
 
@@ -290,7 +365,22 @@ run_once() {
       echo "skipped opening Tailscale/AeroSpace"
     else
       open -gj -a Tailscale >/dev/null 2>&1 || true
-      open -gj -a AeroSpace >/dev/null 2>&1 || true
+      if [[ "$aerospace_mode" == "skip" ]]; then
+        echo "skipped opening AeroSpace by LAB_SELF_HEAL_AEROSPACE_MODE=skip"
+      elif [[ "$aerospace_mode" == "custom" || ( "$aerospace_mode" == "auto" && -x "$custom_aerospace_runner" ) ]]; then
+        if pgrep -fl "/AeroSpace/.debug/AeroSpaceApp|run-aerospace.command" >/dev/null 2>&1; then
+          echo "custom AeroSpace runner already visible"
+        else
+          echo "custom AeroSpace runner configured but not visible; relying on dev.eventloopos.aerospace-terminal-launcher LaunchAgent"
+        fi
+        while IFS= read -r release_pid; do
+          [[ -n "$release_pid" ]] || continue
+          echo "stopping duplicate LaunchServices AeroSpace pid=$release_pid while custom runner is active"
+          kill "$release_pid" >/dev/null 2>&1 || true
+        done < <(pgrep -f "/AeroSpace/.release/AeroSpace.app/Contents/MacOS/AeroSpace|/Applications/AeroSpace.app/Contents/MacOS/AeroSpace" || true)
+      else
+        open -gj -a AeroSpace >/dev/null 2>&1 || true
+      fi
       sleep 3
     fi
     echo

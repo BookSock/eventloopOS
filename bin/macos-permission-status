@@ -69,10 +69,10 @@ const commands = {
   ),
   aerospacePath: await runCommand("bash", ["-lc", "command -v aerospace"]),
   aerospaceVersion: await runCommand("bash", ["-lc", "command -v aerospace >/dev/null 2>&1 && aerospace --version"]),
-  aerospaceAppVersion: await runCommand("bash", ["-lc", 'if [[ -x /Applications/AeroSpace.app/Contents/MacOS/AeroSpace ]]; then /Applications/AeroSpace.app/Contents/MacOS/AeroSpace --version; else echo "AeroSpace.app binary missing"; exit 1; fi']),
+  aerospaceAppVersion: await runCommand("bash", ["-lc", 'app="${AEROSPACE_APP_BIN:-}"; if [[ -z "$app" ]]; then for candidate in /Applications/AeroSpace.app/Contents/MacOS/AeroSpace "$HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp"; do [[ -x "$candidate" ]] && app="$candidate" && break; done; fi; if [[ -x "$app" ]]; then "$app" --version; else echo "AeroSpace.app binary missing"; exit 1; fi']),
   aerospaceCliShasum: await runCommand("bash", ["-lc", 'if command -v aerospace >/dev/null 2>&1; then shasum "$(command -v aerospace)"; else echo "aerospace CLI missing"; exit 1; fi']),
-  aerospaceAppShasum: await runCommand("bash", ["-lc", 'if [[ -x /Applications/AeroSpace.app/Contents/MacOS/AeroSpace ]]; then shasum /Applications/AeroSpace.app/Contents/MacOS/AeroSpace; else echo "AeroSpace.app binary missing"; exit 1; fi']),
-  aerospaceProcess: await runCommand("bash", ["-lc", "pgrep -fl 'AeroSpace.app/Contents/MacOS/AeroSpace'"]),
+  aerospaceAppShasum: await runCommand("bash", ["-lc", 'app="${AEROSPACE_APP_BIN:-}"; if [[ -z "$app" ]]; then for candidate in /Applications/AeroSpace.app/Contents/MacOS/AeroSpace "$HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp"; do [[ -x "$candidate" ]] && app="$candidate" && break; done; fi; if [[ -x "$app" ]]; then shasum "$app"; else echo "AeroSpace.app binary missing"; exit 1; fi']),
+  aerospaceProcess: await runCommand("bash", ["-lc", "pgrep -fl 'AeroSpace.app/Contents/MacOS/AeroSpace|/AeroSpace/.debug/AeroSpaceApp|/AeroSpaceApp$'"]),
   aerospaceWorkspace: await runCommand("bash", ["-lc", "command -v aerospace >/dev/null 2>&1 && aerospace list-workspaces --focused"]),
   aerospaceMutationProbe: await runCommand("bash", ["-lc", "command -v aerospace >/dev/null 2>&1 && aerospace layout --window-id 2147483647 floating"]),
 };

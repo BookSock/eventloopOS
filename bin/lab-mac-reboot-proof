@@ -13,7 +13,8 @@ Environment:
   LAB_MAC_HOST                   default: 100.71.111.25
   LAB_MAC_USER                   default: claw
   LAB_MAC_KEY                    default: ~/.ssh/eventloop_lab_mac
-  LAB_MAC_LOGIN_PASSWORD         optional: sudo fallback when GUI restart is ignored
+  LAB_MAC_LOGIN_PASSWORD         optional: sudo reboot password
+  LAB_MAC_LOGIN_PASSWORD_FILE    optional: file containing sudo reboot password
   LAB_DOGFOOD_URL                default: http://127.0.0.1:4480
   LAB_MAC_REBOOT_TIMEOUT_SECONDS default: 420
 EOF
@@ -46,6 +47,10 @@ lab_host="${LAB_MAC_HOST:-100.71.111.25}"
 lab_user="${LAB_MAC_USER:-claw}"
 lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
 lab_login_password="${LAB_MAC_LOGIN_PASSWORD:-}"
+lab_login_password_file="${LAB_MAC_LOGIN_PASSWORD_FILE:-}"
+if [[ -z "$lab_login_password" && -n "$lab_login_password_file" && -f "$lab_login_password_file" ]]; then
+  lab_login_password="$(head -n 1 "$lab_login_password_file")"
+fi
 url="${LAB_DOGFOOD_URL:-http://127.0.0.1:4480}"
 timeout_seconds="${LAB_MAC_REBOOT_TIMEOUT_SECONDS:-420}"
 remote="${lab_user}@${lab_host}"
@@ -206,7 +211,7 @@ mkdir -p "$run"
   echo "hostname=$(hostname)"
   echo "computer_name=$(scutil --get ComputerName 2>/dev/null || true)"
   echo "console_user=$(stat -f %Su /dev/console 2>/dev/null || true)"
-  echo "boot_time_epoch=$(sysctl -n kern.boottime 2>/dev/null | sed -E 's/.*sec = ([0-9]+).*/\1/' || true)"
+  echo "boot_time_epoch=$(sysctl -n kern.boottime 2>/dev/null | awk -F'[=,]' '/sec =/ { gsub(/[^0-9]/, "", $2); print $2; exit }' || true)"
   echo "uptime=$(uptime)"
   echo "tailscale_ip=$(tailscale ip -4 2>/dev/null || true)"
   echo
@@ -223,7 +228,7 @@ mkdir -p "$run"
 REMOTE
 }
 
-install_and_request_reboot() {
+request_gui_reboot() {
   ssh_remote "bash -s -- '$remote_repo' '$run_dir'" <<'REMOTE'
 set -euo pipefail
 repo="$1"
@@ -259,6 +264,15 @@ request_sudo_reboot() {
   quoted_run="$(printf "%q" "$run_dir")"
   printf "%s\n" "$lab_login_password" | ssh "${ssh_opts[@]}" "$remote" \
     "cd $quoted_repo && mkdir -p $quoted_run && sudo -S -p '' /sbin/shutdown -r now >$quoted_run/sudo-reboot.out 2>$quoted_run/sudo-reboot.err"
+}
+
+request_reboot() {
+  if request_sudo_reboot; then
+    echo "sudo reboot requested for $remote"
+    return 0
+  fi
+  echo "sudo reboot unavailable; requesting GUI reboot fallback for $remote"
+  request_gui_reboot
 }
 
 ssh_probe() {
@@ -312,7 +326,7 @@ collect_remote_state before
 sync_run
 cp "$run_dir/before-state.txt" "$run_dir/before-state.local-copy.txt" 2>/dev/null || true
 
-install_and_request_reboot
+request_reboot
 reboot_requested=true
 echo "reboot requested for $remote"
 
@@ -321,19 +335,8 @@ if wait_for_ssh_down; then
   collect_controller_transport_state ssh-down
   echo "ssh went down"
 else
-  echo "ssh did not go down within 90s after GUI restart request" >&2
-  if [[ -n "$lab_login_password" ]]; then
-    echo "requesting sudo reboot fallback"
-    request_sudo_reboot || true
-    if wait_for_ssh_down; then
-      ssh_went_down=true
-      echo "ssh went down after sudo fallback"
-    else
-      echo "ssh did not go down after sudo fallback; continuing to wait for reachable host" >&2
-    fi
-  else
-    echo "continuing to wait for reachable host" >&2
-  fi
+  echo "ssh did not go down within 90s after reboot request" >&2
+  echo "continuing to wait for reachable host" >&2
 fi
 
 if wait_for_ssh_up; then
