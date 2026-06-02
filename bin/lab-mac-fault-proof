@@ -1355,6 +1355,11 @@ postgres_port="45993"
 postgres_container="eventloopos-postgres-migration-mismatch"
 fault_url="http://127.0.0.1:$fault_port"
 bad_migrations_dir="$PWD/$run/bad-migrations"
+native_pg_dir="$(mktemp -d /tmp/eventloopos-pg.XXXXXX)"
+native_pg_data="$native_pg_dir/data"
+native_pg_socket="$native_pg_dir/socket"
+native_pg_user="$(id -un)"
+postgres_runtime="none"
 mkdir -p "$bad_migrations_dir"
 cat >"$bad_migrations_dir/0001_bad_migration.sql" <<'SQL'
 CREATE TABLE eventloopos_migration_fault (
@@ -1367,10 +1372,8 @@ printf "%s\n" "$bad_migrations_dir" >"$run/bad-migrations-dir.txt"
 
 curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-before.json" 2>"$run/main-health-before.err" || true
 
-if ! command -v docker >/dev/null 2>&1; then
-  printf "docker missing; install/start Docker Desktop or provide a Postgres runtime before running postgres-migration-mismatch proof\n" >"$run/postgres-runtime-check.txt"
-  printf "126\n" >"$run/dogfood-postgres-migration-mismatch.rc"
-else
+if command -v docker >/dev/null 2>&1; then
+  postgres_runtime="docker"
   printf "docker available\n" >"$run/postgres-runtime-check.txt"
   set +e
   EVENTLOOPOS_POSTGRES_CONTAINER="$postgres_container" \
@@ -1382,7 +1385,30 @@ else
 
   database_url="$(awk '/^postgres:\/\// { value=$0 } END { print value }' "$run/dev-postgres-up.out")"
   printf "%s\n" "$database_url" >"$run/database-url.txt"
-  if [[ "$postgres_up_rc" == "0" && -n "$database_url" ]]; then
+elif command -v initdb >/dev/null 2>&1 && command -v pg_ctl >/dev/null 2>&1 && command -v createdb >/dev/null 2>&1; then
+  postgres_runtime="native"
+  printf "native postgres available\n" >"$run/postgres-runtime-check.txt"
+  printf "%s\n" "$native_pg_dir" >"$run/native-postgres-dir.txt"
+  mkdir -p "$native_pg_dir" "$native_pg_socket"
+  set +e
+  {
+    initdb -D "$native_pg_data" --username "$native_pg_user" --auth=trust --no-instructions
+    pg_ctl -D "$native_pg_data" -l "$run/native-postgres.log" -o "-p $postgres_port -k $native_pg_socket -c listen_addresses=127.0.0.1" -w start
+    createdb -h 127.0.0.1 -p "$postgres_port" -U "$native_pg_user" eventloop_test
+  } >"$run/dev-postgres-up.out" 2>"$run/dev-postgres-up.err"
+  postgres_up_rc="$?"
+  printf "%s\n" "$postgres_up_rc" >"$run/dev-postgres-up.rc"
+  set -e
+  database_url="postgres://$native_pg_user@127.0.0.1:$postgres_port/eventloop_test"
+  printf "%s\n" "$database_url" >"$run/database-url.txt"
+else
+  printf "no Postgres runtime found; install/start Docker Desktop or install native Postgres tools (initdb, pg_ctl, createdb)\n" >"$run/postgres-runtime-check.txt"
+  printf "126\n" >"$run/dogfood-postgres-migration-mismatch.rc"
+  postgres_up_rc="126"
+  database_url=""
+fi
+
+if [[ "${postgres_up_rc:-126}" == "0" && -n "${database_url:-}" ]]; then
     (
       set +e
       EVENTLOOPOS_DOGFOOD_PROFILE="lab-postgres-migration-mismatch-proof" \
@@ -1419,11 +1445,15 @@ else
       printf "124\n" >"$run/dogfood-postgres-migration-mismatch.rc"
     fi
     wait "$dogfood_pid" 2>/dev/null || true
-  fi
+fi
 
+if [[ "$postgres_runtime" == "docker" ]]; then
   EVENTLOOPOS_POSTGRES_CONTAINER="$postgres_container" \
   EVENTLOOPOS_POSTGRES_PORT="$postgres_port" \
     pnpm run dev:postgres:down >"$run/dev-postgres-down.out" 2>"$run/dev-postgres-down.err" || true
+elif [[ "$postgres_runtime" == "native" ]]; then
+  pg_ctl -D "$native_pg_data" -m fast -w stop >"$run/dev-postgres-down.out" 2>"$run/dev-postgres-down.err" || true
+  rm -rf "$native_pg_dir"
 fi
 
 curl -fsS --max-time 5 "$fault_url/health" >"$run/fault-health-after.json" 2>"$run/fault-health-after.err" || true
@@ -1457,7 +1487,8 @@ const stdout = read("dogfood-postgres-migration-mismatch.out");
 const stderr = read("dogfood-postgres-migration-mismatch.err");
 const combinedLog = `${stdout}\n${stderr}`;
 const rc = Number(read("dogfood-postgres-migration-mismatch.rc"));
-const dockerAvailable = /docker available/.test(read("postgres-runtime-check.txt"));
+const runtimeCheck = read("postgres-runtime-check.txt");
+const postgresRuntimeAvailable = /(docker|native) postgres available|docker available/.test(runtimeCheck);
 const postgresStarted = read("dev-postgres-up.rc") === "0" && read("database-url.txt").startsWith("postgres://");
 const actionable = /Postgres unavailable|migrations failed|EVENTLOOPOS_POSTGRES_MIGRATIONS_DIR|DATABASE_URL|syntax error|broken syntax|migration/i.test(combinedLog);
 const mainHealthBefore = json("main-health-before.json", {});
@@ -1470,10 +1501,10 @@ const assertions = [
   },
   {
     name: "postgres_runtime_available",
-    ok: dockerAvailable,
+    ok: postgresRuntimeAvailable,
     details: {
-      runtime_check: read("postgres-runtime-check.txt"),
-      fix: "Install/start Docker Desktop on the lab Mac, or provide another Postgres runtime, then rerun bin/lab-mac-fault-proof postgres-migration-mismatch.",
+      runtime_check: runtimeCheck,
+      fix: "Install/start Docker Desktop or install native Postgres tools (initdb, pg_ctl, createdb), then rerun bin/lab-mac-fault-proof postgres-migration-mismatch.",
     },
   },
   {
