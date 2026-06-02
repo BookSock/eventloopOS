@@ -179,6 +179,17 @@ on waitForMenuBarExtra()
   error "eventloopOS Queue menu bar extra did not appear"
 end waitForMenuBarExtra
 
+on queueWindowCount()
+  tell application "System Events"
+    if exists process "eventloopOS Queue" then
+      tell process "eventloopOS Queue"
+        return count of windows
+      end tell
+    end if
+  end tell
+  return 0
+end queueWindowCount
+
 on clickMenuItem(itemName)
   waitForMenuBarExtra()
   tell application "System Events"
@@ -194,9 +205,12 @@ end clickMenuItem
 
 clickMenuItem("Refresh Queue")
 delay 0.5
-clickMenuItem("Open Queue")
-delay 1.0
-return "opened queue window"
+if queueWindowCount() is 0 then
+  clickMenuItem("Open Queue")
+  delay 1.0
+  return "opened queue window"
+end if
+return "queue window already open"
 APPLESCRIPT
   local osascript_pid="$!"
   for _ in {1..25}; do

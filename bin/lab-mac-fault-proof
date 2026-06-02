@@ -558,6 +558,17 @@ on waitForMenuBarExtra()
   error "EventLoopQueueApp menu bar extra did not appear"
 end waitForMenuBarExtra
 
+on queueWindowCount()
+  tell application "System Events"
+    if exists process "EventLoopQueueApp" then
+      tell process "EventLoopQueueApp"
+        return count of windows
+      end tell
+    end if
+  end tell
+  return 0
+end queueWindowCount
+
 on clickMenuItem(itemName)
   waitForMenuBarExtra()
   tell application "System Events"
@@ -573,9 +584,12 @@ end clickMenuItem
 
 clickMenuItem("Refresh Queue")
 delay 0.5
-clickMenuItem("Open Queue")
-delay 1.0
-return "opened queue window after restart"
+if queueWindowCount() is 0 then
+  clickMenuItem("Open Queue")
+  delay 1.0
+  return "opened queue window after restart"
+end if
+return "queue window already open after restart"
 APPLESCRIPT
 
 collect_api_state after_restart

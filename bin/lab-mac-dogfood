@@ -311,7 +311,7 @@ while read -r window_id; do
   [[ -z \"\$window_id\" ]] && continue
   aerospace close --window-id \"\$window_id\" >/dev/null 2>&1
   closed=\$((closed + 1))
-done < <(jq -r \".[] | select(.\\\"app-name\\\" == \\\"eventloopOS Queue\\\") | .\\\"window-id\\\"\" /tmp/eventloopos-lab-cleanup-windows.json 2>/dev/null)
+done < <(jq -r \".[] | select((.\\\"app-name\\\" == \\\"eventloopOS Queue\\\") or (.\\\"app-name\\\" == \\\"Ghostty\\\" and (.\\\"window-title\\\" | test(\\\"eventloopOS|codex|dogfood|completion-workspace\\\"; \\\"i\\\")))) | .\\\"window-id\\\"\" /tmp/eventloopos-lab-cleanup-windows.json 2>/dev/null)
 osascript <<'\"'\"'APPLESCRIPT'\"'\"' >/tmp/eventloopos-lab-cleanup-queue.out 2>/tmp/eventloopos-lab-cleanup-queue.err || true
 set closedQueueWindows to 0
 tell application \"System Events\"
@@ -367,12 +367,18 @@ APPLESCRIPT
 )
 terminal_total=\$(printf \"%s\" \"\$terminal_counts\" | awk \"{print \\\$1+0}\")
 terminal_capture=\$(printf \"%s\" \"\$terminal_counts\" | awk \"{print \\\$2+0}\")
-if [[ \"\$terminal_total\" -gt 0 && \"\$terminal_total\" -eq \"\$terminal_capture\" ]]; then
+if [[ \"\$terminal_capture\" -gt 0 && \"${LAB_DOGFOOD_KEEP_TERMINAL:-0}\" != \"1\" ]]; then
+  osascript -e \"tell application \\\"Terminal\\\" to quit\" >/dev/null 2>&1 || true
+  sleep 1
   pkill -x Terminal >/dev/null 2>&1 || true
-  echo \"terminal_killed_capture_only_windows=\$terminal_capture\"
+  sleep 1
+  echo \"terminal_killed_because_capture_windows_remained=\$terminal_capture\"
 elif [[ \"\$terminal_capture\" -gt 0 ]]; then
   echo \"terminal_capture_windows_left_open=\$terminal_capture\"
 fi
+pkill -TERM -f \"/Users/$lab_user/dev/2026/eventloopOS/bin/ghostty-codex-remote\" >/dev/null 2>&1 || true
+sleep 1
+pkill -KILL -f \"/Users/$lab_user/dev/2026/eventloopOS/bin/ghostty-codex-remote\" >/dev/null 2>&1 || true
 echo \"cleanup_note=cleanup closes only non-busy Terminal capture windows; busy Terminal windows are left alone to avoid macOS termination prompts.\"
 aerospace list-windows --all --json --format \"%{window-id}%{app-name}%{window-title}%{workspace}\" 2>/dev/null | jq \"{count: length, apps: ([.[].\\\"app-name\\\"] | group_by(.) | map({app: .[0], count: length}))}\" 2>/dev/null || true
 '"
@@ -537,9 +543,9 @@ PY
   stop)
     ssh_remote "bash -lc '
 set +e
-pkill -TERM -f \"bin/dev-dogfood|pnpm run dev:dogfood|EventLoopQueueApp|node dist/src/index.js|codex app-server\" 2>/dev/null
+pkill -TERM -f \"bin/dev-dogfood|pnpm run dev:dogfood|EventLoopQueueApp|node dist/src/index.js|codex app-server|ghostty-codex-remote\" 2>/dev/null
 sleep 2
-	pkill -KILL -f \"bin/dev-dogfood|pnpm run dev:dogfood|EventLoopQueueApp|node dist/src/index.js|codex app-server\" 2>/dev/null
+	pkill -KILL -f \"bin/dev-dogfood|pnpm run dev:dogfood|EventLoopQueueApp|node dist/src/index.js|codex app-server|ghostty-codex-remote\" 2>/dev/null
 	lsof -tiTCP:4480 -sTCP:LISTEN 2>/dev/null | xargs kill -TERM 2>/dev/null
 	sleep 1
 	lsof -tiTCP:4480 -sTCP:LISTEN 2>/dev/null | xargs kill -KILL 2>/dev/null

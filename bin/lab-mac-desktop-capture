@@ -486,7 +486,8 @@ fi
 if [[ "$video_seconds" =~ ^[0-9]+$ && "$video_seconds" -gt 0 && "$video_bytes" == "0" ]]; then
   needs_gui_capture="1"
 fi
-if grep -Eq "EventLoopQueueApp|eventloopOS Queue" "$capture_dir/processes-interesting.txt" 2>/dev/null \
+if [[ "$inject_accessibility_denied" != "1" ]] \
+  && grep -Eq "EventLoopQueueApp|eventloopOS Queue" "$capture_dir/processes-interesting.txt" 2>/dev/null \
   && { [[ ! -s "$capture_dir/queue-ax-summary.txt" ]] || [[ ! -s "$capture_dir/queue-ax-tree.txt" ]]; }; then
   needs_gui_capture="1"
 fi
@@ -499,7 +500,20 @@ set -euo pipefail
 export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 capture_dir="$capture_dir"
 video_seconds="$video_seconds"
+inject_accessibility_denied="$inject_accessibility_denied"
+if [[ "\$inject_accessibility_denied" != "1" ]]; then
 osascript >"\$capture_dir/gui-open-queue.out" 2>"\$capture_dir/gui-open-queue.err" <<'APPLESCRIPT' || true
+on existingQueueWindowCount()
+  tell application "System Events"
+    if exists process "eventloopOS Queue" then
+      tell process "eventloopOS Queue"
+        return count of windows
+      end tell
+    end if
+  end tell
+  return 0
+end existingQueueWindowCount
+
 on waitForMenuBarExtra()
   repeat with attempt from 1 to 30
     tell application "System Events"
@@ -514,6 +528,9 @@ on waitForMenuBarExtra()
   error "eventloopOS Queue menu bar extra did not appear"
 end waitForMenuBarExtra
 
+if existingQueueWindowCount() is greater than 0 then
+  return "queue_window_already_open"
+end if
 waitForMenuBarExtra()
 tell application "System Events"
   tell process "eventloopOS Queue"
@@ -611,6 +628,7 @@ end tell
 set AppleScript's text item delimiters to linefeed
 return allLines as string
 APPLESCRIPT
+fi
 screencapture -x "\$capture_dir/screen.png" >"\$capture_dir/gui-screencapture.out" 2>"\$capture_dir/gui-screencapture.err" || true
 if [[ "\$video_seconds" =~ ^[0-9]+$ && "\$video_seconds" -gt 0 ]]; then
   screencapture -x -v -V "\$video_seconds" "\$capture_dir/screen.mov" >"\$capture_dir/gui-screenrecord.out" 2>"\$capture_dir/gui-screenrecord.err" || true
@@ -637,12 +655,14 @@ EOF
   if [[ -f "$capture_dir/screen.mov" ]]; then
     gui_video_bytes="$(wc -c <"$capture_dir/screen.mov" | tr -d ' ')"
   fi
-  for ax_artifact in queue-menu-items queue-ax-summary queue-ax-tree; do
-    if [[ -s "$capture_dir/gui-${ax_artifact}.txt" ]]; then
-      cp "$capture_dir/gui-${ax_artifact}.txt" "$capture_dir/${ax_artifact}.txt"
-      cp "$capture_dir/gui-${ax_artifact}.err" "$capture_dir/${ax_artifact}.err"
-    fi
-  done
+  if [[ "$inject_accessibility_denied" != "1" ]]; then
+    for ax_artifact in queue-menu-items queue-ax-summary queue-ax-tree; do
+      if [[ -s "$capture_dir/gui-${ax_artifact}.txt" ]]; then
+        cp "$capture_dir/gui-${ax_artifact}.txt" "$capture_dir/${ax_artifact}.txt"
+        cp "$capture_dir/gui-${ax_artifact}.err" "$capture_dir/${ax_artifact}.err"
+      fi
+    done
+  fi
   CAPTURE_DIR="$capture_dir" \
   SCREEN_BYTES="$gui_screen_bytes" \
   SCREEN_SHA="$gui_screen_sha" \
