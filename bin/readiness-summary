@@ -76,13 +76,14 @@ const macosPermissionStatus = Object.values(evidenceDetails).find((item) => item
 const artifactAudit = evidenceDetails.artifact_audit?.kind === "eventloopos.product_readiness_artifact_audit"
   ? evidenceDetails.artifact_audit
   : undefined;
+const failedRebootProof = blockedRebootProof(evidenceDetails);
 const failedSteps = (product.steps ?? []).filter((step) => step.status !== "passed" && step.optional !== true);
 const blockers = product.blockers ?? [];
 const requirementCoverage = product.requirement_coverage ?? [];
 const coverageGaps = requirementCoverage.filter((item) => item.status !== "passed");
 const nextCommandGroups = recommendCommandGroups(product, productLabConnectivity, evidenceDetails, currentAerospaceRepair, currentLabWait);
 const nextCommands = flattenCommandGroups(nextCommandGroups);
-const primaryNextAction = choosePrimaryNextAction(product, nextCommandGroups, currentLabWait);
+const primaryNextAction = choosePrimaryNextAction(product, nextCommandGroups, currentLabWait, failedRebootProof);
 const artifactContractFailures = artifactContractStatusFailures(product.artifact_contract);
 const summary = {
   schema_version: 1,
@@ -313,6 +314,14 @@ function summarizeManifest(file, manifest) {
       fixes: manifest.fixes,
     };
   }
+  if (manifest.kind === "eventloopos.lab_mac_reboot_proof") {
+    return {
+      ...base,
+      checks: manifest.checks,
+      controller_tailscale: manifest.controller_tailscale,
+      fixes: manifest.fixes,
+    };
+  }
   if (manifest.kind === "eventloopos.agent_proof") {
     return {
       ...base,
@@ -422,6 +431,12 @@ function recommendCommandGroups(product, labConnectivity, evidenceDetails, aeros
       groups.lab.push(command);
     }
   }
+  const failedRebootProof = blockedRebootProof(evidenceDetails);
+  if (failedRebootProof) {
+    for (const command of labRebootProofCommands(failedRebootProof)) {
+      groups.lab.push(command);
+    }
+  }
   if (product.mode === "local" && !permissionEvidence) {
     groups.local.push("pnpm product:local:dogfood");
   }
@@ -453,6 +468,40 @@ function labWaitCommands(labWait) {
     : [waitCommand, statusCommand, bootstrapCommand];
 }
 
+function labRebootProofCommands(rebootProof) {
+  const controller = rebootProof.controller_tailscale ?? {};
+  const waitCommand = controller.suggested_wait_command ?? "pnpm lab:wait-online:quick";
+  const statusCommand = controller.suggested_status_command ?? "pnpm setup:lab-status";
+  const bootstrapCommand = controller.suggested_lab_command
+    ? `${controller.suggested_lab_command} # run on the lab Mac after local login`
+    : "LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap # run on the lab Mac after local login";
+  const dogfoodCommand = "pnpm product:dogfood";
+  const strictRebootCommand = "LAB_MAC_REBOOT=1 LAB_MAC_REBOOT_REQUIRE_SUDO=1 LAB_MAC_LOGIN_PASSWORD_FILE=\"$HOME/.eventloop-lab/mac-login-password\" bin/lab-mac-reboot-proof";
+  if (rebootProof.checks?.ssh_came_back === false) {
+    return [bootstrapCommand, waitCommand, statusCommand, dogfoodCommand, strictRebootCommand];
+  }
+  if (rebootProof.checks?.reboot_requested === false) {
+    return [strictRebootCommand];
+  }
+  return [waitCommand, statusCommand, dogfoodCommand, strictRebootCommand];
+}
+
+function rebootProofNeedsLocalBootstrap(rebootProof) {
+  if (!rebootProof || rebootProof.ok === true) return false;
+  if (rebootProof.checks?.ssh_came_back === false) return true;
+  const controller = rebootProof.controller_tailscale ?? {};
+  if (controller.lab_tailscale_visible === false) return true;
+  if (controller.lab_tailscale_offline !== true) return false;
+  return Number(controller.lab_offline_last_seen_seconds) > 10 * 60;
+}
+
+function blockedRebootProof(evidenceDetails) {
+  return evidenceDetails.failed_lab_reboot_proof?.kind === "eventloopos.lab_mac_reboot_proof"
+    && evidenceDetails.failed_lab_reboot_proof.ok === false
+    ? evidenceDetails.failed_lab_reboot_proof
+    : undefined;
+}
+
 function flattenCommandGroups(groups) {
   return [...new Set([
     ...(groups.local ?? []),
@@ -461,8 +510,8 @@ function flattenCommandGroups(groups) {
   ])];
 }
 
-function choosePrimaryNextAction(product, groups, labWait) {
-  const localBootstrapNeeded = labNeedsLocalBootstrap(labWait);
+function choosePrimaryNextAction(product, groups, labWait, rebootProof) {
+  const localBootstrapNeeded = labNeedsLocalBootstrap(labWait) || rebootProofNeedsLocalBootstrap(rebootProof);
   const groupOrder = localBootstrapNeeded
     ? ["lab", "local", "release"]
     : product.mode === "lab"
@@ -635,6 +684,45 @@ function runSelfTest() {
   assert.equal(dogfoodPassedAction.command, "pnpm product:release:fast");
   assert.equal(dogfoodPassedAction.command_group, "release");
   assert.equal(dogfoodPassedAction.target, "controller");
+
+  const failedRebootProof = {
+    kind: "eventloopos.lab_mac_reboot_proof",
+    ok: false,
+    checks: {
+      ssh_came_back: false,
+    },
+    controller_tailscale: {
+      suggested_lab_command: "LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap",
+      suggested_wait_command: "pnpm lab:wait-online:quick",
+      suggested_status_command: "pnpm setup:lab-status",
+      lab_tailscale_offline: true,
+      lab_offline_last_seen_seconds: 540,
+    },
+  };
+  const failedRebootGroups = recommendCommandGroups(
+    { mode: "lab", profile: "release", passed: false },
+    undefined,
+    { failed_lab_reboot_proof: failedRebootProof },
+    undefined,
+    undefined,
+  );
+  assert.deepEqual(failedRebootGroups.lab, [
+    labBootstrap,
+    "pnpm lab:wait-online:quick",
+    "pnpm setup:lab-status",
+    "pnpm product:dogfood",
+    "LAB_MAC_REBOOT=1 LAB_MAC_REBOOT_REQUIRE_SUDO=1 LAB_MAC_LOGIN_PASSWORD_FILE=\"$HOME/.eventloop-lab/mac-login-password\" bin/lab-mac-reboot-proof",
+  ]);
+  const failedRebootAction = choosePrimaryNextAction(
+    { mode: "lab", profile: "release", passed: false },
+    failedRebootGroups,
+    undefined,
+    failedRebootProof,
+  );
+  assert.equal(failedRebootAction.command, labBootstrap);
+  assert.equal(failedRebootAction.target, "lab");
+  assert.equal(failedRebootAction.autorun, false);
+  assert.equal(failedRebootAction.reason, "lab is offline or invisible enough that lab-local bootstrap is the highest-signal next step");
 
   const dogfoodSummary = summarizeManifest("artifacts/lab-runs/status/manifest.json", {
     kind: "eventloopos.lab_dogfood_status",
