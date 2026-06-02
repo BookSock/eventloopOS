@@ -284,6 +284,7 @@ install_custom_aerospace_agent() {
 EOF
   launchctl bootout "gui/$(id -u)" "$terminal_aerospace_plist" >/dev/null 2>&1 || true
   launchctl bootout "gui/$(id -u)" "$aerospace_plist" >/dev/null 2>&1 || true
+  rm -f "$terminal_aerospace_plist"
   pkill -TERM -f "$HOME/.eventloop-lab/bin/run-aerospace.command" >/dev/null 2>&1 || true
   sleep 1
   pkill -KILL -f "$HOME/.eventloop-lab/bin/run-aerospace.command" >/dev/null 2>&1 || true
@@ -295,6 +296,8 @@ EOF
   echo "custom AeroSpace direct LaunchAgent installed: $aerospace_plist"
   if [[ -f "$terminal_aerospace_plist" ]]; then
     echo "old Terminal AeroSpace launcher unloaded: $terminal_aerospace_plist"
+  else
+    echo "old Terminal AeroSpace launcher removed: $terminal_aerospace_plist"
   fi
 }
 
