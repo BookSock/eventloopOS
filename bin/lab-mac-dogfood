@@ -332,6 +332,7 @@ return \"system_events_closed_queue_windows=\" & closedQueueWindows
 APPLESCRIPT
 osascript <<'\"'\"'APPLESCRIPT'\"'\"' >/tmp/eventloopos-lab-cleanup-terminal.out 2>/tmp/eventloopos-lab-cleanup-terminal.err || true
 set closedCaptureWindows to 0
+set closedAerospaceWindows to 0
 tell application \"Terminal\"
   repeat with candidateWindow in windows
     try
@@ -343,11 +344,14 @@ tell application \"Terminal\"
       if windowName contains \"gui-screencapture.command\" and windowBusy is false then
         close candidateWindow
         set closedCaptureWindows to closedCaptureWindows + 1
+      else if windowName contains \"run-aerospace.command\" and windowBusy is false then
+        close candidateWindow
+        set closedAerospaceWindows to closedAerospaceWindows + 1
       end if
     end try
   end repeat
 end tell
-return \"terminal_closed_nonbusy_capture_windows=\" & closedCaptureWindows
+return \"terminal_closed_nonbusy_capture_windows=\" & closedCaptureWindows & \" terminal_closed_nonbusy_aerospace_windows=\" & closedAerospaceWindows
 APPLESCRIPT
 echo \"cleanup_requested_queue_windows=\$closed\"
 cat /tmp/eventloopos-lab-cleanup-queue.out 2>/dev/null || true
@@ -355,25 +359,34 @@ cat /tmp/eventloopos-lab-cleanup-terminal.out 2>/dev/null || true
 terminal_counts=\$(osascript <<'\"'\"'APPLESCRIPT'\"'\"' 2>/dev/null || true
 tell application \"Terminal\"
   set totalWindows to count of windows
-  set captureWindows to 0
+  set staleWindows to 0
+  set busyWindows to 0
   repeat with candidateWindow in windows
     try
-      if (name of candidateWindow as string) contains \"gui-screencapture.command\" then set captureWindows to captureWindows + 1
+      set windowName to name of candidateWindow as string
+      set windowBusy to false
+      try
+        set windowBusy to busy of selected tab of candidateWindow
+      end try
+      if windowBusy then set busyWindows to busyWindows + 1
+      if windowName contains \"gui-screencapture.command\" or windowName contains \"run-aerospace.command\" then set staleWindows to staleWindows + 1
     end try
   end repeat
+  if totalWindows > 0 and totalWindows = staleWindows and busyWindows = 0 then quit
 end tell
-return (totalWindows as string) & \" \" & (captureWindows as string)
+return (totalWindows as string) & \" \" & (staleWindows as string) & \" \" & (busyWindows as string)
 APPLESCRIPT
 )
 terminal_total=\$(printf \"%s\" \"\$terminal_counts\" | awk \"{print \\\$1+0}\")
-terminal_capture=\$(printf \"%s\" \"\$terminal_counts\" | awk \"{print \\\$2+0}\")
-if [[ \"\$terminal_capture\" -gt 0 ]]; then
-  echo \"terminal_capture_windows_left_open=\$terminal_capture\"
+terminal_stale=\$(printf \"%s\" \"\$terminal_counts\" | awk \"{print \\\$2+0}\")
+terminal_busy=\$(printf \"%s\" \"\$terminal_counts\" | awk \"{print \\\$3+0}\")
+if [[ \"\$terminal_stale\" -gt 0 ]]; then
+  echo \"terminal_stale_windows_left_open=\$terminal_stale\"
 fi
 pkill -TERM -f \"/Users/$lab_user/dev/2026/eventloopOS/bin/ghostty-codex-remote\" >/dev/null 2>&1 || true
 sleep 1
 pkill -KILL -f \"/Users/$lab_user/dev/2026/eventloopOS/bin/ghostty-codex-remote\" >/dev/null 2>&1 || true
-echo \"cleanup_note=cleanup never quits Terminal globally; remaining Terminal capture windows are reported, not force-closed, to avoid macOS termination prompts.\"
+echo \"cleanup_note=cleanup only quits Terminal when every Terminal window is a stale non-busy lab runner; busy Terminal windows are left alone to avoid macOS termination prompts.\"
 aerospace list-windows --all --json --format \"%{window-id}%{app-name}%{window-title}%{workspace}\" 2>/dev/null | jq \"{count: length, apps: ([.[].\\\"app-name\\\"] | group_by(.) | map({app: .[0], count: length}))}\" 2>/dev/null || true
 '"
     ;;

@@ -110,10 +110,10 @@ const eventloopWindowMatches = Array.isArray(windows)
       const app = String(window["app-name"] ?? "");
       const title = String(window["window-title"] ?? "");
       return /eventloop|EventLoopQueueApp|eventloopOS Queue/i.test(`${app} ${title}`)
-        || /gui-screencapture\.command|run-dogfood-snapshot\.command|run-dogfood\.command/i.test(title);
+        || /gui-screencapture\.command|run-dogfood-snapshot\.command|run-dogfood\.command|run-aerospace\.command/i.test(title);
     })
   : [];
-const terminalCaptureWindows = terminalWindows.filter((line) => /gui-screencapture\.command|run-dogfood-snapshot\.command|run-dogfood\.command/i.test(line));
+const terminalCaptureWindows = terminalWindows.filter((line) => /gui-screencapture\.command|run-dogfood-snapshot\.command|run-dogfood\.command|run-aerospace\.command/i.test(line));
 const ghosttyEventloopWindows = Array.isArray(windows)
   ? windows.filter((window) => {
       const app = String(window["app-name"] ?? "");
