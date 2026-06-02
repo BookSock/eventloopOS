@@ -126,10 +126,40 @@ export function taskMessageRecordToApiMessage(record: DurableTaskMessageRecord):
     native_session_id: record.native_session_id,
     native_result_session_id: record.native_result_session_id,
     error: record.error,
+    recovery_hint: recoveryHintForTaskMessageError(record.error),
     created_at: record.created_at,
     updated_at: record.updated_at,
     durable: true,
   };
+}
+
+function recoveryHintForTaskMessageError(error: string | undefined): string | undefined {
+  if (!error) return undefined;
+  const lowered = error.toLowerCase();
+  if (lowered.includes("thread not found")
+    || lowered.includes("native thread lost")
+    || lowered.includes("native thread missing")
+    || lowered.includes("stale")
+    || lowered.includes("websocket is closed")) {
+    return "Codex thread is stale. Replace or rebind the task session, then send the followup again.";
+  }
+  if (lowered.includes("codex app-server")
+    || lowered.includes("app-server")
+    || lowered.includes("stream is closed")
+    || lowered.includes("connection refused")) {
+    return "Codex app-server is unavailable. Restart dogfood stack or Codex app-server, then retry followup.";
+  }
+  if (lowered.includes("postgres")
+    || lowered.includes("database_url")
+    || lowered.includes("migration")) {
+    return "Postgres is unavailable or schema is stale. Start the database or run migration repair before retrying.";
+  }
+  if (lowered.includes("ghostty")
+    || lowered.includes("terminal cleanup")
+    || lowered.includes("terminate running processes")) {
+    return "Terminal cleanup needs attention. Close stuck Ghostty/Terminal prompts, then rerun cleanup.";
+  }
+  return undefined;
 }
 
 export function sanitizeTaskMessage(message: unknown): Record<string, unknown> {

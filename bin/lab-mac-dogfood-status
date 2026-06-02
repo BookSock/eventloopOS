@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+url="${LAB_DOGFOOD_URL:-http://127.0.0.1:4480}"
+queue_app="${LAB_DOGFOOD_QUEUE_APP:-1}"
+status_windows="${LAB_DOGFOOD_STATUS_WINDOWS:-1}"
+remote="${lab_user}@${lab_host}"
+remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
+
+ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 "$remote" \
+  "bash -s -- '$remote_repo' '$url' '$remote' '$queue_app' '$status_windows'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+url="$2"
+remote="$3"
+queue_app="$4"
+status_windows="$5"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+cd "$repo"
+run="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-dogfood-status"
+mkdir -p "$run"
+printf "%s\n" "$remote" >"$run/remote.txt"
+printf "%s\n" "$repo" >"$run/repo.txt"
+printf "%s\n" "$url" >"$run/orchestrator-url.txt"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+
+echo "remote=$remote"
+echo "repo=$repo"
+echo "url=$url"
+echo "status_run=$run"
+echo "$run"
+
+command -v codex >"$run/codex-path.txt" 2>"$run/codex-path.err" || true
+codex --version >"$run/codex-version.txt" 2>"$run/codex-version.err" || true
+codex login status >"$run/codex-login-status.txt" 2>"$run/codex-login-status.err" || true
+sed -n "1,40p" "$HOME/.codex/config.toml" >"$run/codex-config-head.txt" 2>/dev/null || true
+
+curl -fsS --max-time 10 "$url/health" >"$run/health.json" 2>"$run/health.err" || echo "health: unavailable" >"$run/health.unavailable"
+curl -fsS --max-time 10 "$url/task-sessions" >"$run/task-sessions.json" 2>"$run/task-sessions.err" || echo "task-sessions: unavailable" >"$run/task-sessions.unavailable"
+curl -fsS --max-time 10 "$url/queue?state=ready" >"$run/queue-ready.json" 2>"$run/queue-ready.err" || echo "queue: unavailable" >"$run/queue-ready.unavailable"
+
+pgrep -fl "bin/dev-dogfood|codex app-server|EventLoopQueueApp|node dist/src/index" >"$run/processes-interesting.txt" 2>/dev/null || true
+ps -axo pid,ppid,comm,args >"$run/ps.txt" 2>/dev/null || true
+lsof -nP -iTCP -sTCP:LISTEN >"$run/listeners.txt" 2>"$run/listeners.err" || true
+
+if [[ "$status_windows" == "0" ]]; then
+  printf "[]\n" >"$run/windows.json"
+  printf "window capture skipped by LAB_DOGFOOD_STATUS_WINDOWS=0\n" >"$run/windows.err"
+elif command -v aerospace >/dev/null 2>&1; then
+  timeout 5 aerospace list-windows --all --json --format "%{window-id}%{app-name}%{window-title}%{window-layout}%{workspace}" >"$run/windows.json" 2>"$run/windows.err" || printf "[]\n" >"$run/windows.json"
+else
+  printf "[]\n" >"$run/windows.json"
+  printf "aerospace missing\n" >"$run/windows.err"
+fi
+
+latest="$(ls -td artifacts/lab-runs/*dogfood-live 2>/dev/null | head -1 || true)"
+printf "%s\n" "${latest:-none}" >"$run/latest-live-run.txt"
+if [[ -n "$latest" ]]; then
+  tail -n 80 "$latest/dogfood.log" >"$run/latest-live-dogfood-tail.txt" 2>/dev/null || true
+else
+  : >"$run/latest-live-dogfood-tail.txt"
+fi
+
+{
+  echo "console_user=$(stat -f %Su /dev/console 2>/dev/null || true)"
+  defaults -currentHost read com.apple.screensaver idleTime 2>/dev/null | sed 's/^/screensaver_idleTime=/'
+  defaults read com.apple.screensaver askForPassword 2>/dev/null | sed 's/^/askForPassword=/'
+  pmset -g custom 2>/dev/null | grep -E "displaysleep| sleep |powernap" || true
+  pgrep -lf "caffeinate -dims" || true
+} >"$run/power.txt" 2>"$run/power.err"
+
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+RUN="$run" URL="$url" QUEUE_APP="$queue_app" STATUS_WINDOWS="$status_windows" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const read = (name) => {
+  try { return fs.readFileSync(path.join(run, name), "utf8"); } catch { return ""; }
+};
+const readJson = (name) => {
+  try { return JSON.parse(read(name)); } catch { return undefined; }
+};
+const statSize = (name) => {
+  try { return fs.statSync(path.join(run, name)).size; } catch { return 0; }
+};
+const health = readJson("health.json");
+const taskSessions = readJson("task-sessions.json");
+const queueReady = readJson("queue-ready.json");
+const windows = readJson("windows.json");
+const processes = read("processes-interesting.txt");
+const listeners = read("listeners.txt");
+const queueAppRequired = process.env.QUEUE_APP !== "0";
+const checks = {
+  health_ok: health?.ok === true,
+  task_sessions_api_ok: Array.isArray(taskSessions?.sessions),
+  queue_api_ok: Array.isArray(queueReady?.items),
+  dogfood_process_visible: /bin\/dev-dogfood|node .*dist\/src\/index\.js|node dist\/src\/index\.js/.test(processes),
+  listener_4480_visible: /:4480\b/.test(listeners),
+  queue_app_process_visible: !queueAppRequired || /EventLoopQueueApp/.test(processes),
+  windows_artifact_exists: Array.isArray(windows),
+  ps_nonempty: statSize("ps.txt") > 100,
+};
+const failedChecks = Object.entries(checks).filter(([, ok]) => ok !== true).map(([key]) => key);
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.lab_dogfood_status",
+  started_at: read("started-at.txt").trim(),
+  finished_at: read("finished-at.txt").trim(),
+  artifact_dir: run,
+  ok: failedChecks.length === 0,
+  passed: failedChecks.length === 0,
+  url: process.env.URL,
+  queue_app_required: queueAppRequired,
+  windows_status_enabled: process.env.STATUS_WINDOWS !== "0",
+  checks,
+  failed_checks: failedChecks,
+  artifacts: {
+    health: "health.json",
+    task_sessions: "task-sessions.json",
+    queue_ready: "queue-ready.json",
+    processes: "processes-interesting.txt",
+    ps: "ps.txt",
+    listeners: "listeners.txt",
+    windows: "windows.json",
+  },
+};
+console.log(JSON.stringify(manifest, null, 2));
+NODE
+
+echo "dogfood status manifest: $run/manifest.json"
+cat "$run/manifest.json"
+jq -e '.ok == true' "$run/manifest.json" >/dev/null
+REMOTE

@@ -1,0 +1,769 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-desktop-capture <artifact-run-dir> <label>
+
+Capture active desktop state on the remote Mac lab over SSH. The run dir is
+relative to the remote eventloopOS repo, for example:
+  artifacts/lab-runs/20260601-queue-followup
+
+Environment:
+  LAB_MAC_HOST                    default: 100.71.111.25
+  LAB_MAC_USER                    default: claw
+  LAB_MAC_KEY                     default: ~/.ssh/eventloop_lab_mac
+  LAB_DOGFOOD_URL                 default: http://127.0.0.1:4480
+  LAB_MAC_CAPTURE_VIDEO_SECONDS   default: 0
+  LAB_MAC_CAPTURE_INJECT_SCREEN_DENIED
+                                    default: 0; test-only simulated TCC denial
+  LAB_MAC_CAPTURE_INJECT_ACCESSIBILITY_DENIED
+                                    default: 0; test-only simulated Accessibility denial
+EOF
+}
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" || $# -ne 2 ]]; then
+  usage
+  exit $([[ $# -eq 2 ]] && echo 0 || echo 2)
+fi
+
+remote_run="${1%/}"
+label="$(printf "%s" "$2" | tr -cs '[:alnum:]_.-' '-' | sed -E 's/^-+|-+$//g')"
+if [[ -z "$label" ]]; then
+  echo "capture label must contain at least one alphanumeric character" >&2
+  exit 2
+fi
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+url="${LAB_DOGFOOD_URL:-http://127.0.0.1:4480}"
+video_seconds="${LAB_MAC_CAPTURE_VIDEO_SECONDS:-0}"
+inject_screen_denied="${LAB_MAC_CAPTURE_INJECT_SCREEN_DENIED:-0}"
+inject_accessibility_denied="${LAB_MAC_CAPTURE_INJECT_ACCESSIBILITY_DENIED:-0}"
+remote="${lab_user}@${lab_host}"
+remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
+
+ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 "$remote" \
+  "bash -s -- '$remote_repo' '$remote_run' '$label' '$video_seconds' '$url' '$inject_screen_denied' '$inject_accessibility_denied'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+run="$2"
+label="$3"
+video_seconds="$4"
+url="$5"
+inject_screen_denied="$6"
+inject_accessibility_denied="$7"
+capture_dir="$repo/$run/captures/$label"
+
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+mkdir -p "$capture_dir"
+cd "$repo"
+
+run_with_timeout() {
+  local timeout_seconds="$1"
+  shift
+  "$@" &
+  local child_pid="$!"
+  (
+    sleep "$timeout_seconds"
+    kill -TERM "$child_pid" >/dev/null 2>&1 || true
+    sleep 2
+    kill -KILL "$child_pid" >/dev/null 2>&1 || true
+  ) &
+  local killer_pid="$!"
+  local code
+  set +e
+  wait "$child_pid"
+  code=$?
+  set -e
+  kill "$killer_pid" >/dev/null 2>&1 || true
+  wait "$killer_pid" >/dev/null 2>&1 || true
+  if [[ "$code" == "143" || "$code" == "137" ]]; then
+    echo "command timed out after ${timeout_seconds}s: $*" >&2
+  fi
+  return "$code"
+}
+
+run_osascript_with_timeout() {
+  local timeout_seconds="$1"
+  local script_file
+  script_file="$(mktemp "${TMPDIR:-/tmp}/eventloopos-osascript.XXXXXX")"
+  cat >"$script_file"
+  run_with_timeout "$timeout_seconds" osascript "$script_file"
+  local code="$?"
+  rm -f "$script_file"
+  return "$code"
+}
+
+date -u +%Y-%m-%dT%H:%M:%SZ >"$capture_dir/captured-at.txt"
+printf "%s\n" "$url" >"$capture_dir/orchestrator-url.txt"
+printf "%s\n" "$(stat -f %Su /dev/console 2>/dev/null || true)" >"$capture_dir/console-user.txt"
+ioreg -n Root -d1 >"$capture_dir/ioreg-root.txt" 2>"$capture_dir/ioreg-root.err" || true
+pmset -g assertions >"$capture_dir/pmset-assertions.txt" 2>"$capture_dir/pmset-assertions.err" || true
+pmset -g custom >"$capture_dir/pmset-custom.txt" 2>"$capture_dir/pmset-custom.err" || true
+system_profiler SPDisplaysDataType >"$capture_dir/displays.txt" 2>"$capture_dir/displays.err" || true
+sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+  'select service,client,client_type,auth_value,auth_reason,indirect_object_identifier from access where service="kTCCServiceScreenCapture" or service="kTCCServiceAccessibility" order by service,client;' \
+  >"$capture_dir/tcc-system-capture-access.txt" 2>"$capture_dir/tcc-system-capture-access.err" || true
+sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" \
+  'select service,client,client_type,auth_value,auth_reason,indirect_object_identifier from access where service="kTCCServiceScreenCapture" or service="kTCCServiceAccessibility" order by service,client;' \
+  >"$capture_dir/tcc-user-capture-access.txt" 2>"$capture_dir/tcc-user-capture-access.err" || true
+if [[ "$inject_accessibility_denied" == "1" ]]; then
+  printf "kTCCServiceAccessibility|com.apple.Terminal|0|0|0|\n" >>"$capture_dir/tcc-user-capture-access.txt"
+fi
+pgrep -fl "EventLoopQueueApp|eventloopOS Queue|codex app-server|bin/dev-dogfood" >"$capture_dir/processes-interesting.txt" 2>"$capture_dir/processes-interesting.err" || true
+ps -axo pid,ppid,comm,args >"$capture_dir/ps.txt" 2>"$capture_dir/ps.err" || true
+
+aerospace list-windows --all --json --format "%{window-id}%{app-name}%{window-title}%{window-layout}%{workspace}" \
+  >"$capture_dir/windows.json" 2>"$capture_dir/windows.err" || true
+aerospace list-workspaces --focused >"$capture_dir/focused-workspace.txt" 2>"$capture_dir/focused-workspace.err" || true
+
+if [[ "$inject_accessibility_denied" == "1" ]]; then
+  accessibility_error="System Events cannot inspect eventloopOS Queue because the controlling app is denied Accessibility in lab fault injection. Grant Terminal or sshd-keygen-wrapper in System Settings > Privacy & Security > Accessibility, then rerun the Queue UI proof."
+  : >"$capture_dir/windows-system-events.json"
+  : >"$capture_dir/frontmost-app.txt"
+  : >"$capture_dir/queue-menu-items.txt"
+  : >"$capture_dir/queue-ax-summary.txt"
+  : >"$capture_dir/queue-ax-tree.txt"
+  printf "%s\n" "$accessibility_error" >"$capture_dir/windows-system-events.err"
+  printf "%s\n" "$accessibility_error" >"$capture_dir/frontmost-app.err"
+  printf "%s\n" "$accessibility_error" >"$capture_dir/queue-menu-items.err"
+  printf "%s\n" "$accessibility_error" >"$capture_dir/queue-ax-summary.err"
+  printf "%s\n" "$accessibility_error" >"$capture_dir/queue-ax-tree.err"
+else
+  run_osascript_with_timeout 15 >"$capture_dir/windows-system-events.json" 2>"$capture_dir/windows-system-events.err" <<'APPLESCRIPT' || true
+on replaceText(findText, replaceText, sourceText)
+  set previousDelimiters to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to findText
+  set textParts to text items of sourceText
+  set AppleScript's text item delimiters to replaceText
+  set escapedText to textParts as text
+  set AppleScript's text item delimiters to previousDelimiters
+  return escapedText
+end replaceText
+
+on jsonString(sourceText)
+  set escapedText to sourceText as string
+  set escapedText to my replaceText("\\", "\\\\", escapedText)
+  set escapedText to my replaceText("\"", "\\\"", escapedText)
+  set escapedText to my replaceText(return, "\\n", escapedText)
+  set escapedText to my replaceText(linefeed, "\\n", escapedText)
+  set escapedText to my replaceText(tab, "\\t", escapedText)
+  return "\"" & escapedText & "\""
+end jsonString
+
+tell application "System Events"
+  set outputLines to {"["}
+  set firstRow to true
+  repeat with appProcess in application processes
+    set appName to name of appProcess as string
+    repeat with candidateWindow in windows of appProcess
+      set windowName to ""
+      try
+        set windowName to name of candidateWindow as string
+      end try
+      set rowText to "{\"app-name\":" & my jsonString(appName) & ",\"window-title\":" & my jsonString(windowName) & "}"
+      if firstRow then
+        set end of outputLines to rowText
+        set firstRow to false
+      else
+        set end of outputLines to "," & rowText
+      end if
+    end repeat
+  end repeat
+  set end of outputLines to "]"
+end tell
+set AppleScript's text item delimiters to linefeed
+return outputLines as string
+APPLESCRIPT
+
+run_osascript_with_timeout 15 >"$capture_dir/frontmost-app.txt" 2>"$capture_dir/frontmost-app.err" <<'APPLESCRIPT' || true
+tell application "System Events"
+  set frontApp to first application process whose frontmost is true
+  set appName to name of frontApp
+  set appPid to unix id of frontApp
+  return appName & "\n" & appPid
+end tell
+APPLESCRIPT
+
+run_osascript_with_timeout 15 >"$capture_dir/queue-menu-items.txt" 2>"$capture_dir/queue-menu-items.err" <<'APPLESCRIPT' || true
+on waitForMenuBarExtra()
+  repeat with attempt from 1 to 80
+    tell application "System Events"
+      if exists process "eventloopOS Queue" then
+        tell process "eventloopOS Queue"
+          if (count of menu bars) is greater than or equal to 2 then return
+        end tell
+      end if
+    end tell
+    delay 0.1
+  end repeat
+  error "eventloopOS Queue menu bar extra did not appear"
+end waitForMenuBarExtra
+
+waitForMenuBarExtra()
+tell application "System Events"
+  tell process "eventloopOS Queue"
+    tell menu bar item 1 of menu bar 2
+      click
+      delay 0.2
+      set itemNames to name of menu items of menu 1
+    end tell
+    key code 53
+  end tell
+end tell
+return itemNames as string
+APPLESCRIPT
+
+run_osascript_with_timeout 15 >"$capture_dir/queue-ax-summary.txt" 2>"$capture_dir/queue-ax-summary.err" <<'APPLESCRIPT' || true
+tell application "System Events"
+  if not (exists process "eventloopOS Queue") then error "eventloopOS Queue process not found"
+  tell process "eventloopOS Queue"
+    set windowLines to {}
+    repeat with candidateWindow in windows
+      set end of windowLines to ((name of candidateWindow) as string)
+    end repeat
+    return "process=eventloopOS Queue" & "\n" & ¬
+      "frontmost=" & ((frontmost as string)) & "\n" & ¬
+      "menu_bars=" & ((count of menu bars) as string) & "\n" & ¬
+      "windows=" & ((count of windows) as string) & "\n" & ¬
+      "window_titles=" & (windowLines as string)
+  end tell
+end tell
+APPLESCRIPT
+
+run_osascript_with_timeout 15 >"$capture_dir/queue-ax-tree.txt" 2>"$capture_dir/queue-ax-tree.err" <<'APPLESCRIPT' || true
+tell application "System Events"
+  if not (exists process "eventloopOS Queue") then error "eventloopOS Queue process not found"
+  tell process "eventloopOS Queue"
+    set allLines to {}
+    set windowCount to count of windows
+    if windowCount is greater than 3 then set windowCount to 3
+    repeat with windowIndex from 1 to windowCount
+      set candidateWindow to window windowIndex
+      set end of allLines to "window role=" & ((role of candidateWindow) as string) & " name=" & ((name of candidateWindow) as string)
+      try
+        set flattenedElements to entire contents of candidateWindow
+        set elementCount to count of flattenedElements
+        if elementCount is greater than 160 then set elementCount to 160
+        repeat with elementIndex from 1 to elementCount
+          set candidateElement to item elementIndex of flattenedElements
+          set roleText to ""
+          set nameText to ""
+          set descriptionText to ""
+          set valueText to ""
+          try
+            set roleText to role of candidateElement as string
+          end try
+          try
+            set nameText to name of candidateElement as string
+          end try
+          try
+            set descriptionText to description of candidateElement as string
+          end try
+          try
+            set valueText to value of candidateElement as string
+          end try
+          set end of allLines to "element role=" & roleText & " name=" & nameText & " description=" & descriptionText & " value=" & valueText
+        end repeat
+      end try
+    end repeat
+  end tell
+end tell
+set AppleScript's text item delimiters to linefeed
+return allLines as string
+APPLESCRIPT
+fi
+
+if [[ "$inject_screen_denied" == "1" ]]; then
+  rm -f "$capture_dir/screen.png"
+  printf "could not create image from display because Terminal is denied Screen Recording in lab fault injection\n" >"$capture_dir/screencapture.err"
+  printf "screen capture denial injected for harness proof\n" >"$capture_dir/screencapture.out"
+  printf "kTCCServiceScreenCapture|com.apple.Terminal|0|0|0|\n" >>"$capture_dir/tcc-user-capture-access.txt"
+else
+  screencapture -x "$capture_dir/screen.png" >"$capture_dir/screencapture.out" 2>"$capture_dir/screencapture.err" || true
+fi
+if [[ "$video_seconds" =~ ^[0-9]+$ && "$video_seconds" -gt 0 ]]; then
+  screencapture -x -v -V "$video_seconds" "$capture_dir/screen.mov" >"$capture_dir/screenrecord.out" 2>"$capture_dir/screenrecord.err" || true
+fi
+
+screen_bytes=0
+screen_sha=""
+screen_dimensions=""
+if [[ -f "$capture_dir/screen.png" ]]; then
+  screen_bytes="$(wc -c <"$capture_dir/screen.png" | tr -d ' ')"
+  screen_sha="$(shasum -a 256 "$capture_dir/screen.png" | awk '{print $1}')"
+  screen_dimensions="$(sips -g pixelWidth -g pixelHeight "$capture_dir/screen.png" 2>/dev/null | awk '/pixelWidth|pixelHeight/ {print $2}' | paste -sd x -)"
+fi
+video_bytes=0
+if [[ -f "$capture_dir/screen.mov" ]]; then
+  video_bytes="$(wc -c <"$capture_dir/screen.mov" | tr -d ' ')"
+fi
+
+CAPTURE_DIR="$capture_dir" \
+LABEL="$label" \
+SCREEN_BYTES="$screen_bytes" \
+SCREEN_SHA="$screen_sha" \
+SCREEN_DIMENSIONS="$screen_dimensions" \
+VIDEO_SECONDS="$video_seconds" \
+VIDEO_BYTES="$video_bytes" \
+node <<'NODE' >"$capture_dir/capture-summary.json"
+const fs = require("node:fs");
+const path = require("node:path");
+
+const dir = process.env.CAPTURE_DIR;
+const read = (name) => {
+  try {
+    return fs.readFileSync(path.join(dir, name), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const statSize = (name) => {
+  try {
+    return fs.statSync(path.join(dir, name)).size;
+  } catch {
+    return 0;
+  }
+};
+const parseJson = (name, fallback) => {
+  try {
+    return JSON.parse(read(name));
+  } catch {
+    return fallback;
+  }
+};
+
+const windows = parseJson("windows.json", []);
+const systemEventWindows = parseJson("windows-system-events.json", []);
+const frontmostLines = read("frontmost-app.txt").split(/\r?\n/).filter(Boolean);
+const processes = read("processes-interesting.txt");
+const queueMenu = read("queue-menu-items.txt");
+const axSummary = read("queue-ax-summary.txt");
+const axTree = read("queue-ax-tree.txt");
+const accessibilityError = [
+  read("windows-system-events.err"),
+  read("frontmost-app.err"),
+  read("queue-menu-items.err"),
+  read("queue-ax-summary.err"),
+  read("queue-ax-tree.err"),
+].filter(Boolean).join("\n");
+const screencaptureError = [read("screencapture.err"), read("gui-screencapture.err")].filter(Boolean).join("\n");
+const displays = read("displays.txt");
+const tccRows = [read("tcc-system-capture-access.txt"), read("tcc-user-capture-access.txt")].filter(Boolean).join("\n");
+const axWindowCount = Number(axSummary.match(/(?:^|\n)windows=([0-9]+)/)?.[1] ?? 0);
+const axWindowTitles = axSummary.match(/(?:^|\n)window_titles=(.*)$/)?.[1] ?? "";
+const queueWindowCount = Array.isArray(windows)
+  ? windows.filter((window) => /eventloop|queue/i.test(String(window["app-name"] ?? ""))).length
+  : 0;
+const systemEventQueueWindowCount = Array.isArray(systemEventWindows)
+  ? systemEventWindows.filter((window) => /eventloop|queue/i.test(String(window["app-name"] ?? ""))).length
+  : 0;
+const ioreg = read("ioreg-root.txt");
+const consoleSession = ioreg.match(/\{[^}]*"kCGSSessionOnConsoleKey"=Yes[^}]*\}/)?.[0] ?? "";
+const consoleUser = consoleSession.match(/"kCGSession(?:Long)?UserNameKey"="([^"]+)"/)?.[1] ?? read("console-user.txt");
+const loginDone = /"kCGSessionLoginDoneKey"=Yes/.test(consoleSession);
+
+const summary = {
+  label: process.env.LABEL,
+  captured_at: read("captured-at.txt"),
+  console_user: consoleUser,
+  frontmost_app: frontmostLines[0] ?? "",
+  frontmost_pid: frontmostLines[1] ?? "",
+  login_done: loginDone,
+  screen: {
+    path: "screen.png",
+    bytes: Number(process.env.SCREEN_BYTES ?? statSize("screen.png")),
+    sha256: process.env.SCREEN_SHA ?? "",
+    dimensions: process.env.SCREEN_DIMENSIONS ?? "",
+    capture_mode: "ssh_direct",
+    error: screencaptureError,
+    failure_hint: captureFailureHint(screencaptureError, displays, tccRows),
+    tcc_terminal_screen_capture: terminalScreenCaptureTcc(tccRows),
+  },
+  video: {
+    requested_seconds: Number(process.env.VIDEO_SECONDS ?? 0),
+    path: "screen.mov",
+    bytes: Number(process.env.VIDEO_BYTES ?? statSize("screen.mov")),
+  },
+  queue_app: {
+    process_present: /EventLoopQueueApp|eventloopOS Queue/.test(processes),
+    aerospace_window_count: queueWindowCount,
+    system_events_window_count: systemEventQueueWindowCount,
+    ax_window_count: axWindowCount,
+    ax_window_titles: axWindowTitles,
+    ax_window_title_present: /eventloopOS Queue/i.test(axWindowTitles),
+    menu_items_present: queueMenu.includes("Pull Next Paper") && queueMenu.includes("Master Command"),
+    ax_summary_present: /process=(EventLoopQueueApp|eventloopOS Queue)/.test(axSummary),
+    ax_tree_present: axTree.includes("AXWindow") || axTree.includes("window"),
+    ax_tree_bytes: Buffer.byteLength(axTree),
+    harness_status_present: /queue-harness-status|eventloopOS harness status/.test(axTree),
+    harness_status_line: axTree.split(/\r?\n/).find((line) => /queue-harness-status|eventloopOS harness status/.test(line)) ?? "",
+    accessibility_error: accessibilityError,
+    accessibility_failure_hint: accessibilityFailureHint(accessibilityError, tccRows),
+    tcc_terminal_accessibility: terminalAccessibilityTcc(tccRows),
+  },
+  artifacts: {
+    windows: "windows.json",
+    windows_system_events: "windows-system-events.json",
+    frontmost: "frontmost-app.txt",
+    queue_menu_items: "queue-menu-items.txt",
+    queue_ax_summary: "queue-ax-summary.txt",
+    queue_ax_tree: "queue-ax-tree.txt",
+    process_list: "ps.txt",
+    ioreg: "ioreg-root.txt",
+    pmset_assertions: "pmset-assertions.txt",
+    displays: "displays.txt",
+    tcc_system_capture_access: "tcc-system-capture-access.txt",
+    tcc_user_capture_access: "tcc-user-capture-access.txt",
+  },
+};
+
+console.log(JSON.stringify(summary, null, 2));
+
+function terminalScreenCaptureTcc(rows) {
+  const terminalRows = rows.split(/\r?\n/).filter((line) => line.startsWith("kTCCServiceScreenCapture|com.apple.Terminal|"));
+  if (terminalRows.length === 0) return "missing";
+  const authValues = terminalRows.map((line) => line.split("|")[3] ?? "");
+  if (authValues.includes("0")) return "denied";
+  if (authValues.includes("2")) return "allowed";
+  return `auth_value_${authValues.find(Boolean) ?? "unknown"}`;
+}
+
+function terminalAccessibilityTcc(rows) {
+  const terminalRows = rows.split(/\r?\n/).filter((line) => line.startsWith("kTCCServiceAccessibility|com.apple.Terminal|"));
+  if (terminalRows.length === 0) return "missing";
+  const authValues = terminalRows.map((line) => line.split("|")[3] ?? "");
+  if (authValues.includes("0")) return "denied";
+  if (authValues.includes("2")) return "allowed";
+  return `auth_value_${authValues.find(Boolean) ?? "unknown"}`;
+}
+
+function accessibilityFailureHint(error, tccRowsText) {
+  if (!error) return "";
+  if (!/accessibility|system events|not authorized|not allowed|assistive/i.test(error)) return "";
+  const terminalTcc = terminalAccessibilityTcc(tccRowsText);
+  return [
+    "Queue UI automation could not inspect or control eventloopOS Queue through System Events.",
+    terminalTcc === "denied"
+      ? "Detected Terminal denied for kTCCServiceAccessibility."
+      : "Likely cause: Terminal or the controlling shell lacks Accessibility permission.",
+    "Grant Terminal or sshd-keygen-wrapper in System Settings > Privacy & Security > Accessibility, then rerun the Queue UI proof.",
+  ].join(" ");
+}
+
+function captureFailureHint(error, displaysText, tccRowsText) {
+  if (!error) return "";
+  const normalized = error.toLowerCase();
+  if (normalized.includes("could not create image from display")) {
+    const terminalTcc = terminalScreenCaptureTcc(tccRowsText);
+    return [
+      "macOS display capture returned no image.",
+      terminalTcc === "denied"
+        ? "Detected Terminal denied for kTCCServiceScreenCapture; grant Terminal in System Settings > Privacy & Security > Screen & System Audio Recording."
+        : "Likely causes: Terminal/shell lacks Screen Recording permission, display is asleep, or the headless Mac has no active framebuffer.",
+      "Check System Settings > Privacy & Security > Screen & System Audio Recording for Terminal, and consider an HDMI dummy plug or virtual display.",
+      displaysText ? "See displays.txt for current display state." : "",
+    ].filter(Boolean).join(" ");
+  }
+  return "";
+}
+NODE
+
+terminal_screen_capture_tcc="missing"
+if grep -q '^kTCCServiceScreenCapture|com.apple.Terminal|0|0|' "$capture_dir/tcc-system-capture-access.txt" "$capture_dir/tcc-user-capture-access.txt" 2>/dev/null; then
+  terminal_screen_capture_tcc="denied"
+elif grep -q '^kTCCServiceScreenCapture|com.apple.Terminal|0|2|' "$capture_dir/tcc-system-capture-access.txt" "$capture_dir/tcc-user-capture-access.txt" 2>/dev/null; then
+  terminal_screen_capture_tcc="allowed"
+fi
+
+needs_gui_capture="0"
+if [[ "$screen_bytes" == "0" ]]; then
+  needs_gui_capture="1"
+fi
+if [[ "$video_seconds" =~ ^[0-9]+$ && "$video_seconds" -gt 0 && "$video_bytes" == "0" ]]; then
+  needs_gui_capture="1"
+fi
+if grep -Eq "EventLoopQueueApp|eventloopOS Queue" "$capture_dir/processes-interesting.txt" 2>/dev/null \
+  && { [[ ! -s "$capture_dir/queue-ax-summary.txt" ]] || [[ ! -s "$capture_dir/queue-ax-tree.txt" ]]; }; then
+  needs_gui_capture="1"
+fi
+
+if [[ "$needs_gui_capture" == "1" && "${LAB_MAC_CAPTURE_GUI_FALLBACK:-1}" == "1" && "$terminal_screen_capture_tcc" != "denied" ]]; then
+  gui_runner="$capture_dir/gui-screencapture.command"
+  cat >"$gui_runner" <<EOF
+#!/bin/bash
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+capture_dir="$capture_dir"
+video_seconds="$video_seconds"
+osascript >"\$capture_dir/gui-open-queue.out" 2>"\$capture_dir/gui-open-queue.err" <<'APPLESCRIPT' || true
+on waitForMenuBarExtra()
+  repeat with attempt from 1 to 30
+    tell application "System Events"
+      if exists process "eventloopOS Queue" then
+        tell process "eventloopOS Queue"
+          if (count of menu bars) is greater than or equal to 2 then return
+        end tell
+      end if
+    end tell
+    delay 0.1
+  end repeat
+  error "eventloopOS Queue menu bar extra did not appear"
+end waitForMenuBarExtra
+
+waitForMenuBarExtra()
+tell application "System Events"
+  tell process "eventloopOS Queue"
+    tell menu bar item 1 of menu bar 2
+      click
+      delay 0.2
+      if exists menu item "Open Queue" of menu 1 then click menu item "Open Queue" of menu 1
+    end tell
+  end tell
+end tell
+delay 0.8
+APPLESCRIPT
+osascript >"\$capture_dir/gui-queue-menu-items.txt" 2>"\$capture_dir/gui-queue-menu-items.err" <<'APPLESCRIPT' || true
+on waitForMenuBarExtra()
+  repeat with attempt from 1 to 30
+    tell application "System Events"
+      if exists process "eventloopOS Queue" then
+        tell process "eventloopOS Queue"
+          if (count of menu bars) is greater than or equal to 2 then return
+        end tell
+      end if
+    end tell
+    delay 0.1
+  end repeat
+  error "eventloopOS Queue menu bar extra did not appear"
+end waitForMenuBarExtra
+
+waitForMenuBarExtra()
+tell application "System Events"
+  tell process "eventloopOS Queue"
+    tell menu bar item 1 of menu bar 2
+      click
+      delay 0.2
+      set itemNames to name of menu items of menu 1
+    end tell
+    key code 53
+  end tell
+end tell
+return itemNames as string
+APPLESCRIPT
+osascript >"\$capture_dir/gui-queue-ax-summary.txt" 2>"\$capture_dir/gui-queue-ax-summary.err" <<'APPLESCRIPT' || true
+tell application "System Events"
+  if not (exists process "eventloopOS Queue") then error "eventloopOS Queue process not found"
+  tell process "eventloopOS Queue"
+    set windowLines to {}
+    repeat with candidateWindow in windows
+      set end of windowLines to ((name of candidateWindow) as string)
+    end repeat
+    return "process=eventloopOS Queue" & "\n" & ¬
+      "frontmost=" & ((frontmost as string)) & "\n" & ¬
+      "menu_bars=" & ((count of menu bars) as string) & "\n" & ¬
+      "windows=" & ((count of windows) as string) & "\n" & ¬
+      "window_titles=" & (windowLines as string)
+  end tell
+end tell
+APPLESCRIPT
+osascript >"\$capture_dir/gui-queue-ax-tree.txt" 2>"\$capture_dir/gui-queue-ax-tree.err" <<'APPLESCRIPT' || true
+tell application "System Events"
+  if not (exists process "eventloopOS Queue") then error "eventloopOS Queue process not found"
+  tell process "eventloopOS Queue"
+    set allLines to {}
+    set windowCount to count of windows
+    if windowCount is greater than 3 then set windowCount to 3
+    repeat with windowIndex from 1 to windowCount
+      set candidateWindow to window windowIndex
+      set end of allLines to "window role=" & ((role of candidateWindow) as string) & " name=" & ((name of candidateWindow) as string)
+      try
+        set flattenedElements to entire contents of candidateWindow
+        set elementCount to count of flattenedElements
+        if elementCount is greater than 160 then set elementCount to 160
+        repeat with elementIndex from 1 to elementCount
+          set candidateElement to item elementIndex of flattenedElements
+          set roleText to ""
+          set nameText to ""
+          set descriptionText to ""
+          set valueText to ""
+          try
+            set roleText to role of candidateElement as string
+          end try
+          try
+            set nameText to name of candidateElement as string
+          end try
+          try
+            set descriptionText to description of candidateElement as string
+          end try
+          try
+            set valueText to value of candidateElement as string
+          end try
+          set end of allLines to "element role=" & roleText & " name=" & nameText & " description=" & descriptionText & " value=" & valueText
+        end repeat
+      end try
+    end repeat
+  end tell
+end tell
+set AppleScript's text item delimiters to linefeed
+return allLines as string
+APPLESCRIPT
+screencapture -x "\$capture_dir/screen.png" >"\$capture_dir/gui-screencapture.out" 2>"\$capture_dir/gui-screencapture.err" || true
+if [[ "\$video_seconds" =~ ^[0-9]+$ && "\$video_seconds" -gt 0 ]]; then
+  screencapture -x -v -V "\$video_seconds" "\$capture_dir/screen.mov" >"\$capture_dir/gui-screenrecord.out" 2>"\$capture_dir/gui-screenrecord.err" || true
+fi
+date -u +%Y-%m-%dT%H:%M:%SZ >"\$capture_dir/gui-screencapture.done"
+printf "gui capture runner exited cleanly; cleanup closes non-busy Terminal windows later\n" >"\$capture_dir/gui-terminal-close.out"
+EOF
+  chmod +x "$gui_runner"
+  rm -f "$capture_dir/gui-screencapture.done"
+  open -a Terminal "$gui_runner" >"$capture_dir/gui-runner-open.out" 2>"$capture_dir/gui-runner-open.err" || true
+  for _ in {1..60}; do
+    [[ -f "$capture_dir/gui-screencapture.done" ]] && break
+    sleep 1
+  done
+  gui_screen_bytes="0"
+  gui_screen_sha=""
+  gui_screen_dimensions=""
+  gui_video_bytes="0"
+  if [[ -f "$capture_dir/screen.png" ]]; then
+    gui_screen_bytes="$(wc -c <"$capture_dir/screen.png" | tr -d ' ')"
+    gui_screen_sha="$(shasum -a 256 "$capture_dir/screen.png" | awk '{print $1}')"
+    gui_screen_dimensions="$(sips -g pixelWidth -g pixelHeight "$capture_dir/screen.png" 2>/dev/null | awk '/pixelWidth|pixelHeight/ {print $2}' | paste -sd x -)"
+  fi
+  if [[ -f "$capture_dir/screen.mov" ]]; then
+    gui_video_bytes="$(wc -c <"$capture_dir/screen.mov" | tr -d ' ')"
+  fi
+  for ax_artifact in queue-menu-items queue-ax-summary queue-ax-tree; do
+    if [[ -s "$capture_dir/gui-${ax_artifact}.txt" ]]; then
+      cp "$capture_dir/gui-${ax_artifact}.txt" "$capture_dir/${ax_artifact}.txt"
+      cp "$capture_dir/gui-${ax_artifact}.err" "$capture_dir/${ax_artifact}.err"
+    fi
+  done
+  CAPTURE_DIR="$capture_dir" \
+  SCREEN_BYTES="$gui_screen_bytes" \
+  SCREEN_SHA="$gui_screen_sha" \
+  SCREEN_DIMENSIONS="$gui_screen_dimensions" \
+  VIDEO_BYTES="$gui_video_bytes" \
+  node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const file = path.join(process.env.CAPTURE_DIR, "capture-summary.json");
+const summary = JSON.parse(fs.readFileSync(file, "utf8"));
+const read = (name) => {
+  try {
+    return fs.readFileSync(path.join(process.env.CAPTURE_DIR, name), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const parseJson = (name, fallback) => {
+  try {
+    return JSON.parse(read(name));
+  } catch {
+    return fallback;
+  }
+};
+summary.screen = {
+  ...summary.screen,
+  bytes: Number(process.env.SCREEN_BYTES ?? 0),
+  sha256: process.env.SCREEN_SHA ?? "",
+  dimensions: process.env.SCREEN_DIMENSIONS ?? "",
+  capture_mode: "gui_terminal_runner",
+  error: [
+    read("screencapture.err"),
+    read("gui-screencapture.err"),
+  ].filter(Boolean).join("\n"),
+};
+if (summary.screen.bytes > 0) {
+  summary.screen.error = "";
+  summary.screen.failure_hint = "";
+}
+summary.video = {
+  ...summary.video,
+  bytes: Number(process.env.VIDEO_BYTES ?? 0),
+  error: [
+    read("screenrecord.err"),
+    read("gui-screenrecord.err"),
+  ].filter(Boolean).join("\n"),
+};
+const windows = parseJson("windows.json", []);
+const systemEventWindows = parseJson("windows-system-events.json", []);
+const processes = read("processes-interesting.txt");
+const queueMenu = read("queue-menu-items.txt");
+const axSummary = read("queue-ax-summary.txt");
+const axTree = read("queue-ax-tree.txt");
+const axWindowCount = Number(axSummary.match(/(?:^|\n)windows=([0-9]+)/)?.[1] ?? 0);
+const axWindowTitles = axSummary.match(/(?:^|\n)window_titles=(.*)$/)?.[1] ?? "";
+summary.queue_app = {
+  ...summary.queue_app,
+  process_present: /EventLoopQueueApp|eventloopOS Queue/.test(processes),
+  aerospace_window_count: Array.isArray(windows)
+    ? windows.filter((window) => /eventloop|queue/i.test(String(window["app-name"] ?? ""))).length
+    : 0,
+  system_events_window_count: Array.isArray(systemEventWindows)
+    ? systemEventWindows.filter((window) => /eventloop|queue/i.test(String(window["app-name"] ?? ""))).length
+    : 0,
+  ax_window_count: axWindowCount,
+  ax_window_titles: axWindowTitles,
+  ax_window_title_present: /eventloopOS Queue/i.test(axWindowTitles),
+  menu_items_present: queueMenu.includes("Pull Next Paper") && queueMenu.includes("Master Command"),
+  ax_summary_present: /process=(EventLoopQueueApp|eventloopOS Queue)/.test(axSummary),
+  ax_tree_present: axTree.includes("AXWindow") || axTree.includes("window"),
+  ax_tree_bytes: Buffer.byteLength(axTree),
+  harness_status_present: /queue-harness-status|eventloopOS harness status/.test(axTree),
+  harness_status_line: axTree.split(/\r?\n/).find((line) => /queue-harness-status|eventloopOS harness status/.test(line)) ?? "",
+  accessibility_error: [
+    read("windows-system-events.err"),
+    read("frontmost-app.err"),
+    read("queue-menu-items.err"),
+    read("queue-ax-summary.err"),
+    read("queue-ax-tree.err"),
+  ].filter(Boolean).join("\n"),
+};
+summary.gui_fallback = {
+  used: true,
+  done: fs.existsSync(path.join(process.env.CAPTURE_DIR, "gui-screencapture.done")),
+};
+fs.writeFileSync(file, `${JSON.stringify(summary, null, 2)}\n`);
+NODE
+  terminal_counts="$(run_osascript_with_timeout 5 <<'APPLESCRIPT' 2>/dev/null || true
+tell application "Terminal"
+  set totalWindows to count of windows
+  set captureWindows to 0
+  repeat with candidateWindow in windows
+    try
+      if (name of candidateWindow as string) contains "gui-screencapture.command" then set captureWindows to captureWindows + 1
+    end try
+  end repeat
+end tell
+return (totalWindows as string) & " " & (captureWindows as string)
+APPLESCRIPT
+)"
+  terminal_total="$(printf "%s" "$terminal_counts" | awk '{print $1+0}')"
+  terminal_capture="$(printf "%s" "$terminal_counts" | awk '{print $2+0}')"
+  if [[ "$terminal_total" -gt 0 && "$terminal_total" -eq "$terminal_capture" ]]; then
+    pkill -x Terminal >/dev/null 2>&1 || true
+    printf "killed %s capture-only Terminal windows\n" "$terminal_capture" >"$capture_dir/gui-terminal-kill.out"
+  elif [[ "$terminal_capture" -gt 0 ]]; then
+    printf "left %s capture Terminal windows because %s total Terminal windows exist\n" "$terminal_capture" "$terminal_total" >"$capture_dir/gui-terminal-kill.out"
+  fi
+elif [[ "$screen_bytes" == "0" && "$terminal_screen_capture_tcc" == "denied" ]]; then
+  CAPTURE_DIR="$capture_dir" node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const file = path.join(process.env.CAPTURE_DIR, "capture-summary.json");
+const summary = JSON.parse(fs.readFileSync(file, "utf8"));
+summary.gui_fallback = {
+  used: false,
+  skipped_reason: "Terminal is denied kTCCServiceScreenCapture; opening a GUI Terminal runner would create stale windows without fixing capture.",
+};
+fs.writeFileSync(file, `${JSON.stringify(summary, null, 2)}\n`);
+NODE
+fi
+
+printf "%s\n" "$run/captures/$label"
+REMOTE

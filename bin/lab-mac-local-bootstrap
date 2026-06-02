@@ -1,0 +1,310 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-local-bootstrap
+       bin/lab-mac-local-bootstrap --self-test
+
+Run this locally on the lab Mac after login. It installs the self-heal
+LaunchAgent, verifies its status, then runs local recovery checks and writes one
+bootstrap manifest.
+
+Environment:
+  LAB_CONTROLLER_TAILSCALE_IP optional controller 100.x IP or MagicDNS name
+  LAB_LOCAL_BOOTSTRAP_ALLOW_CONTROLLER default: 0; override controller-machine guard
+  LAB_LOCAL_BOOTSTRAP_FAKE default: 0; use fake green steps for harness tests
+  LAB_LOCAL_BOOTSTRAP_ARTIFACT_ROOT default: artifacts/lab-runs
+EOF
+}
+
+self_test=0
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  --self-test)
+    self_test=1
+    ;;
+  "")
+    ;;
+  *)
+    echo "unknown argument: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+if [[ "$self_test" == "1" ]]; then
+  temp_root="$(mktemp -d "${TMPDIR:-/tmp}/eventloopos-local-bootstrap-self-test.XXXXXX")"
+  cleanup_self_test() {
+    rm -rf "$temp_root"
+  }
+  trap cleanup_self_test EXIT
+  output="$(LAB_LOCAL_BOOTSTRAP_FAKE=1 LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 LAB_LOCAL_BOOTSTRAP_ARTIFACT_ROOT="$temp_root" "$repo_root/bin/lab-mac-local-bootstrap")"
+  run_path="$(printf "%s\n" "$output" | awk '/local-bootstrap$/ { value=$1 } END { print value }')"
+  if [[ -z "$run_path" ]]; then
+    echo "$output"
+    echo "self-test failed: local bootstrap run path missing" >&2
+    exit 1
+  fi
+  SELF_TEST_RUN="$run_path" node <<'NODE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const run = process.env.SELF_TEST_RUN;
+const manifestPath = path.join(run, "manifest.json");
+const summaryPath = path.join(run, "summary.json");
+assert.equal(fs.existsSync(manifestPath), true, "manifest missing");
+assert.equal(fs.existsSync(summaryPath), true, "summary missing");
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const summary = JSON.parse(fs.readFileSync(summaryPath, "utf8"));
+assert.equal(manifest.kind, "eventloopos.lab_mac_local_bootstrap");
+assert.equal(manifest.ok, true);
+assert.equal(manifest.failed_required_count, 0);
+assert.equal(manifest.controller_tailscale_ip, "100.76.35.66");
+assert.equal(manifest.next_controller_commands.includes("pnpm product:dogfood"), true);
+assert.equal(manifest.next_controller_commands.includes("pnpm product:readiness"), true);
+assert.equal(typeof manifest.operator_handoff, "string");
+assert.equal(summary.operator_handoff, manifest.operator_handoff);
+assert.equal(fs.existsSync(manifest.operator_handoff), true, "operator handoff missing");
+const handoff = fs.readFileSync(manifest.operator_handoff, "utf8");
+assert.match(handoff, /eventloopOS Lab Mac Bootstrap Handoff/);
+assert.match(handoff, /Status: OK/);
+assert.match(handoff, /Controller Next Commands/);
+assert.match(handoff, /pnpm lab:wait-online:quick/);
+assert.match(handoff, /pnpm product:dogfood/);
+assert.match(handoff, /Evidence/);
+assert.match(handoff, /fake-local-recovery-check\/manifest\.json/);
+console.log("lab-mac-local-bootstrap self-test passed");
+NODE
+  exit 0
+fi
+
+artifact_root="${LAB_LOCAL_BOOTSTRAP_ARTIFACT_ROOT:-artifacts/lab-runs}"
+run="$artifact_root/$(date +%Y%m%d-%H%M%S)-$$-local-bootstrap"
+steps_dir="$run/steps"
+steps_file="$run/steps.jsonl"
+manifest="$run/manifest.json"
+mkdir -p "$steps_dir"
+: >"$steps_file"
+
+append_step() {
+  local id="$1"
+  local name="$2"
+  local required="$3"
+  local fix="$4"
+  local started="$5"
+  local finished="$6"
+  local exit_code="$7"
+  local stdout_path="$8"
+  local stderr_path="$9"
+  STEP_ID="$id" STEP_NAME="$name" STEP_REQUIRED="$required" STEP_FIX="$fix" \
+    STEP_STARTED="$started" STEP_FINISHED="$finished" STEP_EXIT_CODE="$exit_code" \
+    STEP_STDOUT="$stdout_path" STEP_STDERR="$stderr_path" node <<'NODE' >>"$steps_file"
+const step = {
+  id: process.env.STEP_ID,
+  name: process.env.STEP_NAME,
+  required: process.env.STEP_REQUIRED === "1",
+  ok: Number(process.env.STEP_EXIT_CODE) === 0,
+  exit_code: Number(process.env.STEP_EXIT_CODE),
+  started_at: process.env.STEP_STARTED,
+  finished_at: process.env.STEP_FINISHED,
+  duration_ms: Date.parse(process.env.STEP_FINISHED) - Date.parse(process.env.STEP_STARTED),
+  stdout_path: process.env.STEP_STDOUT,
+  stderr_path: process.env.STEP_STDERR,
+  fix: process.env.STEP_FIX,
+};
+console.log(JSON.stringify(step));
+NODE
+}
+
+run_step() {
+  local id="$1"
+  local name="$2"
+  local required="$3"
+  local fix="$4"
+  shift 4
+  local stdout_path="$steps_dir/$id.stdout.log"
+  local stderr_path="$steps_dir/$id.stderr.log"
+  local started
+  local finished
+  local code
+  started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  set +e
+  "$@" >"$stdout_path" 2>"$stderr_path"
+  code=$?
+  set -e
+  finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  append_step "$id" "$name" "$required" "$fix" "$started" "$finished" "$code" "$stdout_path" "$stderr_path"
+  if [[ "$code" == "0" ]]; then
+    echo "local bootstrap pass: $name"
+  else
+    echo "local bootstrap fail: $name"
+  fi
+}
+
+exit_if_last_required_step_failed() {
+  LAST_STEP_FILE="$steps_file" node <<'NODE'
+const fs = require("node:fs");
+const lines = fs.readFileSync(process.env.LAST_STEP_FILE, "utf8").trim().split(/\n/).filter(Boolean);
+const last = lines.length > 0 ? JSON.parse(lines.at(-1)) : undefined;
+process.exit(last && last.required && !last.ok ? 0 : 1);
+NODE
+}
+
+write_manifest() {
+  RUN="$run" STEPS_FILE="$steps_file" LAB_CONTROLLER_TAILSCALE_IP="${LAB_CONTROLLER_TAILSCALE_IP:-}" node <<'NODE' >"$manifest"
+const fs = require("node:fs");
+const run = process.env.RUN;
+const steps = fs.readFileSync(process.env.STEPS_FILE, "utf8")
+  .split(/\n/)
+  .filter(Boolean)
+  .map((line) => JSON.parse(line));
+const failedRequired = steps.filter((step) => step.required && !step.ok);
+const findArtifact = (id, pattern) => {
+  const step = steps.find((item) => item.id === id);
+  if (!step) return undefined;
+  try {
+    const stdout = fs.readFileSync(step.stdout_path, "utf8");
+    const match = stdout.match(pattern);
+    return match ? match[0] : undefined;
+  } catch {
+    return undefined;
+  }
+};
+const recoveryRun = findArtifact("local_recovery", /^.+-local-recovery-check$/m);
+const recoveryManifestPath = recoveryRun ? `${recoveryRun}/manifest.json` : undefined;
+let recoveryManifest;
+if (recoveryManifestPath && fs.existsSync(recoveryManifestPath)) {
+  recoveryManifest = JSON.parse(fs.readFileSync(recoveryManifestPath, "utf8"));
+}
+const nextControllerCommands = [
+  "pnpm lab:wait-online:quick",
+  "pnpm setup:lab-status",
+  "pnpm product:transport",
+  "pnpm product:lab-ready",
+  "pnpm product:dogfood",
+  "pnpm product:readiness",
+];
+const controllerTailscaleIp = process.env.LAB_CONTROLLER_TAILSCALE_IP || "100.76.35.66";
+const bootstrapOk = failedRequired.length === 0;
+const operatorHandoffPath = `${run}/OPERATOR.md`;
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.lab_mac_local_bootstrap",
+  run,
+  generated_at: new Date().toISOString(),
+  controller_tailscale_ip: process.env.LAB_CONTROLLER_TAILSCALE_IP || undefined,
+  ok: bootstrapOk,
+  required_count: steps.filter((step) => step.required).length,
+  failed_required_count: failedRequired.length,
+  steps,
+  local_recovery_manifest: recoveryManifestPath,
+  local_recovery_ok: recoveryManifest?.ok,
+  local_recovery_failed_required_count: recoveryManifest?.failed_required_count,
+  local_recovery_failed_optional_count: recoveryManifest?.failed_optional_count,
+  local_recovery_fixes: recoveryManifest?.fixes ?? [],
+  local_recovery_optional_warnings: recoveryManifest?.optional_warnings ?? [],
+  operator_handoff: operatorHandoffPath,
+  next_controller_commands: bootstrapOk ? nextControllerCommands : [
+    `Rerun LAB_CONTROLLER_TAILSCALE_IP=${controllerTailscaleIp} pnpm lab:local-bootstrap on the lab Mac after applying fixes`,
+  ],
+  fixes: failedRequired.map((step) => ({
+    id: step.id,
+    requirement: step.name,
+    fix: step.fix,
+    stdout_path: step.stdout_path,
+    stderr_path: step.stderr_path,
+  })),
+};
+const operatorLines = [
+  "# eventloopOS Lab Mac Bootstrap Handoff",
+  "",
+  `Status: ${bootstrapOk ? "OK" : "NEEDS FIX"}`,
+  `Generated: ${manifest.generated_at}`,
+  `Run artifact: ${run}`,
+  "",
+  "## Lab Mac Fixes",
+];
+if (manifest.fixes.length === 0 && manifest.local_recovery_fixes.length === 0) {
+  operatorLines.push("- None required by this bootstrap.");
+} else {
+  for (const fix of manifest.fixes) {
+    operatorLines.push(`- ${fix.requirement}: ${fix.fix}`);
+  }
+  for (const fix of manifest.local_recovery_fixes) {
+    const requirement = fix.requirement ?? fix.id ?? "local recovery";
+    operatorLines.push(`- ${requirement}: ${fix.fix}`);
+  }
+}
+if (manifest.local_recovery_optional_warnings.length > 0) {
+  operatorLines.push("", "## Optional Warnings");
+  for (const warning of manifest.local_recovery_optional_warnings) {
+    const requirement = warning.requirement ?? warning.id ?? "optional check";
+    operatorLines.push(`- ${requirement}: ${warning.fix ?? JSON.stringify(warning)}`);
+  }
+}
+operatorLines.push("", "## Controller Next Commands");
+for (const command of manifest.next_controller_commands) {
+  operatorLines.push(`\`\`\`sh\n${command}\n\`\`\``);
+}
+operatorLines.push("", "## Evidence");
+operatorLines.push(`- Manifest: \`${run}/manifest.json\``);
+operatorLines.push(`- Summary: \`${run}/summary.json\``);
+if (manifest.local_recovery_manifest) {
+  operatorLines.push(`- Local recovery: \`${manifest.local_recovery_manifest}\``);
+}
+fs.writeFileSync(operatorHandoffPath, `${operatorLines.join("\n")}\n`);
+fs.writeFileSync(`${run}/summary.json`, `${JSON.stringify({
+  ok: manifest.ok,
+  failed_required_count: manifest.failed_required_count,
+  operator_handoff: manifest.operator_handoff,
+  local_recovery_manifest: manifest.local_recovery_manifest,
+  local_recovery_ok: manifest.local_recovery_ok,
+  local_recovery_failed_required_count: manifest.local_recovery_failed_required_count,
+  local_recovery_failed_optional_count: manifest.local_recovery_failed_optional_count,
+  fixes: manifest.fixes,
+  local_recovery_fixes: manifest.local_recovery_fixes,
+  local_recovery_optional_warnings: manifest.local_recovery_optional_warnings,
+  next_controller_commands: manifest.next_controller_commands,
+}, null, 2)}\n`);
+console.log(JSON.stringify(manifest, null, 2));
+NODE
+}
+
+if [[ "${LAB_LOCAL_BOOTSTRAP_FAKE:-0}" == "1" ]]; then
+  run_step not_controller_machine "Confirm bootstrap is not running on controller Mac" 1 "Run this command on the lab Mac after local login, not on the controller Mac." \
+    bash -lc 'echo fake-not-controller-ok'
+  run_step self_heal_install "Install self-heal LaunchAgent" 1 "Run LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:self-heal -- install locally after logging into the lab user." \
+    bash -lc 'echo install-ok'
+  run_step self_heal_status "Self-heal LaunchAgent status" 1 "Run pnpm lab:self-heal -- status; if not loaded, rerun pnpm lab:self-heal -- install." \
+    bash -lc 'echo status-ok'
+  run_step local_recovery "Local recovery checks" 1 "Follow fixes from the local recovery manifest, then rerun pnpm lab:local-bootstrap." \
+    bash -lc 'fake="'"$run"'/fake-local-recovery-check"; mkdir -p "$fake"; printf "%s\n" "{\"schema_version\":1,\"kind\":\"eventloopos.lab_mac_local_recovery_check\",\"ok\":true,\"failed_required_count\":0,\"failed_optional_count\":0,\"fixes\":[],\"optional_warnings\":[]}" >"$fake/manifest.json"; echo "$fake"'
+else
+  run_step not_controller_machine "Confirm bootstrap is not running on controller Mac" 1 "Run this command on the lab Mac after local login, not on the controller Mac. If this is truly the lab Mac and it shares the controller IP, set LAB_LOCAL_BOOTSTRAP_ALLOW_CONTROLLER=1." \
+    bash -lc 'if [[ "${LAB_LOCAL_BOOTSTRAP_ALLOW_CONTROLLER:-0}" == "1" ]]; then echo "controller guard override enabled"; exit 0; fi; controller="${LAB_CONTROLLER_TAILSCALE_IP:-}"; if [[ -z "$controller" ]]; then echo "LAB_CONTROLLER_TAILSCALE_IP not set; cannot compare local Tailscale IP"; exit 0; fi; if ! command -v tailscale >/dev/null 2>&1; then echo "tailscale CLI unavailable; cannot compare local Tailscale IP"; exit 0; fi; local_ips="$(tailscale ip -4 2>/dev/null || true)"; printf "controller=%s\nlocal_tailscale_ips=%s\n" "$controller" "$local_ips"; if printf "%s\n" "$local_ips" | grep -Fx "$controller" >/dev/null; then echo "refusing: this appears to be the controller Mac, not the lab Mac" >&2; exit 1; fi'
+  if exit_if_last_required_step_failed; then
+    write_manifest
+    echo "$run"
+    jq '{ok, failed_required_count, operator_handoff, fixes, next_controller_commands}' "$manifest"
+    exit 1
+  fi
+  run_step self_heal_install "Install self-heal LaunchAgent" 1 "Run LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:self-heal -- install locally after logging into the lab user." \
+    bin/lab-mac-self-heal install
+  run_step self_heal_status "Self-heal LaunchAgent status" 1 "Run pnpm lab:self-heal -- status; if not loaded, rerun pnpm lab:self-heal -- install." \
+    bin/lab-mac-self-heal status
+  run_step local_recovery "Local recovery checks" 1 "Follow fixes from the local recovery manifest, then rerun pnpm lab:local-bootstrap." \
+    bin/lab-mac-local-recovery-check
+fi
+
+write_manifest
+echo "$run"
+jq '{ok, failed_required_count, operator_handoff, local_recovery_manifest, local_recovery_ok, local_recovery_failed_required_count, local_recovery_failed_optional_count, fixes, local_recovery_fixes, local_recovery_optional_warnings, next_controller_commands}' "$manifest"
+jq -e '.ok == true' "$manifest" >/dev/null

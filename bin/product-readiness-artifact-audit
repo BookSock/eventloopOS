@@ -1,0 +1,1019 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+process.chdir(repoRoot);
+
+const args = process.argv.slice(2);
+if (args.includes("--self-test")) {
+  runSelfTest();
+  console.log("product-readiness-artifact-audit self-test passed");
+  process.exit(0);
+}
+
+if (args.includes("-h") || args.includes("--help") || args.length !== 1) {
+  console.log(`Usage: bin/product-readiness-artifact-audit [--self-test] <product-or-scenario-manifest-or-snapshot-dir>
+
+Validate that proof artifacts contain the evidence needed for real-user
+readiness: screenshot, optional video, API state, window list, process list,
+and Queue accessibility artifacts.
+`);
+  process.exit(args.length === 1 ? 0 : 2);
+}
+
+const inputPath = path.resolve(repoRoot, args[0]);
+const runId = `${utcStamp()}-${process.pid}-artifact-audit`;
+const artifactDir = path.join("artifacts", "product-readiness-artifact-audit", runId);
+mkdirSync(path.join(repoRoot, artifactDir), { recursive: true });
+
+const status = auditPath(inputPath);
+const inputIsDirectory = existsSync(inputPath) && statSync(inputPath).isDirectory();
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.product_readiness_artifact_audit",
+  started_at: new Date().toISOString(),
+  finished_at: new Date().toISOString(),
+  artifact_dir: artifactDir,
+  input_path: path.relative(repoRoot, inputPath),
+  input_manifest: inputIsDirectory ? undefined : path.relative(repoRoot, inputPath),
+  input_snapshot_dir: inputIsDirectory ? path.relative(repoRoot, inputPath) : undefined,
+  ok: status.ok,
+  audited_count: status.statuses.length,
+  statuses: status.statuses,
+  failures: status.statuses.filter((item) => !item.ok),
+};
+manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+
+const outputPath = path.join(repoRoot, artifactDir, "manifest.json");
+writeFileSync(outputPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+console.log(`artifact audit manifest: ${path.relative(repoRoot, outputPath)}`);
+console.log(JSON.stringify({
+  ok: manifest.ok,
+  audited_count: manifest.audited_count,
+  failure_count: manifest.failures.length,
+  failures: manifest.failures.map((failure) => ({
+    evidence_key: failure.evidence_key,
+    kind: failure.kind,
+    scenario: failure.scenario,
+    manifest: failure.manifest,
+    reason: failure.reason,
+    missing: failure.missing,
+    failed_checks: failure.failed_checks,
+    profile_gate_reasons: failure.profile_gate_reasons,
+    release_ready_reasons: failure.release_ready_reasons,
+    failed_count_keys: failure.failed_count_keys,
+  })),
+}, null, 2));
+
+process.exit(manifest.ok ? 0 : 1);
+
+function auditPath(inputPath) {
+  if (!existsSync(inputPath)) {
+    return {
+      ok: false,
+      statuses: [{
+        ok: false,
+        reason: "input path missing",
+        path: path.relative(repoRoot, inputPath),
+      }],
+    };
+  }
+  if (statSync(inputPath).isDirectory()) {
+    const manifestPath = path.join(inputPath, "manifest.json");
+    if (existsSync(manifestPath)) {
+      return auditInput(manifestPath, readJson(manifestPath));
+    }
+    const status = snapshotArtifactContractStatus(inputPath);
+    return { ok: status.ok, statuses: [status] };
+  }
+  return auditInput(inputPath, readJson(inputPath));
+}
+
+function auditInput(manifestPath, manifest) {
+  if (isDirectArtifactManifest(manifest)) {
+    const status = artifactContractStatus(manifestPath, manifest, manifest);
+    return { ok: status.ok, statuses: [status] };
+  }
+  const evidence = manifest.evidence ?? {};
+  const evidenceKeys = [
+    "dogfood_status_before",
+    "dogfood_status_after",
+    "connectivity_status",
+    "failed_lab_connectivity_status",
+    "snapshot_before",
+    "snapshot_after",
+    "queue_followup_runs",
+    "queue_decision_runs",
+    "codex_recovery_runs",
+    "completion_workspace_runs",
+    "codex_app_server_down_fault_runs",
+    "orchestrator_crash_restart_fault_runs",
+    "duplicate_idempotency_fault_runs",
+    "postgres_unavailable_fault_runs",
+    "postgres_migration_mismatch_fault_runs",
+    "aerospace_unavailable_fault_runs",
+    "aerospace_permission_missing_fault_runs",
+    "ghostty_cleanup_failure_fault_runs",
+    "screen_capture_denied_fault_runs",
+    "queue_app_accessibility_denied_fault_runs",
+    "aerospace_restore_server_down_fault_runs",
+    "tailscale_vnc_disconnected_fault_runs",
+    "orphan_proof",
+  ];
+  const statuses = [];
+  if (manifest?.kind === "eventloopos.product_readiness_proof") {
+    statuses.push(productOutcomeStatus(manifestPath, manifest));
+    statuses.push(productProfileGateStatus(manifestPath, manifest));
+    statuses.push(productReleaseRepeatDepthStatus(manifestPath, manifest));
+  }
+  for (const key of evidenceKeys) {
+    const items = evidenceItems(evidence[key]);
+    for (const [index, item] of items.entries()) {
+      if (key === "snapshot_before" || key === "snapshot_after") {
+        statuses.push({
+          evidence_key: key,
+          index,
+          ...snapshotArtifactContractStatus(item),
+        });
+        continue;
+      }
+      const nestedManifest = typeof item === "string"
+        ? item
+        : item?.local_manifest ?? item?.manifest;
+      if (!nestedManifest) {
+        statuses.push({
+          ok: false,
+          evidence_key: key,
+          index,
+          reason: "missing local_manifest",
+        });
+        continue;
+      }
+      const nestedPath = path.resolve(repoRoot, nestedManifest);
+      if (!existsSync(nestedPath)) {
+        statuses.push({
+          ok: false,
+          evidence_key: key,
+          index,
+          manifest: path.relative(repoRoot, nestedPath),
+          reason: "manifest file missing",
+        });
+        continue;
+      }
+      statuses.push({
+        evidence_key: key,
+        index,
+        ...artifactContractStatus(nestedPath, readJson(nestedPath), manifest),
+      });
+    }
+  }
+  const artifactStatuses = statuses.filter((status) =>
+    status.evidence_key !== "product_outcome"
+      && status.evidence_key !== "profile_gate"
+      && status.evidence_key !== "release_repeat_depth"
+  );
+  if (manifest?.kind === "eventloopos.product_readiness_proof" && artifactStatuses.length === 0) {
+    statuses.push({
+      ok: false,
+      kind: "eventloopos.product_artifact_evidence",
+      evidence_key: "artifact_evidence",
+      reason: "product manifest has no auditable artifact evidence",
+    });
+  }
+  return {
+    ok: statuses.length > 0 && statuses.every((status) => status.ok),
+    statuses,
+  };
+}
+
+function productOutcomeStatus(manifestPath, manifest) {
+  const releaseReasons = Array.isArray(manifest.release_ready_reasons) ? manifest.release_ready_reasons : [];
+  const releaseProfile = manifest.profile === "release";
+  const checks = {
+    passed_field_present: Object.hasOwn(manifest, "passed"),
+    release_ready_field_present: Object.hasOwn(manifest, "release_ready"),
+    release_ready_reasons_field_present: Object.hasOwn(manifest, "release_ready_reasons"),
+    passed_true: manifest.passed === true,
+    release_profile_ready: !releaseProfile || manifest.release_ready === true,
+    release_profile_reasons_empty: !releaseProfile || releaseReasons.length === 0,
+  };
+  const failedChecks = Object.entries(checks)
+    .filter(([, value]) => value !== true)
+    .map(([key]) => key);
+  return {
+    ok: failedChecks.length === 0,
+    kind: "eventloopos.product_outcome",
+    evidence_key: "product_outcome",
+    index: 0,
+    manifest: path.relative(repoRoot, manifestPath),
+    profile: manifest.profile,
+    checks,
+    failed_checks: failedChecks,
+    release_ready_reasons: releaseReasons,
+  };
+}
+
+function productProfileGateStatus(manifestPath, manifest) {
+  const reasons = Array.isArray(manifest.profile_gate_reasons) ? manifest.profile_gate_reasons : [];
+  const checks = {
+    profile_gate_field_present: Object.hasOwn(manifest, "profile_gate_passed"),
+    profile_gate_reasons_field_present: Object.hasOwn(manifest, "profile_gate_reasons"),
+    profile_gate_passed: manifest.profile_gate_passed === true,
+    profile_gate_reasons_empty: reasons.length === 0,
+  };
+  const failedChecks = Object.entries(checks)
+    .filter(([, value]) => value !== true)
+    .map(([key]) => key);
+  return {
+    ok: failedChecks.length === 0,
+    kind: "eventloopos.product_profile_gate",
+    evidence_key: "profile_gate",
+    index: 0,
+    manifest: path.relative(repoRoot, manifestPath),
+    checks,
+    failed_checks: failedChecks,
+    profile_gate_reasons: reasons,
+  };
+}
+
+function productReleaseRepeatDepthStatus(manifestPath, manifest) {
+  const releaseProfile = manifest.profile === "release";
+  const required = manifest.release_required_artifact_counts ?? {};
+  const actual = manifest.release_repeat_artifact_counts ?? {};
+  const failedKeys = Object.entries(required)
+    .filter(([, count]) => Number(count) > 0)
+    .filter(([key, count]) => Number(actual[key] ?? 0) < Number(count))
+    .map(([key]) => key);
+  const checks = {
+    release_profile_or_skipped: releaseProfile ? true : "skipped_non_release_profile",
+    required_counts_present: !releaseProfile || Object.keys(required).length > 0,
+    actual_counts_present: !releaseProfile || Object.keys(actual).length > 0,
+    requested_runs_present: !releaseProfile || Number.isFinite(Number(manifest.requested_runs)),
+    requested_fault_runs_present: !releaseProfile || Number.isFinite(Number(manifest.requested_fault_runs ?? manifest.requested_runs)),
+    required_counts_met: !releaseProfile || failedKeys.length === 0,
+  };
+  const failedChecks = Object.entries(checks)
+    .filter(([, value]) => value !== true && value !== "skipped_non_release_profile")
+    .map(([key]) => key);
+  return {
+    ok: failedChecks.length === 0,
+    kind: "eventloopos.product_release_repeat_depth",
+    evidence_key: "release_repeat_depth",
+    index: 0,
+    manifest: path.relative(repoRoot, manifestPath),
+    profile: manifest.profile,
+    requested_runs: manifest.requested_runs,
+    requested_fault_runs: manifest.requested_fault_runs,
+    required_release_runs: manifest.required_release_runs,
+    required_counts: required,
+    actual_counts: actual,
+    failed_count_keys: failedKeys,
+    checks,
+    failed_checks: failedChecks,
+  };
+}
+
+function isDirectArtifactManifest(manifest) {
+  return Boolean(manifest?.scenario)
+    || manifest?.kind === "eventloopos.lab_dogfood_status"
+    || manifest?.kind === "eventloopos.lab_fault_proof"
+    || manifest?.kind === "eventloopos.lab_connectivity_proof"
+    || manifest?.kind === "eventloopos.lab_orphan_proof";
+}
+
+function artifactContractStatus(manifestFile, nested, parentManifest) {
+  if (nested?.kind === "eventloopos.lab_dogfood_status") {
+    return dogfoodStatusArtifactContractStatus(manifestFile, nested);
+  }
+  if (nested?.kind === "eventloopos.lab_fault_proof") {
+    return faultArtifactContractStatus(manifestFile, nested);
+  }
+  if (nested?.kind === "eventloopos.lab_connectivity_proof") {
+    return connectivityArtifactContractStatus(manifestFile, nested);
+  }
+  if (nested?.kind === "eventloopos.lab_orphan_proof") {
+    return orphanArtifactContractStatus(manifestFile, nested);
+  }
+  return scenarioArtifactContractStatus(manifestFile, nested, parentManifest);
+}
+
+function dogfoodStatusArtifactContractStatus(manifestFile, nested) {
+  const relativeManifest = path.relative(repoRoot, manifestFile);
+  const dir = path.dirname(manifestFile);
+  const artifactMissing = artifactPaths(nested)
+    .filter((relative) => !existsSync(path.join(dir, relative)));
+  const statusCheckValues = Object.values(nested.checks ?? {});
+  const checks = {
+    manifest_green: nested.ok === true || nested.passed === true,
+    status_checks_green: statusCheckValues.length > 0 && statusCheckValues.every((value) => value === true),
+    declared_artifacts_exist: artifactMissing.length === 0,
+    health_ok: readJsonIfExists(firstPath(dir, artifactValue(nested, "health"), "health.json"))?.ok === true,
+    task_sessions_api_exists: fileSize(firstPath(dir, artifactValue(nested, "task_sessions"), "task-sessions.json")) > 2,
+    queue_ready_api_exists: fileSize(firstPath(dir, artifactValue(nested, "queue_ready"), "queue-ready.json")) > 2,
+    process_list_nonempty: fileSize(firstPath(dir, artifactValue(nested, "processes"), "processes-interesting.txt")) > 20,
+    ps_nonempty: fileSize(firstPath(dir, artifactValue(nested, "ps"), "ps.txt")) > 100,
+    listener_artifact_exists: existsSync(firstPath(dir, artifactValue(nested, "listeners"), "listeners.txt")),
+    window_artifact_exists: existsSync(firstPath(dir, artifactValue(nested, "windows"), "windows.json")),
+  };
+  const failedChecks = Object.entries(checks)
+    .filter(([, value]) => value !== true)
+    .map(([key]) => key);
+  return {
+    ok: artifactMissing.length === 0 && failedChecks.length === 0,
+    kind: nested.kind,
+    manifest: relativeManifest,
+    checks: { ...checks, declared_artifact_missing_count: artifactMissing.length },
+    missing: artifactMissing,
+    failed_checks: failedChecks,
+  };
+}
+
+function snapshotArtifactContractStatus(item) {
+  const dir = typeof item === "string" ? item : item?.path ?? item?.dir;
+  if (!dir) {
+    return { ok: false, reason: "missing snapshot directory path" };
+  }
+  const absoluteDir = path.resolve(repoRoot, dir);
+  const files = {
+    health: path.join(absoluteDir, "health.json"),
+    activity: path.join(absoluteDir, "activity.json"),
+    queue_ready: path.join(absoluteDir, "queue_state_ready.json"),
+    task_messages: path.join(absoluteDir, "task-messages_limit_50.json"),
+    windows: path.join(absoluteDir, "windows.json"),
+    ps: path.join(absoluteDir, "ps.txt"),
+    screen: path.join(absoluteDir, "screen.png"),
+  };
+  const health = readJsonIfExists(files.health);
+  const checks = {
+    directory_exists: existsSync(absoluteDir) && statSync(absoluteDir).isDirectory(),
+    health_ok: health?.ok === true,
+    activity_exists: fileSize(files.activity) > 2,
+    queue_ready_exists: fileSize(files.queue_ready) > 2,
+    task_messages_exists: fileSize(files.task_messages) > 2,
+    windows_exists: fileSize(files.windows) > 2,
+    process_list_nonempty: fileSize(files.ps) > 100,
+    screen_nonempty: !existsSync(files.screen) || fileSize(files.screen) > 10000,
+  };
+  const failedChecks = Object.entries(checks)
+    .filter(([, value]) => value !== true)
+    .map(([key]) => key);
+  return {
+    ok: failedChecks.length === 0,
+    kind: "eventloopos.lab_snapshot",
+    snapshot_dir: path.relative(repoRoot, absoluteDir),
+    checks,
+    failed_checks: failedChecks,
+  };
+}
+
+function evidenceItems(value) {
+  if (Array.isArray(value)) return value;
+  if (value === undefined || value === null || value === "") return [];
+  return [value];
+}
+
+function scenarioArtifactContractStatus(manifestFile, nested, parentManifest) {
+  const relativeManifest = path.relative(repoRoot, manifestFile);
+  if (!nested || typeof nested !== "object" || !nested.scenario) {
+    return { ok: true, skipped: true, manifest: relativeManifest, reason: "not a lab scenario artifact" };
+  }
+  const dir = path.dirname(manifestFile);
+  const requiredFiles = [
+    "manifest.json",
+    nested.captures?.before ?? "captures/before/capture-summary.json",
+    nested.captures?.after ?? "captures/after/capture-summary.json",
+    "captures/after/screen.png",
+    "captures/after/windows.json",
+    "captures/after/ps.txt",
+    "captures/after/processes-interesting.txt",
+    "captures/after/queue-ax-tree.txt",
+    "api/after/health.json",
+    "api/after/task-messages_limit_120.json",
+    "api/after/activity_limit_120.json",
+    "api/after/queue_state_ready.json",
+    "api-state.json",
+    "task-messages.json",
+    "windows.json",
+    "screenshot-after.png",
+  ];
+  if (Number(parentManifest.capture_video_seconds ?? 0) > 0) {
+    requiredFiles.push("captures/after/screen.mov");
+    requiredFiles.push("screen.mov");
+  }
+  const missing = requiredFiles.filter((relative) => !existsSync(path.join(dir, relative)));
+  const afterCapture = readJsonIfExists(path.join(dir, nested.captures?.after ?? "captures/after/capture-summary.json"));
+  const apiHealth = readJsonIfExists(path.join(dir, "api/after/health.json"));
+  const checks = {
+    manifest_green: nested.ok === true || nested.passed === true,
+    after_screen_nonempty: Number(afterCapture?.screen?.bytes ?? 0) > 10000,
+    after_video_present: Number(parentManifest.capture_video_seconds ?? 0) <= 0 || Number(afterCapture?.video?.bytes ?? 0) > 10000,
+    api_health_ok: apiHealth?.ok === true,
+    api_state_alias_nonempty: fileSize(path.join(dir, "api-state.json")) > 100,
+    task_messages_alias_nonempty: fileSize(path.join(dir, "task-messages.json")) > 10,
+    windows_alias_nonempty: fileSize(path.join(dir, "windows.json")) > 2,
+    screenshot_after_alias_nonempty: fileSize(path.join(dir, "screenshot-after.png")) > 10000,
+    screen_recording_alias_present: Number(parentManifest.capture_video_seconds ?? 0) <= 0 || fileSize(path.join(dir, "screen.mov")) > 10000,
+    queue_ax_tree_nonempty: fileSize(path.join(dir, "captures/after/queue-ax-tree.txt")) > 100,
+    process_list_nonempty: fileSize(path.join(dir, "captures/after/ps.txt")) > 100,
+    missing_file_count: missing.length,
+  };
+  const failedChecks = Object.entries(checks)
+    .filter(([key, value]) => key !== "missing_file_count" && value !== true)
+    .map(([key]) => key);
+  return {
+    ok: missing.length === 0 && failedChecks.length === 0,
+    scenario: nested.scenario,
+    manifest: relativeManifest,
+    checks,
+    missing,
+    failed_checks: failedChecks,
+  };
+}
+
+function faultArtifactContractStatus(manifestFile, nested) {
+  const relativeManifest = path.relative(repoRoot, manifestFile);
+  const dir = path.dirname(manifestFile);
+  const artifactMissing = artifactPaths(nested)
+    .filter((relative) => !existsSync(path.join(dir, relative)));
+  const captureSummary = firstJson(dir, artifactValue(nested, "capture_summary"), ...captureSummaryFallbacks(nested.scenario));
+  const apiStatePath = firstPath(dir, artifactValue(nested, "api_state"), "api-state.json");
+  const processPath = firstPath(
+    dir,
+    artifactValue(nested, "process_list"),
+    ...capturePathFallbacks(nested.scenario, "ps.txt"),
+    artifactValue(nested, "processes_after_cleanup"),
+    artifactValue(nested, "processes_after_proof"),
+    artifactValue(nested, "fault_processes_after"),
+  );
+  const windowPath = firstPath(
+    dir,
+    artifactValue(nested, "windows_after_fault"),
+    artifactValue(nested, "windows_after_restart"),
+    artifactValue(nested, "windows_after"),
+    artifactValue(nested, "windows_after_cleanup"),
+    artifactValue(nested, "windows_after_proof"),
+    artifactValue(nested, "windows"),
+    ...capturePathFallbacks(nested.scenario, "windows.json"),
+  );
+  const screenshotPath = firstPath(
+    dir,
+    artifactValue(nested, "screenshot_after_fault"),
+    artifactValue(nested, "screenshot_after_restart"),
+    artifactValue(nested, "screenshot_after"),
+    artifactValue(nested, "screenshot"),
+    ...capturePathFallbacks(nested.scenario, "screen.png"),
+  );
+  const isScreenDenied = nested.scenario === "screen-capture-denied";
+  const checks = {
+    manifest_green: nested.ok === true || nested.passed === true,
+    assertions_green: assertionsGreen(nested),
+    declared_artifacts_exist: artifactMissing.length === 0,
+    api_state_exists: fileSize(apiStatePath) > 0,
+    process_list_nonempty: fileSize(processPath) > 100,
+    window_list_exists: fileSize(windowPath) > 2,
+    capture_summary_exists: Boolean(captureSummary),
+    screenshot_nonempty: isScreenDenied || fileSize(screenshotPath) > 10000 || Number(captureSummary?.screen?.bytes ?? 0) > 10000,
+    screen_denied_zero_byte_with_actionable_error: !isScreenDenied || (
+      Number(captureSummary?.screen?.bytes ?? -1) === 0
+      && String(captureSummary?.screen?.failure_hint ?? "").length > 20
+      && existsSync(firstPath(dir, artifactValue(nested, "screencapture_error"), ...capturePathFallbacks(nested.scenario, "screencapture.err")))
+    ),
+  };
+  const failedChecks = Object.entries(checks)
+    .filter(([, value]) => value !== true)
+    .map(([key]) => key);
+  return {
+    ok: artifactMissing.length === 0 && failedChecks.length === 0,
+    scenario: nested.scenario,
+    kind: nested.kind,
+    manifest: relativeManifest,
+    checks: { ...checks, declared_artifact_missing_count: artifactMissing.length },
+    missing: artifactMissing,
+    failed_checks: failedChecks,
+  };
+}
+
+function connectivityArtifactContractStatus(manifestFile, nested) {
+  const relativeManifest = path.relative(repoRoot, manifestFile);
+  const dir = path.dirname(manifestFile);
+  const artifactMissing = artifactPaths(nested)
+    .filter((relative) => !existsSync(path.join(dir, relative)));
+  const checks = {
+    manifest_green: nested.ok === true || nested.passed === true,
+    assertions_green: assertionsGreen(nested),
+    declared_artifacts_exist: artifactMissing.length === 0,
+    api_state_exists: fileSize(firstPath(dir, artifactValue(nested, "api_state"), "api-state.json")) > 0,
+    ssh_probe_artifacts_exist: existsSync(firstPath(dir, artifactValue(nested, "ssh_probe_stdout"), "ssh-probe.out"))
+      && existsSync(firstPath(dir, artifactValue(nested, "ssh_probe_stderr"), "ssh-probe.err")),
+    vnc_probe_artifacts_exist: existsSync(firstPath(dir, artifactValue(nested, "vnc_port_probe_stdout"), "vnc-port-probe.out"))
+      && existsSync(firstPath(dir, artifactValue(nested, "vnc_port_probe_stderr"), "vnc-port-probe.err")),
+  };
+  const failedChecks = Object.entries(checks)
+    .filter(([, value]) => value !== true)
+    .map(([key]) => key);
+  return {
+    ok: artifactMissing.length === 0 && failedChecks.length === 0,
+    kind: nested.kind,
+    manifest: relativeManifest,
+    checks: { ...checks, declared_artifact_missing_count: artifactMissing.length },
+    missing: artifactMissing,
+    failed_checks: failedChecks,
+  };
+}
+
+function orphanArtifactContractStatus(manifestFile, nested) {
+  const relativeManifest = path.relative(repoRoot, manifestFile);
+  const dir = path.dirname(manifestFile);
+  const artifactMissing = artifactPaths(nested)
+    .filter((relative) => !existsSync(path.join(dir, relative)));
+  const checks = {
+    manifest_green: nested.ok === true || nested.passed === true,
+    assertions_green: assertionsGreen(nested),
+    declared_artifacts_exist: artifactMissing.length === 0,
+    process_artifact_exists: existsSync(firstPath(dir, artifactValue(nested, "processes"), "processes-interesting.txt")),
+    ps_artifact_nonempty: fileSize(firstPath(dir, artifactValue(nested, "ps"), "ps.txt")) > 100,
+    listener_artifact_exists: existsSync(firstPath(dir, artifactValue(nested, "listeners"), "listeners.txt")),
+    window_artifact_exists: existsSync(firstPath(dir, artifactValue(nested, "windows"), "windows.json")),
+    terminal_window_artifact_exists: existsSync(firstPath(dir, artifactValue(nested, "terminal_windows"), "terminal-windows.txt")),
+  };
+  const failedChecks = Object.entries(checks)
+    .filter(([, value]) => value !== true)
+    .map(([key]) => key);
+  return {
+    ok: artifactMissing.length === 0 && failedChecks.length === 0,
+    kind: nested.kind,
+    manifest: relativeManifest,
+    checks: { ...checks, declared_artifact_missing_count: artifactMissing.length },
+    missing: artifactMissing,
+    failed_checks: failedChecks,
+  };
+}
+
+function artifactValue(manifest, key) {
+  const value = manifest?.artifacts?.[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function artifactPaths(manifest) {
+  return Object.values(manifest?.artifacts ?? {})
+    .filter((value) => typeof value === "string");
+}
+
+function firstPath(dir, ...candidates) {
+  for (const candidate of candidates.flat().filter(Boolean)) {
+    const absolute = path.join(dir, candidate);
+    if (existsSync(absolute)) return absolute;
+  }
+  return path.join(dir, candidates.flat().filter(Boolean)[0] ?? "__missing__");
+}
+
+function firstJson(dir, ...candidates) {
+  const found = firstPath(dir, ...candidates);
+  return readJsonIfExists(found);
+}
+
+function captureSummaryFallbacks(scenario) {
+  return capturePathFallbacks(scenario, "capture-summary.json");
+}
+
+function capturePathFallbacks(scenario, file) {
+  const dirsByScenario = {
+    "codex-app-server-down": ["captures/after-fault"],
+    "orchestrator-crash-restart": ["captures/after-restart"],
+    "queue-app-accessibility-denied": ["captures/accessibility-denied"],
+    "screen-capture-denied": ["captures/screen-denied"],
+  };
+  const dirs = [...(dirsByScenario[scenario] ?? []), "captures/after", "captures/after-fault", "captures/after-restart", "captures/accessibility-denied", "captures/screen-denied"];
+  return [...new Set(dirs)].map((dir) => `${dir}/${file}`);
+}
+
+function assertionsGreen(manifest) {
+  return !Array.isArray(manifest.assertions) || manifest.assertions.every((assertion) => assertion?.ok === true);
+}
+
+function readJson(file) {
+  return JSON.parse(readFileSync(file, "utf8"));
+}
+
+function readJsonIfExists(file) {
+  try {
+    if (!existsSync(file)) return undefined;
+    return readJson(file);
+  } catch {
+    return undefined;
+  }
+}
+
+function fileSize(file) {
+  try {
+    return statSync(file).size;
+  } catch {
+    return 0;
+  }
+}
+
+function utcStamp() {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function runSelfTest() {
+  const fixtureRoot = path.join(repoRoot, "artifacts", "product-readiness-artifact-audit-self-test", `${utcStamp()}-${process.pid}`);
+  try {
+    const scenarioDir = path.join(fixtureRoot, "scenario");
+    const faultDir = path.join(fixtureRoot, "screen-denied-fault");
+    const connectivityDir = path.join(fixtureRoot, "connectivity");
+    const orphanDir = path.join(fixtureRoot, "orphan");
+    const snapshotDir = path.join(fixtureRoot, "snapshot");
+    const dogfoodStatusDir = path.join(fixtureRoot, "dogfood-status");
+    const missingChecksDogfoodStatusDir = path.join(fixtureRoot, "missing-checks-dogfood-status");
+    const brokenScenarioDir = path.join(fixtureRoot, "broken-scenario");
+    const brokenSnapshotDir = path.join(fixtureRoot, "broken-snapshot");
+    const brokenDogfoodStatusDir = path.join(fixtureRoot, "broken-dogfood-status");
+    writeScenarioFixture(scenarioDir, { includeScreenshot: true });
+    writeScreenDeniedFaultFixture(faultDir);
+    writeConnectivityFixture(connectivityDir);
+    writeOrphanFixture(orphanDir);
+    writeSnapshotFixture(snapshotDir);
+    writeDogfoodStatusFixture(dogfoodStatusDir, { ok: true });
+    writeDogfoodStatusFixture(missingChecksDogfoodStatusDir, { ok: true, includeChecks: false });
+    writeScenarioFixture(brokenScenarioDir, { includeScreenshot: false });
+    mkdirSync(brokenSnapshotDir, { recursive: true });
+    writeDogfoodStatusFixture(brokenDogfoodStatusDir, { ok: false });
+
+    const productManifest = {
+      kind: "eventloopos.product_readiness_proof",
+      profile: "dogfood",
+      passed: true,
+      release_ready: false,
+      release_ready_reasons: [{ requirement: "release readiness requires release profile", evidence: "current profile: dogfood" }],
+      profile_gate_passed: true,
+      profile_gate_reasons: [],
+      capture_video_seconds: 3,
+      evidence: {
+        dogfood_status_before: path.relative(repoRoot, path.join(dogfoodStatusDir, "manifest.json")),
+        failed_lab_connectivity_status: path.relative(repoRoot, path.join(connectivityDir, "manifest.json")),
+        snapshot_before: path.relative(repoRoot, snapshotDir),
+        queue_followup_runs: [{ local_manifest: path.relative(repoRoot, path.join(scenarioDir, "manifest.json")) }],
+        screen_capture_denied_fault_runs: [{ local_manifest: path.relative(repoRoot, path.join(faultDir, "manifest.json")) }],
+        tailscale_vnc_disconnected_fault_runs: [{ local_manifest: path.relative(repoRoot, path.join(connectivityDir, "manifest.json")) }],
+        orphan_proof: path.relative(repoRoot, path.join(orphanDir, "manifest.json")),
+      },
+    };
+    const productPath = path.join(fixtureRoot, "product-manifest.json");
+    writeJson(productPath, productManifest);
+    const productStatus = auditInput(productPath, productManifest);
+    assert.equal(productStatus.ok, true);
+    assert.equal(productStatus.statuses.length, 10);
+    assert.equal(productStatus.statuses.find((status) => status.evidence_key === "product_outcome").ok, true);
+    assert.equal(productStatus.statuses.find((status) => status.evidence_key === "profile_gate").ok, true);
+    assert.equal(productStatus.statuses.find((status) => status.evidence_key === "release_repeat_depth").ok, true);
+    assert.equal(productStatus.statuses.find((status) => status.evidence_key === "dogfood_status_before").ok, true);
+    assert.equal(productStatus.statuses.find((status) => status.evidence_key === "failed_lab_connectivity_status").ok, true);
+    assert.equal(productStatus.statuses.find((status) => status.evidence_key === "snapshot_before").ok, true);
+
+    const fastReleaseRepeatDepth = productReleaseRepeatDepthStatus(path.join(fixtureRoot, "fast-release-product-manifest.json"), {
+      kind: "eventloopos.product_readiness_proof",
+      profile: "release",
+      requested_runs: 3,
+      requested_fault_runs: 1,
+      required_release_runs: 3,
+      release_required_artifact_counts: {
+        queue_followup_runs: 3,
+        completion_workspace_runs: 3,
+        codex_app_server_down_fault_runs: 1,
+      },
+      release_repeat_artifact_counts: {
+        queue_followup_runs: 3,
+        completion_workspace_runs: 3,
+        codex_app_server_down_fault_runs: 1,
+      },
+    });
+    assert.equal(fastReleaseRepeatDepth.ok, true);
+    assert.equal(fastReleaseRepeatDepth.required_counts.codex_app_server_down_fault_runs, 1);
+
+    const redReleaseRepeatDepth = productReleaseRepeatDepthStatus(path.join(fixtureRoot, "red-fast-release-product-manifest.json"), {
+      kind: "eventloopos.product_readiness_proof",
+      profile: "release",
+      requested_runs: 3,
+      requested_fault_runs: 1,
+      required_release_runs: 3,
+      release_required_artifact_counts: {
+        queue_followup_runs: 3,
+        completion_workspace_runs: 3,
+        codex_app_server_down_fault_runs: 1,
+      },
+      release_repeat_artifact_counts: {
+        queue_followup_runs: 2,
+        completion_workspace_runs: 3,
+        codex_app_server_down_fault_runs: 0,
+      },
+    });
+    assert.equal(redReleaseRepeatDepth.ok, false);
+    assert.equal(redReleaseRepeatDepth.failed_checks.includes("required_counts_met"), true);
+    assert.deepEqual(redReleaseRepeatDepth.failed_count_keys, ["queue_followup_runs", "codex_app_server_down_fault_runs"]);
+
+    const profileOnlyProductManifest = {
+      kind: "eventloopos.product_readiness_proof",
+      profile: "dogfood",
+      passed: true,
+      release_ready: false,
+      release_ready_reasons: [{ requirement: "release readiness requires release profile", evidence: "current profile: dogfood" }],
+      profile_gate_passed: true,
+      profile_gate_reasons: [],
+      evidence: {},
+    };
+    const profileOnlyStatus = auditInput(path.join(fixtureRoot, "profile-only-product-manifest.json"), profileOnlyProductManifest);
+    assert.equal(profileOnlyStatus.ok, false);
+    assert.equal(profileOnlyStatus.statuses.find((status) => status.evidence_key === "product_outcome").ok, true);
+    assert.equal(profileOnlyStatus.statuses.find((status) => status.evidence_key === "profile_gate").ok, true);
+    assert.equal(profileOnlyStatus.statuses.find((status) => status.evidence_key === "release_repeat_depth").ok, true);
+    assert.equal(profileOnlyStatus.statuses.find((status) => status.evidence_key === "artifact_evidence").ok, false);
+
+    const redOutcomeProductManifest = {
+      ...productManifest,
+      passed: false,
+      profile_gate_passed: true,
+      profile_gate_reasons: [],
+    };
+    const redOutcomeStatus = auditInput(path.join(fixtureRoot, "red-outcome-product-manifest.json"), redOutcomeProductManifest);
+    const redOutcome = redOutcomeStatus.statuses.find((status) => status.evidence_key === "product_outcome");
+    assert.equal(redOutcomeStatus.ok, false);
+    assert.equal(redOutcome.ok, false);
+    assert.equal(redOutcome.failed_checks.includes("passed_true"), true);
+
+    const redReleaseOutcomeProductManifest = {
+      ...productManifest,
+      profile: "release",
+      passed: true,
+      release_ready: false,
+      release_ready_reasons: [{ requirement: "critical lab proofs must pass enough repeat runs", evidence: "requested_runs=1; required_release_runs=3" }],
+    };
+    const redReleaseOutcomeStatus = auditInput(path.join(fixtureRoot, "red-release-outcome-product-manifest.json"), redReleaseOutcomeProductManifest);
+    const redReleaseOutcome = redReleaseOutcomeStatus.statuses.find((status) => status.evidence_key === "product_outcome");
+    assert.equal(redReleaseOutcomeStatus.ok, false);
+    assert.equal(redReleaseOutcome.ok, false);
+    assert.equal(redReleaseOutcome.failed_checks.includes("release_profile_ready"), true);
+    assert.equal(redReleaseOutcome.failed_checks.includes("release_profile_reasons_empty"), true);
+
+    const legacyProductManifest = {
+      kind: "eventloopos.product_readiness_proof",
+      profile: "dogfood",
+      capture_video_seconds: 3,
+      evidence: productManifest.evidence,
+    };
+    const legacyStatus = auditInput(path.join(fixtureRoot, "legacy-product-manifest.json"), legacyProductManifest);
+    const legacyOutcomeStatus = legacyStatus.statuses.find((status) => status.evidence_key === "product_outcome");
+    const legacyProfileStatus = legacyStatus.statuses.find((status) => status.evidence_key === "profile_gate");
+    assert.equal(legacyStatus.ok, false);
+    assert.equal(legacyOutcomeStatus.ok, false);
+    assert.equal(legacyOutcomeStatus.failed_checks.includes("passed_field_present"), true);
+    assert.equal(legacyOutcomeStatus.failed_checks.includes("release_ready_field_present"), true);
+    assert.equal(legacyProfileStatus.ok, false);
+    assert.equal(legacyProfileStatus.failed_checks.includes("profile_gate_field_present"), true);
+    assert.equal(legacyProfileStatus.failed_checks.includes("profile_gate_reasons_field_present"), true);
+
+    const scenarioStatus = auditInput(path.join(scenarioDir, "manifest.json"), readJson(path.join(scenarioDir, "manifest.json")));
+    assert.equal(scenarioStatus.ok, true);
+    assert.equal(scenarioStatus.statuses[0].checks.after_video_present, true);
+
+    const directSnapshotStatus = auditPath(snapshotDir);
+    assert.equal(directSnapshotStatus.ok, true);
+    assert.equal(directSnapshotStatus.statuses[0].kind, "eventloopos.lab_snapshot");
+
+    const directDogfoodStatus = auditInput(path.join(dogfoodStatusDir, "manifest.json"), readJson(path.join(dogfoodStatusDir, "manifest.json")));
+    assert.equal(directDogfoodStatus.ok, true);
+    assert.equal(directDogfoodStatus.statuses[0].kind, "eventloopos.lab_dogfood_status");
+    const directDogfoodStatusDir = auditPath(dogfoodStatusDir);
+    assert.equal(directDogfoodStatusDir.ok, true);
+    assert.equal(directDogfoodStatusDir.statuses[0].kind, "eventloopos.lab_dogfood_status");
+    const missingChecksDogfoodStatus = auditPath(missingChecksDogfoodStatusDir);
+    assert.equal(missingChecksDogfoodStatus.ok, false);
+    assert.equal(missingChecksDogfoodStatus.statuses[0].failed_checks.includes("status_checks_green"), true);
+
+    const faultStatus = auditInput(path.join(faultDir, "manifest.json"), readJson(path.join(faultDir, "manifest.json")));
+    assert.equal(faultStatus.ok, true);
+    assert.equal(faultStatus.statuses[0].checks.screen_denied_zero_byte_with_actionable_error, true);
+
+    const connectivityStatus = auditInput(path.join(connectivityDir, "manifest.json"), readJson(path.join(connectivityDir, "manifest.json")));
+    assert.equal(connectivityStatus.ok, true);
+
+    const orphanStatus = auditInput(path.join(orphanDir, "manifest.json"), readJson(path.join(orphanDir, "manifest.json")));
+    assert.equal(orphanStatus.ok, true);
+    assert.equal(orphanStatus.statuses[0].checks.assertions_green, true);
+
+    const brokenProductManifest = {
+      kind: "eventloopos.product_readiness_proof",
+      profile: "dogfood",
+      passed: false,
+      release_ready: false,
+      release_ready_reasons: [{ requirement: "release readiness requires release profile", evidence: "current profile: dogfood" }],
+      profile_gate_passed: false,
+      profile_gate_reasons: [{ requirement: "dogfood requires green queue artifacts", evidence: "queue_followup_runs 0/1" }],
+      capture_video_seconds: 0,
+      evidence: {
+        dogfood_status_before: path.relative(repoRoot, path.join(brokenDogfoodStatusDir, "manifest.json")),
+        snapshot_after: path.relative(repoRoot, brokenSnapshotDir),
+        queue_followup_runs: [{ local_manifest: path.relative(repoRoot, path.join(brokenScenarioDir, "manifest.json")) }],
+      },
+    };
+    const brokenStatus = auditInput(path.join(fixtureRoot, "broken-product-manifest.json"), brokenProductManifest);
+    assert.equal(brokenStatus.ok, false);
+    assert.equal(brokenStatus.statuses.find((status) => status.evidence_key === "product_outcome").ok, false);
+    assert.equal(brokenStatus.statuses.find((status) => status.evidence_key === "product_outcome").failed_checks.includes("passed_true"), true);
+    assert.equal(brokenStatus.statuses.find((status) => status.evidence_key === "profile_gate").ok, false);
+    assert.equal(brokenStatus.statuses.find((status) => status.evidence_key === "profile_gate").failed_checks.includes("profile_gate_passed"), true);
+    assert.equal(brokenStatus.statuses.find((status) => status.evidence_key === "queue_followup_runs").missing.includes("captures/after/screen.png"), true);
+    assert.equal(brokenStatus.statuses.find((status) => status.evidence_key === "queue_followup_runs").failed_checks.includes("after_screen_nonempty"), true);
+    assert.equal(brokenStatus.statuses.find((status) => status.evidence_key === "snapshot_after").ok, false);
+    assert.equal(brokenStatus.statuses.find((status) => status.evidence_key === "snapshot_after").failed_checks.includes("health_ok"), true);
+    assert.equal(brokenStatus.statuses.find((status) => status.evidence_key === "dogfood_status_before").ok, false);
+    assert.equal(brokenStatus.statuses.find((status) => status.evidence_key === "dogfood_status_before").failed_checks.includes("status_checks_green"), true);
+    const directBrokenSnapshotStatus = auditPath(brokenSnapshotDir);
+    assert.equal(directBrokenSnapshotStatus.ok, false);
+    assert.equal(directBrokenSnapshotStatus.statuses[0].failed_checks.includes("health_ok"), true);
+    const directBrokenDogfoodStatusDir = auditPath(brokenDogfoodStatusDir);
+    assert.equal(directBrokenDogfoodStatusDir.ok, false);
+    assert.equal(directBrokenDogfoodStatusDir.statuses[0].failed_checks.includes("status_checks_green"), true);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+}
+
+function writeDogfoodStatusFixture(dir, { ok, includeChecks = true }) {
+  mkdirSync(dir, { recursive: true });
+  const checks = {
+    health_ok: true,
+    task_sessions_api_ok: true,
+    queue_api_ok: true,
+    dogfood_process_visible: ok,
+    listener_4480_visible: true,
+    queue_app_process_visible: true,
+    windows_artifact_exists: true,
+    ps_nonempty: true,
+  };
+  writeJson(path.join(dir, "manifest.json"), {
+    kind: "eventloopos.lab_dogfood_status",
+    ok,
+    passed: ok,
+    ...(includeChecks ? { checks } : {}),
+    artifacts: {
+      health: "health.json",
+      task_sessions: "task-sessions.json",
+      queue_ready: "queue-ready.json",
+      processes: "processes-interesting.txt",
+      ps: "ps.txt",
+      listeners: "listeners.txt",
+      windows: "windows.json",
+    },
+  });
+  writeJson(path.join(dir, "health.json"), { ok: true });
+  writeJson(path.join(dir, "task-sessions.json"), { sessions: [] });
+  writeJson(path.join(dir, "queue-ready.json"), { items: [] });
+  writeBytes(path.join(dir, "processes-interesting.txt"), 128);
+  writeBytes(path.join(dir, "ps.txt"), 256);
+  writeBytes(path.join(dir, "listeners.txt"), 128);
+  writeJson(path.join(dir, "windows.json"), []);
+}
+
+function writeSnapshotFixture(dir) {
+  mkdirSync(dir, { recursive: true });
+  writeJson(path.join(dir, "health.json"), { ok: true });
+  writeJson(path.join(dir, "activity.json"), { events: [] });
+  writeJson(path.join(dir, "queue_state_ready.json"), { items: [] });
+  writeJson(path.join(dir, "task-messages_limit_50.json"), { messages: [] });
+  writeJson(path.join(dir, "windows.json"), [{ title: "eventloopOS Queue" }]);
+  writeBytes(path.join(dir, "ps.txt"), 256);
+  writeBytes(path.join(dir, "screen.png"), 12001);
+}
+
+function writeScenarioFixture(dir, { includeScreenshot }) {
+  mkdirSync(path.join(dir, "captures", "before"), { recursive: true });
+  mkdirSync(path.join(dir, "captures", "after"), { recursive: true });
+  mkdirSync(path.join(dir, "api", "after"), { recursive: true });
+  writeJson(path.join(dir, "manifest.json"), {
+    scenario: "queue-followup",
+    ok: true,
+    captures: {
+      before: "captures/before/capture-summary.json",
+      after: "captures/after/capture-summary.json",
+    },
+  });
+  writeJson(path.join(dir, "captures", "before", "capture-summary.json"), {
+    screen: { bytes: 12001 },
+  });
+  writeJson(path.join(dir, "captures", "after", "capture-summary.json"), {
+    screen: { bytes: includeScreenshot ? 12001 : 0 },
+    video: { bytes: 12001 },
+  });
+  if (includeScreenshot) {
+    writeBytes(path.join(dir, "captures", "after", "screen.png"), 12001);
+    writeBytes(path.join(dir, "screenshot-after.png"), 12001);
+  }
+  writeBytes(path.join(dir, "captures", "after", "screen.mov"), 12001);
+  writeBytes(path.join(dir, "screen.mov"), 12001);
+  writeJson(path.join(dir, "captures", "after", "windows.json"), [{ title: "eventloopOS Queue" }]);
+  writeJson(path.join(dir, "windows.json"), [{ title: "eventloopOS Queue" }]);
+  writeBytes(path.join(dir, "captures", "after", "ps.txt"), 256);
+  writeBytes(path.join(dir, "captures", "after", "processes-interesting.txt"), 256);
+  writeBytes(path.join(dir, "captures", "after", "queue-ax-tree.txt"), 256);
+  writeJson(path.join(dir, "api", "after", "health.json"), { ok: true });
+  writeJson(path.join(dir, "api", "after", "task-messages_limit_120.json"), { messages: [{ id: "msg_1", task_id: "task_1", origin: "task_session_api", status: "sent" }] });
+  writeJson(path.join(dir, "api", "after", "activity_limit_120.json"), { events: [] });
+  writeJson(path.join(dir, "api", "after", "queue_state_ready.json"), { items: [] });
+  writeJson(path.join(dir, "task-messages.json"), { messages: [{ id: "msg_1", task_id: "task_1", origin: "task_session_api", status: "sent" }] });
+  writeJson(path.join(dir, "api-state.json"), {
+    health: { ok: true },
+    activity: { events: [] },
+    queue_ready: { items: [] },
+    task_messages: { messages: [{ id: "msg_1", task_id: "task_1", origin: "task_session_api", status: "sent" }] },
+  });
+}
+
+function writeScreenDeniedFaultFixture(dir) {
+  mkdirSync(path.join(dir, "captures", "screen-denied"), { recursive: true });
+  writeJson(path.join(dir, "manifest.json"), {
+    kind: "eventloopos.lab_fault_proof",
+    scenario: "screen-capture-denied",
+    ok: true,
+    artifacts: {
+      manifest: "manifest.json",
+      api_state: "api-state.json",
+      capture_summary: "captures/screen-denied/capture-summary.json",
+      windows: "captures/screen-denied/windows.json",
+      process_list: "captures/screen-denied/ps.txt",
+      screencapture_error: "captures/screen-denied/screencapture.err",
+    },
+    assertions: [{ name: "screen_capture_denied_error_is_actionable", ok: true }],
+  });
+  writeJson(path.join(dir, "api-state.json"), { health: { ok: true } });
+  writeJson(path.join(dir, "captures", "screen-denied", "capture-summary.json"), {
+    screen: {
+      bytes: 0,
+      failure_hint: "Grant Terminal in System Settings > Privacy & Security > Screen & System Audio Recording.",
+    },
+  });
+  writeJson(path.join(dir, "captures", "screen-denied", "windows.json"), [{ title: "eventloopOS Queue" }]);
+  writeBytes(path.join(dir, "captures", "screen-denied", "ps.txt"), 256);
+  writeFileSync(path.join(dir, "captures", "screen-denied", "screencapture.err"), "screen capture denied\n");
+}
+
+function writeConnectivityFixture(dir) {
+  mkdirSync(dir, { recursive: true });
+  writeJson(path.join(dir, "manifest.json"), {
+    kind: "eventloopos.lab_connectivity_proof",
+    ok: true,
+    artifacts: {
+      manifest: "manifest.json",
+      api_state: "api-state.json",
+      ssh_probe_stdout: "ssh-probe.out",
+      ssh_probe_stderr: "ssh-probe.err",
+      vnc_port_probe_stdout: "vnc-port-probe.out",
+      vnc_port_probe_stderr: "vnc-port-probe.err",
+    },
+    assertions: [{ name: "ssh_transport_reachable", ok: true }],
+  });
+  writeJson(path.join(dir, "api-state.json"), { ok: true });
+  writeFileSync(path.join(dir, "ssh-probe.out"), "ok\n");
+  writeFileSync(path.join(dir, "ssh-probe.err"), "");
+  writeFileSync(path.join(dir, "vnc-port-probe.out"), "");
+  writeFileSync(path.join(dir, "vnc-port-probe.err"), "Connection succeeded\n");
+}
+
+function writeOrphanFixture(dir) {
+  mkdirSync(dir, { recursive: true });
+  writeJson(path.join(dir, "manifest.json"), {
+    kind: "eventloopos.lab_orphan_proof",
+    ok: true,
+    artifacts: {
+      processes: "processes-interesting.txt",
+      ps: "ps.txt",
+      listeners: "listeners.txt",
+      windows: "windows.json",
+      terminal_windows: "terminal-windows.txt",
+    },
+    assertions: [
+      { name: "no_dogfood_processes_left", ok: true },
+      { name: "no_dogfood_port_listener_left", ok: true },
+      { name: "no_eventloop_windows_left", ok: true },
+    ],
+  });
+  writeFileSync(path.join(dir, "processes-interesting.txt"), "");
+  writeBytes(path.join(dir, "ps.txt"), 256);
+  writeFileSync(path.join(dir, "listeners.txt"), "");
+  writeJson(path.join(dir, "windows.json"), []);
+  writeFileSync(path.join(dir, "terminal-windows.txt"), "");
+}
+
+function writeJson(file, value) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function writeBytes(file, length) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, "x".repeat(length));
+}

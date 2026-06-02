@@ -1,0 +1,84 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-sync [--aerospace] [--all]
+
+Sync this eventloopOS worktree to the remote Mac lab.
+
+Environment:
+  LAB_MAC_HOST              default: 100.71.111.25
+  LAB_MAC_USER              default: claw
+  LAB_MAC_KEY               default: ~/.ssh/eventloop_lab_mac
+  LAB_MAC_EVENTLOOP_PATH    default: ~/dev/2026/eventloopOS
+  LAB_MAC_AEROSPACE_SRC     default: ../AeroSpace
+  LAB_MAC_AEROSPACE_PATH    default: ~/dev/2026/AeroSpace
+EOF
+}
+
+sync_aerospace=0
+while (($#)); do
+  case "$1" in
+    --aerospace|--all)
+      sync_aerospace=1
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "unknown argument: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+eventloop_path="${LAB_MAC_EVENTLOOP_PATH:-~/dev/2026/eventloopOS}"
+aerospace_src="${LAB_MAC_AEROSPACE_SRC:-$repo_root/../AeroSpace}"
+aerospace_path="${LAB_MAC_AEROSPACE_PATH:-~/dev/2026/AeroSpace}"
+remote="${lab_user}@${lab_host}"
+
+ssh_cmd=(ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8)
+rsync_ssh="ssh -i $lab_key -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8"
+
+common_excludes=(
+  --exclude node_modules/
+  --exclude .pnpm-store/
+  --exclude dist/
+  --exclude .build/
+  --exclude .debug/
+  --exclude .release/
+  --exclude .xcode-build/
+  --exclude .DS_Store
+  --exclude artifacts/lab-runs/
+)
+
+"${ssh_cmd[@]}" "$remote" "mkdir -p ${eventloop_path%/*}"
+rsync -az --delete \
+  -e "$rsync_ssh" \
+  "${common_excludes[@]}" \
+  "$repo_root/" "$remote:$eventloop_path/"
+
+if ((sync_aerospace)); then
+  if [[ ! -d "$aerospace_src" ]]; then
+    echo "AeroSpace source not found: $aerospace_src" >&2
+    exit 1
+  fi
+  "${ssh_cmd[@]}" "$remote" "mkdir -p ${aerospace_path%/*}"
+  rsync -az --delete \
+    -e "$rsync_ssh" \
+    "${common_excludes[@]}" \
+    "$aerospace_src/" "$remote:$aerospace_path/"
+fi
+
+echo "synced eventloopOS to $remote:$eventloop_path"
+if ((sync_aerospace)); then
+  echo "synced AeroSpace to $remote:$aerospace_path"
+fi

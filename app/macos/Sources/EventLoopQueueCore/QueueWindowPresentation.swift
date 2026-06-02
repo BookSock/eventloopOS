@@ -19,7 +19,7 @@ public struct QueueWindowSidebarSummary: Equatable, Sendable {
             showsPlaceholder = packets.isEmpty
         case let .failed(message):
             title = "Queue unavailable"
-            subtitle = message
+            subtitle = actionableQueueFailureMessage(message)
             systemImage = "exclamationmark.triangle"
             showsProgress = false
             showsRetry = true
@@ -70,7 +70,7 @@ public struct QueueWindowDetailSummary: Equatable, Sendable {
             showsRetry = false
         case let .failed(message):
             title = "Queue unavailable"
-            subtitle = message
+            subtitle = actionableQueueFailureMessage(message)
             systemImage = "exclamationmark.triangle"
             showsProgress = false
             showsRetry = true
@@ -185,6 +185,95 @@ public struct QueuePacketIdentityPresentation: Equatable, Sendable {
             sendBackLabel = nil
         }
     }
+}
+
+public func actionableQueueFailureMessage(_ message: String) -> String {
+    let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+    let detail = trimmed.isEmpty ? "No error detail." : trimmed
+    let lowered = detail.lowercased()
+
+    if lowered.contains("client/server versions don't match")
+        || lowered.contains("server restart is required after each update")
+        || lowered.contains("corrupted installation")
+        || lowered.contains("cli/app hashes") {
+        return "AeroSpace version mismatch. Restart AeroSpace, then refresh. If it still fails, reinstall AeroSpace so the CLI and app bundle match. Detail: \(detail)"
+    }
+
+    if lowered.contains("launchservices_server_ready=false")
+        || lowered.contains("launchservices")
+        || lowered.contains("direct binary launch")
+        || lowered.contains("open -a aerospace") {
+        return "AeroSpace launch needs approval. Run pnpm setup:prompt, re-grant AeroSpace Accessibility, open AeroSpace normally, then refresh. Detail: \(detail)"
+    }
+
+    if lowered.contains("aerospace") || lowered.contains("workspace restore") {
+        return "AeroSpace unavailable. Launch AeroSpace, grant Accessibility in System Settings > Privacy & Security, then refresh. Detail: \(detail)"
+    }
+
+    if lowered.contains("screen recording") || lowered.contains("screencapture") || lowered.contains("could not create image from display") {
+        return "Screen Recording missing. Run pnpm macos:permission-prompt, approve Terminal/eventloopOS in Screen & System Audio Recording, then refresh. Detail: \(detail)"
+    }
+
+    if lowered.contains("accessibility") || lowered.contains("system events") || lowered.contains("assistive") {
+        return "Accessibility missing. Run pnpm macos:permission-prompt, approve Terminal/eventloopOS/AeroSpace in Accessibility, then refresh. Detail: \(detail)"
+    }
+
+    if lowered.contains("codex") && (lowered.contains("login") || lowered.contains("auth") || lowered.contains("not configured")) {
+        return "Codex is not ready. Run pnpm codex:status-proof, then codex login if auth is missing. Detail: \(detail)"
+    }
+
+    if lowered.contains("codex")
+        && (lowered.contains("thread not found")
+            || lowered.contains("websocket is closed")
+            || lowered.contains("stale")
+            || lowered.contains("lost native thread")) {
+        return "Codex thread is stale. Replace or rebind the task session, then send the followup again. Detail: \(detail)"
+    }
+
+    if lowered.contains("tailscale")
+        || lowered.contains("tailnet")
+        || lowered.contains("vnc")
+        || lowered.contains("screen sharing")
+        || lowered.contains("remote login") {
+        return "Remote lab disconnected. Open Tailscale on the lab Mac, verify Remote Login and Screen Sharing, then run pnpm lab:wait-online:quick. Detail: \(detail)"
+    }
+
+    if lowered.contains("postgres")
+        || lowered.contains("database_url")
+        || lowered.contains("database url")
+        || lowered.contains("migration mismatch")
+        || lowered.contains("schema migration") {
+        return "Postgres unavailable or schema mismatch. Start the configured database or run the migration repair proof, then refresh. Detail: \(detail)"
+    }
+
+    if lowered.contains("ghostty")
+        || lowered.contains("terminal cleanup")
+        || lowered.contains("terminate running processes")
+        || lowered.contains("osascript") {
+        return "Terminal cleanup needs attention. Close stuck Ghostty/Terminal prompts, then rerun cleanup or product readiness. Detail: \(detail)"
+    }
+
+    if isOrchestratorUnavailable(lowered) {
+        return "Orchestrator unavailable. Start dev dogfood with pnpm dev:dogfood or set EVENTLOOPOS_ORCHESTRATOR_URL, then refresh. Detail: \(detail)"
+    }
+
+    if lowered.contains("http 500") || lowered.contains("http 502") || lowered.contains("http 503") || lowered.contains("http 504") {
+        return "Orchestrator returned a server error. Check dogfood logs, run pnpm readiness:summary, then refresh. Detail: \(detail)"
+    }
+
+    return detail
+}
+
+private func isOrchestratorUnavailable(_ lowered: String) -> Bool {
+    lowered.contains("connection refused")
+        || lowered.contains("could not connect")
+        || lowered.contains("couldn't connect")
+        || lowered.contains("failed to connect")
+        || lowered.contains("timed out")
+        || lowered.contains("offline")
+        || lowered.contains("network is down")
+        || lowered.contains("cannot find the server")
+        || lowered.contains("http 404")
 }
 
 private func taskSessionProviderLabel(_ provider: String) -> String {

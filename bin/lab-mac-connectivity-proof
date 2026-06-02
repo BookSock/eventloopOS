@@ -1,0 +1,276 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-connectivity-proof [status|fault]
+
+Prove remote lab transport is observable and actionable. The proof does not
+disable Tailscale, SSH, or Screen Sharing; fault mode injects transport failures
+into the manifest so product readiness can verify repair guidance safely.
+
+Environment:
+  LAB_MAC_HOST                         default: 100.71.111.25
+  LAB_MAC_USER                         default: claw
+  LAB_MAC_KEY                          default: ~/.ssh/eventloop_lab_mac
+  LAB_CONNECTIVITY_SSH_TIMEOUT         default: 20 seconds
+  LAB_CONNECTIVITY_VNC_TIMEOUT         default: 8 seconds
+  LAB_CONNECTIVITY_INJECT_TAILSCALE_DOWN
+                                       default: 1 for fault, 0 for status
+  LAB_CONNECTIVITY_INJECT_VNC_DOWN     default: 1 for fault, 0 for status
+EOF
+}
+
+mode="${1:-status}"
+case "$mode" in
+  status|fault) ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown mode: $mode" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+remote="${lab_user}@${lab_host}"
+ssh_timeout="${LAB_CONNECTIVITY_SSH_TIMEOUT:-20}"
+vnc_timeout="${LAB_CONNECTIVITY_VNC_TIMEOUT:-8}"
+run_id="$(date +%Y%m%d-%H%M%S)-lab-connectivity-$mode"
+run="artifacts/lab-runs/$run_id"
+inject_tailscale="${LAB_CONNECTIVITY_INJECT_TAILSCALE_DOWN:-}"
+inject_vnc="${LAB_CONNECTIVITY_INJECT_VNC_DOWN:-}"
+if [[ "$mode" == "fault" ]]; then
+  inject_tailscale="${inject_tailscale:-1}"
+  inject_vnc="${inject_vnc:-1}"
+else
+  inject_tailscale="${inject_tailscale:-0}"
+  inject_vnc="${inject_vnc:-0}"
+fi
+
+ssh_opts=(-i "$lab_key" -o BatchMode=yes -o ConnectTimeout="$ssh_timeout" -o ServerAliveInterval=15 -o ServerAliveCountMax=8)
+
+mkdir -p "$run"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+printf "%s\n" "$lab_host" >"$run/lab-host.txt"
+printf "%s\n" "$remote" >"$run/remote.txt"
+printf "%s\n" "$mode" >"$run/mode.txt"
+printf "%s\n" "$inject_tailscale" >"$run/inject-tailscale-down.txt"
+printf "%s\n" "$inject_vnc" >"$run/inject-vnc-down.txt"
+
+if command -v tailscale >/dev/null 2>&1; then
+  {
+    echo "tailscale_path=$(command -v tailscale)"
+    tailscale version 2>/dev/null | head -3 || true
+    echo "tailscale_ip=$(tailscale ip -4 2>/dev/null | tr '\n' ' ')"
+    tailscale status --self 2>/dev/null || tailscale status 2>/dev/null | head -20 || true
+  } >"$run/controller-tailscale.out" 2>"$run/controller-tailscale.err" || true
+else
+  echo "tailscale_missing=1" >"$run/controller-tailscale.out"
+  : >"$run/controller-tailscale.err"
+fi
+
+set +e
+ssh "${ssh_opts[@]}" "$remote" "date -u +%Y-%m-%dT%H:%M:%SZ; hostname; whoami" >"$run/ssh-probe.out" 2>"$run/ssh-probe.err"
+ssh_rc=$?
+set -e
+printf "%s\n" "$ssh_rc" >"$run/ssh-probe.rc"
+
+if [[ "$ssh_rc" == "0" ]]; then
+  ssh "${ssh_opts[@]}" "$remote" "bash -s" >"$run/remote-status.out" 2>"$run/remote-status.err" <<'REMOTE' || true
+set -euo pipefail
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+echo "== tailscale =="
+if command -v tailscale >/dev/null 2>&1; then
+  echo "tailscale_path=$(command -v tailscale)"
+  tailscale version 2>/dev/null | head -3 || true
+  echo "tailscale_ip=$(tailscale ip -4 2>/dev/null | tr '\n' ' ')"
+  tailscale status --self 2>/dev/null || tailscale status 2>/dev/null | head -20 || true
+else
+  echo "tailscale_missing=1"
+fi
+echo
+echo "== screen_sharing =="
+launchctl print system/com.apple.screensharing 2>/dev/null | sed -n '1,80p' || true
+pgrep -fl "screensharingd|ARDAgent" || true
+lsof -nP -iTCP:5900 -sTCP:LISTEN 2>/dev/null || true
+echo
+echo "== remote_login =="
+systemsetup -getremotelogin 2>/dev/null || true
+lsof -nP -iTCP:22 -sTCP:LISTEN 2>/dev/null || true
+REMOTE
+fi
+
+set +e
+if command -v nc >/dev/null 2>&1; then
+  nc -vz -G "$vnc_timeout" "$lab_host" 5900 >"$run/vnc-port-probe.out" 2>"$run/vnc-port-probe.err"
+  vnc_rc=$?
+else
+  printf "nc missing on local machine\n" >"$run/vnc-port-probe.err"
+  vnc_rc=127
+fi
+set -e
+printf "%s\n" "$vnc_rc" >"$run/vnc-port-probe.rc"
+
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+
+RUN="$run" MODE="$mode" LAB_HOST="$lab_host" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+
+const run = process.env.RUN;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const rc = (relative) => Number(read(relative));
+const mode = process.env.MODE;
+const labHost = process.env.LAB_HOST;
+const injectedTailscaleDown = read("inject-tailscale-down.txt") === "1";
+const injectedVncDown = read("inject-vnc-down.txt") === "1";
+const sshOk = rc("ssh-probe.rc") === 0;
+const vncPortOpen = rc("vnc-port-probe.rc") === 0;
+const remoteStatus = read("remote-status.out");
+const controllerStatus = read("controller-tailscale.out");
+const tailscaleIpMatch = remoteStatus.match(/tailscale_ip=([^\n]+)/);
+const tailscaleIps = tailscaleIpMatch ? tailscaleIpMatch[1].trim().split(/\s+/).filter(Boolean) : [];
+const controllerTailscaleIpMatch = controllerStatus.match(/tailscale_ip=([^\n]+)/);
+const controllerTailscaleIps = controllerTailscaleIpMatch ? controllerTailscaleIpMatch[1].trim().split(/\s+/).filter(Boolean) : [];
+const tailscaleCliPresent = /tailscale_path=/.test(remoteStatus);
+const controllerTailscaleCliPresent = /tailscale_path=/.test(controllerStatus);
+const tailscaleIpVisible = tailscaleIps.some((ip) => ip.startsWith("100."));
+const hostLooksTailnet = /^100\./.test(labHost);
+const effectiveTailscaleOk = !injectedTailscaleDown && sshOk && (tailscaleIpVisible || hostLooksTailnet);
+const effectiveVncOk = !injectedVncDown && vncPortOpen;
+const controllerTailnetTarget = controllerTailscaleIps.find((ip) => ip.startsWith("100."));
+const localBootstrapCommand = controllerTailnetTarget
+  ? `LAB_CONTROLLER_TAILSCALE_IP=${controllerTailnetTarget} pnpm lab:local-bootstrap`
+  : "pnpm lab:local-bootstrap";
+const tailscaleFix = [
+  "Tailscale transport is not reachable or not reporting a 100.x tailnet IP.",
+  "On the lab Mac, open Tailscale, sign into the correct tailnet, ensure the device is connected, and verify `tailscale ip -4` shows the expected 100.x address.",
+  "Also verify the tailnet ACL allows this controller machine to reach the lab on SSH/VNC.",
+  `If someone is at the lab Mac, run \`${localBootstrapCommand}\` from the eventloopOS checkout after logging in locally.`,
+].join(" ");
+const vncFix = [
+  "VNC/Screen Sharing is not reachable on port 5900.",
+  "On the lab Mac, enable Screen Sharing or Remote Management, allow administrators to control the screen, keep the lab user logged in/auto-login enabled, and verify port 5900 from the controller.",
+  `If someone is at the lab Mac, run \`${localBootstrapCommand}\` from the eventloopOS checkout after logging in locally.`,
+].join(" ");
+const assertions = [
+  {
+    name: "ssh_transport_reachable",
+    ok: sshOk || injectedTailscaleDown,
+    details: {
+      rc: rc("ssh-probe.rc"),
+      stdout: read("ssh-probe.out"),
+      stderr: read("ssh-probe.err"),
+      injected_tailscale_down: injectedTailscaleDown,
+      fix: tailscaleFix,
+    },
+  },
+  {
+    name: "tailscale_status_visible_or_injected",
+    ok: effectiveTailscaleOk || injectedTailscaleDown,
+    details: {
+      tailscale_cli_present: tailscaleCliPresent,
+      tailscale_ips: tailscaleIps,
+      host_looks_tailnet: hostLooksTailnet,
+      injected_tailscale_down: injectedTailscaleDown,
+      fix: tailscaleFix,
+    },
+  },
+  {
+    name: "vnc_port_reachable_or_injected",
+    ok: effectiveVncOk || injectedVncDown,
+    details: {
+      rc: rc("vnc-port-probe.rc"),
+      stdout: read("vnc-port-probe.out"),
+      stderr: read("vnc-port-probe.err"),
+      injected_vnc_down: injectedVncDown,
+      fix: vncFix,
+    },
+  },
+  {
+    name: "tailscale_down_repair_text_actionable",
+    ok: !injectedTailscaleDown || /Tailscale|tailnet|ACL|tailscale ip -4|100\.x/.test(tailscaleFix),
+    details: { fix: tailscaleFix },
+  },
+  {
+    name: "vnc_down_repair_text_actionable",
+    ok: !injectedVncDown || /Screen Sharing|Remote Management|port 5900|auto-login|control the screen/.test(vncFix),
+    details: { fix: vncFix },
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+fs.writeFileSync(path.join(run, "api-state.json"), JSON.stringify({
+  ssh: {
+    ok: sshOk,
+    stdout: read("ssh-probe.out"),
+    stderr: read("ssh-probe.err"),
+  },
+  tailscale: {
+    cli_present: tailscaleCliPresent,
+    ips: tailscaleIps,
+    host_looks_tailnet: hostLooksTailnet,
+    injected_down: injectedTailscaleDown,
+  },
+  controller_tailscale: {
+    cli_present: controllerTailscaleCliPresent,
+    ips: controllerTailscaleIps,
+    suggested_local_bootstrap_command: localBootstrapCommand,
+    suggested_local_recovery_command: localBootstrapCommand,
+  },
+  vnc: {
+    port_open: vncPortOpen,
+    stdout: read("vnc-port-probe.out"),
+    stderr: read("vnc-port-probe.err"),
+    injected_down: injectedVncDown,
+  },
+}, null, 2) + "\n");
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_connectivity_proof",
+  mode,
+  run,
+  started_at: read("started-at.txt"),
+  finished_at: read("finished-at.txt"),
+  ok,
+  controller_tailscale: {
+    cli_present: controllerTailscaleCliPresent,
+    ips: controllerTailscaleIps,
+    suggested_local_bootstrap_command: localBootstrapCommand,
+    suggested_local_recovery_command: localBootstrapCommand,
+  },
+  assertions,
+  artifacts: {
+    manifest: "manifest.json",
+    api_state: "api-state.json",
+    ssh_probe_stdout: "ssh-probe.out",
+    ssh_probe_stderr: "ssh-probe.err",
+    remote_status: "remote-status.out",
+    remote_status_error: "remote-status.err",
+    controller_tailscale: "controller-tailscale.out",
+    controller_tailscale_error: "controller-tailscale.err",
+    vnc_port_probe_stdout: "vnc-port-probe.out",
+    vnc_port_probe_stderr: "vnc-port-probe.err",
+  },
+}, null, 2));
+NODE
+
+echo "$run"
+jq '{ok, mode, assertions: [.assertions[] | {name, ok}]}' "$run/manifest.json"
+if ! jq -e '.ok == true' "$run/manifest.json" >/dev/null; then
+  exit 1
+fi

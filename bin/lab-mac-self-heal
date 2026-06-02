@@ -1,0 +1,336 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-self-heal [install|status|uninstall|run]
+
+Install or run a user LaunchAgent that helps the lab Mac recover after login or
+reboot. It does not bypass macOS privacy prompts or admin-only Sharing settings;
+it opens user apps, keeps the machine awake, and writes recovery artifacts with
+exact fixes.
+
+Environment:
+  LAB_CONTROLLER_TAILSCALE_IP optional controller 100.x IP or MagicDNS name
+  LAB_SELF_HEAL_START_INTERVAL default: 300 seconds
+  LAB_SELF_HEAL_NO_LAUNCHCTL   default: 0; write plist without loading it
+  LAB_SELF_HEAL_SKIP_OPEN      default: 0; do not open Tailscale/AeroSpace
+  LAB_SELF_HEAL_SKIP_CAFFEINATE default: 0; do not start caffeinate
+  LAB_SELF_HEAL_PROOF_LOCK_TTL_SECONDS default: 7200; proof lock age treated active
+  LAB_SELF_HEAL_RECOVERY_COMMAND optional bash command for harness tests
+EOF
+}
+
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+
+action="${1:-status}"
+case "$action" in
+  install|status|uninstall|run) ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown action: $action" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+
+label="com.eventloopos.lab-self-heal"
+agent_dir="$HOME/Library/LaunchAgents"
+plist="$agent_dir/$label.plist"
+log_dir="$HOME/Library/Logs/eventloopOS"
+state_dir="$HOME/.eventloopos/lab-self-heal"
+proof_lock_dir="artifacts/.locks/product-readiness-lab.lock"
+start_interval="${LAB_SELF_HEAL_START_INTERVAL:-300}"
+controller_tailnet_ip="${LAB_CONTROLLER_TAILSCALE_IP:-}"
+
+plist_escape() {
+  sed \
+    -e 's/&/\&amp;/g' \
+    -e 's/</\&lt;/g' \
+    -e 's/>/\&gt;/g' \
+    -e 's/"/\&quot;/g' \
+    -e "s/'/\&apos;/g"
+}
+
+write_manifest() {
+  local run="$1"
+  local ok="$2"
+  local reason="$3"
+  RUN="$run" OK="$ok" REASON="$reason" PLIST="$plist" LABEL="$label" REPO_ROOT="$repo_root" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const localRecoveryManifestText = `${process.env.RUN}/local-recovery-manifest.txt`;
+let localRecoveryManifestPath = "";
+try {
+  localRecoveryManifestPath = fs.readFileSync(localRecoveryManifestText, "utf8").trim();
+} catch {}
+const heartbeatPath = `${process.env.RUN}/heartbeat.json`;
+let heartbeat;
+try {
+  heartbeat = JSON.parse(fs.readFileSync(heartbeatPath, "utf8"));
+} catch {}
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.lab_mac_self_heal",
+  run: process.env.RUN,
+  generated_at: new Date().toISOString(),
+  ok: process.env.OK === "1",
+  label: process.env.LABEL,
+  plist: process.env.PLIST,
+  repo_root: process.env.REPO_ROOT,
+  reason: process.env.REASON,
+  heartbeat,
+  local_recovery_manifest: localRecoveryManifestPath || undefined,
+  artifacts: {
+    stdout: `${process.env.RUN}/self-heal.stdout.log`,
+    stderr: `${process.env.RUN}/self-heal.stderr.log`,
+    heartbeat: heartbeatPath,
+    local_recovery_manifest_text: localRecoveryManifestText,
+  },
+};
+console.log(JSON.stringify(manifest, null, 2));
+NODE
+}
+
+write_heartbeat() {
+  local run="$1"
+  local heartbeat_out="$run/heartbeat.out"
+  local heartbeat_err="$run/heartbeat.err"
+  set +e
+  {
+    echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "hostname=$(hostname)"
+    echo "whoami=$(whoami)"
+    echo "controller=$controller_tailnet_ip"
+    echo
+    echo "== macos =="
+    sw_vers 2>/dev/null || true
+    echo
+    echo "== tailscale =="
+    if command -v tailscale >/dev/null 2>&1; then
+      echo "tailscale_path=$(command -v tailscale)"
+      tailscale version 2>/dev/null | head -3 || true
+      echo "tailscale_ip=$(tailscale ip -4 2>/dev/null | tr '\n' ' ')"
+      tailscale status --self 2>/dev/null || tailscale status 2>/dev/null | head -20 || true
+      if [[ -n "$controller_tailnet_ip" ]]; then
+        echo
+        echo "== controller ping =="
+        tailscale ping --timeout=2s --c 1 "$controller_tailnet_ip" 2>&1 || true
+      fi
+    else
+      echo "tailscale_missing=1"
+    fi
+    echo
+    echo "== listeners =="
+    lsof -nP -iTCP:22 -sTCP:LISTEN 2>/dev/null || true
+    lsof -nP -iTCP:5900 -sTCP:LISTEN 2>/dev/null || true
+    echo
+    echo "== processes =="
+    pgrep -fl "Tailscale|AeroSpace|screensharingd|ARDAgent|sshd|caffeinate -dims" || true
+  } >"$heartbeat_out" 2>"$heartbeat_err"
+  local heartbeat_code=$?
+  set -e
+  RUN="$run" HEARTBEAT_OUT="$heartbeat_out" HEARTBEAT_ERR="$heartbeat_err" HEARTBEAT_CODE="$heartbeat_code" node <<'NODE' >"$run/heartbeat.json"
+const fs = require("node:fs");
+const out = fs.readFileSync(process.env.HEARTBEAT_OUT, "utf8");
+const err = fs.readFileSync(process.env.HEARTBEAT_ERR, "utf8");
+const tailscaleIpMatch = out.match(/tailscale_ip=([^\n]+)/);
+const tailscaleIps = tailscaleIpMatch ? tailscaleIpMatch[1].trim().split(/\s+/).filter(Boolean) : [];
+const checks = {
+  command_completed: Number(process.env.HEARTBEAT_CODE) === 0,
+  tailscale_cli_present: /tailscale_path=/.test(out),
+  tailscale_ip_visible: tailscaleIps.some((ip) => ip.startsWith("100.")),
+  ssh_listener_visible: /TCP.*:22 .*LISTEN/i.test(out),
+  vnc_listener_visible: /TCP.*:5900 .*LISTEN/i.test(out),
+  tailscale_process_visible: /Tailscale/i.test(out),
+  aerospace_process_visible: /AeroSpace/i.test(out),
+  controller_ping_ok: /pong from|pong in|via DERP|direct=true/i.test(out),
+};
+const fixes = [];
+if (!checks.tailscale_ip_visible) fixes.push("Open Tailscale and confirm this lab Mac is connected to the tailnet with a 100.x IP.");
+if (!checks.ssh_listener_visible) fixes.push("Enable Remote Login for administrators in System Settings > General > Sharing.");
+if (!checks.vnc_listener_visible) fixes.push("Enable Screen Sharing or Remote Management and allow administrators to control the screen.");
+if (!checks.aerospace_process_visible) fixes.push("Open AeroSpace and approve Accessibility if macOS prompts.");
+const timestamp = out.match(/^timestamp=(.+)$/m)?.[1];
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_mac_heartbeat",
+  generated_at: timestamp || new Date().toISOString(),
+  artifact_dir: process.env.RUN,
+  checks,
+  tailscale_ips: tailscaleIps,
+  fixes,
+  artifacts: {
+    stdout: process.env.HEARTBEAT_OUT,
+    stderr: process.env.HEARTBEAT_ERR,
+  },
+  stderr: err.trim(),
+}, null, 2));
+NODE
+}
+
+proof_lock_active() {
+  [[ -d "$proof_lock_dir" ]] || return 1
+  LOCK_DIR="$proof_lock_dir" TTL_SECONDS="${LAB_SELF_HEAL_PROOF_LOCK_TTL_SECONDS:-7200}" node <<'NODE'
+const fs = require("node:fs");
+const lockDir = process.env.LOCK_DIR;
+const ttlSeconds = Number(process.env.TTL_SECONDS || "0");
+try {
+  const stat = fs.statSync(lockDir);
+  const ageSeconds = (Date.now() - stat.mtimeMs) / 1000;
+  process.exit(ttlSeconds > 0 && ageSeconds >= 0 && ageSeconds <= ttlSeconds ? 0 : 1);
+} catch {
+  process.exit(1);
+}
+NODE
+}
+
+install_agent() {
+  mkdir -p "$agent_dir" "$log_dir" "$state_dir"
+  local quoted_repo
+  local quoted_controller
+  quoted_repo="$(printf "%s" "$repo_root" | plist_escape)"
+  quoted_controller="$(printf "%s" "$controller_tailnet_ip" | plist_escape)"
+  cat >"$plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$label</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>cd &quot;$quoted_repo&quot; &amp;&amp; LAB_CONTROLLER_TAILSCALE_IP=&quot;$quoted_controller&quot; bin/lab-mac-self-heal run</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>$start_interval</integer>
+  <key>StandardOutPath</key>
+  <string>$log_dir/lab-self-heal.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>$log_dir/lab-self-heal.err.log</string>
+  <key>WorkingDirectory</key>
+  <string>$quoted_repo</string>
+</dict>
+</plist>
+EOF
+  if [[ "${LAB_SELF_HEAL_NO_LAUNCHCTL:-0}" == "1" ]]; then
+    echo "lab self-heal plist written without launchctl: $plist"
+    return
+  fi
+  launchctl bootout "gui/$(id -u)" "$plist" >/dev/null 2>&1 || true
+  launchctl bootstrap "gui/$(id -u)" "$plist"
+  launchctl kickstart -k "gui/$(id -u)/$label" >/dev/null 2>&1 || true
+  echo "lab self-heal installed: $plist"
+}
+
+status_agent() {
+  echo "plist=$plist"
+  if [[ -f "$plist" ]]; then
+    echo "plist_present=1"
+  else
+    echo "plist_present=0"
+  fi
+  launchctl print "gui/$(id -u)/$label" 2>/dev/null || true
+  echo
+  echo "recent_logs=$log_dir"
+  tail -n 80 "$log_dir/lab-self-heal.out.log" 2>/dev/null || true
+  tail -n 80 "$log_dir/lab-self-heal.err.log" 2>/dev/null || true
+}
+
+uninstall_agent() {
+  launchctl bootout "gui/$(id -u)" "$plist" >/dev/null 2>&1 || true
+  rm -f "$plist"
+  echo "lab self-heal uninstalled: $plist"
+}
+
+run_once() {
+  mkdir -p "$state_dir" "$log_dir"
+  local run="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-self-heal"
+  mkdir -p "$run"
+  local code
+  local proof_active=0
+  if proof_lock_active; then
+    proof_active=1
+  fi
+  set +e
+  {
+    echo "eventloopOS lab self-heal run"
+    date -u +%Y-%m-%dT%H:%M:%SZ
+    echo "repo=$repo_root"
+    echo "controller=$controller_tailnet_ip"
+    echo "proof_lock_dir=$proof_lock_dir"
+    echo "proof_lock_active=$proof_active"
+    echo
+    echo "== keep awake =="
+    if [[ "${LAB_SELF_HEAL_SKIP_CAFFEINATE:-0}" == "1" ]]; then
+      echo "skipped caffeinate"
+    elif ! pgrep -fl "caffeinate -dims" >/dev/null 2>&1; then
+      nohup caffeinate -dims >"$log_dir/caffeinate.out.log" 2>"$log_dir/caffeinate.err.log" &
+      echo "started caffeinate pid=$!"
+    else
+      pgrep -fl "caffeinate -dims"
+    fi
+    echo
+    echo "== open user agents =="
+    if [[ "$proof_active" == "1" ]]; then
+      echo "skipped opening Tailscale/AeroSpace because product-readiness proof lock is active"
+    elif [[ "${LAB_SELF_HEAL_SKIP_OPEN:-0}" == "1" ]]; then
+      echo "skipped opening Tailscale/AeroSpace"
+    else
+      open -gj -a Tailscale >/dev/null 2>&1 || true
+      open -gj -a AeroSpace >/dev/null 2>&1 || true
+      sleep 3
+    fi
+    echo
+    echo "== heartbeat =="
+    write_heartbeat "$run"
+    jq '{checks, tailscale_ips, fixes}' "$run/heartbeat.json"
+    echo
+    echo "== local recovery =="
+    if [[ "$proof_active" == "1" ]]; then
+      echo "skipped local recovery because product-readiness proof lock is active"
+    elif [[ -n "${LAB_SELF_HEAL_RECOVERY_COMMAND:-}" ]]; then
+      bash -lc "$LAB_SELF_HEAL_RECOVERY_COMMAND"
+    elif [[ -n "$controller_tailnet_ip" ]]; then
+      LAB_CONTROLLER_TAILSCALE_IP="$controller_tailnet_ip" bin/lab-mac-local-recovery-check
+    else
+      bin/lab-mac-local-recovery-check
+    fi
+  } >"$run/self-heal.stdout.log" 2>"$run/self-heal.stderr.log"
+  code=$?
+  set -e
+  local recovery_run
+  recovery_run="$(grep -E "^artifacts/lab-runs/.+-local-recovery-check$" "$run/self-heal.stdout.log" | tail -1 || true)"
+  if [[ -n "$recovery_run" ]]; then
+    printf "%s/manifest.json\n" "$recovery_run" >"$run/local-recovery-manifest.txt"
+  else
+    : >"$run/local-recovery-manifest.txt"
+  fi
+  if [[ "$code" == "0" ]]; then
+    write_manifest "$run" 1 "self-heal local recovery checks passed"
+  else
+    write_manifest "$run" 0 "self-heal local recovery checks failed; inspect linked local recovery manifest and logs"
+  fi
+  echo "$run"
+  jq '{ok, reason, artifacts}' "$run/manifest.json"
+  exit "$code"
+}
+
+case "$action" in
+  install) install_agent ;;
+  status) status_agent ;;
+  uninstall) uninstall_agent ;;
+  run) run_once ;;
+esac

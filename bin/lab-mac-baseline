@@ -1,0 +1,239 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-baseline
+
+Run remote Mac lab install/onboarding baseline checks and emit a structured
+manifest with exact fixes for failed required checks.
+
+Environment:
+  LAB_MAC_HOST           default: 100.71.111.25
+  LAB_MAC_USER           default: claw
+  LAB_MAC_KEY            default: ~/.ssh/eventloop_lab_mac
+  LAB_MAC_EVENTLOOP_PATH default: ~/dev/2026/eventloopOS
+  LAB_CONTROLLER_TAILSCALE_IP
+                         optional controller 100.x IP or MagicDNS name to
+                         ping from the lab Mac
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    echo "unknown argument: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+eventloop_path="${LAB_MAC_EVENTLOOP_PATH:-~/dev/2026/eventloopOS}"
+controller_tailnet_ip="${LAB_CONTROLLER_TAILSCALE_IP:-}"
+remote="${lab_user}@${lab_host}"
+
+ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 "$remote" \
+  "bash -s -- '$eventloop_path' '$controller_tailnet_ip'" <<'REMOTE'
+set -euo pipefail
+
+eventloop_path="$1"
+controller_tailnet_ip="${2:-}"
+export LAB_CONTROLLER_TAILSCALE_IP="$controller_tailnet_ip"
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
+case "$eventloop_path" in
+  "~"/*) repo="$HOME/${eventloop_path#"~/"}" ;;
+  "~") repo="$HOME" ;;
+  *) repo="$eventloop_path" ;;
+esac
+run="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-baseline"
+steps_dir="$repo/$run/steps"
+steps_file="$repo/$run/steps.jsonl"
+mkdir -p "$steps_dir"
+: >"$steps_file"
+
+append_step() {
+  local id="$1"
+  local name="$2"
+  local required="$3"
+  local fix="$4"
+  local started="$5"
+  local finished="$6"
+  local exit_code="$7"
+  local stdout_path="$8"
+  local stderr_path="$9"
+  STEP_ID="$id" STEP_NAME="$name" STEP_REQUIRED="$required" STEP_FIX="$fix" \
+    STEP_STARTED="$started" STEP_FINISHED="$finished" STEP_EXIT_CODE="$exit_code" \
+    STEP_STDOUT="$stdout_path" STEP_STDERR="$stderr_path" node <<'NODE' >>"$steps_file"
+const step = {
+  id: process.env.STEP_ID,
+  name: process.env.STEP_NAME,
+  required: process.env.STEP_REQUIRED === "1",
+  ok: Number(process.env.STEP_EXIT_CODE) === 0,
+  exit_code: Number(process.env.STEP_EXIT_CODE),
+  started_at: process.env.STEP_STARTED,
+  finished_at: process.env.STEP_FINISHED,
+  duration_ms: Date.parse(process.env.STEP_FINISHED) - Date.parse(process.env.STEP_STARTED),
+  stdout_path: process.env.STEP_STDOUT,
+  stderr_path: process.env.STEP_STDERR,
+  fix: process.env.STEP_FIX,
+};
+console.log(JSON.stringify(step));
+NODE
+}
+
+run_step() {
+  local id="$1"
+  local name="$2"
+  local required="$3"
+  local fix="$4"
+  shift 4
+  local stdout_path="$run/steps/$id.stdout.log"
+  local stderr_path="$run/steps/$id.stderr.log"
+  local started
+  local finished
+  local code
+  started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  set +e
+  "$@" >"$repo/$stdout_path" 2>"$repo/$stderr_path"
+  code=$?
+  set -e
+  finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  append_step "$id" "$name" "$required" "$fix" "$started" "$finished" "$code" "$stdout_path" "$stderr_path"
+  if [[ "$code" == "0" ]]; then
+    echo "baseline pass: $name"
+  else
+    echo "baseline fail: $name"
+  fi
+}
+
+write_manifest() {
+  BASELINE_RUN="$run" REPO="$repo" node <<'NODE' >"$repo/$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const repo = process.env.REPO;
+const run = process.env.BASELINE_RUN;
+const stepsPath = path.join(repo, run, "steps.jsonl");
+const steps = fs.readFileSync(stepsPath, "utf8")
+  .split(/\n/)
+  .filter(Boolean)
+  .map((line) => JSON.parse(line));
+const failedRequired = steps.filter((step) => step.required && !step.ok);
+const failedOptional = steps.filter((step) => !step.required && !step.ok);
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.lab_mac_baseline",
+  run,
+  generated_at: new Date().toISOString(),
+  ok: failedRequired.length === 0,
+  required_count: steps.filter((step) => step.required).length,
+  optional_count: steps.filter((step) => !step.required).length,
+  failed_required_count: failedRequired.length,
+  failed_optional_count: failedOptional.length,
+  steps,
+  fixes: failedRequired.map((step) => ({
+    id: step.id,
+    requirement: step.name,
+    fix: step.fix,
+    stderr_path: step.stderr_path,
+    stdout_path: step.stdout_path,
+  })),
+  optional_warnings: failedOptional.map((step) => ({
+    id: step.id,
+    requirement: step.name,
+    fix: step.fix,
+    stderr_path: step.stderr_path,
+    stdout_path: step.stdout_path,
+  })),
+};
+fs.writeFileSync(path.join(repo, run, "summary.json"), JSON.stringify({
+  ok: manifest.ok,
+  failed_required_count: manifest.failed_required_count,
+  fixes: manifest.fixes,
+  optional_warnings: manifest.optional_warnings,
+}, null, 2) + "\n");
+console.log(JSON.stringify(manifest, null, 2));
+NODE
+}
+
+if [[ ! -d "$repo" ]]; then
+  mkdir -p "$(dirname "$repo")"
+  echo "repo missing: $repo" >&2
+  exit 1
+fi
+
+cd "$repo"
+
+run_step path "Homebrew shell path" 1 "Install Homebrew or ensure /opt/homebrew/bin is on PATH." \
+  bash -lc 'command -v brew && command -v node && command -v pnpm'
+run_step node "Node.js 22+" 1 "Install Node.js 22+ and rerun corepack enable." \
+  bash -lc 'node -e "const v=Number(process.versions.node.split(\".\")[0]); if (v < 22) { console.error(\"Node 22+ required, got \" + process.version); process.exit(1); } console.log(process.version)"'
+run_step pnpm "pnpm via Corepack" 1 "Run corepack enable, then pnpm install in the repo." \
+  bash -lc 'pnpm -v && test -d node_modules'
+run_step swift "Swift command line tools" 1 "Run xcode-select --install. Full Xcode is optional unless Swift XCTest is needed." \
+  bash -lc 'swift --version | head -1'
+run_step codex "Codex CLI authenticated and reachable" 1 "Install Codex CLI, run codex login on the lab Mac, and verify Codex websocket/provider reachability." \
+  bash -lc 'node bin/codex-status-proof'
+run_step aerospace "AeroSpace server and Accessibility" 1 "Launch AeroSpace, grant Accessibility, then verify with aerospace list-workspaces --focused." \
+  bash -lc 'command -v aerospace && aerospace --version && aerospace list-workspaces --focused'
+run_step macos_permissions "macOS Screen Recording, Accessibility, and AeroSpace permissions" 1 "Run pnpm macos:permission-status on the lab Mac, grant missing Privacy & Security permissions, and rerun baseline." \
+  bash -lc 'set +e; output="$(node bin/macos-permission-status 2>&1)"; code=$?; set -e; printf "%s\n" "$output"; if [[ "$code" == "0" ]]; then exit 0; fi; manifest="$(printf "%s\n" "$output" | sed -n "s/^macOS permission status manifest: //p" | tail -1)"; test -n "$manifest"; jq -e ".checks.darwin_host == true and .checks.accessibility_system_events_usable == true and .checks.aerospace_cli_available == true and .checks.aerospace_app_process_visible == true and .checks.aerospace_server_ready == true and .checks.aerospace_mutation_commands_ready == true and .details.terminal_tcc.screen_capture == \"allowed\"" "$manifest"'
+run_step remote_login "Remote Login survives reboot" 1 "Enable System Settings > General > Sharing > Remote Login, allow administrators, then verify SSH works after reboot." \
+  bash -lc 'launchctl print system/com.openssh.sshd >/tmp/eventloopos-remote-login.txt 2>&1 || true; ip="$(tailscale ip -4 2>/dev/null | head -1)"; echo "tailscale_ip=$ip" | tee -a /tmp/eventloopos-remote-login.txt; test -n "$ip"; nc -G 3 -z "$ip" 22'
+run_step tailscale_connected "Tailscale connected with 100.x IP" 1 "Open Tailscale, sign into the correct tailnet, enable launch at login, and verify tailscale ip -4 prints the lab 100.x address." \
+  bash -lc 'command -v tailscale && tailscale ip -4 | tee /tmp/eventloopos-tailscale-ip.txt; grep -E "^100\\." /tmp/eventloopos-tailscale-ip.txt'
+run_step tailscale_self_status "Tailscale self status visible" 1 "Open Tailscale, confirm it says connected, and rerun. If this fails while tailscale ip -4 works, restart Tailscale.app." \
+  bash -lc 'command -v tailscale && tailscale status --self | tee /tmp/eventloopos-tailscale-self.txt; grep -E "100\\." /tmp/eventloopos-tailscale-self.txt'
+run_step screen_sharing_listener "Screen Sharing/VNC reachable after reboot" 1 "Enable Screen Sharing or Remote Management, allow administrators to control the screen, and verify port 5900 is reachable on the tailnet IP." \
+  bash -lc 'launchctl print system/com.apple.screensharing >/tmp/eventloopos-screensharing-launchd.txt 2>&1 || true; ip="$(tailscale ip -4 2>/dev/null | head -1)"; echo "tailscale_ip=$ip" | tee /tmp/eventloopos-vnc-listener.txt; test -n "$ip"; nc -G 3 -z "$ip" 5900'
+run_step tailscale_ssh_reachable "SSH reachable on Tailscale IP" 1 "Remote Login is not reachable on the tailnet IP. Verify Tailscale is connected, Remote Login is enabled, and local firewall/security software allows port 22 on the Tailscale interface." \
+  bash -lc 'ip="$(tailscale ip -4 | head -1)"; echo "tailscale_ip=$ip"; test -n "$ip"; nc -G 3 -z "$ip" 22'
+run_step tailscale_vnc_reachable "VNC reachable on Tailscale IP" 1 "Screen Sharing/VNC is not reachable on the tailnet IP. Verify Screen Sharing or Remote Management is enabled, administrators can control the screen, and local firewall/security software allows port 5900 on the Tailscale interface." \
+  bash -lc 'ip="$(tailscale ip -4 | head -1)"; echo "tailscale_ip=$ip"; test -n "$ip"; nc -G 3 -z "$ip" 5900'
+run_step controller_tailnet_ping "Controller tailnet peer reachable" 0 "Set LAB_CONTROLLER_TAILSCALE_IP to the controller Mac's 100.x IP or MagicDNS name and verify Tailscale ACL/routing allows the lab to reach it." \
+  bash -lc 'target="${LAB_CONTROLLER_TAILSCALE_IP:-}"; if [[ -z "$target" ]]; then echo "LAB_CONTROLLER_TAILSCALE_IP not configured"; exit 0; fi; tailscale ping --c 1 --timeout=5s "$target"'
+run_step auto_login "Lab user auto-login for GUI dogfood" 1 "Enable automatic login for the lab user so Tailscale, AeroSpace, Screen Sharing GUI state, and Queue app are available after reboot." \
+  bash -lc 'auto_user="$(defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null || true)"; echo "autoLoginUser=$auto_user"; test "$auto_user" = "$(whoami)"'
+run_step lab_self_heal_plist "Lab self-heal LaunchAgent plist installed" 1 "Run LAB_CONTROLLER_TAILSCALE_IP=${LAB_CONTROLLER_TAILSCALE_IP:-100.76.35.66} pnpm lab:self-heal -- install on the lab Mac, or run LAB_CONTROLLER_TAILSCALE_IP=${LAB_CONTROLLER_TAILSCALE_IP:-100.76.35.66} pnpm lab:self-heal:remote -- install from the controller once SSH works." \
+  bash -lc 'plist="$HOME/Library/LaunchAgents/com.eventloopos.lab-self-heal.plist"; echo "plist=$plist"; test -f "$plist"; plutil -lint "$plist"; grep -q "bin/lab-mac-self-heal run" "$plist"'
+run_step lab_self_heal_loaded "Lab self-heal LaunchAgent loaded" 1 "Load the self-heal LaunchAgent with LAB_CONTROLLER_TAILSCALE_IP=${LAB_CONTROLLER_TAILSCALE_IP:-100.76.35.66} pnpm lab:self-heal -- install after logging into the lab user. Verify with pnpm lab:self-heal -- status." \
+  bash -lc 'launchctl print "gui/$(id -u)/com.eventloopos.lab-self-heal"'
+run_step screen_capture "Direct SSH Screen Recording permission" 0 "Run pnpm macos:permission-status or bin/lab-mac-screen-capture-permission prompt, approve Terminal in Privacy & Security, then rerun status. Product scenarios still require GUI screenshot artifacts." \
+  bash -lc 'tmp="${TMPDIR:-/tmp}/eventloopos-baseline-screen.png"; rm -f "$tmp"; screencapture -x "$tmp"; test -s "$tmp"; wc -c "$tmp"'
+run_step dogfood_script "Dogfood script syntax" 1 "Fix bash/node syntax errors before dogfood." \
+  bash -lc 'node --check bin/dev-dogfood && node --check bin/codex-status-proof && bash -n bin/lab-mac-dogfood bin/lab-mac-scenario bin/lab-mac-connectivity-proof bin/product-readiness-proof'
+run_step doctor "Developer doctor preflight" 0 "Run pnpm run dev:doctor:preflight locally on the lab and follow failed check details. Docker failures are optional for memory-mode dogfood." \
+  bash -lc 'EVENTLOOPOS_DOCTOR_REQUIRE_ORCHESTRATOR=0 pnpm run dev:doctor'
+run_step shared_tests "Shared package tests" 1 "Fix shared package tests before onboarding users." \
+  bash -lc 'pnpm --filter @eventloopos/shared test'
+run_step orchestrator_tests "Orchestrator tests" 1 "Fix orchestrator tests before onboarding users." \
+  bash -lc 'pnpm --filter @eventloopos/orchestrator test'
+run_step browser_tests "Browser extension tests" 1 "Fix browser extension tests or install Playwright browser dependencies." \
+  bash -lc 'pnpm --filter @eventloopos/browser-extension test'
+run_step native_host_tests "Native host tests" 1 "Fix native host tests before browser capture onboarding." \
+  bash -lc 'pnpm --filter @eventloopos/native-host test'
+run_step harness_tests "Python test harness tests" 1 "Fix test harness tests before trusting scenario output." \
+  bash -lc 'pnpm --filter @eventloopos/test-harness test'
+run_step macos_build "macOS app build/typecheck" 1 "Fix Swift build/typecheck; full Xcode is not required for this build path." \
+  bash -lc 'pnpm --filter @eventloopos/macos run typecheck'
+run_step macos_launch "macOS app launch smoke" 1 "Fix app bundle launch smoke before user install/dogfood." \
+  bash -lc 'pnpm test:e2e:macos-launch'
+run_step docker "Docker daemon for Postgres mode" 0 "Install/start Docker Desktop when testing Postgres-backed dogfood." \
+  bash -lc 'docker info --format "{{.ServerVersion}}"'
+
+write_manifest
+jq -r '"status:" + (if .ok then "0" else "1" end)' "$run/manifest.json" >"$run/status.txt"
+echo "$run"
+jq '{ok, failed_required_count, fixes, optional_warnings}' "$run/manifest.json"
+jq -e '.ok == true' "$run/manifest.json" >/dev/null
+REMOTE

@@ -44,4 +44,19 @@ final class QueueAppDelegateTests: XCTestCase {
         XCTAssertFalse(restored)
         XCTAssertTrue(workspaceClient.workspaceRestoreSnapshots.isEmpty)
     }
+
+    func testHarnessWindowFlagCanBeRequestedByArgumentOrEnvironment() {
+        XCTAssertTrue(QueueAppDelegate.shouldOpenHarnessWindow(
+            arguments: ["EventLoopQueueApp", "--harness-window"],
+            environment: [:]
+        ))
+        XCTAssertTrue(QueueAppDelegate.shouldOpenHarnessWindow(
+            arguments: ["EventLoopQueueApp"],
+            environment: ["EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW": "1"]
+        ))
+        XCTAssertFalse(QueueAppDelegate.shouldOpenHarnessWindow(
+            arguments: ["EventLoopQueueApp"],
+            environment: [:]
+        ))
+    }
 }

@@ -21,6 +21,7 @@ export type CodexNativeTurn = {
 export type CodexNativeThreadClient = {
   listThreads(): Promise<CodexNativeThread[]> | CodexNativeThread[];
   getThread(threadId: string): Promise<CodexNativeThread | undefined> | CodexNativeThread | undefined;
+  taskIdForThreadId?(threadId: string): Promise<string | undefined> | string | undefined;
   startThread?(input: {
     task_id: string;
     cwd?: string;
@@ -71,6 +72,7 @@ export type CodexTaskMessage = {
   idempotency_key: string;
   sent_at?: string;
   status: "sent" | "failed" | "blocked";
+  error?: string;
   evidence: Array<{
     id: string;
     kind: "raw";
@@ -83,6 +85,8 @@ export type CodexTaskMessage = {
 export class CodexNativeThreadController implements TaskSessionController {
   readonly messages = new Map<string, CodexTaskMessage>();
   readonly messagesByIdempotencyKey = new Map<string, CodexTaskMessage>();
+  private readonly knownNativeThreads = new Map<string, CodexNativeThread>();
+  private readonly lostNativeThreadIds = new Set<string>();
   private readonly clock: () => Date;
   private readonly bindingWriter?: CodexTaskSessionBindingWriter;
 
@@ -96,12 +100,41 @@ export class CodexNativeThreadController implements TaskSessionController {
 
   async listSessions(): Promise<CodexTaskSession[]> {
     const threads = await this.client.listThreads();
-    return threads.map((thread) => this.threadToSession(thread)).sort((left, right) => left.id.localeCompare(right.id));
+    const byId = new Map<string, CodexNativeThread>();
+    for (const thread of this.knownNativeThreads.values()) byId.set(thread.id, thread);
+    for (const thread of threads) byId.set(thread.id, thread);
+    return [...byId.values()].map((thread) => this.threadToSession(thread)).sort((left, right) => left.id.localeCompare(right.id));
   }
 
   async getSession(taskSessionId: string): Promise<CodexTaskSession | undefined> {
     const sessions = await this.listSessions();
-    return sessions.find((session) => session.id === taskSessionId);
+    const listed = sessions.find((session) => session.id === taskSessionId);
+    if (listed) return listed;
+
+    const nativeThreadId = nativeThreadIdFromTaskSessionId(taskSessionId);
+    if (!nativeThreadId) return undefined;
+
+    try {
+      const thread = await this.client.getThread(nativeThreadId);
+      if (thread) {
+        this.knownNativeThreads.set(nativeThreadId, thread);
+        return this.threadToSession(thread);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (isThreadNotFoundError(message, nativeThreadId)) {
+        this.lostNativeThreadIds.add(nativeThreadId);
+      }
+    }
+
+    const taskId = await this.resolveKnownTaskIdForNativeThread(nativeThreadId);
+    if (!taskId) return undefined;
+    this.lostNativeThreadIds.add(nativeThreadId);
+    return this.threadToSession({
+      id: nativeThreadId,
+      task_id: taskId,
+      status: "stopped",
+    });
   }
 
   async sendFollowupMessage(input: {
@@ -116,11 +149,34 @@ export class CodexNativeThreadController implements TaskSessionController {
     const now = this.clock().toISOString();
     const session = await this.getSession(input.task_session_id);
     if (!session) {
+      const nativeThreadId = nativeThreadIdFromTaskSessionId(input.task_session_id);
+      if (nativeThreadId) {
+        this.lostNativeThreadIds.add(nativeThreadId);
+        return this.recordMessage({
+          ...input,
+          now,
+          nativeThreadId,
+          status: "failed",
+          evidenceTitle: `Codex native thread lost: ${nativeThreadId}`,
+          error: `Codex native thread lost: ${nativeThreadId}`,
+        });
+      }
       return this.recordMessage({
         ...input,
         now,
         status: "blocked",
         evidenceTitle: "Codex native thread missing",
+        error: "Codex native thread missing",
+      });
+    }
+    if (session.status === "lost") {
+      return this.recordMessage({
+        ...input,
+        now,
+        nativeThreadId: session.native_thread_id,
+        status: "failed",
+        evidenceTitle: `Codex native thread lost: ${session.native_thread_id}`,
+        error: `Codex native thread lost: ${session.native_thread_id}`,
       });
     }
 
@@ -140,12 +196,17 @@ export class CodexNativeThreadController implements TaskSessionController {
         evidenceTitle: "Codex native thread turn started",
       });
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (isThreadNotFoundError(message, session.native_thread_id)) {
+        this.lostNativeThreadIds.add(session.native_thread_id);
+      }
       return this.recordMessage({
         ...input,
         now,
         nativeThreadId: session.native_thread_id,
         status: "failed",
-        evidenceTitle: `Codex native thread turn failed: ${error instanceof Error ? error.message : String(error)}`,
+        evidenceTitle: `Codex native thread turn failed: ${message}`,
+        error: message,
       });
     }
   }
@@ -178,9 +239,17 @@ export class CodexNativeThreadController implements TaskSessionController {
         cwd: input.cwd,
         model: input.model,
       });
+      await this.bindingWriter?.bindThreadToTask(thread.id, input.task_id);
+      this.knownNativeThreads.set(thread.id, {
+        ...thread,
+        task_id: input.task_id,
+        cwd: thread.cwd ?? input.cwd,
+        status: thread.status ?? "idle",
+      });
       const session = this.threadToSession({
         ...thread,
         task_id: input.task_id,
+        cwd: thread.cwd ?? input.cwd,
       });
       const now = this.clock().toISOString();
       const turn = await this.client.startTurn({
@@ -268,7 +337,7 @@ export class CodexNativeThreadController implements TaskSessionController {
       name: thread.name ?? undefined,
       preview: thread.preview,
       cwd: thread.cwd,
-      status: taskSessionStatusForCodexThread(thread.status),
+      status: this.lostNativeThreadIds.has(thread.id) ? "lost" : taskSessionStatusForCodexThread(thread.status),
       supports: {
         steer: true,
         followup: true,
@@ -282,6 +351,10 @@ export class CodexNativeThreadController implements TaskSessionController {
     };
   }
 
+  private async resolveKnownTaskIdForNativeThread(threadId: string): Promise<string | undefined> {
+    return this.knownNativeThreads.get(threadId)?.task_id ?? await this.client.taskIdForThreadId?.(threadId);
+  }
+
   private recordMessage(input: {
     task_session_id: string;
     text: string;
@@ -292,6 +365,7 @@ export class CodexNativeThreadController implements TaskSessionController {
     nativeTurnId?: string;
     status: CodexTaskMessage["status"];
     evidenceTitle: string;
+    error?: string;
   }): CodexTaskMessage {
     const message: CodexTaskMessage = {
       id: `codex_task_msg_${stableId(input.idempotency_key)}`,
@@ -305,6 +379,7 @@ export class CodexNativeThreadController implements TaskSessionController {
       idempotency_key: input.idempotency_key,
       sent_at: input.status === "sent" ? input.now : undefined,
       status: input.status,
+      error: input.error,
       evidence: [
         {
           id: `ev_codex_task_msg_${stableId(input.idempotency_key)}`,
@@ -323,6 +398,17 @@ export class CodexNativeThreadController implements TaskSessionController {
 
 export function taskSessionIdForNativeThread(threadId: string): string {
   return `codex_thread_${Buffer.from(threadId).toString("base64url")}`;
+}
+
+export function nativeThreadIdFromTaskSessionId(taskSessionId: string): string | undefined {
+  if (!taskSessionId.startsWith("codex_thread_")) return undefined;
+  const encoded = taskSessionId.slice("codex_thread_".length);
+  try {
+    const decoded = Buffer.from(encoded, "base64url").toString("utf8");
+    return decoded || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function taskSessionStatusForCodexThread(status: string | undefined): CodexTaskSession["status"] {
@@ -350,4 +436,9 @@ function timestampFromThread(iso: string | undefined, unixSeconds: number | unde
 
 function stableId(input: string): string {
   return input.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "unknown";
+}
+
+function isThreadNotFoundError(message: string, threadId: string): boolean {
+  const normalized = message.toLowerCase();
+  return normalized.includes("thread not found") && normalized.includes(threadId.toLowerCase());
 }

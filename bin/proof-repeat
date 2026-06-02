@@ -1,0 +1,482 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const parsed = parseArgs(process.argv.slice(2));
+
+if (parsed.selfTest) {
+  await runSelfTest();
+  console.log("proof-repeat self-test passed");
+  process.exit(0);
+}
+
+const runs = Number.parseInt(parsed.runs ?? process.env.PROOF_REPEAT_RUNS ?? "20", 10);
+const name = parsed.name ?? process.env.PROOF_REPEAT_NAME ?? slug(parsed.command.join(" "));
+const stopOnFail = parsed.stopOnFail || truthy(process.env.PROOF_REPEAT_STOP_ON_FAIL);
+const timeoutSeconds = optionalPositiveNumber(parsed.timeoutSeconds ?? process.env.PROOF_REPEAT_TIMEOUT_SECONDS);
+const runId = `${utcStamp()}-${slug(name)}-repeat`;
+const artifactDir = path.join(repoRoot, "artifacts", "proof-repeat", runId);
+const stepsDir = path.join(artifactDir, "runs");
+const manifestPath = path.join(artifactDir, "manifest.json");
+
+if (!Number.isInteger(runs) || runs < 1) {
+  console.error("--runs must be a positive integer");
+  process.exit(2);
+}
+
+if (timeoutSeconds !== undefined && (!Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0)) {
+  console.error("--timeout-seconds must be a positive number");
+  process.exit(2);
+}
+
+if (parsed.command.length === 0) {
+  console.error("usage: bin/proof-repeat [--runs N] [--name NAME] [--timeout-seconds N] -- command [args...]");
+  process.exit(2);
+}
+
+await mkdir(stepsDir, { recursive: true });
+
+const startedAt = new Date().toISOString();
+const results = [];
+for (let index = 1; index <= runs; index += 1) {
+  const result = await runOnce(index);
+  results.push(result);
+  await writeManifest(false);
+  const label = result.ok ? "pass" : "fail";
+  console.log(`proof repeat ${label}: ${index}/${runs} (${result.duration_ms}ms)`);
+  if (!result.ok && stopOnFail) {
+    console.log("proof repeat stopped early after first failure");
+    break;
+  }
+}
+
+await writeManifest(true);
+
+const passCount = results.filter((result) => result.ok).length;
+const failCount = results.length - passCount;
+const failureSignatures = buildFailureSignatures(results);
+console.log(`proof repeat manifest: ${manifestPath}`);
+console.log(JSON.stringify({
+  ok: failCount === 0,
+  name,
+  runs,
+  timeout_seconds: timeoutSeconds,
+  pass_count: passCount,
+  fail_count: failCount,
+  flake_rate: failCount / results.length,
+  failure_signatures: failureSignatures,
+  manifest: manifestPath,
+}, null, 2));
+
+if (failCount > 0) {
+  process.exit(1);
+}
+
+async function runOnce(index) {
+  const safe = `${String(index).padStart(3, "0")}-${slug(name)}`;
+  const stdoutPath = path.join(stepsDir, `${safe}.stdout.log`);
+  const stderrPath = path.join(stepsDir, `${safe}.stderr.log`);
+  return runCommandOnce({
+    index,
+    name,
+    command: parsed.command[0],
+    args: parsed.command.slice(1),
+    timeoutSeconds,
+    stdoutPath,
+    stderrPath,
+  });
+}
+
+async function runCommandOnce({ index, command, args, timeoutSeconds, stdoutPath, stderrPath }) {
+  const started_at = new Date().toISOString();
+  const result = await new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: repoRoot,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+    });
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+    const timeout = timeoutSeconds === undefined
+      ? undefined
+      : setTimeout(() => {
+          timedOut = true;
+          stderr += `\nproof-repeat timed out after ${timeoutSeconds}s\n`;
+          killChild(child);
+        }, Math.ceil(timeoutSeconds * 1000));
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      if (timeout) clearTimeout(timeout);
+      resolve({
+        code: 127,
+        signal: undefined,
+        stdout,
+        stderr: `${stderr}${error.message}`,
+        timed_out: timedOut,
+      });
+    });
+    child.on("exit", (code, signal) => {
+      if (timeout) clearTimeout(timeout);
+      resolve({
+        code: code ?? 1,
+        signal: signal ?? undefined,
+        stdout,
+        stderr,
+        timed_out: timedOut,
+      });
+    });
+  });
+  const finished_at = new Date().toISOString();
+  await writeFile(stdoutPath, result.stdout, "utf8");
+  await writeFile(stderrPath, result.stderr, "utf8");
+  const linkedArtifacts = extractArtifactLinks(`${result.stdout}\n${result.stderr}`);
+  return {
+    index,
+    ok: result.code === 0,
+    exit_code: result.code,
+    signal: result.signal,
+    timed_out: result.timed_out,
+    timeout_seconds: timeoutSeconds,
+    started_at,
+    finished_at,
+    duration_ms: Date.parse(finished_at) - Date.parse(started_at),
+    stdout_path: relative(stdoutPath),
+    stderr_path: relative(stderrPath),
+    linked_artifacts: linkedArtifacts,
+    linked_manifest_summaries: summarizeLinkedArtifacts(linkedArtifacts),
+  };
+}
+
+async function writeManifest(final) {
+  const finishedAt = final ? new Date().toISOString() : undefined;
+  const passCount = results.filter((result) => result.ok).length;
+  const failCount = results.length - passCount;
+  const manifest = {
+    schema_version: 1,
+    kind: "eventloopos.proof_repeat",
+    run_id: runId,
+    name,
+    command: parsed.command,
+    stop_on_fail: stopOnFail,
+    timeout_seconds: timeoutSeconds,
+    requested_runs: runs,
+    completed_runs: results.length,
+    stopped_early: stopOnFail && results.some((result) => !result.ok) && results.length < runs,
+    pass_count: passCount,
+    fail_count: failCount,
+    flake_rate: results.length === 0 ? undefined : failCount / results.length,
+    failure_signatures: buildFailureSignatures(results),
+    ok: final ? failCount === 0 && results.length === runs : false,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    duration_ms: finishedAt ? Date.parse(finishedAt) - Date.parse(startedAt) : undefined,
+    artifact_dir: relative(artifactDir),
+    runs: results,
+  };
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+function summarizeLinkedArtifacts(links) {
+  return links
+    .map((link) => manifestPathForArtifactLink(link))
+    .filter(Boolean)
+    .map((manifestLink) => summarizeManifest(manifestLink));
+}
+
+function manifestPathForArtifactLink(link) {
+  const normalized = String(link).replace(/[),.;:]+$/, "");
+  if (!normalized.startsWith("artifacts/")) return undefined;
+  if (normalized.endsWith("/manifest.json")) return normalized;
+  const manifestFile = path.join(repoRoot, normalized, "manifest.json");
+  return existsSync(manifestFile) ? path.join(normalized, "manifest.json") : undefined;
+}
+
+function summarizeManifest(manifestLink) {
+  const manifestFile = path.join(repoRoot, manifestLink);
+  try {
+    const manifest = JSON.parse(readFileSync(manifestFile, "utf8"));
+    const failedSteps = Array.isArray(manifest.failed_steps)
+      ? manifest.failed_steps.map((step) => step.name ?? step.requirement ?? "failed_step").slice(0, 8)
+      : Array.isArray(manifest.steps)
+        ? manifest.steps.filter((step) => step.status === "failed").map((step) => step.name ?? "failed_step").slice(0, 8)
+        : [];
+    const blockers = Array.isArray(manifest.blockers)
+      ? manifest.blockers.map((blocker) => `${blocker.requirement ?? "blocker"}: ${stringSnippet(blocker.evidence ?? blocker.fix ?? "")}`).slice(0, 8)
+      : [];
+    const releaseReadyReasons = Array.isArray(manifest.release_ready_reasons)
+      ? manifest.release_ready_reasons.map((reason) => `${reason.requirement ?? "release_ready"}: ${stringSnippet(reason.evidence ?? "")}`).slice(0, 8)
+      : [];
+    const failures = Array.isArray(manifest.failures)
+      ? manifest.failures.map((failure) => failure.reason ?? failure.requirement ?? failure.scenario ?? failure.manifest ?? "failure").slice(0, 8)
+      : [];
+    const requirementGaps = Array.isArray(manifest.requirement_coverage_gaps)
+      ? manifest.requirement_coverage_gaps.map((gap) => `${gap.id ?? gap.requirement ?? "gap"}:${gap.status ?? "unknown"}`).slice(0, 8)
+      : [];
+    return {
+      manifest: manifestLink,
+      kind: manifest.kind,
+      scenario: manifest.scenario,
+      mode: manifest.mode,
+      profile: manifest.profile,
+      ok: manifest.ok,
+      passed: manifest.passed,
+      release_ready: manifest.release_ready,
+      failed_steps: failedSteps,
+      blockers,
+      release_ready_reasons: releaseReadyReasons,
+      failures,
+      requirement_gaps: requirementGaps,
+      signature: manifestFailureSignature({
+        manifest,
+        failedSteps,
+        blockers,
+        releaseReadyReasons,
+        failures,
+        requirementGaps,
+      }),
+    };
+  } catch (error) {
+    return {
+      manifest: manifestLink,
+      ok: false,
+      signature: `manifest_read_failed:${String(error?.message ?? error)}`,
+    };
+  }
+}
+
+function manifestFailureSignature({ manifest, failedSteps, blockers, releaseReadyReasons, failures, requirementGaps }) {
+  if (manifest.ok === true && (manifest.passed === undefined || manifest.passed === true) && manifest.release_ready !== false) {
+    return "linked_manifest_green";
+  }
+  const source = failedSteps[0]
+    ?? blockers[0]
+    ?? failures[0]
+    ?? releaseReadyReasons[0]
+    ?? requirementGaps[0]
+    ?? manifest.scenario
+    ?? manifest.kind
+    ?? "linked_manifest_not_green";
+  return slug(`${manifest.kind ?? "manifest"}:${source}`);
+}
+
+function buildFailureSignatures(runResults) {
+  const counts = new Map();
+  for (const result of runResults) {
+    if (result.ok) continue;
+    const signatures = result.linked_manifest_summaries
+      .map((summary) => summary.signature)
+      .filter((signature) => signature && signature !== "linked_manifest_green");
+    if (signatures.length === 0) {
+      signatures.push(result.timed_out ? `timeout_${result.timeout_seconds}s` : `exit_${result.exit_code}`);
+    }
+    for (const signature of new Set(signatures)) {
+      const entry = counts.get(signature) ?? { signature, count: 0, runs: [] };
+      entry.count += 1;
+      entry.runs.push(result.index);
+      counts.set(signature, entry);
+    }
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count || String(a.signature).localeCompare(String(b.signature)));
+}
+
+function stringSnippet(value) {
+  return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 180);
+}
+
+function parseArgs(args) {
+  const parsed = {
+    runs: undefined,
+    name: undefined,
+    timeoutSeconds: undefined,
+    command: [],
+  };
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--") {
+      parsed.command = args.slice(index + 1);
+      break;
+    }
+    if (arg === "--runs") {
+      parsed.runs = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--name") {
+      parsed.name = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--timeout-seconds") {
+      parsed.timeoutSeconds = args[index + 1];
+      index += 1;
+      continue;
+    }
+    if (arg === "--stop-on-fail") {
+      parsed.stopOnFail = true;
+      continue;
+    }
+    if (arg === "--self-test") {
+      parsed.selfTest = true;
+      continue;
+    }
+    parsed.command = args.slice(index);
+    break;
+  }
+  return parsed;
+}
+
+async function runSelfTest() {
+  const fixtureRoot = path.join(repoRoot, "artifacts", "proof-repeat-self-test", `${utcStamp()}-${process.pid}`);
+  try {
+    const failedDir = path.join(fixtureRoot, "failed-product");
+    const greenDir = path.join(fixtureRoot, "green-artifact");
+    const runsDir = path.join(fixtureRoot, "runs");
+    mkdirSync(failedDir, { recursive: true });
+    mkdirSync(greenDir, { recursive: true });
+    mkdirSync(runsDir, { recursive: true });
+    writeFileSync(path.join(failedDir, "manifest.json"), `${JSON.stringify({
+      kind: "eventloopos.product_readiness_proof",
+      mode: "local",
+      profile: "quick",
+      ok: false,
+      passed: false,
+      release_ready: false,
+      failed_steps: [{ name: "local macos permission status" }],
+      blockers: [{ requirement: "Step failed: local macos permission status", evidence: "artifacts/macos-permissions/example/manifest.json" }],
+      release_ready_reasons: [{ requirement: "all readiness proof steps must pass", evidence: "1 failed steps" }],
+      requirement_coverage_gaps: [{ id: "first_run_permission_flow", status: "blocked" }],
+    }, null, 2)}\n`);
+    writeFileSync(path.join(greenDir, "manifest.json"), `${JSON.stringify({
+      kind: "eventloopos.product_readiness_artifact_audit",
+      ok: true,
+      passed: true,
+    }, null, 2)}\n`);
+
+    const failedLink = path.relative(repoRoot, failedDir);
+    const greenLink = path.relative(repoRoot, path.join(greenDir, "manifest.json"));
+    const summaries = summarizeLinkedArtifacts([failedLink, greenLink]);
+    assert.equal(summaries.length, 2);
+    assert.equal(summaries[0].signature, "eventloopos.product_readiness_proof-local-macos-permission-status");
+    assert.equal(summaries[1].signature, "linked_manifest_green");
+
+    const signatures = buildFailureSignatures([
+      { index: 1, ok: false, exit_code: 1, linked_manifest_summaries: [summaries[0]] },
+      { index: 2, ok: false, exit_code: 1, linked_manifest_summaries: [summaries[0]] },
+      { index: 3, ok: false, exit_code: 9, linked_manifest_summaries: [] },
+      { index: 4, ok: true, exit_code: 0, linked_manifest_summaries: [summaries[1]] },
+    ]);
+    assert.deepEqual(signatures, [
+      {
+        signature: "eventloopos.product_readiness_proof-local-macos-permission-status",
+        count: 2,
+        runs: [1, 2],
+      },
+      {
+        signature: "exit_9",
+        count: 1,
+        runs: [3],
+      },
+    ]);
+
+    const timeoutResult = await runCommandOnce({
+      index: 5,
+      command: process.execPath,
+      args: ["-e", "setTimeout(() => {}, 5000)"],
+      timeoutSeconds: 0.05,
+      stdoutPath: path.join(runsDir, "timeout.stdout.log"),
+      stderrPath: path.join(runsDir, "timeout.stderr.log"),
+    });
+    assert.equal(timeoutResult.ok, false);
+    assert.equal(timeoutResult.timed_out, true);
+    assert.equal(timeoutResult.timeout_seconds, 0.05);
+    assert.match(readFileSync(path.join(runsDir, "timeout.stderr.log"), "utf8"), /timed out after 0.05s/);
+    assert.deepEqual(buildFailureSignatures([timeoutResult]), [
+      {
+        signature: "timeout_0.05s",
+        count: 1,
+        runs: [5],
+      },
+    ]);
+
+    assert.equal(optionalPositiveNumber("2.5"), 2.5);
+    assert.equal(optionalPositiveNumber(undefined), undefined);
+    assert.equal(Number.isNaN(optionalPositiveNumber("nope")), true);
+  } finally {
+    rmSync(fixtureRoot, { recursive: true, force: true });
+  }
+}
+
+function optionalPositiveNumber(value) {
+  if (value === undefined || value === null || value === "") return undefined;
+  return Number(value);
+}
+
+function killChild(child) {
+  if (!child.pid) return;
+  try {
+    if (process.platform !== "win32") {
+      process.kill(-child.pid, "SIGTERM");
+    } else {
+      child.kill("SIGTERM");
+    }
+  } catch {
+    child.kill("SIGTERM");
+  }
+  setTimeout(() => {
+    try {
+      if (process.platform !== "win32") {
+        process.kill(-child.pid, "SIGKILL");
+      } else {
+        child.kill("SIGKILL");
+      }
+    } catch {
+      // Process already exited.
+    }
+  }, 1000).unref();
+}
+
+function truthy(value) {
+  return /^(1|true|yes|on)$/i.test(String(value ?? ""));
+}
+
+function extractArtifactLinks(output) {
+  const links = new Set();
+  const patterns = [
+    /artifacts\/[^\s"'<>]+\/manifest\.json/g,
+    /artifacts\/[^\s"'<>]+/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of output.matchAll(pattern)) {
+      links.add(match[0].replace(/[),.;:]+$/, ""));
+    }
+  }
+  return [...links];
+}
+
+function relative(filePath) {
+  return path.relative(repoRoot, filePath);
+}
+
+function slug(value) {
+  return String(value || "proof")
+    .trim()
+    .replace(/[^A-Za-z0-9._-]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80) || "proof";
+}
+
+function utcStamp() {
+  return new Date().toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+}

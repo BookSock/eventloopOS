@@ -1,0 +1,254 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import {
+  buildPackagedQueueAppBundle,
+  openQueueApp,
+  terminateProcessByExecutablePath,
+  waitForExit,
+} from "../app/macos/bin/smoke-app-bundle.mjs";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const runId = `${utcStamp()}-macos-install-proof`;
+const artifactDir = path.join(repoRoot, "artifacts", "install", runId);
+const logsDir = path.join(artifactDir, "logs");
+const manifestPath = path.join(artifactDir, "manifest.json");
+const appName = "eventloopOS Queue Install Proof.app";
+const installedAppBundle = path.join(artifactDir, appName);
+const executableName = "EventLoopQueueApp";
+const installedExecutablePath = path.join(installedAppBundle, "Contents", "MacOS", executableName);
+const allowNonDarwin = process.env.EVENTLOOPOS_INSTALL_PROOF_ALLOW_NON_DARWIN === "1";
+const launchSmokeMs = Number.parseInt(process.env.EVENTLOOPOS_INSTALL_PROOF_LAUNCH_MS ?? "1500", 10);
+
+await mkdir(logsDir, { recursive: true });
+
+if (process.platform !== "darwin" && !allowNonDarwin) {
+  await writeManifest({
+    ok: false,
+    mode: "unsupported",
+    checks: {
+      darwin_host: false,
+    },
+    blockers: [
+      {
+        requirement: "macOS install proof must run on macOS",
+        evidence: `process.platform=${process.platform}`,
+      },
+    ],
+  });
+  console.log(`macOS install proof manifest: ${manifestPath}`);
+  process.exit(1);
+}
+
+let tempBundle;
+let launchResult = {
+  ok: false,
+  output: "",
+  error: undefined,
+};
+const commands = {};
+const blockers = [];
+
+try {
+  process.chdir(path.join(repoRoot, "app", "macos"));
+  tempBundle = await buildPackagedQueueAppBundle({
+    bundleIdentifier: "dev.eventloopos.queue.installproof",
+    bundleName: "eventloopOS Queue Install Proof",
+  });
+  process.chdir(repoRoot);
+
+  await rm(installedAppBundle, { recursive: true, force: true });
+  await cp(tempBundle.appBundle, installedAppBundle, { recursive: true });
+
+  commands.plutil = await runCommand("plutil", ["-lint", path.join(installedAppBundle, "Contents", "Info.plist")]);
+  commands.codesignVerify = await runCommand("codesign", [
+    "--verify",
+    "--deep",
+    "--strict",
+    "--verbose=2",
+    installedAppBundle,
+  ]);
+  commands.codesignDisplay = await runCommand("codesign", ["-dv", "--verbose=4", installedAppBundle]);
+  commands.spctlAssess = await runCommand("spctl", ["--assess", "--type", "execute", "--verbose=4", installedAppBundle]);
+  launchResult = await assertAppBundleLaunches(installedAppBundle, installedExecutablePath);
+} catch (error) {
+  blockers.push({
+    requirement: "unsigned-dev macOS install flow must build, copy, and launch the Queue app",
+    evidence: error instanceof Error ? error.message : String(error),
+  });
+} finally {
+  if (tempBundle) {
+    await tempBundle.cleanup();
+  }
+}
+
+const appBundleCreated = existsSync(installedAppBundle);
+const executablePresent = existsSync(installedExecutablePath);
+const infoPlistValid = commands.plutil?.code === 0;
+const codesignVerifyOk = commands.codesignVerify?.code === 0;
+const gatekeeperAssessOk = commands.spctlAssess?.code === 0;
+const signingDetails = `${commands.codesignDisplay?.stdout ?? ""}\n${commands.codesignDisplay?.stderr ?? ""}`;
+const signed = codesignVerifyOk && /Authority=|Signature=|TeamIdentifier=/.test(signingDetails);
+const notarized = gatekeeperAssessOk && /accepted/i.test(`${commands.spctlAssess?.stdout ?? ""}\n${commands.spctlAssess?.stderr ?? ""}`);
+const unsignedDevOk = appBundleCreated && executablePresent && infoPlistValid && launchResult.ok;
+
+if (!unsignedDevOk && blockers.length === 0) {
+  blockers.push({
+    requirement: "unsigned-dev app bundle must be installable and launchable",
+    evidence: `appBundleCreated=${appBundleCreated}; executablePresent=${executablePresent}; infoPlistValid=${infoPlistValid}; launchSmokeOk=${launchResult.ok}`,
+  });
+}
+
+const manifest = {
+  ok: unsignedDevOk || (signed && notarized),
+  mode: signed && notarized ? "signed_notarized" : "unsigned_dev",
+  unsigned_dev_ok: unsignedDevOk,
+  signed,
+  notarized,
+  app_bundle: installedAppBundle,
+  executable_path: installedExecutablePath,
+  checks: {
+    darwin_host: process.platform === "darwin",
+    app_bundle_created: appBundleCreated,
+    executable_present: executablePresent,
+    info_plist_valid: infoPlistValid,
+    launch_smoke_ok: launchResult.ok,
+    codesign_verify_ok: codesignVerifyOk,
+    gatekeeper_assess_ok: gatekeeperAssessOk,
+  },
+  commands,
+  launch: launchResult,
+  blockers,
+};
+
+await writeManifest(manifest);
+console.log(`macOS install proof manifest: ${manifestPath}`);
+console.log(JSON.stringify({
+  ok: manifest.ok,
+  mode: manifest.mode,
+  unsigned_dev_ok: manifest.unsigned_dev_ok,
+  signed: manifest.signed,
+  notarized: manifest.notarized,
+  app_bundle: manifest.app_bundle,
+  blockers: manifest.blockers,
+}, null, 2));
+
+if (!manifest.ok) {
+  process.exit(1);
+}
+
+async function assertAppBundleLaunches(appBundle, executablePath) {
+  const child = openQueueApp(appBundle, {
+    appArgs: ["--test-mode"],
+    env: {
+      EVENTLOOP_QUEUE_TEST_MODE: "1",
+    },
+  });
+  let output = "";
+  child.stdout.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+  child.stderr.on("data", (chunk) => {
+    output += chunk.toString();
+  });
+
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(resolve, launchSmokeMs);
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+      child.on("exit", (code, signal) => {
+        clearTimeout(timer);
+        reject(new Error(`EventLoopQueueApp exited before smoke window: ${signal ?? code}\n${output}`));
+      });
+    });
+    await terminateProcessByExecutablePath(executablePath);
+    await waitForExit(child, 3_000);
+    return {
+      ok: true,
+      output,
+    };
+  } catch (error) {
+    if (child.exitCode === null) {
+      child.kill("SIGKILL");
+    }
+    return {
+      ok: false,
+      output,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function runCommand(file, args) {
+  const safe = [file, ...args].join(" ").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-|-$/g, "").slice(0, 96);
+  const stdoutPath = path.join(logsDir, `${safe}.stdout.log`);
+  const stderrPath = path.join(logsDir, `${safe}.stderr.log`);
+  const startedAt = new Date().toISOString();
+  const result = await new Promise((resolve) => {
+    const child = spawn(file, args, {
+      cwd: repoRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      resolve({
+        code: 127,
+        signal: undefined,
+        stdout,
+        stderr: `${stderr}${error.message}`,
+      });
+    });
+    child.on("exit", (code, signal) => {
+      resolve({
+        code: code ?? 1,
+        signal: signal ?? undefined,
+        stdout,
+        stderr,
+      });
+    });
+  });
+  const finishedAt = new Date().toISOString();
+  await writeFile(stdoutPath, result.stdout, "utf8");
+  await writeFile(stderrPath, result.stderr, "utf8");
+  return {
+    command: [file, ...args],
+    code: result.code,
+    signal: result.signal,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
+    stdout_path: stdoutPath,
+    stderr_path: stderrPath,
+    stdout: result.stdout.slice(0, 2000),
+    stderr: result.stderr.slice(0, 2000),
+  };
+}
+
+async function writeManifest(fields) {
+  const manifest = {
+    schema_version: 1,
+    kind: "eventloopos.macos_install_proof",
+    run_id: runId,
+    generated_at: new Date().toISOString(),
+    artifact_dir: artifactDir,
+    ...fields,
+  };
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+function utcStamp() {
+  return new Date().toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+}

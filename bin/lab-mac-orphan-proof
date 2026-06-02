@@ -1,0 +1,188 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-orphan-proof
+
+Verify the remote Mac lab has no eventloopOS dogfood orphan processes, windows,
+or listeners after a product proof cleanup.
+
+Environment:
+  LAB_MAC_HOST           default: 100.71.111.25
+  LAB_MAC_USER           default: claw
+  LAB_MAC_KEY            default: ~/.ssh/eventloop_lab_mac
+  LAB_MAC_EVENTLOOP_PATH default: ~/dev/2026/eventloopOS
+  LAB_DOGFOOD_PORT       default: 4480
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    echo "unknown argument: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+eventloop_path="${LAB_MAC_EVENTLOOP_PATH:-~/dev/2026/eventloopOS}"
+port="${LAB_DOGFOOD_PORT:-4480}"
+remote="${lab_user}@${lab_host}"
+
+ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 "$remote" \
+  "bash -s -- '$eventloop_path' '$port'" <<'REMOTE'
+set -euo pipefail
+
+eventloop_path="$1"
+port="$2"
+if [[ -x /opt/homebrew/bin/brew ]]; then
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+fi
+
+case "$eventloop_path" in
+  "~"/*) repo="$HOME/${eventloop_path#"~/"}" ;;
+  "~") repo="$HOME" ;;
+  *) repo="$eventloop_path" ;;
+esac
+run="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-lab-orphan-proof"
+mkdir -p "$repo/$run"
+cd "$repo"
+
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/generated-at.txt"
+printf "%s\n" "$port" >"$run/port.txt"
+ps -axo pid,ppid,comm,args >"$run/ps.txt" 2>"$run/ps.err" || true
+pgrep -fl "bin/dev-dogfood|pnpm run dev:dogfood|EventLoopQueueApp|node dist/src/index.js|codex app-server|ghostty-codex-remote|run-dogfood.command|run-dogfood-snapshot.command" \
+  >"$run/processes-interesting.txt" 2>"$run/processes-interesting.err" || true
+lsof -nP -iTCP:"$port" -sTCP:LISTEN >"$run/listeners.txt" 2>"$run/listeners.err" || true
+aerospace list-windows --all --json --format "%{window-id}%{app-name}%{window-title}%{workspace}" >"$run/windows.json" 2>"$run/windows.err" || true
+osascript >"$run/terminal-windows.txt" 2>"$run/terminal-windows.err" <<'APPLESCRIPT' || true
+tell application "Terminal"
+  set outputLines to {}
+  repeat with candidateWindow in windows
+    set windowName to ""
+    set windowBusy to false
+    try
+      set windowName to name of candidateWindow as string
+    end try
+    try
+      set windowBusy to busy of selected tab of candidateWindow
+    end try
+    set end of outputLines to windowName & "|busy=" & (windowBusy as string)
+  end repeat
+end tell
+set AppleScript's text item delimiters to linefeed
+return outputLines as string
+APPLESCRIPT
+
+RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const read = (name) => {
+  try {
+    return fs.readFileSync(path.join(run, name), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const parseJson = (name, fallback) => {
+  try {
+    return JSON.parse(read(name));
+  } catch {
+    return fallback;
+  }
+};
+const processesText = read("processes-interesting.txt");
+const listenersText = read("listeners.txt");
+const windows = parseJson("windows.json", []);
+const terminalWindows = read("terminal-windows.txt").split(/\r?\n/).filter(Boolean);
+const eventloopWindowMatches = Array.isArray(windows)
+  ? windows.filter((window) => {
+      const app = String(window["app-name"] ?? "");
+      const title = String(window["window-title"] ?? "");
+      return /eventloop|EventLoopQueueApp|eventloopOS Queue/i.test(`${app} ${title}`)
+        || /gui-screencapture\.command|run-dogfood-snapshot\.command|run-dogfood\.command/i.test(title);
+    })
+  : [];
+const terminalCaptureWindows = terminalWindows.filter((line) => /gui-screencapture\.command|run-dogfood-snapshot\.command|run-dogfood\.command/i.test(line));
+const ghosttyEventloopWindows = Array.isArray(windows)
+  ? windows.filter((window) => {
+      const app = String(window["app-name"] ?? "");
+      const title = String(window["window-title"] ?? "");
+      return /Ghostty/i.test(app) && /eventloopOS|codex|dogfood|completion-workspace/i.test(title);
+    })
+  : [];
+const processMatches = processesText.split(/\r?\n/).filter(Boolean);
+const listenerMatches = listenersText.split(/\r?\n/).filter(Boolean);
+const assertions = [
+  {
+    name: "no_dogfood_processes_left",
+    ok: processMatches.length === 0,
+    details: { processes: processMatches },
+    fix: "Run `bin/lab-mac-dogfood stop`, then `bin/lab-mac-dogfood cleanup`, and inspect ps.txt for stubborn dogfood/Codex/Queue processes.",
+  },
+  {
+    name: "no_dogfood_port_listener_left",
+    ok: listenerMatches.length === 0,
+    details: { listeners: listenerMatches },
+    fix: "Kill the process listening on the dogfood port or run `bin/lab-mac-dogfood stop`.",
+  },
+  {
+    name: "no_eventloop_windows_left",
+    ok: eventloopWindowMatches.length === 0,
+    details: { windows: eventloopWindowMatches },
+    fix: "Run `bin/lab-mac-dogfood cleanup`; if windows remain, grant Accessibility to Terminal/AeroSpace so cleanup can close Queue and capture windows.",
+  },
+  {
+    name: "no_capture_terminal_windows_left",
+    ok: terminalCaptureWindows.length === 0,
+    details: { terminal_windows: terminalCaptureWindows },
+    fix: "Close stale Terminal capture runners or grant Terminal automation permissions so cleanup can close non-busy capture windows.",
+  },
+  {
+    name: "no_eventloop_ghostty_windows_left",
+    ok: ghosttyEventloopWindows.length === 0,
+    details: { windows: ghosttyEventloopWindows },
+    fix: "Close stale Ghostty/Codex dogfood windows; rerun the Ghostty cleanup fault proof if this recurs.",
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.lab_orphan_proof",
+  run,
+  generated_at: read("generated-at.txt"),
+  ok,
+  assertions,
+  artifacts: {
+    processes: "processes-interesting.txt",
+    ps: "ps.txt",
+    listeners: "listeners.txt",
+    windows: "windows.json",
+    terminal_windows: "terminal-windows.txt",
+  },
+};
+fs.writeFileSync(path.join(run, "summary.json"), JSON.stringify({
+  ok,
+  failures: assertions.filter((assertion) => !assertion.ok).map((assertion) => ({
+    requirement: assertion.name,
+    fix: assertion.fix,
+    details: assertion.details,
+  })),
+}, null, 2) + "\n");
+console.log(JSON.stringify(manifest, null, 2));
+NODE
+
+echo "$run"
+jq '{ok, assertions: [.assertions[] | {name, ok}]}' "$run/manifest.json"
+jq -e '.ok == true' "$run/manifest.json" >/dev/null
+REMOTE

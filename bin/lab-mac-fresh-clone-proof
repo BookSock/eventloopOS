@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-fresh-clone-proof
+
+Run the fresh-clone setup proof on the remote Mac lab and sync artifacts back.
+
+Environment:
+  LAB_MAC_HOST           default: 100.71.111.25
+  LAB_MAC_USER           default: claw
+  LAB_MAC_KEY            default: ~/.ssh/eventloop_lab_mac
+  LAB_MAC_EVENTLOOP_PATH default: /Users/<LAB_MAC_USER>/dev/2026/eventloopOS
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    echo "unknown argument: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+eventloop_path="${LAB_MAC_EVENTLOOP_PATH:-/Users/$lab_user/dev/2026/eventloopOS}"
+remote="${lab_user}@${lab_host}"
+run_id="$(date +%Y%m%d-%H%M%S)-fresh-clone-proof"
+run_dir="artifacts/lab-runs/$run_id"
+ssh_opts=(-i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8)
+
+case "$eventloop_path" in
+  "~"/*) remote_repo="/Users/$lab_user/${eventloop_path#"~/"}" ;;
+  "~") remote_repo="/Users/$lab_user" ;;
+  *) remote_repo="$eventloop_path" ;;
+esac
+
+set +e
+ssh "${ssh_opts[@]}" "$remote" "bash -s -- '$remote_repo' '$run_dir'" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+run="$2"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+EVENTLOOPOS_FRESH_CLONE_ARTIFACT_DIR="$run" node bin/fresh-clone-proof-smoke
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+REMOTE
+code=$?
+set -e
+
+mkdir -p "$run_dir"
+rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" \
+  "$remote:$remote_repo/$run_dir/" "$run_dir/" >/dev/null 2>&1 || true
+
+echo "$run_dir"
+exit "$code"

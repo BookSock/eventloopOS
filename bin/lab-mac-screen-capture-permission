@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-screen-capture-permission [status|prompt]
+
+Inspect or trigger the remote Mac lab Screen Recording permission needed for
+SSH/Terminal screenshot artifacts.
+
+Environment:
+  LAB_MAC_HOST  default: 100.71.111.25
+  LAB_MAC_USER  default: claw
+  LAB_MAC_KEY   default: ~/.ssh/eventloop_lab_mac
+EOF
+}
+
+action="${1:-status}"
+case "$action" in
+  status|prompt) ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown action: $action" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+remote="${lab_user}@${lab_host}"
+
+ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 "$remote" "bash -s -- '$action'" <<'REMOTE'
+set -euo pipefail
+
+action="$1"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+print_status() {
+  echo "== display =="
+  system_profiler SPDisplaysDataType 2>/dev/null | sed -n '/Displays:/,/Metal Support/p' | sed -n '1,80p' || true
+  echo
+  echo "== tcc screen capture rows =="
+  sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \
+    'select service,client,client_type,auth_value,auth_reason,indirect_object_identifier from access where service="kTCCServiceScreenCapture" order by client;' \
+    2>&1 || true
+  echo
+  echo "auth_value: 2=allowed, 0=denied"
+}
+
+print_status
+
+if [[ "$action" == "prompt" ]]; then
+  echo
+  echo "Opening Screen Recording settings and triggering a Terminal screencapture permission check..."
+  echo "Resetting Terminal's existing ScreenCapture decision first, so macOS can show the approval prompt again."
+  tccutil reset ScreenCapture com.apple.Terminal >/tmp/eventloopos-screen-permission-reset.out 2>/tmp/eventloopos-screen-permission-reset.err || true
+  open "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture" 2>/dev/null || true
+  tmp="${TMPDIR:-/tmp}/eventloopos-screen-permission-check.png"
+  runner="${TMPDIR:-/tmp}/eventloopos-screen-permission-check.command"
+  rm -f "$tmp"
+  cat >"$runner" <<EOF
+#!/bin/bash
+set -euo pipefail
+rm -f "$tmp"
+screencapture -x "$tmp" >/tmp/eventloopos-screen-permission-check.out 2>/tmp/eventloopos-screen-permission-check.err || true
+date -u +%Y-%m-%dT%H:%M:%SZ >/tmp/eventloopos-screen-permission-check.done
+EOF
+  chmod +x "$runner"
+  rm -f /tmp/eventloopos-screen-permission-check.done
+  open -a Terminal "$runner" >/tmp/eventloopos-screen-permission-open.out 2>/tmp/eventloopos-screen-permission-open.err || true
+  for _ in {1..45}; do
+    [[ -f /tmp/eventloopos-screen-permission-check.done ]] && break
+    sleep 1
+  done
+  echo
+  echo "== screencapture result =="
+  if [[ -s "$tmp" ]]; then
+    wc -c "$tmp"
+  else
+    cat /tmp/eventloopos-screen-permission-check.err 2>/dev/null || true
+  fi
+  echo
+  print_status
+  echo
+  echo "Approve Terminal in System Settings > Privacy & Security > Screen & System Audio Recording, then rerun:"
+  echo "  bin/lab-mac-screen-capture-permission status"
+fi
+REMOTE

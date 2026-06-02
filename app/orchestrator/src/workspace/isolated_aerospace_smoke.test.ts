@@ -226,6 +226,39 @@ describe("isolated AeroSpace smoke", () => {
     }
   });
 
+  it("reports restore execution failure and cleans up smoke window", async () => {
+    const controller = new FakeWorkspaceController([{ id: 11, app: "Ghostty", title: "codex", workspace: "dev" }]);
+    controller.failOnMoveCount = 2;
+    const cleanupCalls: string[] = [];
+
+    const result = await runIsolatedAerospaceSmoke({
+      enabled: true,
+      runId: "test",
+      controller,
+      launchWindow: fakeLauncher(controller, {
+        id: 12,
+        title: "eventloopOS-isolated-smoke-test.txt",
+        workspace: "main",
+        cleanupCalls,
+      }),
+      scratchWorkspace: "eventloop-smoke",
+      waitTimeoutMs: 20,
+      pollIntervalMs: 1,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.skipped, false);
+    if (!result.ok) {
+      assert.equal(result.reason, "isolated_smoke_failed");
+      assert.match(result.detail ?? "", /AeroSpace server unavailable during restore/);
+      assert.deepEqual(result.cleanup, { attempted: true, ok: true });
+      assert.equal(result.cleanup_verified, true);
+    }
+    assert.deepEqual(cleanupCalls, ["cleanup"]);
+    assert.equal(controller.window(12), undefined);
+    assert.equal(controller.window(11)?.workspace, "dev");
+  });
+
   it("cleans up if smoke window never appears", async () => {
     const cleanupCalls: string[] = [];
     const result = await runIsolatedAerospaceSmoke({
@@ -306,6 +339,7 @@ function fakeLauncher(
 
 class FakeWorkspaceController implements WorkspaceController {
   afterFirstMove?: () => void;
+  failOnMoveCount?: number;
   private moveCount = 0;
 
   constructor(private readonly windows: AerospaceWindow[]) {}
@@ -338,8 +372,11 @@ class FakeWorkspaceController implements WorkspaceController {
     for (const command of plan.commands) {
       const windowId = Number(command.args[2]);
       const workspace = command.args[3] ?? "";
-      this.moveWindow(windowId, workspace);
       this.moveCount += 1;
+      if (this.failOnMoveCount === this.moveCount) {
+        throw new Error("AeroSpace server unavailable during restore");
+      }
+      this.moveWindow(windowId, workspace);
       if (this.moveCount === 1) {
         this.afterFirstMove?.();
       }

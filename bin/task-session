@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+if [[ "${EVENTLOOPOS_TASK_SESSION_SKIP_BUILD:-0}" != "1" ]]; then
+  pnpm --filter @eventloopos/orchestrator run -s build >/dev/null
+fi
+
+exec node app/orchestrator/dist/src/task_sessions/task_session_cli.js "$@"

@@ -1,0 +1,362 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
+import assert from "node:assert/strict";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const action = process.argv[2] ?? "status";
+const stabilitySeconds = Number(process.env.MACOS_AEROSPACE_REPAIR_STABILITY_SECONDS ?? "20");
+const allowDirectLaunchFallback = process.env.MACOS_AEROSPACE_REPAIR_ALLOW_DIRECT_LAUNCH === "1";
+const runId = `${utcStamp()}-macos-aerospace-repair-${action}`;
+const artifactDir = path.join(repoRoot, "artifacts", "macos-aerospace-repair", runId);
+const logsDir = path.join(artifactDir, "logs");
+const manifestPath = path.join(artifactDir, "manifest.json");
+
+if (action === "--self-test") {
+  runSelfTest();
+  console.log("macos-aerospace-repair self-test passed");
+  process.exit(0);
+}
+
+if (action === "-h" || action === "--help") {
+  console.log(`Usage: bin/macos-aerospace-repair [status|restart|reinstall]
+
+Modes:
+  status     Inspect AeroSpace CLI/app/server version and mutation readiness.
+  restart    Quit/reopen AeroSpace.app, then inspect readiness.
+  reinstall  Reinstall aerospace-dev cask, reopen AeroSpace.app, then inspect readiness.
+
+Each mode writes artifacts/macos-aerospace-repair/<run-id>/manifest.json.
+`);
+  process.exit(0);
+}
+
+if (!["status", "restart", "reinstall"].includes(action)) {
+  console.error(`unknown action: ${action}`);
+  process.exit(2);
+}
+
+await mkdir(logsDir, { recursive: true });
+const startedAt = new Date().toISOString();
+const commands = {};
+
+if (action === "restart") {
+  commands.quitAerospace = await runCommand("osascript", ["-e", 'tell application "AeroSpace" to quit']);
+  await sleep(1000);
+  commands.openAerospace = await runCommand("open", ["-a", "AeroSpace"]);
+  await sleep(2000);
+  commands.launchFallback = await launchFallbackIfNeeded();
+}
+
+if (action === "reinstall") {
+  commands.quitAerospace = await runCommand("osascript", ["-e", 'tell application "AeroSpace" to quit']);
+  commands.reinstallAerospace = await runCommand("brew", ["reinstall", "--cask", "aerospace-dev"]);
+  commands.openAerospace = await runCommand("open", ["-a", "AeroSpace"]);
+  await sleep(2000);
+  commands.launchFallback = await launchFallbackIfNeeded();
+}
+
+commands.aerospacePath = await runShell("aerospace-path", "command -v aerospace");
+commands.aerospaceVersion = await runShell("aerospace-version", "command -v aerospace >/dev/null 2>&1 && aerospace --version");
+commands.aerospaceAppVersion = await runShell("aerospace-app-version", 'if [[ -x /Applications/AeroSpace.app/Contents/MacOS/AeroSpace ]]; then /Applications/AeroSpace.app/Contents/MacOS/AeroSpace --version; else echo "AeroSpace.app binary missing"; exit 1; fi');
+commands.aerospaceCliShasum = await runShell("aerospace-cli-shasum", 'if command -v aerospace >/dev/null 2>&1; then shasum "$(command -v aerospace)"; else echo "aerospace CLI missing"; exit 1; fi');
+commands.aerospaceAppShasum = await runShell("aerospace-app-shasum", 'if [[ -x /Applications/AeroSpace.app/Contents/MacOS/AeroSpace ]]; then shasum /Applications/AeroSpace.app/Contents/MacOS/AeroSpace; else echo "AeroSpace.app binary missing"; exit 1; fi');
+commands.gatekeeperAssessment = await runShell("aerospace-gatekeeper-assessment", "spctl -a -vv /Applications/AeroSpace.app");
+commands.appCandidates = await runShell("aerospace-app-candidates", 'find /Applications "$HOME/Applications" "$HOME/dev/2026" -maxdepth 6 -name "AeroSpace*.app" 2>/dev/null | sort');
+commands.launchServicesRegistrations = await runShell(
+  "aerospace-launchservices-registrations",
+  '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump 2>/dev/null | awk \'/path: .*AeroSpace.*\\.app|identifier: *bobko\\.aerospace/ { print }\' | head -80',
+);
+commands.aerospaceProcess = await runShell("aerospace-process", 'pgrep -fl "AeroSpace" || true');
+commands.focusedWorkspace = await runShell("aerospace-focused-workspace", "command -v aerospace >/dev/null 2>&1 && aerospace list-workspaces --focused");
+commands.mutationProbe = await runShell("aerospace-mutation-probe", "command -v aerospace >/dev/null 2>&1 && aerospace layout --window-id 2147483647 floating");
+if (action !== "status") {
+  await sleep(Math.max(0, stabilitySeconds) * 1000);
+  commands.finalStability = await runShell(
+    "aerospace-final-stability",
+    "pgrep -fl 'AeroSpace.app/Contents/MacOS/AeroSpace' && aerospace list-workspaces --focused && aerospace --version",
+  );
+}
+
+const versionText = `${commands.aerospaceVersion.stdout}\n${commands.aerospaceVersion.stderr}`;
+const mutationText = `${commands.mutationProbe.stdout}\n${commands.mutationProbe.stderr}`;
+const mismatchDetected = /client\/server versions don't match|versions don't match|server restart is required after each update|corrupted installation/i.test(`${versionText}\n${mutationText}`);
+const mutationReachedServer = commands.focusedWorkspace.code === 0 && (commands.mutationProbe.code === 0 || /invalid <window-id>|no window|not found/i.test(mutationText));
+const cliHash = firstField(commands.aerospaceCliShasum.stdout);
+const appHash = firstField(commands.aerospaceAppShasum.stdout);
+const hashMatch = cliHash !== "" && cliHash === appHash;
+const gatekeeperRejected = commands.gatekeeperAssessment.code !== 0 || /rejected/i.test(`${commands.gatekeeperAssessment.stdout}\n${commands.gatekeeperAssessment.stderr}`);
+const appCandidates = commands.appCandidates.stdout.split(/\n/).map((line) => line.trim()).filter(Boolean);
+const launchServicesText = `${commands.launchServicesRegistrations.stdout}\n${commands.launchServicesRegistrations.stderr}`;
+const launchServicesBundleRegistrationCount = (launchServicesText.match(/identifier:\s*bobko\.aerospace/g) ?? []).length;
+const duplicateLaunchServicesRegistrations = launchServicesBundleRegistrationCount > 1;
+const directLaunchFallbackUsed = Boolean(commands.launchFallback && !commands.launchFallback.skipped);
+const readiness = computeReadinessChecks({
+  action,
+  mutationReachedServer,
+  finalStabilityCode: commands.finalStability?.code,
+  directLaunchFallbackUsed,
+  allowDirectLaunchFallback,
+});
+const finalStabilityReady = readiness.finalStabilityReady;
+const launchServicesReady = readiness.launchServicesReady;
+const ok = commands.aerospacePath.code === 0 && mutationReachedServer && !mismatchDetected && finalStabilityReady && launchServicesReady;
+const fixes = [];
+const fixCommands = [];
+
+if (commands.aerospacePath.code !== 0) {
+  fixes.push("Install AeroSpace with `brew install --cask aerospace-dev`, then rerun `pnpm setup:status`.");
+  fixCommands.push("brew install --cask aerospace-dev");
+  fixCommands.push("pnpm setup:status");
+}
+if (mismatchDetected) {
+  fixes.push("Run `pnpm macos:aerospace-repair:restart`, then rerun `pnpm setup:status`. If the mismatch remains, run `pnpm macos:aerospace-repair:reinstall`.");
+  fixCommands.push("pnpm macos:aerospace-repair:restart && pnpm setup:status");
+  fixCommands.push("pnpm macos:aerospace-repair:reinstall && pnpm setup:status # if restart still reports CLI/server mismatch");
+}
+if (!mutationReachedServer && !mismatchDetected) {
+  fixes.push("Open AeroSpace, grant Accessibility in System Settings > Privacy & Security, then rerun `pnpm setup:status`. If LaunchServices opens no process, run `pnpm macos:aerospace-repair:restart` to use the direct-launch fallback.");
+  fixCommands.push("open -a AeroSpace");
+  fixCommands.push("pnpm setup:status");
+}
+if (action !== "status" && !launchServicesReady) {
+  fixes.push("LaunchServices `open -a AeroSpace` did not expose a durable AeroSpace app server; direct binary launch only proved the binary can start. Open AeroSpace normally, re-grant AeroSpace Accessibility in System Settings > Privacy & Security, then rerun `pnpm setup:status`. Set `MACOS_AEROSPACE_REPAIR_ALLOW_DIRECT_LAUNCH=1` only for diagnostics.");
+  fixCommands.push("open -a AeroSpace");
+  fixCommands.push("pnpm setup:status");
+}
+if (gatekeeperRejected) {
+  fixes.push("Gatekeeper rejects `/Applications/AeroSpace.app`. For dev dogfood, reinstall the AeroSpace app from a trusted/signed build or explicitly approve this app in System Settings > Privacy & Security, then rerun `pnpm setup:status`.");
+  fixCommands.push("brew reinstall --cask aerospace-dev && pnpm setup:status");
+  fixCommands.push("open /Applications/AeroSpace.app # approve in System Settings > Privacy & Security if macOS blocks it, then rerun pnpm setup:status");
+}
+if (duplicateLaunchServicesRegistrations) {
+  fixes.push(`LaunchServices has ${launchServicesBundleRegistrationCount} registrations for bobko.aerospace. Remove or rename stale AeroSpace.app copies outside /Applications, rebuild LaunchServices registration for /Applications/AeroSpace.app, then rerun \`pnpm setup:status\`.`);
+  fixCommands.push("find \"$HOME/Applications\" \"$HOME/dev/2026\" -maxdepth 6 -name 'AeroSpace*.app' -print # inspect stale duplicates before moving/removing");
+  fixCommands.push("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/AeroSpace.app && pnpm setup:status");
+}
+if (!finalStabilityReady && mutationReachedServer && !mismatchDetected) {
+  fixes.push(`AeroSpace server was reachable during repair but did not stay ready for ${stabilitySeconds}s after final checks. Re-grant AeroSpace Accessibility in System Settings > Privacy & Security, then rerun \`pnpm macos:aerospace-repair:restart\`.`);
+  fixCommands.push("pnpm setup:prompt");
+  fixCommands.push("pnpm macos:aerospace-repair:restart && pnpm setup:status");
+}
+if (commands.launchFallback && !commands.launchFallback.skipped && commands.launchFallback.stable?.code !== 0) {
+  fixes.push("AeroSpace server appeared briefly after direct launch but did not stay ready. Re-grant AeroSpace Accessibility in System Settings > Privacy & Security, then rerun `pnpm macos:aerospace-repair:restart`.");
+  fixCommands.push("pnpm setup:prompt");
+  fixCommands.push("pnpm macos:aerospace-repair:restart && pnpm setup:status");
+}
+
+const finishedAt = new Date().toISOString();
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.macos_aerospace_repair",
+  action,
+  run_id: runId,
+  started_at: startedAt,
+  finished_at: finishedAt,
+  duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
+  artifact_dir: path.relative(repoRoot, artifactDir),
+  stability_seconds: stabilitySeconds,
+  ok,
+  checks: {
+    aerospace_cli_available: commands.aerospacePath.code === 0,
+    aerospace_process_visible: commands.aerospaceProcess.stdout.trim().length > 0,
+    mutation_probe_reached_server: mutationReachedServer,
+    client_server_mismatch_detected: mismatchDetected,
+    cli_app_hash_match: hashMatch,
+    final_stability_ready: finalStabilityReady,
+    direct_launch_fallback_used: directLaunchFallbackUsed,
+    direct_launch_allowed_for_readiness: allowDirectLaunchFallback,
+    direct_launch_diagnostic_only: directLaunchFallbackUsed && !allowDirectLaunchFallback,
+    launchservices_server_ready: launchServicesReady,
+    gatekeeper_allows_app: !gatekeeperRejected,
+    duplicate_launchservices_registrations: duplicateLaunchServicesRegistrations,
+  },
+  aerospace: {
+    path: commands.aerospacePath.stdout.trim(),
+    cli_version_output: versionText.trim(),
+    app_version_output: `${commands.aerospaceAppVersion.stdout}\n${commands.aerospaceAppVersion.stderr}`.trim(),
+    cli_shasum: commands.aerospaceCliShasum.stdout.trim(),
+    app_shasum: commands.aerospaceAppShasum.stdout.trim(),
+    gatekeeper_assessment: `${commands.gatekeeperAssessment.stdout}\n${commands.gatekeeperAssessment.stderr}`.trim(),
+    app_candidates: appCandidates,
+    launchservices_registration_count: launchServicesBundleRegistrationCount,
+    launchservices_registrations: commands.launchServicesRegistrations.stdout.trim(),
+    process_list: commands.aerospaceProcess.stdout.trim(),
+    focused_workspace: commands.focusedWorkspace.stdout.trim(),
+    mutation_probe: {
+      code: commands.mutationProbe.code,
+      stdout: commands.mutationProbe.stdout.trim(),
+      stderr: commands.mutationProbe.stderr.trim(),
+    },
+  },
+  fixes,
+  fix_commands: [...new Set(fixCommands)],
+  commands,
+};
+
+await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+console.log(`AeroSpace repair manifest: ${path.relative(repoRoot, manifestPath)}`);
+console.log(JSON.stringify({
+  ok: manifest.ok,
+  action: manifest.action,
+  checks: manifest.checks,
+  fixes: manifest.fixes,
+  fix_commands: manifest.fix_commands,
+}, null, 2));
+
+process.exit(ok ? 0 : 1);
+
+async function runShell(name, script) {
+  return await runCommand("bash", ["-lc", script], name);
+}
+
+async function launchFallbackIfNeeded() {
+  const probe = await runShell("aerospace-launch-fallback-probe", "pgrep -fl 'AeroSpace.app/Contents/MacOS/AeroSpace' >/dev/null 2>&1 || aerospace list-workspaces --focused >/dev/null 2>&1");
+  if (probe.code === 0) {
+    return {
+      skipped: true,
+      reason: "AeroSpace process/server already visible after open -a",
+      probe,
+    };
+  }
+  const launch = await runShell(
+    "aerospace-direct-launch",
+    "nohup /Applications/AeroSpace.app/Contents/MacOS/AeroSpace > artifacts/macos-aerospace-repair/aerospace-direct-launch.out 2> artifacts/macos-aerospace-repair/aerospace-direct-launch.err &",
+  );
+  await sleep(2500);
+  const verify = await runShell("aerospace-direct-launch-verify", "pgrep -fl 'AeroSpace.app/Contents/MacOS/AeroSpace' && aerospace list-workspaces --focused");
+  await sleep(Math.max(0, stabilitySeconds) * 1000);
+  const stable = await runShell("aerospace-direct-launch-stable", "pgrep -fl 'AeroSpace.app/Contents/MacOS/AeroSpace' && aerospace list-workspaces --focused");
+  return {
+    skipped: false,
+    reason: "open -a did not expose AeroSpace server; attempted direct app-binary launch",
+    probe,
+    launch,
+    verify,
+    stable,
+  };
+}
+
+async function runCommand(file, args, explicitName) {
+  const safe = explicitName ?? [file, ...args].join(" ").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-|-$/g, "").slice(0, 96);
+  const stdoutPath = path.join(logsDir, `${safe}.stdout.log`);
+  const stderrPath = path.join(logsDir, `${safe}.stderr.log`);
+  const startedAt = new Date().toISOString();
+  const result = await new Promise((resolve) => {
+    const child = spawn(file, args, {
+      cwd: repoRoot,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      resolve({
+        code: 127,
+        signal: undefined,
+        stdout,
+        stderr: `${stderr}${error.message}`,
+      });
+    });
+    child.on("exit", (code, signal) => {
+      resolve({
+        code: code ?? 1,
+        signal: signal ?? undefined,
+        stdout,
+        stderr,
+      });
+    });
+  });
+  const finishedAt = new Date().toISOString();
+  await writeFile(stdoutPath, result.stdout, "utf8");
+  await writeFile(stderrPath, result.stderr, "utf8");
+  return {
+    command: [file, ...args],
+    code: result.code,
+    signal: result.signal,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
+    stdout_path: path.relative(repoRoot, stdoutPath),
+    stderr_path: path.relative(repoRoot, stderrPath),
+    stdout: result.stdout.slice(0, 2000),
+    stderr: result.stderr.slice(0, 2000),
+  };
+}
+
+function firstField(value) {
+  return value.trim().split(/\s+/)[0] ?? "";
+}
+
+function computeReadinessChecks({ action, mutationReachedServer, finalStabilityCode, directLaunchFallbackUsed, allowDirectLaunchFallback }) {
+  const finalStabilityReady = action === "status"
+    ? mutationReachedServer
+    : finalStabilityCode === 0;
+  const launchServicesReady = action === "status"
+    ? mutationReachedServer
+    : !directLaunchFallbackUsed || allowDirectLaunchFallback;
+  return { finalStabilityReady, launchServicesReady };
+}
+
+function runSelfTest() {
+  assert.deepEqual(
+    computeReadinessChecks({
+      action: "status",
+      mutationReachedServer: false,
+      finalStabilityCode: undefined,
+      directLaunchFallbackUsed: false,
+      allowDirectLaunchFallback: false,
+    }),
+    { finalStabilityReady: false, launchServicesReady: false },
+    "status mode must not report ready when server probes cannot reach AeroSpace",
+  );
+  assert.deepEqual(
+    computeReadinessChecks({
+      action: "status",
+      mutationReachedServer: true,
+      finalStabilityCode: undefined,
+      directLaunchFallbackUsed: false,
+      allowDirectLaunchFallback: false,
+    }),
+    { finalStabilityReady: true, launchServicesReady: true },
+    "status mode should be ready when server probes reach AeroSpace",
+  );
+  assert.deepEqual(
+    computeReadinessChecks({
+      action: "restart",
+      mutationReachedServer: true,
+      finalStabilityCode: 0,
+      directLaunchFallbackUsed: true,
+      allowDirectLaunchFallback: false,
+    }),
+    { finalStabilityReady: true, launchServicesReady: false },
+    "restart mode must keep direct launch diagnostic-only unless explicitly allowed",
+  );
+  assert.deepEqual(
+    computeReadinessChecks({
+      action: "restart",
+      mutationReachedServer: true,
+      finalStabilityCode: 0,
+      directLaunchFallbackUsed: true,
+      allowDirectLaunchFallback: true,
+    }),
+    { finalStabilityReady: true, launchServicesReady: true },
+    "restart mode can allow direct launch for diagnostics when explicitly requested",
+  );
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function utcStamp() {
+  return new Date().toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+}

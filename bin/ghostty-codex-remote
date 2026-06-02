@@ -5,7 +5,11 @@ set -euo pipefail
 : "${EVENTLOOPOS_THREAD_ID:?missing EVENTLOOPOS_THREAD_ID}"
 : "${EVENTLOOPOS_CODEX_WORKDIR:?missing EVENTLOOPOS_CODEX_WORKDIR}"
 
-export CODEX_HOME="${CODEX_HOME:-$HOME/.codex-work}"
+export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+if [[ ! -d "$CODEX_HOME" ]]; then
+  echo "CODEX_HOME does not exist: $CODEX_HOME" >&2
+  exit 1
+fi
 cd "$EVENTLOOPOS_CODEX_WORKDIR"
 
 if [[ -n "${EVENTLOOPOS_GHOSTTY_TITLE:-}" ]]; then

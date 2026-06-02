@@ -1,0 +1,2680 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-fault-proof [codex-app-server-down|orchestrator-crash-restart|duplicate-idempotency|postgres-unavailable|postgres-migration-mismatch|aerospace-unavailable|aerospace-permission-missing|ghostty-cleanup-failure|screen-capture-denied|queue-app-accessibility-denied|aerospace-restore-server-down]
+
+Run a lab-safe fault injection proof on the remote Mac. The proof captures API,
+process, window, and screenshot artifacts, then restores the dogfood stack.
+
+Environment:
+  LAB_MAC_HOST              default: 100.71.111.25
+  LAB_MAC_USER              default: claw
+  LAB_MAC_KEY               default: ~/.ssh/eventloop_lab_mac
+  LAB_DOGFOOD_URL           default: http://127.0.0.1:4480
+  LAB_DOGFOOD_POSTGRES      default: 0
+  LAB_FAULT_RESTART_STACK   default: 1; restart first to pick up synced code
+EOF
+}
+
+scenario="${1:-codex-app-server-down}"
+case "$scenario" in
+  codex-app-server-down|orchestrator-crash-restart|duplicate-idempotency|postgres-unavailable|postgres-migration-mismatch|aerospace-unavailable|aerospace-permission-missing|ghostty-cleanup-failure|screen-capture-denied|queue-app-accessibility-denied|aerospace-restore-server-down) ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown fault scenario: $scenario" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+url="${LAB_DOGFOOD_URL:-http://127.0.0.1:4480}"
+postgres="${LAB_DOGFOOD_POSTGRES:-0}"
+restart_first="${LAB_FAULT_RESTART_STACK:-1}"
+remote="${lab_user}@${lab_host}"
+remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
+run_id="$(date +%Y%m%d-%H%M%S)-lab-fault-$scenario"
+remote_run="artifacts/lab-runs/$run_id"
+ssh_opts=(-i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8)
+recover_needed=0
+
+ssh_remote() {
+  ssh "${ssh_opts[@]}" "$remote" "$@"
+}
+
+wait_for_health() {
+  for _ in {1..90}; do
+    if ssh_remote "curl -fsS --max-time 3 '$url/health' >/dev/null 2>&1"; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo "orchestrator did not become healthy at $url" >&2
+  return 1
+}
+
+ensure_stack() {
+  if ssh_remote "curl -fsS --max-time 3 '$url/health' >/dev/null 2>&1"; then
+    return 0
+  fi
+  LAB_MAC_HOST="$lab_host" \
+  LAB_MAC_USER="$lab_user" \
+  LAB_MAC_KEY="$lab_key" \
+  LAB_DOGFOOD_URL="$url" \
+  LAB_DOGFOOD_REAL_CODEX=1 \
+  LAB_DOGFOOD_POSTGRES="$postgres" \
+  bin/lab-mac-dogfood start
+  wait_for_health
+}
+
+restart_stack() {
+  LAB_MAC_HOST="$lab_host" \
+  LAB_MAC_USER="$lab_user" \
+  LAB_MAC_KEY="$lab_key" \
+  LAB_DOGFOOD_URL="$url" \
+  bin/lab-mac-dogfood stop >/dev/null || true
+  LAB_MAC_HOST="$lab_host" \
+  LAB_MAC_USER="$lab_user" \
+  LAB_MAC_KEY="$lab_key" \
+  LAB_DOGFOOD_URL="$url" \
+  LAB_DOGFOOD_REAL_CODEX=1 \
+  LAB_DOGFOOD_POSTGRES="$postgres" \
+  bin/lab-mac-dogfood start >/dev/null
+  wait_for_health
+}
+
+restore_if_needed() {
+  if [[ "$recover_needed" == "1" ]]; then
+    echo "restoring dogfood stack after fault proof" >&2
+    restart_stack >/dev/null 2>&1 || true
+  fi
+}
+trap restore_if_needed EXIT
+
+capture_desktop() {
+  local label="$1"
+  LAB_MAC_HOST="$lab_host" \
+  LAB_MAC_USER="$lab_user" \
+  LAB_MAC_KEY="$lab_key" \
+  LAB_DOGFOOD_URL="$url" \
+  bin/lab-mac-desktop-capture "$remote_run" "$label" >/dev/null
+}
+
+sync_artifacts() {
+  mkdir -p "$remote_run"
+  rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" \
+    "$remote:$remote_repo/$remote_run/" "$remote_run/"
+}
+
+run_remote_fault() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$url' '$scenario'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+run="$2"
+url="$3"
+scenario="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run/api/before" "$run/api/after_fault"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+
+json_endpoint() {
+  local phase="$1"
+  local endpoint="$2"
+  local output_name
+  output_name="$(printf "%s" "$endpoint" | tr '?/=&' '____')"
+  curl -fsS --max-time 10 "$url/$endpoint" >"$run/api/$phase/$output_name.json" 2>"$run/api/$phase/$output_name.err" || true
+}
+
+collect_api_state() {
+  local phase="$1"
+  mkdir -p "$run/api/$phase"
+  for endpoint in health metrics "activity?limit=120" "task-sessions" "task-messages?limit=120" "queue?state=ready" tasks; do
+    json_endpoint "$phase" "$endpoint"
+  done
+}
+
+post_json_allow_error() {
+  local path="$1"
+  local body_file="$2"
+  local output_file="$3"
+  local status_file="$4"
+  local idempotency_key="$5"
+  local tmp
+  tmp="$(mktemp)"
+  set +e
+  status="$(curl -sS --max-time 60 -o "$tmp" -w "%{http_code}" \
+    -H "content-type: application/json" \
+    -H "idempotency-key: $idempotency_key" \
+    -d @"$body_file" \
+    "$url$path" 2>"$output_file.err")"
+  code=$?
+  set -e
+  mv "$tmp" "$output_file"
+  printf "%s\n" "$status" >"$status_file"
+  printf "%s\n" "$code" >"$status_file.curl_rc"
+}
+
+collect_api_state before
+pgrep -fl "[c]odex app-server" >"$run/codex-app-server-before.txt" 2>"$run/codex-app-server-before.err" || true
+
+stamp="$(date +%Y%m%d%H%M%S)"
+task_id="task_lab_fault_${scenario//-/_}_$stamp"
+start_key="lab-fault-$scenario-start-$stamp"
+followup_key="lab-fault-$scenario-followup-$stamp"
+printf "%s\n" "$task_id" >"$run/task-id.txt"
+printf "%s\n" "$followup_key" >"$run/followup-idempotency-key.txt"
+
+cat >"$run/start-request.json" <<JSON
+{
+  "task_id": "$task_id",
+  "prompt": "eventloopOS fault proof setup $stamp. Reply exactly: eventloopos-lab-fault-setup-ok.",
+  "cwd": "$repo",
+  "idempotency_key": "$start_key",
+  "queue_paper": true
+}
+JSON
+post_json_allow_error "/task-sessions" "$run/start-request.json" "$run/start-response.json" "$run/start-response.status" "$start_key"
+task_session_id="$(jq -r '.started.task_session_id // empty' "$run/start-response.json" 2>/dev/null || true)"
+printf "%s\n" "$task_session_id" >"$run/task-session-id.txt"
+
+pkill -TERM -f "[c]odex app-server" 2>/dev/null || true
+sleep 2
+pkill -KILL -f "[c]odex app-server" 2>/dev/null || true
+pgrep -fl "[c]odex app-server" >"$run/codex-app-server-after-kill.txt" 2>"$run/codex-app-server-after-kill.err" || true
+curl -fsS --max-time 5 "$url/health" >"$run/health-after-fault.json" 2>"$run/health-after-fault.err" || true
+
+if [[ -n "$task_session_id" ]]; then
+  set +e
+  EVENTLOOPOS_TASK_SESSION_SKIP_BUILD=1 bin/task-session followup \
+    --base-url "$url" \
+    --session "$task_session_id" \
+    --event "evt_${task_id}_fault" \
+    --idempotency-key "$followup_key" \
+    "This followup should fail clearly because the Codex app-server was killed by the lab fault proof." \
+    >"$run/followup-response.json" 2>"$run/followup-response.err"
+  printf "%s\n" "$?" >"$run/followup-response.rc"
+  set -e
+else
+  printf '{}\n' >"$run/followup-response.json"
+  printf '1\n' >"$run/followup-response.rc"
+fi
+
+collect_api_state after_fault
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+
+SCENARIO="$scenario" RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const scenario = process.env.SCENARIO;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const json = (relative, fallback = undefined) => {
+  const text = read(relative);
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+const start = json("start-response.json", {});
+const followup = json("followup-response.json", {});
+const taskMessages = json("api/after_fault/task-messages_limit_120.json", { messages: [] });
+const activity = json("api/after_fault/activity_limit_120.json", { events: [] });
+const health = json("health-after-fault.json", {});
+const followupKey = read("followup-idempotency-key.txt");
+const taskSessionId = read("task-session-id.txt");
+const taskId = read("task-id.txt");
+const messages = Array.isArray(taskMessages.messages) ? taskMessages.messages : [];
+const events = Array.isArray(activity.events) ? activity.events : [];
+const failedMessage = messages.find((message) => message.idempotency_key === followupKey);
+const errorText = String(followup?.message?.error ?? failedMessage?.error ?? "");
+const actionableError = /codex app-server|app-server|stream|websocket|closed|process|timed out|unavailable/i.test(errorText);
+const assertions = [
+  {
+    name: "task_session_started_before_fault",
+    ok: start?.ok === true && Boolean(taskSessionId),
+    details: { task_id: taskId, task_session_id: taskSessionId, http_status: read("start-response.status") },
+  },
+  {
+    name: "codex_app_server_process_present_before_fault",
+    ok: read("codex-app-server-before.txt").length > 0,
+    details: { before: read("codex-app-server-before.txt") },
+  },
+  {
+    name: "codex_app_server_process_absent_after_fault",
+    ok: read("codex-app-server-after-kill.txt").length === 0,
+    details: { after: read("codex-app-server-after-kill.txt") },
+  },
+  {
+    name: "orchestrator_stays_healthy_after_codex_fault",
+    ok: health?.ok === true,
+    details: health,
+  },
+  {
+    name: "followup_returns_failed_message_not_crash",
+    ok: followup?.ok === true && followup?.message?.status === "failed",
+    details: followup?.message ?? followup,
+  },
+  {
+    name: "failed_followup_has_actionable_error_text",
+    ok: actionableError,
+    details: { error: errorText },
+  },
+  {
+    name: "failed_followup_is_durable",
+    ok: failedMessage?.status === "failed",
+    details: failedMessage,
+  },
+  {
+    name: "activity_shows_failed_followup",
+    ok: events.some((event) => event.type === "task_followup_failed" && event.task_session_id === taskSessionId),
+    details: events
+      .filter((event) => event.task_session_id === taskSessionId)
+      .map((event) => ({
+        type: event.type,
+        status: event.status,
+        summary: event.summary,
+        task_session_id: event.task_session_id,
+      })),
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+fs.writeFileSync(path.join(run, "api-state.json"), JSON.stringify({
+  before: {
+    health: json("api/before/health.json", null),
+    task_sessions: json("api/before/task-sessions.json", null),
+  },
+  after_fault: {
+    health: json("api/after_fault/health.json", null),
+    activity,
+    task_messages: taskMessages,
+    task_sessions: json("api/after_fault/task-sessions.json", null),
+  },
+}, null, 2) + "\n");
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_fault_proof",
+  scenario,
+  run,
+  started_at: read("started-at.txt"),
+  finished_at: read("finished-at.txt"),
+  ok,
+  task_id: taskId,
+  task_session_id: taskSessionId,
+  fault: {
+    injected: "kill codex app-server process",
+    recovery: "caller restarts dogfood stack after artifact capture",
+  },
+  assertions,
+  artifacts: {
+    manifest: "manifest.json",
+    api_state: "api-state.json",
+    codex_process_before: "codex-app-server-before.txt",
+    codex_process_after_kill: "codex-app-server-after-kill.txt",
+    start_response: "start-response.json",
+    followup_response: "followup-response.json",
+  },
+}, null, 2));
+NODE
+REMOTE
+}
+
+patch_capture_manifest() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run'" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+run="$2"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+RUN="$run" node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const manifestPath = path.join(run, "manifest.json");
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const readJson = (relative, fallback) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(run, relative), "utf8"));
+  } catch {
+    return fallback;
+  }
+};
+const after = readJson("captures/after-fault/capture-summary.json", {});
+const before = readJson("captures/before/capture-summary.json", {});
+manifest.assertions.push(
+  {
+    name: "desktop_capture_after_fault_nonempty",
+    ok: Number(after?.screen?.bytes ?? 0) > 10000,
+    details: after?.screen,
+  },
+  {
+    name: "queue_app_still_visible_after_fault",
+    ok: after?.queue_app?.process_present === true
+      && after?.queue_app?.menu_items_present === true
+      && after?.queue_app?.ax_tree_present === true,
+    details: after?.queue_app,
+  },
+);
+manifest.ok = manifest.assertions.every((assertion) => assertion.ok);
+manifest.captures = {
+  before: "captures/before/capture-summary.json",
+  after_fault: "captures/after-fault/capture-summary.json",
+};
+manifest.artifacts = {
+  ...manifest.artifacts,
+  screenshot_before: Number(before?.screen?.bytes ?? 0) > 0 ? "captures/before/screen.png" : undefined,
+  screenshot_after_fault: Number(after?.screen?.bytes ?? 0) > 0 ? "captures/after-fault/screen.png" : undefined,
+  windows_after_fault: "captures/after-fault/windows.json",
+};
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+NODE
+REMOTE
+}
+
+run_remote_orchestrator_crash_before() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$url' '$scenario'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+run="$2"
+url="$3"
+scenario="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run/api/before" "$run/api/down"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+
+json_endpoint() {
+  local phase="$1"
+  local endpoint="$2"
+  local output_name
+  output_name="$(printf "%s" "$endpoint" | tr '?/=&' '____')"
+  curl -fsS --max-time 10 "$url/$endpoint" >"$run/api/$phase/$output_name.json" 2>"$run/api/$phase/$output_name.err" || true
+}
+
+collect_api_state() {
+  local phase="$1"
+  mkdir -p "$run/api/$phase"
+  for endpoint in health metrics "activity?limit=120" "task-sessions" "task-messages?limit=120" "queue?state=ready" tasks; do
+    json_endpoint "$phase" "$endpoint"
+  done
+}
+
+post_json_allow_error() {
+  local path="$1"
+  local body_file="$2"
+  local output_file="$3"
+  local status_file="$4"
+  local idempotency_key="$5"
+  local tmp
+  tmp="$(mktemp)"
+  set +e
+  status="$(curl -sS --max-time 60 -o "$tmp" -w "%{http_code}" \
+    -H "content-type: application/json" \
+    -H "idempotency-key: $idempotency_key" \
+    -d @"$body_file" \
+    "$url$path" 2>"$output_file.err")"
+  code=$?
+  set -e
+  mv "$tmp" "$output_file"
+  printf "%s\n" "$status" >"$status_file"
+  printf "%s\n" "$code" >"$status_file.curl_rc"
+}
+
+collect_api_state before
+pgrep -fl "[n]ode dist/src/index.js" >"$run/orchestrator-before.txt" 2>"$run/orchestrator-before.err" || true
+pgrep -fl "[c]odex app-server" >"$run/codex-app-server-before.txt" 2>"$run/codex-app-server-before.err" || true
+
+stamp="$(date +%Y%m%d%H%M%S)"
+task_id="task_lab_fault_${scenario//-/_}_$stamp"
+start_key="lab-fault-$scenario-start-$stamp"
+followup_key="lab-fault-$scenario-followup-$stamp"
+printf "%s\n" "$task_id" >"$run/task-id.txt"
+printf "%s\n" "$followup_key" >"$run/followup-idempotency-key.txt"
+
+cat >"$run/start-request.json" <<JSON
+{
+  "task_id": "$task_id",
+  "prompt": "eventloopOS orchestrator restart proof setup $stamp. Reply exactly: eventloopos-orchestrator-restart-setup-ok.",
+  "cwd": "$repo",
+  "idempotency_key": "$start_key",
+  "queue_paper": true
+}
+JSON
+post_json_allow_error "/task-sessions" "$run/start-request.json" "$run/start-response.json" "$run/start-response.status" "$start_key"
+task_session_id="$(jq -r '.started.task_session_id // empty' "$run/start-response.json" 2>/dev/null || true)"
+queue_item_id="$(jq -r '.queue_item.id // empty' "$run/start-response.json" 2>/dev/null || true)"
+printf "%s\n" "$task_session_id" >"$run/task-session-id.txt"
+printf "%s\n" "$queue_item_id" >"$run/queue-item-id.txt"
+
+collect_api_state before_crash
+pkill -TERM -f "[n]ode dist/src/index.js" 2>/dev/null || true
+sleep 2
+pkill -KILL -f "[n]ode dist/src/index.js" 2>/dev/null || true
+pgrep -fl "[n]ode dist/src/index.js" >"$run/orchestrator-after-kill.txt" 2>"$run/orchestrator-after-kill.err" || true
+set +e
+status="$(curl -sS --max-time 5 -o "$run/health-after-kill.json" -w "%{http_code}" "$url/health" 2>"$run/health-after-kill.err")"
+code=$?
+set -e
+printf "%s\n" "$status" >"$run/health-after-kill.status"
+printf "%s\n" "$code" >"$run/health-after-kill.curl_rc"
+REMOTE
+}
+
+run_remote_orchestrator_crash_after() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$url' '$scenario'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+run="$2"
+url="$3"
+scenario="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run/api/after_restart"
+
+json_endpoint() {
+  local phase="$1"
+  local endpoint="$2"
+  local output_name
+  output_name="$(printf "%s" "$endpoint" | tr '?/=&' '____')"
+  curl -fsS --max-time 10 "$url/$endpoint" >"$run/api/$phase/$output_name.json" 2>"$run/api/$phase/$output_name.err" || true
+}
+
+collect_api_state() {
+  local phase="$1"
+  mkdir -p "$run/api/$phase"
+  for endpoint in health metrics "activity?limit=120" "task-sessions" "task-messages?limit=120" "queue?state=ready" tasks; do
+    json_endpoint "$phase" "$endpoint"
+  done
+}
+
+task_session_id="$(cat "$run/task-session-id.txt" 2>/dev/null || true)"
+followup_key="$(cat "$run/followup-idempotency-key.txt" 2>/dev/null || true)"
+
+collect_api_state after_restart_before_followup
+if [[ -n "$task_session_id" ]]; then
+  set +e
+  EVENTLOOPOS_TASK_SESSION_SKIP_BUILD=1 bin/task-session followup \
+    --base-url "$url" \
+    --session "$task_session_id" \
+    --event "evt_${task_session_id}_after_orchestrator_restart" \
+    --idempotency-key "$followup_key" \
+    "This followup should still work after orchestrator restart because eventloopOS persisted task state." \
+    >"$run/followup-response.json" 2>"$run/followup-response.err"
+  printf "%s\n" "$?" >"$run/followup-response.rc"
+  set -e
+else
+  printf '{}\n' >"$run/followup-response.json"
+  printf '1\n' >"$run/followup-response.rc"
+fi
+
+if jq -e '.message.status == "failed" and (.message.error // "" | test("thread not found|not found"; "i"))' "$run/followup-response.json" >/dev/null 2>&1; then
+  set +e
+  EVENTLOOPOS_TASK_SESSION_SKIP_BUILD=1 bin/task-session replace \
+    --base-url "$url" \
+    --session "$task_session_id" \
+    --idempotency-key "replacement-$followup_key" \
+    "Restart recovery: replace missing Codex native thread for persisted task after orchestrator restart. Reply exactly: eventloopos-replacement-after-restart-ok." \
+    >"$run/replacement-response.json" 2>"$run/replacement-response.err"
+  printf "%s\n" "$?" >"$run/replacement-response.rc"
+  set -e
+else
+  printf '{}\n' >"$run/replacement-response.json"
+  printf '0\n' >"$run/replacement-response.rc"
+fi
+
+osascript >"$run/open-queue-window-after-restart.out" 2>"$run/open-queue-window-after-restart.err" <<'APPLESCRIPT' || true
+on waitForMenuBarExtra()
+  repeat with attempt from 1 to 80
+    tell application "System Events"
+      if exists process "EventLoopQueueApp" then
+        tell process "EventLoopQueueApp"
+          if (count of menu bars) is greater than or equal to 2 then return
+        end tell
+      end if
+    end tell
+    delay 0.1
+  end repeat
+  error "EventLoopQueueApp menu bar extra did not appear"
+end waitForMenuBarExtra
+
+on clickMenuItem(itemName)
+  waitForMenuBarExtra()
+  tell application "System Events"
+    tell process "EventLoopQueueApp"
+      tell menu bar item 1 of menu bar 2
+        click
+        delay 0.2
+        click menu item itemName of menu 1
+      end tell
+    end tell
+  end tell
+end clickMenuItem
+
+clickMenuItem("Refresh Queue")
+delay 0.5
+clickMenuItem("Open Queue")
+delay 1.0
+return "opened queue window after restart"
+APPLESCRIPT
+
+collect_api_state after_restart
+pgrep -fl "[n]ode dist/src/index.js" >"$run/orchestrator-after-restart.txt" 2>"$run/orchestrator-after-restart.err" || true
+pgrep -fl "[c]odex app-server" >"$run/codex-app-server-after-restart.txt" 2>"$run/codex-app-server-after-restart.err" || true
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+
+SCENARIO="$scenario" RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const scenario = process.env.SCENARIO;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const json = (relative, fallback = undefined) => {
+  const text = read(relative);
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+const start = json("start-response.json", {});
+const followup = json("followup-response.json", {});
+const replacement = json("replacement-response.json", {});
+const taskMessages = json("api/after_restart/task-messages_limit_120.json", { messages: [] });
+const tasks = json("api/after_restart/tasks.json", { tasks: [] });
+const queueReady = json("api/after_restart/queue_state_ready.json", { items: [] });
+const taskSessions = json("api/after_restart/task-sessions.json", { sessions: [] });
+const health = json("api/after_restart/health.json", {});
+const taskId = read("task-id.txt");
+const taskSessionId = read("task-session-id.txt");
+const queueItemId = read("queue-item-id.txt");
+const followupKey = read("followup-idempotency-key.txt");
+const messages = Array.isArray(taskMessages.messages) ? taskMessages.messages : [];
+const persistedTask = Array.isArray(tasks.tasks) ? tasks.tasks.find((task) => task.task_id === taskId) : undefined;
+const persistedQueueItem = Array.isArray(queueReady.items) ? queueReady.items.find((item) => item.id === queueItemId || item.task_id === taskId) : undefined;
+const followupMessage = messages.find((message) => message.idempotency_key === followupKey);
+const replacementStarted = replacement?.started;
+const replacementMessage = messages.find((message) => message.idempotency_key === `replacement-${followupKey}`);
+const followupSucceeded = followup?.ok === true && followup?.message?.status !== "failed";
+const followupFailedClearly = followup?.ok === true
+  && followup?.message?.status === "failed"
+  && /thread not found|not found/i.test(String(followup?.message?.error ?? ""));
+const assertions = [
+  {
+    name: "task_session_started_before_crash",
+    ok: start?.ok === true && Boolean(taskSessionId),
+    details: { task_id: taskId, task_session_id: taskSessionId, http_status: read("start-response.status") },
+  },
+  {
+    name: "orchestrator_process_present_before_crash",
+    ok: read("orchestrator-before.txt").length > 0,
+    details: { before: read("orchestrator-before.txt") },
+  },
+  {
+    name: "orchestrator_process_absent_after_fault",
+    ok: read("orchestrator-after-kill.txt").length === 0,
+    details: { after: read("orchestrator-after-kill.txt"), health_status: read("health-after-kill.status") },
+  },
+  {
+    name: "orchestrator_healthy_after_restart",
+    ok: health?.ok === true && read("orchestrator-after-restart.txt").length > 0,
+    details: { health, process: read("orchestrator-after-restart.txt") },
+  },
+  {
+    name: "task_record_survives_restart",
+    ok: Boolean(persistedTask),
+    details: persistedTask,
+  },
+  {
+    name: "queue_item_survives_restart",
+    ok: Boolean(persistedQueueItem),
+    details: persistedQueueItem,
+  },
+  {
+    name: "start_message_survives_restart",
+    ok: messages.some((message) => message.task_id === taskId && message.origin === "task_session_start"),
+    details: messages.filter((message) => message.task_id === taskId),
+  },
+  {
+    name: "task_session_visible_after_restart",
+    ok: Array.isArray(taskSessions.sessions) && taskSessions.sessions.some((session) => session.id === taskSessionId),
+    details: taskSessions,
+  },
+  {
+    name: "followup_after_restart_succeeds_or_fails_clearly",
+    ok: followupSucceeded || followupFailedClearly,
+    details: followup?.message ?? followup,
+  },
+  {
+    name: "followup_after_restart_is_durable",
+    ok: Boolean(followupMessage),
+    details: followupMessage,
+  },
+  {
+    name: "missing_thread_replacement_recovers_task",
+    ok: followupSucceeded || (replacement?.ok === true && replacementStarted?.ok === true),
+    details: replacement,
+  },
+  {
+    name: "replacement_start_message_is_durable",
+    ok: followupSucceeded || (Boolean(replacementMessage) && replacementMessage.status !== "failed"),
+    details: replacementMessage,
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+fs.writeFileSync(path.join(run, "api-state.json"), JSON.stringify({
+  before_crash: {
+    health: json("api/before_crash/health.json", null),
+    task_sessions: json("api/before_crash/task-sessions.json", null),
+    task_messages: json("api/before_crash/task-messages_limit_120.json", null),
+    queue_ready: json("api/before_crash/queue_state_ready.json", null),
+    tasks: json("api/before_crash/tasks.json", null),
+  },
+  after_restart: {
+    health,
+    task_sessions: taskSessions,
+    task_messages: taskMessages,
+    queue_ready: queueReady,
+    tasks,
+  },
+}, null, 2) + "\n");
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_fault_proof",
+  scenario,
+  run,
+  started_at: read("started-at.txt"),
+  finished_at: read("finished-at.txt"),
+  ok,
+  task_id: taskId,
+  task_session_id: taskSessionId,
+  fault: {
+    injected: "kill orchestrator process",
+    recovery: "restart dogfood stack and verify persisted state",
+  },
+  assertions,
+  artifacts: {
+    manifest: "manifest.json",
+    api_state: "api-state.json",
+    orchestrator_process_before: "orchestrator-before.txt",
+    orchestrator_process_after_kill: "orchestrator-after-kill.txt",
+    orchestrator_process_after_restart: "orchestrator-after-restart.txt",
+    start_response: "start-response.json",
+    followup_response: "followup-response.json",
+    replacement_response: "replacement-response.json",
+    open_queue_window_after_restart: "open-queue-window-after-restart.out",
+  },
+}, null, 2));
+NODE
+REMOTE
+}
+
+patch_orchestrator_crash_capture_manifest() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run'" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+run="$2"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+RUN="$run" node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const manifestPath = path.join(run, "manifest.json");
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const readJson = (relative, fallback) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(run, relative), "utf8"));
+  } catch {
+    return fallback;
+  }
+};
+const before = readJson("captures/before/capture-summary.json", {});
+const after = readJson("captures/after-restart/capture-summary.json", {});
+manifest.assertions.push(
+  {
+    name: "desktop_capture_after_restart_nonempty",
+    ok: Number(after?.screen?.bytes ?? 0) > 10000,
+    details: after?.screen,
+  },
+  {
+    name: "queue_app_visible_after_restart",
+    ok: after?.queue_app?.process_present === true
+      && after?.queue_app?.menu_items_present === true
+      && after?.queue_app?.ax_tree_present === true,
+    details: after?.queue_app,
+  },
+);
+manifest.ok = manifest.assertions.every((assertion) => assertion.ok);
+manifest.captures = {
+  before: "captures/before/capture-summary.json",
+  after_restart: "captures/after-restart/capture-summary.json",
+};
+manifest.artifacts = {
+  ...manifest.artifacts,
+  screenshot_before: Number(before?.screen?.bytes ?? 0) > 0 ? "captures/before/screen.png" : undefined,
+  screenshot_after_restart: Number(after?.screen?.bytes ?? 0) > 0 ? "captures/after-restart/screen.png" : undefined,
+  windows_after_restart: "captures/after-restart/windows.json",
+};
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+NODE
+REMOTE
+}
+
+run_orchestrator_crash_restart() {
+  ensure_stack
+  if [[ "$restart_first" != "0" ]]; then
+    restart_stack >/dev/null
+  fi
+  LAB_MAC_HOST="$lab_host" LAB_MAC_USER="$lab_user" LAB_MAC_KEY="$lab_key" LAB_DOGFOOD_URL="$url" \
+    bin/lab-mac-dogfood cleanup >/dev/null || true
+  ssh_remote "cd '$remote_repo' && mkdir -p '$remote_run'"
+  capture_desktop before
+  recover_needed=1
+  run_remote_orchestrator_crash_before
+  restart_stack >/dev/null
+  run_remote_orchestrator_crash_after
+  capture_desktop after-restart
+  patch_orchestrator_crash_capture_manifest
+  sync_artifacts
+  recover_needed=0
+
+  echo "$remote_run"
+  jq '{ok, scenario, task_id, task_session_id, assertions: [.assertions[] | {name, ok}]}' "$remote_run/manifest.json"
+  if ! jq -e '.ok == true' "$remote_run/manifest.json" >/dev/null; then
+    exit 1
+  fi
+}
+
+run_remote_duplicate_idempotency() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$url' '$scenario'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+run="$2"
+url="$3"
+scenario="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run/api/before" "$run/api/after"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+
+json_endpoint() {
+  local phase="$1"
+  local endpoint="$2"
+  local output_name
+  output_name="$(printf "%s" "$endpoint" | tr '?/=&' '____')"
+  curl -fsS --max-time 10 "$url/$endpoint" >"$run/api/$phase/$output_name.json" 2>"$run/api/$phase/$output_name.err" || true
+}
+
+collect_api_state() {
+  local phase="$1"
+  mkdir -p "$run/api/$phase"
+  for endpoint in health metrics "activity?limit=120" "task-sessions" "task-messages?limit=120" "queue?state=ready" "queue?state=deferred" "queue?state=dead" tasks; do
+    json_endpoint "$phase" "$endpoint"
+  done
+}
+
+post_json_allow_error() {
+  local path="$1"
+  local body_file="$2"
+  local output_file="$3"
+  local status_file="$4"
+  local idempotency_key="$5"
+  local tmp
+  tmp="$(mktemp)"
+  set +e
+  status="$(curl -sS --max-time 60 -o "$tmp" -w "%{http_code}" \
+    -H "content-type: application/json" \
+    -H "idempotency-key: $idempotency_key" \
+    -d @"$body_file" \
+    "$url$path" 2>"$output_file.err")"
+  code=$?
+  set -e
+  mv "$tmp" "$output_file"
+  printf "%s\n" "$status" >"$status_file"
+  printf "%s\n" "$code" >"$status_file.curl_rc"
+}
+
+collect_api_state before
+stamp="$(date +%Y%m%d%H%M%S)"
+task_id="task_lab_fault_${scenario//-/_}_$stamp"
+start_key="lab-fault-$scenario-start-$stamp"
+followup_key="lab-fault-$scenario-followup-$stamp"
+printf "%s\n" "$task_id" >"$run/task-id.txt"
+printf "%s\n" "$start_key" >"$run/start-idempotency-key.txt"
+printf "%s\n" "$followup_key" >"$run/followup-idempotency-key.txt"
+
+cat >"$run/start-request.json" <<JSON
+{
+  "task_id": "$task_id",
+  "prompt": "eventloopOS duplicate idempotency proof setup $stamp. Reply exactly: eventloopos-duplicate-idempotency-setup-ok.",
+  "cwd": "$repo",
+  "idempotency_key": "$start_key",
+  "queue_paper": true
+}
+JSON
+post_json_allow_error "/task-sessions" "$run/start-request.json" "$run/start-response-1.json" "$run/start-response-1.status" "$start_key"
+post_json_allow_error "/task-sessions" "$run/start-request.json" "$run/start-response-2.json" "$run/start-response-2.status" "$start_key"
+task_session_id="$(jq -r '.started.task_session_id // empty' "$run/start-response-1.json" 2>/dev/null || true)"
+printf "%s\n" "$task_session_id" >"$run/task-session-id.txt"
+
+if [[ -n "$task_session_id" ]]; then
+  set +e
+  EVENTLOOPOS_TASK_SESSION_SKIP_BUILD=1 bin/task-session followup \
+    --base-url "$url" \
+    --session "$task_session_id" \
+    --event "evt_${task_id}_duplicate_idempotency" \
+    --idempotency-key "$followup_key" \
+    "This followup is sent twice with the same idempotency key. eventloopOS should record one durable message." \
+    >"$run/followup-response-1.json" 2>"$run/followup-response-1.err"
+  printf "%s\n" "$?" >"$run/followup-response-1.rc"
+  EVENTLOOPOS_TASK_SESSION_SKIP_BUILD=1 bin/task-session followup \
+    --base-url "$url" \
+    --session "$task_session_id" \
+    --event "evt_${task_id}_duplicate_idempotency" \
+    --idempotency-key "$followup_key" \
+    "This followup is sent twice with the same idempotency key. eventloopOS should record one durable message." \
+    >"$run/followup-response-2.json" 2>"$run/followup-response-2.err"
+  printf "%s\n" "$?" >"$run/followup-response-2.rc"
+  set -e
+else
+  printf '{}\n' >"$run/followup-response-1.json"
+  printf '{}\n' >"$run/followup-response-2.json"
+  printf '1\n' >"$run/followup-response-1.rc"
+  printf '1\n' >"$run/followup-response-2.rc"
+fi
+
+collect_api_state after
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+
+SCENARIO="$scenario" RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const scenario = process.env.SCENARIO;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const json = (relative, fallback = undefined) => {
+  const text = read(relative);
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+const start1 = json("start-response-1.json", {});
+const start2 = json("start-response-2.json", {});
+const followup1 = json("followup-response-1.json", {});
+const followup2 = json("followup-response-2.json", {});
+const taskMessages = json("api/after/task-messages_limit_120.json", { messages: [] });
+const queueReady = json("api/after/queue_state_ready.json", { items: [] });
+const tasks = json("api/after/tasks.json", { tasks: [] });
+const health = json("api/after/health.json", {});
+const taskId = read("task-id.txt");
+const taskSessionId = read("task-session-id.txt");
+const startKey = read("start-idempotency-key.txt");
+const followupKey = read("followup-idempotency-key.txt");
+const messages = Array.isArray(taskMessages.messages) ? taskMessages.messages : [];
+const queueItems = Array.isArray(queueReady.items) ? queueReady.items : [];
+const taskRecords = Array.isArray(tasks.tasks) ? tasks.tasks : [];
+const startMessages = messages.filter((message) => message.idempotency_key === startKey);
+const followupMessages = messages.filter((message) => message.idempotency_key === followupKey);
+const queueItemsForTask = queueItems.filter((item) => item.task_id === taskId);
+const taskRecordsForTask = taskRecords.filter((task) => task.task_id === taskId);
+const assertions = [
+  {
+    name: "orchestrator_healthy",
+    ok: health?.ok === true,
+    details: health,
+  },
+  {
+    name: "first_start_succeeds",
+    ok: start1?.ok === true && start1?.started?.task_session_id === taskSessionId,
+    details: start1?.started ?? start1,
+  },
+  {
+    name: "second_start_dedupes",
+    ok: start2?.ok === true && start2?.started?.deduped === true && start2?.started?.task_session_id === taskSessionId,
+    details: start2?.started ?? start2,
+  },
+  {
+    name: "single_start_message_for_idempotency_key",
+    ok: startMessages.length === 1,
+    details: startMessages,
+  },
+  {
+    name: "single_queue_item_for_task_retry",
+    ok: queueItemsForTask.length === 1,
+    details: queueItemsForTask,
+  },
+  {
+    name: "single_task_record_for_task_retry",
+    ok: taskRecordsForTask.length === 1,
+    details: taskRecordsForTask,
+  },
+  {
+    name: "second_followup_dedupes",
+    ok: followup1?.ok === true
+      && followup2?.ok === true
+      && followup1?.message?.idempotency_key === followupKey
+      && followup2?.message?.idempotency_key === followupKey
+      && followup1?.message?.id === followup2?.message?.id,
+    details: { first: followup1?.message ?? followup1, second: followup2?.message ?? followup2 },
+  },
+  {
+    name: "single_followup_message_for_idempotency_key",
+    ok: followupMessages.length === 1,
+    details: followupMessages,
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+fs.writeFileSync(path.join(run, "api-state.json"), JSON.stringify({
+  before: {
+    health: json("api/before/health.json", null),
+    task_messages: json("api/before/task-messages_limit_120.json", null),
+    queue_ready: json("api/before/queue_state_ready.json", null),
+    tasks: json("api/before/tasks.json", null),
+  },
+  after: {
+    health,
+    task_messages: taskMessages,
+    queue_ready: queueReady,
+    tasks,
+  },
+}, null, 2) + "\n");
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_fault_proof",
+  scenario,
+  run,
+  started_at: read("started-at.txt"),
+  finished_at: read("finished-at.txt"),
+  ok,
+  task_id: taskId,
+  task_session_id: taskSessionId,
+  fault: {
+    injected: "repeat task start and followup with identical idempotency keys",
+    recovery: "dedupe without duplicate queue items, task records, or durable messages",
+  },
+  assertions,
+  artifacts: {
+    manifest: "manifest.json",
+    api_state: "api-state.json",
+    start_response_1: "start-response-1.json",
+    start_response_2: "start-response-2.json",
+    followup_response_1: "followup-response-1.json",
+    followup_response_2: "followup-response-2.json",
+  },
+}, null, 2));
+NODE
+REMOTE
+}
+
+patch_duplicate_idempotency_capture_manifest() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run'" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+run="$2"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+RUN="$run" node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const manifestPath = path.join(run, "manifest.json");
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const readJson = (relative, fallback) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(run, relative), "utf8"));
+  } catch {
+    return fallback;
+  }
+};
+const before = readJson("captures/before/capture-summary.json", {});
+const after = readJson("captures/after/capture-summary.json", {});
+manifest.assertions.push(
+  {
+    name: "desktop_capture_after_nonempty",
+    ok: Number(after?.screen?.bytes ?? 0) > 10000,
+    details: after?.screen,
+  },
+  {
+    name: "queue_app_visible_after_duplicate_retry",
+    ok: after?.queue_app?.process_present === true
+      && after?.queue_app?.menu_items_present === true
+      && after?.queue_app?.ax_tree_present === true,
+    details: after?.queue_app,
+  },
+);
+manifest.ok = manifest.assertions.every((assertion) => assertion.ok);
+manifest.captures = {
+  before: "captures/before/capture-summary.json",
+  after: "captures/after/capture-summary.json",
+};
+manifest.artifacts = {
+  ...manifest.artifacts,
+  screenshot_before: Number(before?.screen?.bytes ?? 0) > 0 ? "captures/before/screen.png" : undefined,
+  screenshot_after: Number(after?.screen?.bytes ?? 0) > 0 ? "captures/after/screen.png" : undefined,
+  windows_after: "captures/after/windows.json",
+};
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+NODE
+REMOTE
+}
+
+run_duplicate_idempotency() {
+  ensure_stack
+  if [[ "$restart_first" != "0" ]]; then
+    restart_stack >/dev/null
+  fi
+  LAB_MAC_HOST="$lab_host" LAB_MAC_USER="$lab_user" LAB_MAC_KEY="$lab_key" LAB_DOGFOOD_URL="$url" \
+    bin/lab-mac-dogfood cleanup >/dev/null || true
+  ssh_remote "cd '$remote_repo' && mkdir -p '$remote_run'"
+  capture_desktop before
+  run_remote_duplicate_idempotency
+  capture_desktop after
+  patch_duplicate_idempotency_capture_manifest
+  sync_artifacts
+
+  echo "$remote_run"
+  jq '{ok, scenario, task_id, task_session_id, assertions: [.assertions[] | {name, ok}]}' "$remote_run/manifest.json"
+  if ! jq -e '.ok == true' "$remote_run/manifest.json" >/dev/null; then
+    exit 1
+  fi
+}
+
+run_remote_postgres_unavailable() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$url' '$scenario'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+run="$2"
+main_url="$3"
+scenario="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+
+fault_port="45991"
+fault_url="http://127.0.0.1:$fault_port"
+bad_database_url="postgres://eventloopos:eventloopos@127.0.0.1:1/eventloopos"
+printf "%s\n" "$fault_url" >"$run/fault-url.txt"
+printf "%s\n" "$bad_database_url" >"$run/bad-database-url.txt"
+
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-before.json" 2>"$run/main-health-before.err" || true
+
+(
+  set +e
+  EVENTLOOPOS_DOGFOOD_PROFILE="lab-postgres-unavailable-proof" \
+  EVENTLOOPOS_ORCHESTRATOR_URL="$fault_url" \
+  EVENTLOOPOS_DOGFOOD_POSTGRES=1 \
+  DATABASE_URL="$bad_database_url" \
+  EVENTLOOPOS_DOGFOOD_QUEUE_APP=0 \
+  EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=0 \
+  EVENTLOOPOS_DOGFOOD_SHARED_CODEX_APP_SERVER=0 \
+  ORCHESTRATOR_TASK_SESSIONS=fake \
+  ORCHESTRATOR_MCP_SOURCES=off \
+    pnpm run dev:dogfood >"$run/dogfood-postgres-unavailable.out" 2>"$run/dogfood-postgres-unavailable.err"
+  printf "%s\n" "$?" >"$run/dogfood-postgres-unavailable.rc"
+) &
+dogfood_pid="$!"
+printf "%s\n" "$dogfood_pid" >"$run/dogfood-postgres-unavailable.pid"
+
+for _ in {1..45}; do
+  if [[ -f "$run/dogfood-postgres-unavailable.rc" ]]; then
+    break
+  fi
+  if ! kill -0 "$dogfood_pid" 2>/dev/null; then
+    wait "$dogfood_pid" || true
+    break
+  fi
+  sleep 1
+done
+
+if [[ ! -f "$run/dogfood-postgres-unavailable.rc" ]]; then
+  kill -TERM "$dogfood_pid" 2>/dev/null || true
+  sleep 2
+  kill -KILL "$dogfood_pid" 2>/dev/null || true
+  printf "124\n" >"$run/dogfood-postgres-unavailable.rc"
+fi
+wait "$dogfood_pid" 2>/dev/null || true
+
+curl -fsS --max-time 5 "$fault_url/health" >"$run/fault-health-after.json" 2>"$run/fault-health-after.err" || true
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-after.json" 2>"$run/main-health-after.err" || true
+lsof -nP -iTCP:"$fault_port" -sTCP:LISTEN >"$run/fault-port-listeners.txt" 2>"$run/fault-port-listeners.err" || true
+pgrep -fl "lab-postgres-unavailable-proof|45991|127.0.0.1:1/eventloopos" >"$run/fault-processes-after.txt" 2>"$run/fault-processes-after.err" || true
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+
+SCENARIO="$scenario" RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const scenario = process.env.SCENARIO;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const json = (relative, fallback = undefined) => {
+  const text = read(relative);
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+const stdout = read("dogfood-postgres-unavailable.out");
+const stderr = read("dogfood-postgres-unavailable.err");
+const combinedLog = `${stdout}\n${stderr}`;
+const rc = Number(read("dogfood-postgres-unavailable.rc"));
+const actionable = /Postgres unavailable|migrations failed|DATABASE_URL|EVENTLOOPOS_DOGFOOD_POSTGRES=0|ECONNREFUSED|connect ECONNREFUSED|database/i.test(combinedLog);
+const mainHealthBefore = json("main-health-before.json", {});
+const mainHealthAfter = json("main-health-after.json", {});
+const assertions = [
+  {
+    name: "main_dogfood_healthy_before_fault",
+    ok: mainHealthBefore?.ok === true,
+    details: mainHealthBefore,
+  },
+  {
+    name: "bad_postgres_dogfood_exits_nonzero",
+    ok: Number.isFinite(rc) && rc !== 0,
+    details: { exit_code: rc },
+  },
+  {
+    name: "bad_postgres_error_is_actionable",
+    ok: actionable,
+    details: {
+      stdout_tail: stdout.slice(-2000),
+      stderr_tail: stderr.slice(-2000),
+    },
+  },
+  {
+    name: "bad_postgres_orchestrator_not_listening",
+    ok: read("fault-port-listeners.txt").length === 0,
+    details: { listeners: read("fault-port-listeners.txt") },
+  },
+  {
+    name: "bad_postgres_fault_processes_cleaned_up",
+    ok: read("fault-processes-after.txt").length === 0,
+    details: { processes: read("fault-processes-after.txt") },
+  },
+  {
+    name: "main_dogfood_healthy_after_fault",
+    ok: mainHealthAfter?.ok === true,
+    details: mainHealthAfter,
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+fs.writeFileSync(path.join(run, "api-state.json"), JSON.stringify({
+  main_health_before: mainHealthBefore,
+  main_health_after: mainHealthAfter,
+  fault_health_after: json("fault-health-after.json", null),
+}, null, 2) + "\n");
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_fault_proof",
+  scenario,
+  run,
+  started_at: read("started-at.txt"),
+  finished_at: read("finished-at.txt"),
+  ok,
+  fault: {
+    injected: "run dogfood with Postgres mode and a closed DATABASE_URL on an isolated port",
+    recovery: "dogfood exits nonzero with actionable setup text and main stack remains healthy",
+  },
+  assertions,
+  artifacts: {
+    manifest: "manifest.json",
+    api_state: "api-state.json",
+    dogfood_stdout: "dogfood-postgres-unavailable.out",
+    dogfood_stderr: "dogfood-postgres-unavailable.err",
+    dogfood_exit_code: "dogfood-postgres-unavailable.rc",
+    fault_port_listeners: "fault-port-listeners.txt",
+    fault_processes_after: "fault-processes-after.txt",
+  },
+}, null, 2));
+NODE
+REMOTE
+}
+
+patch_postgres_unavailable_capture_manifest() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run'" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+run="$2"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+RUN="$run" node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const manifestPath = path.join(run, "manifest.json");
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const readJson = (relative, fallback) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(run, relative), "utf8"));
+  } catch {
+    return fallback;
+  }
+};
+const before = readJson("captures/before/capture-summary.json", {});
+const after = readJson("captures/after/capture-summary.json", {});
+manifest.assertions.push(
+  {
+    name: "desktop_capture_after_nonempty",
+    ok: Number(after?.screen?.bytes ?? 0) > 10000,
+    details: after?.screen,
+  },
+);
+manifest.ok = manifest.assertions.every((assertion) => assertion.ok);
+manifest.captures = {
+  before: "captures/before/capture-summary.json",
+  after: "captures/after/capture-summary.json",
+};
+manifest.artifacts = {
+  ...manifest.artifacts,
+  screenshot_before: Number(before?.screen?.bytes ?? 0) > 0 ? "captures/before/screen.png" : undefined,
+  screenshot_after: Number(after?.screen?.bytes ?? 0) > 0 ? "captures/after/screen.png" : undefined,
+  windows_after: "captures/after/windows.json",
+};
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+NODE
+REMOTE
+}
+
+run_postgres_unavailable() {
+  ensure_stack
+  ssh_remote "cd '$remote_repo' && mkdir -p '$remote_run'"
+  capture_desktop before
+  run_remote_postgres_unavailable
+  capture_desktop after
+  patch_postgres_unavailable_capture_manifest
+  sync_artifacts
+
+  echo "$remote_run"
+  jq '{ok, scenario, assertions: [.assertions[] | {name, ok}]}' "$remote_run/manifest.json"
+  if ! jq -e '.ok == true' "$remote_run/manifest.json" >/dev/null; then
+    exit 1
+  fi
+}
+
+run_remote_postgres_migration_mismatch() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$url' '$scenario'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+run="$2"
+main_url="$3"
+scenario="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+
+fault_port="45992"
+postgres_port="45993"
+postgres_container="eventloopos-postgres-migration-mismatch"
+fault_url="http://127.0.0.1:$fault_port"
+bad_migrations_dir="$PWD/$run/bad-migrations"
+mkdir -p "$bad_migrations_dir"
+cat >"$bad_migrations_dir/0001_bad_migration.sql" <<'SQL'
+CREATE TABLE eventloopos_migration_fault (
+  id text PRIMARY KEY,
+  broken syntax
+);
+SQL
+printf "%s\n" "$fault_url" >"$run/fault-url.txt"
+printf "%s\n" "$bad_migrations_dir" >"$run/bad-migrations-dir.txt"
+
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-before.json" 2>"$run/main-health-before.err" || true
+
+if ! command -v docker >/dev/null 2>&1; then
+  printf "docker missing; install/start Docker Desktop or provide a Postgres runtime before running postgres-migration-mismatch proof\n" >"$run/postgres-runtime-check.txt"
+  printf "126\n" >"$run/dogfood-postgres-migration-mismatch.rc"
+else
+  printf "docker available\n" >"$run/postgres-runtime-check.txt"
+  set +e
+  EVENTLOOPOS_POSTGRES_CONTAINER="$postgres_container" \
+  EVENTLOOPOS_POSTGRES_PORT="$postgres_port" \
+    pnpm run dev:postgres:up >"$run/dev-postgres-up.out" 2>"$run/dev-postgres-up.err"
+  postgres_up_rc="$?"
+  printf "%s\n" "$postgres_up_rc" >"$run/dev-postgres-up.rc"
+  set -e
+
+  database_url="$(awk '/^postgres:\/\// { value=$0 } END { print value }' "$run/dev-postgres-up.out")"
+  printf "%s\n" "$database_url" >"$run/database-url.txt"
+  if [[ "$postgres_up_rc" == "0" && -n "$database_url" ]]; then
+    (
+      set +e
+      EVENTLOOPOS_DOGFOOD_PROFILE="lab-postgres-migration-mismatch-proof" \
+      EVENTLOOPOS_ORCHESTRATOR_URL="$fault_url" \
+      EVENTLOOPOS_DOGFOOD_POSTGRES=1 \
+      DATABASE_URL="$database_url" \
+      EVENTLOOPOS_POSTGRES_MIGRATIONS_DIR="$bad_migrations_dir" \
+      EVENTLOOPOS_DOGFOOD_QUEUE_APP=0 \
+      EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=0 \
+      EVENTLOOPOS_DOGFOOD_SHARED_CODEX_APP_SERVER=0 \
+      ORCHESTRATOR_TASK_SESSIONS=fake \
+      ORCHESTRATOR_MCP_SOURCES=off \
+        pnpm run dev:dogfood >"$run/dogfood-postgres-migration-mismatch.out" 2>"$run/dogfood-postgres-migration-mismatch.err"
+      printf "%s\n" "$?" >"$run/dogfood-postgres-migration-mismatch.rc"
+    ) &
+    dogfood_pid="$!"
+    printf "%s\n" "$dogfood_pid" >"$run/dogfood-postgres-migration-mismatch.pid"
+
+    for _ in {1..60}; do
+      if [[ -f "$run/dogfood-postgres-migration-mismatch.rc" ]]; then
+        break
+      fi
+      if ! kill -0 "$dogfood_pid" 2>/dev/null; then
+        wait "$dogfood_pid" || true
+        break
+      fi
+      sleep 1
+    done
+
+    if [[ ! -f "$run/dogfood-postgres-migration-mismatch.rc" ]]; then
+      kill -TERM "$dogfood_pid" 2>/dev/null || true
+      sleep 2
+      kill -KILL "$dogfood_pid" 2>/dev/null || true
+      printf "124\n" >"$run/dogfood-postgres-migration-mismatch.rc"
+    fi
+    wait "$dogfood_pid" 2>/dev/null || true
+  fi
+
+  EVENTLOOPOS_POSTGRES_CONTAINER="$postgres_container" \
+  EVENTLOOPOS_POSTGRES_PORT="$postgres_port" \
+    pnpm run dev:postgres:down >"$run/dev-postgres-down.out" 2>"$run/dev-postgres-down.err" || true
+fi
+
+curl -fsS --max-time 5 "$fault_url/health" >"$run/fault-health-after.json" 2>"$run/fault-health-after.err" || true
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-after.json" 2>"$run/main-health-after.err" || true
+lsof -nP -iTCP:"$fault_port" -sTCP:LISTEN >"$run/fault-port-listeners.txt" 2>"$run/fault-port-listeners.err" || true
+pgrep -fl "lab-postgres-migration-mismatch-proof|45992|45993|eventloopos-postgres-migration-mismatch" >"$run/fault-processes-after.txt" 2>"$run/fault-processes-after.err" || true
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+
+SCENARIO="$scenario" RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const scenario = process.env.SCENARIO;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const json = (relative, fallback = undefined) => {
+  const text = read(relative);
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+const stdout = read("dogfood-postgres-migration-mismatch.out");
+const stderr = read("dogfood-postgres-migration-mismatch.err");
+const combinedLog = `${stdout}\n${stderr}`;
+const rc = Number(read("dogfood-postgres-migration-mismatch.rc"));
+const dockerAvailable = /docker available/.test(read("postgres-runtime-check.txt"));
+const postgresStarted = read("dev-postgres-up.rc") === "0" && read("database-url.txt").startsWith("postgres://");
+const actionable = /Postgres unavailable|migrations failed|EVENTLOOPOS_POSTGRES_MIGRATIONS_DIR|DATABASE_URL|syntax error|broken syntax|migration/i.test(combinedLog);
+const mainHealthBefore = json("main-health-before.json", {});
+const mainHealthAfter = json("main-health-after.json", {});
+const assertions = [
+  {
+    name: "main_dogfood_healthy_before_fault",
+    ok: mainHealthBefore?.ok === true,
+    details: mainHealthBefore,
+  },
+  {
+    name: "postgres_runtime_available",
+    ok: dockerAvailable,
+    details: {
+      runtime_check: read("postgres-runtime-check.txt"),
+      fix: "Install/start Docker Desktop on the lab Mac, or provide another Postgres runtime, then rerun bin/lab-mac-fault-proof postgres-migration-mismatch.",
+    },
+  },
+  {
+    name: "isolated_postgres_started",
+    ok: postgresStarted,
+    details: {
+      dev_postgres_up_rc: read("dev-postgres-up.rc"),
+      dev_postgres_up_stdout_tail: read("dev-postgres-up.out").slice(-1000),
+      dev_postgres_up_stderr_tail: read("dev-postgres-up.err").slice(-1000),
+    },
+  },
+  {
+    name: "bad_migration_dogfood_exits_nonzero",
+    ok: Number.isFinite(rc) && rc !== 0 && rc !== 126,
+    details: { exit_code: rc },
+  },
+  {
+    name: "bad_migration_error_is_actionable",
+    ok: actionable,
+    details: {
+      stdout_tail: stdout.slice(-2000),
+      stderr_tail: stderr.slice(-2000),
+    },
+  },
+  {
+    name: "bad_migration_orchestrator_not_listening",
+    ok: read("fault-port-listeners.txt").length === 0,
+    details: { listeners: read("fault-port-listeners.txt") },
+  },
+  {
+    name: "bad_migration_fault_processes_cleaned_up",
+    ok: read("fault-processes-after.txt").length === 0,
+    details: { processes: read("fault-processes-after.txt") },
+  },
+  {
+    name: "main_dogfood_healthy_after_fault",
+    ok: mainHealthAfter?.ok === true,
+    details: mainHealthAfter,
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+fs.writeFileSync(path.join(run, "api-state.json"), JSON.stringify({
+  main_health_before: mainHealthBefore,
+  main_health_after: mainHealthAfter,
+  fault_health_after: json("fault-health-after.json", null),
+}, null, 2) + "\n");
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_fault_proof",
+  scenario,
+  run,
+  started_at: read("started-at.txt"),
+  finished_at: read("finished-at.txt"),
+  ok,
+  fault: {
+    injected: "run dogfood with Postgres mode and a deliberately broken migration directory on an isolated port",
+    recovery: "dogfood exits nonzero with actionable migration text and main stack remains healthy",
+  },
+  assertions,
+  artifacts: {
+    manifest: "manifest.json",
+    api_state: "api-state.json",
+    bad_migrations_dir: "bad-migrations",
+    dev_postgres_up_stdout: "dev-postgres-up.out",
+    dev_postgres_up_stderr: "dev-postgres-up.err",
+    dogfood_stdout: "dogfood-postgres-migration-mismatch.out",
+    dogfood_stderr: "dogfood-postgres-migration-mismatch.err",
+    dogfood_exit_code: "dogfood-postgres-migration-mismatch.rc",
+    fault_port_listeners: "fault-port-listeners.txt",
+    fault_processes_after: "fault-processes-after.txt",
+  },
+}, null, 2));
+NODE
+REMOTE
+}
+
+run_postgres_migration_mismatch() {
+  ensure_stack
+  ssh_remote "cd '$remote_repo' && mkdir -p '$remote_run'"
+  capture_desktop before
+  run_remote_postgres_migration_mismatch
+  capture_desktop after
+  patch_postgres_unavailable_capture_manifest
+  sync_artifacts
+
+  echo "$remote_run"
+  jq '{ok, scenario, assertions: [.assertions[] | {name, ok}]}' "$remote_run/manifest.json"
+  if ! jq -e '.ok == true' "$remote_run/manifest.json" >/dev/null; then
+    exit 1
+  fi
+}
+
+run_remote_aerospace_unavailable() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$url' '$scenario'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+run="$2"
+main_url="$3"
+scenario="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run/shim-bin"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+
+node_bin="$(command -v node)"
+pnpm_bin="$(command -v pnpm)"
+ln -sf "$node_bin" "$run/shim-bin/node"
+ln -sf "$pnpm_bin" "$run/shim-bin/pnpm"
+printf "%s\n" "$node_bin" >"$run/node-bin.txt"
+printf "%s\n" "$pnpm_bin" >"$run/pnpm-bin.txt"
+
+fault_port="45992"
+fault_url="http://127.0.0.1:$fault_port"
+printf "%s\n" "$fault_url" >"$run/fault-url.txt"
+
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-before.json" 2>"$run/main-health-before.err" || true
+
+(
+  set +e
+  PATH="$PWD/$run/shim-bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+  EVENTLOOPOS_DOGFOOD_PROFILE="lab-aerospace-unavailable-proof" \
+  EVENTLOOPOS_ORCHESTRATOR_URL="$fault_url" \
+  EVENTLOOPOS_DOGFOOD_POSTGRES=0 \
+  EVENTLOOPOS_DOGFOOD_QUEUE_APP=0 \
+  EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=1 \
+  EVENTLOOPOS_DOGFOOD_SHARED_CODEX_APP_SERVER=0 \
+  ORCHESTRATOR_TASK_SESSIONS=fake \
+  ORCHESTRATOR_MCP_SOURCES=off \
+    pnpm run dev:dogfood >"$run/dogfood-aerospace-unavailable.out" 2>"$run/dogfood-aerospace-unavailable.err"
+  printf "%s\n" "$?" >"$run/dogfood-aerospace-unavailable.rc"
+) &
+dogfood_pid="$!"
+printf "%s\n" "$dogfood_pid" >"$run/dogfood-aerospace-unavailable.pid"
+
+for _ in {1..30}; do
+  if [[ -f "$run/dogfood-aerospace-unavailable.rc" ]]; then
+    break
+  fi
+  if ! kill -0 "$dogfood_pid" 2>/dev/null; then
+    wait "$dogfood_pid" || true
+    break
+  fi
+  sleep 1
+done
+
+if [[ ! -f "$run/dogfood-aerospace-unavailable.rc" ]]; then
+  kill -TERM "$dogfood_pid" 2>/dev/null || true
+  sleep 2
+  kill -KILL "$dogfood_pid" 2>/dev/null || true
+  printf "124\n" >"$run/dogfood-aerospace-unavailable.rc"
+fi
+wait "$dogfood_pid" 2>/dev/null || true
+
+curl -fsS --max-time 5 "$fault_url/health" >"$run/fault-health-after.json" 2>"$run/fault-health-after.err" || true
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-after.json" 2>"$run/main-health-after.err" || true
+lsof -nP -iTCP:"$fault_port" -sTCP:LISTEN >"$run/fault-port-listeners.txt" 2>"$run/fault-port-listeners.err" || true
+pgrep -fl "lab-aerospace-unavailable-proof|45992" >"$run/fault-processes-after.txt" 2>"$run/fault-processes-after.err" || true
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+
+SCENARIO="$scenario" RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const scenario = process.env.SCENARIO;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const json = (relative, fallback = undefined) => {
+  const text = read(relative);
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+const stdout = read("dogfood-aerospace-unavailable.out");
+const stderr = read("dogfood-aerospace-unavailable.err");
+const combinedLog = `${stdout}\n${stderr}`;
+const rc = Number(read("dogfood-aerospace-unavailable.rc"));
+const actionable = /AeroSpace is required|brew install --cask nikitabobko\/tap\/aerospace|grant Accessibility|EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=0|AeroSpace readiness check failed/i.test(combinedLog);
+const mainHealthBefore = json("main-health-before.json", {});
+const mainHealthAfter = json("main-health-after.json", {});
+const assertions = [
+  {
+    name: "main_dogfood_healthy_before_fault",
+    ok: mainHealthBefore?.ok === true,
+    details: mainHealthBefore,
+  },
+  {
+    name: "missing_aerospace_dogfood_exits_nonzero",
+    ok: Number.isFinite(rc) && rc !== 0,
+    details: { exit_code: rc },
+  },
+  {
+    name: "missing_aerospace_error_is_actionable",
+    ok: actionable,
+    details: {
+      stdout_tail: stdout.slice(-2000),
+      stderr_tail: stderr.slice(-2000),
+    },
+  },
+  {
+    name: "missing_aerospace_orchestrator_not_listening",
+    ok: read("fault-port-listeners.txt").length === 0,
+    details: { listeners: read("fault-port-listeners.txt") },
+  },
+  {
+    name: "missing_aerospace_fault_processes_cleaned_up",
+    ok: read("fault-processes-after.txt").length === 0,
+    details: { processes: read("fault-processes-after.txt") },
+  },
+  {
+    name: "main_dogfood_healthy_after_fault",
+    ok: mainHealthAfter?.ok === true,
+    details: mainHealthAfter,
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+fs.writeFileSync(path.join(run, "api-state.json"), JSON.stringify({
+  main_health_before: mainHealthBefore,
+  main_health_after: mainHealthAfter,
+  fault_health_after: json("fault-health-after.json", null),
+}, null, 2) + "\n");
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_fault_proof",
+  scenario,
+  run,
+  started_at: read("started-at.txt"),
+  finished_at: read("finished-at.txt"),
+  ok,
+  fault: {
+    injected: "run dogfood with AeroSpace hidden from PATH on an isolated port",
+    recovery: "dogfood exits nonzero with actionable setup text and main stack remains healthy",
+  },
+  assertions,
+  artifacts: {
+    manifest: "manifest.json",
+    api_state: "api-state.json",
+    dogfood_stdout: "dogfood-aerospace-unavailable.out",
+    dogfood_stderr: "dogfood-aerospace-unavailable.err",
+    dogfood_exit_code: "dogfood-aerospace-unavailable.rc",
+    fault_port_listeners: "fault-port-listeners.txt",
+    fault_processes_after: "fault-processes-after.txt",
+  },
+}, null, 2));
+NODE
+REMOTE
+}
+
+run_remote_aerospace_permission_missing() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$url' '$scenario'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+run="$2"
+main_url="$3"
+scenario="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run/shim-bin"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+
+node_bin="$(command -v node)"
+pnpm_bin="$(command -v pnpm)"
+ln -sf "$node_bin" "$run/shim-bin/node"
+ln -sf "$pnpm_bin" "$run/shim-bin/pnpm"
+cat >"$run/shim-bin/aerospace" <<'SHIM'
+#!/bin/bash
+set -euo pipefail
+case "${1:-}" in
+  --version)
+    printf "aerospace 0.0.0-lab-fake\n"
+    exit 0
+    ;;
+  list-workspaces)
+    printf "AeroSpace cannot control windows because Accessibility permission is missing. Grant AeroSpace in System Settings > Privacy & Security > Accessibility.\n" >&2
+    exit 1
+    ;;
+  *)
+    printf "AeroSpace fake permission-missing shim blocked command: %s\n" "$*" >&2
+    exit 1
+    ;;
+esac
+SHIM
+chmod +x "$run/shim-bin/aerospace"
+printf "%s\n" "$node_bin" >"$run/node-bin.txt"
+printf "%s\n" "$pnpm_bin" >"$run/pnpm-bin.txt"
+printf "%s\n" "$repo/$run/shim-bin/aerospace" >"$run/aerospace-shim.txt"
+
+fault_port="45993"
+fault_url="http://127.0.0.1:$fault_port"
+printf "%s\n" "$fault_url" >"$run/fault-url.txt"
+
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-before.json" 2>"$run/main-health-before.err" || true
+
+(
+  set +e
+  PATH="$PWD/$run/shim-bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+  EVENTLOOPOS_DOGFOOD_PROFILE="lab-aerospace-permission-missing-proof" \
+  EVENTLOOPOS_ORCHESTRATOR_URL="$fault_url" \
+  EVENTLOOPOS_DOGFOOD_POSTGRES=0 \
+  EVENTLOOPOS_DOGFOOD_QUEUE_APP=0 \
+  EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=1 \
+  EVENTLOOPOS_DOGFOOD_SHARED_CODEX_APP_SERVER=0 \
+  ORCHESTRATOR_TASK_SESSIONS=fake \
+  ORCHESTRATOR_MCP_SOURCES=off \
+    pnpm run dev:dogfood >"$run/dogfood-aerospace-permission-missing.out" 2>"$run/dogfood-aerospace-permission-missing.err"
+  printf "%s\n" "$?" >"$run/dogfood-aerospace-permission-missing.rc"
+) &
+dogfood_pid="$!"
+printf "%s\n" "$dogfood_pid" >"$run/dogfood-aerospace-permission-missing.pid"
+
+for _ in {1..30}; do
+  if [[ -f "$run/dogfood-aerospace-permission-missing.rc" ]]; then
+    break
+  fi
+  if ! kill -0 "$dogfood_pid" 2>/dev/null; then
+    wait "$dogfood_pid" || true
+    break
+  fi
+  sleep 1
+done
+
+if [[ ! -f "$run/dogfood-aerospace-permission-missing.rc" ]]; then
+  kill -TERM "$dogfood_pid" 2>/dev/null || true
+  sleep 2
+  kill -KILL "$dogfood_pid" 2>/dev/null || true
+  printf "124\n" >"$run/dogfood-aerospace-permission-missing.rc"
+fi
+wait "$dogfood_pid" 2>/dev/null || true
+
+curl -fsS --max-time 5 "$fault_url/health" >"$run/fault-health-after.json" 2>"$run/fault-health-after.err" || true
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-after.json" 2>"$run/main-health-after.err" || true
+lsof -nP -iTCP:"$fault_port" -sTCP:LISTEN >"$run/fault-port-listeners.txt" 2>"$run/fault-port-listeners.err" || true
+pgrep -fl "lab-aerospace-permission-missing-proof|45993" >"$run/fault-processes-after.txt" 2>"$run/fault-processes-after.err" || true
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+
+SCENARIO="$scenario" RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const scenario = process.env.SCENARIO;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const json = (relative, fallback = undefined) => {
+  const text = read(relative);
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+const stdout = read("dogfood-aerospace-permission-missing.out");
+const stderr = read("dogfood-aerospace-permission-missing.err");
+const combinedLog = `${stdout}\n${stderr}`;
+const rc = Number(read("dogfood-aerospace-permission-missing.rc"));
+const actionable = /AeroSpace is required|grant Accessibility|System Settings|Privacy & Security|AeroSpace readiness check failed|EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=0/i.test(combinedLog);
+const mainHealthBefore = json("main-health-before.json", {});
+const mainHealthAfter = json("main-health-after.json", {});
+const assertions = [
+  {
+    name: "main_dogfood_healthy_before_fault",
+    ok: mainHealthBefore?.ok === true,
+    details: mainHealthBefore,
+  },
+  {
+    name: "aerospace_permission_fault_dogfood_exits_nonzero",
+    ok: Number.isFinite(rc) && rc !== 0,
+    details: { exit_code: rc },
+  },
+  {
+    name: "aerospace_permission_fault_error_is_actionable",
+    ok: actionable,
+    details: {
+      stdout_tail: stdout.slice(-2000),
+      stderr_tail: stderr.slice(-2000),
+    },
+  },
+  {
+    name: "aerospace_permission_fault_orchestrator_not_listening",
+    ok: read("fault-port-listeners.txt").length === 0,
+    details: { listeners: read("fault-port-listeners.txt") },
+  },
+  {
+    name: "aerospace_permission_fault_processes_cleaned_up",
+    ok: read("fault-processes-after.txt").length === 0,
+    details: { processes: read("fault-processes-after.txt") },
+  },
+  {
+    name: "main_dogfood_healthy_after_fault",
+    ok: mainHealthAfter?.ok === true,
+    details: mainHealthAfter,
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+fs.writeFileSync(path.join(run, "api-state.json"), JSON.stringify({
+  main_health_before: mainHealthBefore,
+  main_health_after: mainHealthAfter,
+  fault_health_after: json("fault-health-after.json", null),
+}, null, 2) + "\n");
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_fault_proof",
+  scenario,
+  run,
+  started_at: read("started-at.txt"),
+  finished_at: read("finished-at.txt"),
+  ok,
+  fault: {
+    injected: "run dogfood with a fake AeroSpace CLI that reports missing Accessibility permission",
+    recovery: "dogfood exits nonzero with actionable setup text and main stack remains healthy",
+  },
+  assertions,
+  artifacts: {
+    manifest: "manifest.json",
+    api_state: "api-state.json",
+    dogfood_stdout: "dogfood-aerospace-permission-missing.out",
+    dogfood_stderr: "dogfood-aerospace-permission-missing.err",
+    dogfood_exit_code: "dogfood-aerospace-permission-missing.rc",
+    fault_port_listeners: "fault-port-listeners.txt",
+    fault_processes_after: "fault-processes-after.txt",
+  },
+}, null, 2));
+NODE
+REMOTE
+}
+
+patch_aerospace_unavailable_capture_manifest() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run'" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+run="$2"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+RUN="$run" node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const manifestPath = path.join(run, "manifest.json");
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const readJson = (relative, fallback) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(run, relative), "utf8"));
+  } catch {
+    return fallback;
+  }
+};
+const before = readJson("captures/before/capture-summary.json", {});
+const after = readJson("captures/after/capture-summary.json", {});
+manifest.assertions.push(
+  {
+    name: "desktop_capture_after_nonempty",
+    ok: Number(after?.screen?.bytes ?? 0) > 10000,
+    details: after?.screen,
+  },
+);
+manifest.ok = manifest.assertions.every((assertion) => assertion.ok);
+manifest.captures = {
+  before: "captures/before/capture-summary.json",
+  after: "captures/after/capture-summary.json",
+};
+manifest.artifacts = {
+  ...manifest.artifacts,
+  screenshot_before: Number(before?.screen?.bytes ?? 0) > 0 ? "captures/before/screen.png" : undefined,
+  screenshot_after: Number(after?.screen?.bytes ?? 0) > 0 ? "captures/after/screen.png" : undefined,
+  windows_after: "captures/after/windows.json",
+};
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+NODE
+REMOTE
+}
+
+run_aerospace_unavailable() {
+  ensure_stack
+  ssh_remote "cd '$remote_repo' && mkdir -p '$remote_run'"
+  capture_desktop before
+  run_remote_aerospace_unavailable
+  capture_desktop after
+  patch_aerospace_unavailable_capture_manifest
+  sync_artifacts
+
+  echo "$remote_run"
+  jq '{ok, scenario, assertions: [.assertions[] | {name, ok}]}' "$remote_run/manifest.json"
+  if ! jq -e '.ok == true' "$remote_run/manifest.json" >/dev/null; then
+    exit 1
+  fi
+}
+
+run_aerospace_permission_missing() {
+  ensure_stack
+  ssh_remote "cd '$remote_repo' && mkdir -p '$remote_run'"
+  capture_desktop before
+  run_remote_aerospace_permission_missing
+  capture_desktop after
+  patch_aerospace_unavailable_capture_manifest
+  sync_artifacts
+
+  echo "$remote_run"
+  jq '{ok, scenario, assertions: [.assertions[] | {name, ok}]}' "$remote_run/manifest.json"
+  if ! jq -e '.ok == true' "$remote_run/manifest.json" >/dev/null; then
+    exit 1
+  fi
+}
+
+run_remote_ghostty_cleanup_failure() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$url' '$scenario'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+run="$2"
+main_url="$3"
+scenario="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+
+proof_dir="codex-completion-workspace-cleanup-fault"
+printf "%s\n" "$proof_dir" >"$run/proof-dir.txt"
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-before.json" 2>"$run/main-health-before.err" || true
+
+set +e
+EVENTLOOPOS_PROOF_INJECT_GHOSTTY_CLEANUP_FAILURE=1 \
+EVENTLOOPOS_CODEX_COMPLETION_WORKSPACE_ARTIFACT_DIR="$PWD/$run/$proof_dir" \
+  pnpm test:e2e:event-loop:codex-completion-workspace >"$run/proof.out" 2>"$run/proof.err"
+proof_rc="$?"
+set -e
+printf "%s\n" "$proof_rc" >"$run/proof.rc"
+
+proof_manifest="$proof_dir/manifest.json"
+if [[ -f "$proof_manifest" ]]; then
+  jq -r '.ghostty_remote_tui.launcher_path // empty' "$proof_manifest" >"$run/ghostty-launcher-path.txt" || true
+  jq -r '.ghostty_remote_tui.window_id // empty' "$proof_manifest" >"$run/ghostty-window-id.txt" || true
+  jq -r '.ghostty_remote_tui.title // empty' "$proof_manifest" >"$run/ghostty-title.txt" || true
+else
+  : >"$run/ghostty-launcher-path.txt"
+  : >"$run/ghostty-window-id.txt"
+  : >"$run/ghostty-title.txt"
+fi
+
+aerospace list-windows --all --format "%{window-id}|%{app-name}|%{window-title}|%{workspace}" >"$run/windows-before-cleanup.txt" 2>"$run/windows-before-cleanup.err" || true
+ps -axo pid,ppid,comm,args >"$run/ps-before-cleanup.txt" || true
+
+launcher_path="$(cat "$run/ghostty-launcher-path.txt" 2>/dev/null || true)"
+window_id="$(cat "$run/ghostty-window-id.txt" 2>/dev/null || true)"
+title="$(cat "$run/ghostty-title.txt" 2>/dev/null || true)"
+
+if [[ -n "$launcher_path" ]]; then
+  pkill -f "$launcher_path" >"$run/pkill-launcher.out" 2>"$run/pkill-launcher.err" || true
+fi
+if [[ -n "$window_id" && "$window_id" != "null" ]]; then
+  aerospace close --window-id "$window_id" >"$run/close-window-id.out" 2>"$run/close-window-id.err" || true
+fi
+if [[ -n "$title" && "$title" != "null" ]]; then
+  aerospace list-windows --all --json --format "%{window-id}%{app-name}%{window-title}%{workspace}" 2>/dev/null \
+    | jq -r --arg title "$title" '.[] | select(."app-name" == "Ghostty" and (."window-title" | contains($title))) | ."window-id"' \
+    | while read -r matched_window_id; do
+        [[ -z "$matched_window_id" ]] && continue
+        aerospace close --window-id "$matched_window_id" >>"$run/close-title.out" 2>>"$run/close-title.err" || true
+      done
+fi
+sleep 2
+
+aerospace list-windows --all --format "%{window-id}|%{app-name}|%{window-title}|%{workspace}" >"$run/windows-after-cleanup.txt" 2>"$run/windows-after-cleanup.err" || true
+ps -axo pid,ppid,comm,args >"$run/ps-after-cleanup.txt" || true
+if [[ -n "$launcher_path" ]]; then
+  pgrep -fl "$launcher_path" >"$run/launcher-processes-after-cleanup.txt" 2>"$run/launcher-processes-after-cleanup.err" || true
+else
+  : >"$run/launcher-processes-after-cleanup.txt"
+fi
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-after.json" 2>"$run/main-health-after.err" || true
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+
+SCENARIO="$scenario" RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const scenario = process.env.SCENARIO;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const json = (relative, fallback = undefined) => {
+  const text = read(relative);
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+const proofDir = read("proof-dir.txt");
+const proofManifest = json(path.join(proofDir, "manifest.json"), {});
+const proofRc = Number(read("proof.rc"));
+const title = read("ghostty-title.txt");
+const windowId = read("ghostty-window-id.txt");
+const launcherPath = read("ghostty-launcher-path.txt");
+const mainHealthBefore = json("main-health-before.json", {});
+const mainHealthAfter = json("main-health-after.json", {});
+const proofError = String(proofManifest?.error ?? "");
+const cleanup = proofManifest?.ghostty_cleanup ?? {};
+const remainingWindows = Array.isArray(cleanup.remaining_windows) ? cleanup.remaining_windows : [];
+const remainingPids = Array.isArray(cleanup.remaining_pids) ? cleanup.remaining_pids : [];
+const afterWindowsText = read("windows-after-cleanup.txt");
+const afterLauncherProcesses = read("launcher-processes-after-cleanup.txt");
+const titleStillPresent = title.length > 0 && afterWindowsText.includes(title);
+const windowIdStillPresent = windowId.length > 0 && new RegExp(`^${windowId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\|`, "m").test(afterWindowsText);
+const cleanupFailureVisible = proofManifest?.ghostty_cleanup_fault_injected === true
+  && proofManifest?.ghostty_cleanup?.ok === false
+  && /Ghostty cleanup verification failed/i.test(proofError);
+const assertions = [
+  {
+    name: "main_dogfood_healthy_before_fault",
+    ok: mainHealthBefore?.ok === true,
+    details: mainHealthBefore,
+  },
+  {
+    name: "cleanup_fault_proof_exits_nonzero",
+    ok: Number.isFinite(proofRc) && proofRc !== 0,
+    details: { exit_code: proofRc },
+  },
+  {
+    name: "ghostty_cleanup_failure_is_detected",
+    ok: cleanupFailureVisible,
+    details: {
+      proof_error: proofError,
+      cleanup,
+    },
+  },
+  {
+    name: "ghostty_cleanup_failure_records_remaining_artifact",
+    ok: remainingWindows.length > 0 || remainingPids.length > 0,
+    details: {
+      remaining_windows: remainingWindows,
+      remaining_pids: remainingPids,
+      title,
+      window_id: windowId,
+      launcher_path: launcherPath,
+    },
+  },
+  {
+    name: "ghostty_cleanup_fault_recovery_removed_orphans",
+    ok: !titleStillPresent && !windowIdStillPresent && afterLauncherProcesses.length === 0,
+    details: {
+      title_still_present: titleStillPresent,
+      window_id_still_present: windowIdStillPresent,
+      launcher_processes_after_cleanup: afterLauncherProcesses,
+    },
+  },
+  {
+    name: "main_dogfood_healthy_after_fault",
+    ok: mainHealthAfter?.ok === true,
+    details: mainHealthAfter,
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+fs.writeFileSync(path.join(run, "api-state.json"), JSON.stringify({
+  main_health_before: mainHealthBefore,
+  main_health_after: mainHealthAfter,
+  proof_manifest: proofManifest,
+}, null, 2) + "\n");
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_fault_proof",
+  scenario,
+  run,
+  started_at: read("started-at.txt"),
+  finished_at: read("finished-at.txt"),
+  ok,
+  fault: {
+    injected: "skip Ghostty cleanup in the real Codex completion/workspace proof",
+    recovery: "proof fails with visible remaining Ghostty artifacts, then lab fault runner closes the orphaned window/process",
+  },
+  assertions,
+  artifacts: {
+    manifest: "manifest.json",
+    api_state: "api-state.json",
+    proof_manifest: `${proofDir}/manifest.json`,
+    proof_stdout: "proof.out",
+    proof_stderr: "proof.err",
+    proof_exit_code: "proof.rc",
+    windows_before_cleanup: "windows-before-cleanup.txt",
+    windows_after_cleanup: "windows-after-cleanup.txt",
+    processes_before_cleanup: "ps-before-cleanup.txt",
+    processes_after_cleanup: "ps-after-cleanup.txt",
+  },
+}, null, 2));
+NODE
+REMOTE
+}
+
+run_ghostty_cleanup_failure() {
+  ensure_stack
+  ssh_remote "cd '$remote_repo' && mkdir -p '$remote_run'"
+  capture_desktop before
+  run_remote_ghostty_cleanup_failure
+  capture_desktop after
+  patch_postgres_unavailable_capture_manifest
+  sync_artifacts
+
+  echo "$remote_run"
+  jq '{ok, scenario, assertions: [.assertions[] | {name, ok}]}' "$remote_run/manifest.json"
+  if ! jq -e '.ok == true' "$remote_run/manifest.json" >/dev/null; then
+    exit 1
+  fi
+}
+
+patch_screen_capture_denied_manifest() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$scenario' '$url'" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+run="$2"
+scenario="$3"
+main_url="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-after.json" 2>"$run/main-health-after.err" || true
+SCENARIO="$scenario" RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const scenario = process.env.SCENARIO;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const json = (relative, fallback = undefined) => {
+  const text = read(relative);
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+const capture = json("captures/screen-denied/capture-summary.json", {});
+const mainHealthAfter = json("main-health-after.json", {});
+const hint = String(capture?.screen?.failure_hint ?? "");
+const error = String(capture?.screen?.error ?? "");
+const assertions = [
+  {
+    name: "screen_capture_denied_has_zero_bytes",
+    ok: Number(capture?.screen?.bytes ?? -1) === 0,
+    details: capture?.screen,
+  },
+  {
+    name: "screen_capture_denied_tcc_status_reported",
+    ok: capture?.screen?.tcc_terminal_screen_capture === "denied",
+    details: capture?.screen,
+  },
+  {
+    name: "screen_capture_denied_error_is_actionable",
+    ok: /Terminal denied|Screen & System Audio Recording|Privacy & Security|grant Terminal/i.test(hint),
+    details: {
+      failure_hint: hint,
+      error,
+    },
+  },
+  {
+    name: "screen_capture_denied_skips_gui_fallback",
+    ok: capture?.gui_fallback?.used === false && /Terminal is denied/.test(String(capture?.gui_fallback?.skipped_reason ?? "")),
+    details: capture?.gui_fallback,
+  },
+  {
+    name: "capture_still_collects_window_and_process_artifacts",
+    ok: Boolean(capture?.artifacts?.windows) && Boolean(capture?.artifacts?.tcc_user_capture_access),
+    details: capture?.artifacts,
+  },
+  {
+    name: "main_dogfood_healthy_after_fault",
+    ok: mainHealthAfter?.ok === true,
+    details: mainHealthAfter,
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+fs.writeFileSync(path.join(run, "api-state.json"), JSON.stringify({
+  main_health_after: mainHealthAfter,
+  capture_summary: capture,
+}, null, 2) + "\n");
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_fault_proof",
+  scenario,
+  run,
+  started_at: read("captures/screen-denied/captured-at.txt"),
+  finished_at: read("finished-at.txt"),
+  ok,
+  fault: {
+    injected: "simulate Terminal denied Screen Recording during desktop capture",
+    recovery: "capture records actionable TCC setup guidance and avoids GUI fallback that would leave stale Terminal windows",
+  },
+  assertions,
+  captures: {
+    screen_denied: "captures/screen-denied/capture-summary.json",
+  },
+  artifacts: {
+    manifest: "manifest.json",
+    api_state: "api-state.json",
+    capture_summary: "captures/screen-denied/capture-summary.json",
+    windows: "captures/screen-denied/windows.json",
+    process_list: "captures/screen-denied/ps.txt",
+    tcc_user_capture_access: "captures/screen-denied/tcc-user-capture-access.txt",
+    screencapture_error: "captures/screen-denied/screencapture.err",
+  },
+}, null, 2));
+NODE
+REMOTE
+}
+
+run_screen_capture_denied() {
+  ensure_stack
+  ssh_remote "cd '$remote_repo' && mkdir -p '$remote_run'"
+  LAB_MAC_HOST="$lab_host" \
+  LAB_MAC_USER="$lab_user" \
+  LAB_MAC_KEY="$lab_key" \
+  LAB_DOGFOOD_URL="$url" \
+  LAB_MAC_CAPTURE_INJECT_SCREEN_DENIED=1 \
+  bin/lab-mac-desktop-capture "$remote_run" screen-denied >/dev/null
+  patch_screen_capture_denied_manifest
+  sync_artifacts
+
+  echo "$remote_run"
+  jq '{ok, scenario, assertions: [.assertions[] | {name, ok}]}' "$remote_run/manifest.json"
+  if ! jq -e '.ok == true' "$remote_run/manifest.json" >/dev/null; then
+    exit 1
+  fi
+}
+
+patch_queue_app_accessibility_denied_manifest() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$scenario' '$url'" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+run="$2"
+scenario="$3"
+main_url="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-after.json" 2>"$run/main-health-after.err" || true
+SCENARIO="$scenario" RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const scenario = process.env.SCENARIO;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const json = (relative, fallback = undefined) => {
+  const text = read(relative);
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+const capture = json("captures/accessibility-denied/capture-summary.json", {});
+const mainHealthAfter = json("main-health-after.json", {});
+const queueApp = capture?.queue_app ?? {};
+const hint = String(queueApp.accessibility_failure_hint ?? "");
+const error = String(queueApp.accessibility_error ?? "");
+const assertions = [
+  {
+    name: "desktop_capture_still_nonempty",
+    ok: Number(capture?.screen?.bytes ?? 0) > 10000,
+    details: capture?.screen,
+  },
+  {
+    name: "queue_app_process_still_visible",
+    ok: queueApp.process_present === true,
+    details: queueApp,
+  },
+  {
+    name: "queue_app_ax_menu_blocked",
+    ok: queueApp.menu_items_present === false && queueApp.ax_tree_present === false && queueApp.harness_status_present === false,
+    details: queueApp,
+  },
+  {
+    name: "queue_app_accessibility_tcc_status_reported",
+    ok: queueApp.tcc_terminal_accessibility === "denied",
+    details: queueApp,
+  },
+  {
+    name: "queue_app_accessibility_error_is_actionable",
+    ok: /Terminal denied|Accessibility|Privacy & Security|Grant Terminal|Queue UI proof/i.test(hint),
+    details: {
+      failure_hint: hint,
+      error,
+    },
+  },
+  {
+    name: "capture_still_collects_window_process_and_tcc_artifacts",
+    ok: Boolean(capture?.artifacts?.windows) && Boolean(capture?.artifacts?.process_list) && Boolean(capture?.artifacts?.tcc_user_capture_access),
+    details: capture?.artifacts,
+  },
+  {
+    name: "main_dogfood_healthy_after_fault",
+    ok: mainHealthAfter?.ok === true,
+    details: mainHealthAfter,
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+fs.writeFileSync(path.join(run, "api-state.json"), JSON.stringify({
+  main_health_after: mainHealthAfter,
+  capture_summary: capture,
+}, null, 2) + "\n");
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_fault_proof",
+  scenario,
+  run,
+  started_at: read("captures/accessibility-denied/captured-at.txt"),
+  finished_at: read("finished-at.txt"),
+  ok,
+  fault: {
+    injected: "simulate Terminal/System Events denied Accessibility while capturing Queue app UI",
+    recovery: "capture records actionable Accessibility setup guidance while preserving screenshot/process/window/TCC artifacts",
+  },
+  assertions,
+  captures: {
+    accessibility_denied: "captures/accessibility-denied/capture-summary.json",
+  },
+  artifacts: {
+    manifest: "manifest.json",
+    api_state: "api-state.json",
+    capture_summary: "captures/accessibility-denied/capture-summary.json",
+    screenshot: "captures/accessibility-denied/screen.png",
+    windows: "captures/accessibility-denied/windows.json",
+    process_list: "captures/accessibility-denied/ps.txt",
+    tcc_user_capture_access: "captures/accessibility-denied/tcc-user-capture-access.txt",
+    queue_menu_error: "captures/accessibility-denied/queue-menu-items.err",
+    queue_ax_tree_error: "captures/accessibility-denied/queue-ax-tree.err",
+  },
+}, null, 2));
+NODE
+REMOTE
+}
+
+run_queue_app_accessibility_denied() {
+  ensure_stack
+  ssh_remote "cd '$remote_repo' && mkdir -p '$remote_run'"
+  LAB_MAC_HOST="$lab_host" \
+  LAB_MAC_USER="$lab_user" \
+  LAB_MAC_KEY="$lab_key" \
+  LAB_DOGFOOD_URL="$url" \
+  LAB_MAC_CAPTURE_INJECT_ACCESSIBILITY_DENIED=1 \
+  bin/lab-mac-desktop-capture "$remote_run" accessibility-denied >/dev/null
+  patch_queue_app_accessibility_denied_manifest
+  sync_artifacts
+
+  echo "$remote_run"
+  jq '{ok, scenario, assertions: [.assertions[] | {name, ok}]}' "$remote_run/manifest.json"
+  if ! jq -e '.ok == true' "$remote_run/manifest.json" >/dev/null; then
+    exit 1
+  fi
+}
+
+run_remote_aerospace_restore_server_down() {
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$url' '$scenario'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+run="$2"
+main_url="$3"
+scenario="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+
+proof_dir="aerospace-restore-server-down-proof"
+printf "%s\n" "$proof_dir" >"$run/proof-dir.txt"
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-before.json" 2>"$run/main-health-before.err" || true
+
+set +e
+EVENTLOOPOS_INJECT_AEROSPACE_RESTORE_FAILURE=1 \
+EVENTLOOPOS_PROVE_FORCE_FLOATING=0 \
+EVENTLOOPOS_ISOLATED_AEROSPACE_ARTIFACT_DIR="$PWD/$run/$proof_dir" \
+  pnpm --filter @eventloopos/orchestrator run live:aerospace:isolated >"$run/proof.out" 2>"$run/proof.err"
+proof_rc="$?"
+set -e
+printf "%s\n" "$proof_rc" >"$run/proof.rc"
+
+aerospace list-windows --all --format "%{window-id}|%{app-name}|%{window-title}|%{workspace}" >"$run/windows-after-proof.txt" 2>"$run/windows-after-proof.err" || true
+ps -axo pid,ppid,comm,args >"$run/ps-after-proof.txt" || true
+curl -fsS --max-time 5 "$main_url/health" >"$run/main-health-after.json" 2>"$run/main-health-after.err" || true
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+
+SCENARIO="$scenario" RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+const run = process.env.RUN;
+const scenario = process.env.SCENARIO;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const json = (relative, fallback = undefined) => {
+  const text = read(relative);
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+const proofDir = read("proof-dir.txt");
+const proofManifest = json(path.join(proofDir, "manifest.json"), {});
+const proofRc = Number(read("proof.rc"));
+const proofStdout = read("proof.out");
+const proofStderr = read("proof.err");
+const combinedProofText = `${proofStdout}\n${proofStderr}\n${JSON.stringify(proofManifest)}`;
+const mainHealthBefore = json("main-health-before.json", {});
+const mainHealthAfter = json("main-health-after.json", {});
+const cleanup = proofManifest?.cleanup ?? {};
+const detail = String(proofManifest?.detail ?? "");
+const windowsAfter = read("windows-after-proof.txt");
+const smokeTitleStillPresent = /eventloopOS-isolated-smoke/.test(windowsAfter);
+const assertions = [
+  {
+    name: "main_dogfood_healthy_before_fault",
+    ok: mainHealthBefore?.ok === true,
+    details: mainHealthBefore,
+  },
+  {
+    name: "aerospace_restore_fault_proof_exits_nonzero",
+    ok: Number.isFinite(proofRc) && proofRc !== 0,
+    details: { exit_code: proofRc },
+  },
+  {
+    name: "aerospace_restore_failure_is_actionable",
+    ok: proofManifest?.ok === false
+      && proofManifest?.reason === "isolated_smoke_failed"
+      && /AeroSpace server unavailable during restore|Restart AeroSpace|grant Accessibility|workspace restore proof/i.test(combinedProofText),
+    details: {
+      reason: proofManifest?.reason,
+      detail,
+      stdout_tail: proofStdout.slice(-2000),
+      stderr_tail: proofStderr.slice(-2000),
+    },
+  },
+  {
+    name: "aerospace_restore_fault_cleanup_removed_smoke_window",
+    ok: cleanup?.ok === true && proofManifest?.cleanup_verified === true && !smokeTitleStillPresent,
+    details: {
+      cleanup,
+      cleanup_verified: proofManifest?.cleanup_verified,
+      smoke_title_still_present: smokeTitleStillPresent,
+    },
+  },
+  {
+    name: "main_dogfood_healthy_after_fault",
+    ok: mainHealthAfter?.ok === true,
+    details: mainHealthAfter,
+  },
+];
+const ok = assertions.every((assertion) => assertion.ok);
+fs.writeFileSync(path.join(run, "api-state.json"), JSON.stringify({
+  main_health_before: mainHealthBefore,
+  main_health_after: mainHealthAfter,
+  proof_manifest: proofManifest,
+}, null, 2) + "\n");
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_fault_proof",
+  scenario,
+  run,
+  started_at: read("started-at.txt"),
+  finished_at: read("finished-at.txt"),
+  ok,
+  fault: {
+    injected: "fail the second AeroSpace move-node-to-workspace command during isolated restore proof",
+    recovery: "proof reports actionable restore failure and removes the smoke window",
+  },
+  assertions,
+  artifacts: {
+    manifest: "manifest.json",
+    api_state: "api-state.json",
+    proof_manifest: `${proofDir}/manifest.json`,
+    proof_stdout: "proof.out",
+    proof_stderr: "proof.err",
+    proof_exit_code: "proof.rc",
+    windows_after_proof: "windows-after-proof.txt",
+    processes_after_proof: "ps-after-proof.txt",
+  },
+}, null, 2));
+NODE
+REMOTE
+}
+
+run_aerospace_restore_server_down() {
+  ensure_stack
+  ssh_remote "cd '$remote_repo' && mkdir -p '$remote_run'"
+  capture_desktop before
+  run_remote_aerospace_restore_server_down
+  capture_desktop after
+  patch_postgres_unavailable_capture_manifest
+  sync_artifacts
+
+  echo "$remote_run"
+  jq '{ok, scenario, assertions: [.assertions[] | {name, ok}]}' "$remote_run/manifest.json"
+  if ! jq -e '.ok == true' "$remote_run/manifest.json" >/dev/null; then
+    exit 1
+  fi
+}
+
+if [[ "$scenario" == "orchestrator-crash-restart" ]]; then
+  run_orchestrator_crash_restart
+  exit 0
+fi
+
+if [[ "$scenario" == "duplicate-idempotency" ]]; then
+  run_duplicate_idempotency
+  exit 0
+fi
+
+if [[ "$scenario" == "postgres-unavailable" ]]; then
+  run_postgres_unavailable
+  exit 0
+fi
+
+if [[ "$scenario" == "postgres-migration-mismatch" ]]; then
+  run_postgres_migration_mismatch
+  exit 0
+fi
+
+if [[ "$scenario" == "aerospace-unavailable" ]]; then
+  run_aerospace_unavailable
+  exit 0
+fi
+
+if [[ "$scenario" == "aerospace-permission-missing" ]]; then
+  run_aerospace_permission_missing
+  exit 0
+fi
+
+if [[ "$scenario" == "ghostty-cleanup-failure" ]]; then
+  run_ghostty_cleanup_failure
+  exit 0
+fi
+
+if [[ "$scenario" == "screen-capture-denied" ]]; then
+  run_screen_capture_denied
+  exit 0
+fi
+
+if [[ "$scenario" == "queue-app-accessibility-denied" ]]; then
+  run_queue_app_accessibility_denied
+  exit 0
+fi
+
+if [[ "$scenario" == "aerospace-restore-server-down" ]]; then
+  run_aerospace_restore_server_down
+  exit 0
+fi
+
+ensure_stack
+if [[ "$restart_first" != "0" ]]; then
+  restart_stack >/dev/null
+fi
+LAB_MAC_HOST="$lab_host" LAB_MAC_USER="$lab_user" LAB_MAC_KEY="$lab_key" LAB_DOGFOOD_URL="$url" \
+  bin/lab-mac-dogfood cleanup >/dev/null || true
+ssh_remote "cd '$remote_repo' && mkdir -p '$remote_run'"
+capture_desktop before
+recover_needed=1
+run_remote_fault
+capture_desktop after-fault
+patch_capture_manifest
+sync_artifacts
+restart_stack >/dev/null
+recover_needed=0
+
+echo "$remote_run"
+jq '{ok, scenario, task_id, task_session_id, assertions: [.assertions[] | {name, ok}]}' "$remote_run/manifest.json"
+if ! jq -e '.ok == true' "$remote_run/manifest.json" >/dev/null; then
+  exit 1
+fi

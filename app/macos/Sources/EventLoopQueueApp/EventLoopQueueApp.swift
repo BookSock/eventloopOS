@@ -184,6 +184,11 @@ struct EventLoopQueueApp: App {
 final class QueueAppDelegate: NSObject, NSApplicationDelegate {
     weak var viewModel: QueueViewModel?
     private var terminationRestoreInFlight = false
+    private var harnessWindow: NSWindow?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        openHarnessWindowIfRequested()
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !terminationRestoreInFlight, viewModel?.canRestoreManualWorkspace == true else {
@@ -204,6 +209,52 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         await viewModel.confirmManualWorkspaceRestore()
+        return true
+    }
+
+    @discardableResult
+    func openHarnessWindowIfRequested(
+        arguments: [String] = CommandLine.arguments,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        guard Self.shouldOpenHarnessWindow(arguments: arguments, environment: environment) else {
+            return false
+        }
+        return openHarnessWindow()
+    }
+
+    static func shouldOpenHarnessWindow(
+        arguments: [String],
+        environment: [String: String]
+    ) -> Bool {
+        arguments.contains("--harness-window") ||
+            environment["EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW"] == "1"
+    }
+
+    @discardableResult
+    private func openHarnessWindow() -> Bool {
+        guard let viewModel else {
+            return false
+        }
+        if let harnessWindow {
+            harnessWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return true
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 960, height: 640),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "eventloopOS Queue"
+        window.identifier = NSUserInterfaceItemIdentifier("eventloopos-queue-harness-window")
+        window.contentViewController = NSHostingController(rootView: QueueWindowView(viewModel: viewModel))
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        harnessWindow = window
+        NSApp.activate(ignoringOtherApps: true)
         return true
     }
 }

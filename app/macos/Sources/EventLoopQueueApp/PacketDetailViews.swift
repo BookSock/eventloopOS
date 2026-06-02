@@ -447,6 +447,12 @@ private struct QueueLineageTaskMessageRow: View {
             }
             .font(.caption2)
             .foregroundStyle(.tertiary)
+            if let recoveryHint = message.recoveryHint {
+                Text(recoveryHint)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
         }
         .padding(.vertical, 3)
         .accessibilityIdentifier("packet-lineage-task-message-row-\(message.id)")
@@ -766,4 +772,3 @@ private func confidenceReasonLabel(_ reason: String) -> String {
         .map(String.init)
         .joined(separator: " ")
 }
-

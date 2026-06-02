@@ -260,10 +260,12 @@ final class QueueClientTests: XCTestCase {
                 "durable_id": "task_msg_durable_1",
                 "task_session_id": "task_session_blog",
                 "origin": "queue_action",
-                "status": "sent",
+                "status": "failed",
                 "event_ids": ["evt_review_1"],
                 "text_hash": "abc",
-                "text_length": 42
+                "text_length": 42,
+                "error": "thread not found",
+                "recovery_hint": "Codex thread is stale. Replace or rebind the task session, then send the followup again."
               }
             ],
             "counts": {"events": 1, "activity": 1, "task_messages": 1}
@@ -280,6 +282,7 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.lineage.events.first?.title, "Launch feedback")
         XCTAssertEqual(envelope.lineage.activity.first?.taskSessionId, "task_session_blog")
         XCTAssertEqual(envelope.lineage.taskMessages.first?.textLength, 42)
+        XCTAssertEqual(envelope.lineage.taskMessages.first?.recoveryHint, "Codex thread is stale. Replace or rebind the task session, then send the followup again.")
         XCTAssertEqual(envelope.lineage.counts.taskMessages, 1)
     }
 

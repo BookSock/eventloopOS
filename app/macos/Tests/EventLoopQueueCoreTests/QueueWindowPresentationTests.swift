@@ -37,7 +37,7 @@ final class QueueWindowPresentationTests: XCTestCase {
         let summary = QueueWindowSidebarSummary(packets: [], state: .failed("offline"))
 
         XCTAssertEqual(summary.title, "Queue unavailable")
-        XCTAssertEqual(summary.subtitle, "offline")
+        XCTAssertEqual(summary.subtitle, "Orchestrator unavailable. Start dev dogfood with pnpm dev:dogfood or set EVENTLOOPOS_ORCHESTRATOR_URL, then refresh. Detail: offline")
         XCTAssertEqual(summary.systemImage, "exclamationmark.triangle")
         XCTAssertFalse(summary.showsProgress)
         XCTAssertTrue(summary.showsRetry)
@@ -73,10 +73,53 @@ final class QueueWindowPresentationTests: XCTestCase {
         let summary = QueueWindowDetailSummary(selectedPacket: nil, packets: [], state: .failed("HTTP 500"))
 
         XCTAssertEqual(summary.title, "Queue unavailable")
-        XCTAssertEqual(summary.subtitle, "HTTP 500")
+        XCTAssertEqual(summary.subtitle, "Orchestrator returned a server error. Check dogfood logs, run pnpm readiness:summary, then refresh. Detail: HTTP 500")
         XCTAssertEqual(summary.systemImage, "exclamationmark.triangle")
         XCTAssertFalse(summary.showsProgress)
         XCTAssertTrue(summary.showsRetry)
+    }
+
+    func testActionableQueueFailureMessageMapsMissingPermissions() {
+        XCTAssertEqual(
+            actionableQueueFailureMessage("AeroSpace app is not running"),
+            "AeroSpace unavailable. Launch AeroSpace, grant Accessibility in System Settings > Privacy & Security, then refresh. Detail: AeroSpace app is not running"
+        )
+        XCTAssertEqual(
+            actionableQueueFailureMessage("Warning: AeroSpace client/server versions don't match. CLI/app hashes: aaa / bbb."),
+            "AeroSpace version mismatch. Restart AeroSpace, then refresh. If it still fails, reinstall AeroSpace so the CLI and app bundle match. Detail: Warning: AeroSpace client/server versions don't match. CLI/app hashes: aaa / bbb."
+        )
+        XCTAssertEqual(
+            actionableQueueFailureMessage("launchservices_server_ready=false; direct binary launch only proved the binary can start"),
+            "AeroSpace launch needs approval. Run pnpm setup:prompt, re-grant AeroSpace Accessibility, open AeroSpace normally, then refresh. Detail: launchservices_server_ready=false; direct binary launch only proved the binary can start"
+        )
+        XCTAssertEqual(
+            actionableQueueFailureMessage("could not create image from display"),
+            "Screen Recording missing. Run pnpm macos:permission-prompt, approve Terminal/eventloopOS in Screen & System Audio Recording, then refresh. Detail: could not create image from display"
+        )
+        XCTAssertEqual(
+            actionableQueueFailureMessage("System Events is not allowed assistive access"),
+            "Accessibility missing. Run pnpm macos:permission-prompt, approve Terminal/eventloopOS/AeroSpace in Accessibility, then refresh. Detail: System Events is not allowed assistive access"
+        )
+        XCTAssertEqual(
+            actionableQueueFailureMessage("Codex login not configured"),
+            "Codex is not ready. Run pnpm codex:status-proof, then codex login if auth is missing. Detail: Codex login not configured"
+        )
+        XCTAssertEqual(
+            actionableQueueFailureMessage("Codex thread not found after restart"),
+            "Codex thread is stale. Replace or rebind the task session, then send the followup again. Detail: Codex thread not found after restart"
+        )
+        XCTAssertEqual(
+            actionableQueueFailureMessage("Tailscale/VNC disconnected; Remote Login unreachable"),
+            "Remote lab disconnected. Open Tailscale on the lab Mac, verify Remote Login and Screen Sharing, then run pnpm lab:wait-online:quick. Detail: Tailscale/VNC disconnected; Remote Login unreachable"
+        )
+        XCTAssertEqual(
+            actionableQueueFailureMessage("Postgres migration mismatch"),
+            "Postgres unavailable or schema mismatch. Start the configured database or run the migration repair proof, then refresh. Detail: Postgres migration mismatch"
+        )
+        XCTAssertEqual(
+            actionableQueueFailureMessage("Ghostty cleanup failure: terminate running processes prompt is still open"),
+            "Terminal cleanup needs attention. Close stuck Ghostty/Terminal prompts, then rerun cleanup or product readiness. Detail: Ghostty cleanup failure: terminate running processes prompt is still open"
+        )
     }
 
     func testTaskSessionTargetPresentationShowsProviderStatusAndIdentity() {

@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-self-heal-remote [install|status|uninstall|run]
+
+Run lab self-heal actions over SSH on the remote Mac Studio.
+
+Environment:
+  LAB_MAC_HOST              default: 100.71.111.25
+  LAB_MAC_USER              default: claw
+  LAB_MAC_KEY               default: ~/.ssh/eventloop_lab_mac
+  LAB_MAC_EVENTLOOP_PATH    default: ~/dev/2026/eventloopOS
+  LAB_CONTROLLER_TAILSCALE_IP optional controller 100.x IP or MagicDNS name
+EOF
+}
+
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+
+action="${1:-status}"
+case "$action" in
+  install|status|uninstall|run) ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown action: $action" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+eventloop_path="${LAB_MAC_EVENTLOOP_PATH:-~/dev/2026/eventloopOS}"
+controller_tailnet_ip="${LAB_CONTROLLER_TAILSCALE_IP:-}"
+remote="${lab_user}@${lab_host}"
+
+ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 "$remote" \
+  "bash -s -- '$eventloop_path' '$action' '$controller_tailnet_ip'" <<'REMOTE'
+set -euo pipefail
+
+eventloop_path="$1"
+action="$2"
+controller_tailnet_ip="${3:-}"
+
+case "$eventloop_path" in
+  "~"/*) repo="$HOME/${eventloop_path#"~/"}" ;;
+  "~") repo="$HOME" ;;
+  *) repo="$eventloop_path" ;;
+esac
+
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+
+if [[ -n "$controller_tailnet_ip" ]]; then
+  LAB_CONTROLLER_TAILSCALE_IP="$controller_tailnet_ip" bin/lab-mac-self-heal "$action"
+else
+  bin/lab-mac-self-heal "$action"
+fi
+REMOTE

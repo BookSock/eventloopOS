@@ -181,6 +181,7 @@ public struct QueueLineageTaskMessage: Codable, Equatable, Identifiable, Sendabl
     public let textHash: String?
     public let textLength: Int?
     public let error: String?
+    public let recoveryHint: String?
 
     public init(
         id: String,
@@ -191,7 +192,8 @@ public struct QueueLineageTaskMessage: Codable, Equatable, Identifiable, Sendabl
         eventIds: [String],
         textHash: String? = nil,
         textLength: Int? = nil,
-        error: String? = nil
+        error: String? = nil,
+        recoveryHint: String? = nil
     ) {
         self.id = id
         self.durableId = durableId
@@ -202,6 +204,7 @@ public struct QueueLineageTaskMessage: Codable, Equatable, Identifiable, Sendabl
         self.textHash = textHash
         self.textLength = textLength
         self.error = error
+        self.recoveryHint = recoveryHint
     }
 
     enum CodingKeys: String, CodingKey {
@@ -214,6 +217,7 @@ public struct QueueLineageTaskMessage: Codable, Equatable, Identifiable, Sendabl
         case textHash = "text_hash"
         case textLength = "text_length"
         case error
+        case recoveryHint = "recovery_hint"
     }
 }
 

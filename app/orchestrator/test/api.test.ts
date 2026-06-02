@@ -2196,7 +2196,15 @@ describe("orchestrator gateway API", () => {
           event_ids: ["evt_failed_followup"],
         }),
       });
-      assert.equal(response.status, 500);
+      const body = await response.json() as {
+        ok: boolean;
+        message: { status?: string; error?: string; durable_id?: string };
+      };
+      assert.equal(response.status, 202);
+      assert.equal(body.ok, true);
+      assert.equal(body.message.status, "failed");
+      assert.equal(body.message.error, "task runtime offline");
+      assert.ok(body.message.durable_id);
 
       const metricsResponse = await fetch(`${taskBaseUrl}/metrics`);
       const metricsBody = await metricsResponse.json() as {

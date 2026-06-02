@@ -1,0 +1,2911 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/product-readiness-proof [lab|local] [quick|lab-ready|dogfood|release]
+
+Run a product-readiness gate and write one pass/fail manifest with links to the
+underlying proof artifacts.
+
+Modes:
+  lab    Run against the remote Mac lab. This is the default and uses real Codex.
+  local  Run the strongest local live proof available on this Mac.
+
+Environment for lab mode:
+  LAB_MAC_HOST              default: 100.71.111.25
+  LAB_MAC_USER              default: claw
+  LAB_MAC_KEY               default: ~/.ssh/eventloop_lab_mac
+  LAB_DOGFOOD_URL           default: http://127.0.0.1:4480
+  PRODUCT_READINESS_PROFILE default: release; one of quick, lab-ready, dogfood, release
+  PRODUCT_READINESS_RUNS    default: 3 for lab release, otherwise 1
+  PRODUCT_READINESS_FAULT_RUNS
+                            default: PRODUCT_READINESS_RUNS; release fault
+                            matrix repeat count. Set to 1 for fast release
+                            iteration while keeping 3x happy-path runs.
+  PRODUCT_READINESS_REBOOT  default: 1 for lab release, otherwise 0
+  PRODUCT_READINESS_FRESH_CLONE
+                            default: 1 for lab release, otherwise 0
+  PRODUCT_READINESS_POSTGRES_MIGRATION_MISMATCH
+                            default: 1 for lab release, otherwise 0
+  PRODUCT_READINESS_FAST_PREFLIGHT
+                            default: 1; use shorter SSH/VNC timeouts for first lab transport gate
+  PRODUCT_READINESS_LAB_QUICK_SCOPE
+                            default: setup; set to transport to run only SSH/VNC
+                            reachability. Valid only with quick profile.
+  PRODUCT_READINESS_LAB_LOCK default: 1; prevent concurrent lab GUI/process mutations
+  PRODUCT_READINESS_LOCK_TTL_SECONDS
+                            default: 7200; remove stale local lab lock after this age
+  PRODUCT_READINESS_BASELINE_CACHE
+                            default: auto; auto enables cache for quick/dogfood and disables for release
+  PRODUCT_READINESS_BASELINE_CACHE_TTL_SECONDS
+                            default: 86400; reuse green lab baseline within this age when source/lab match
+  PRODUCT_READINESS_INSTALL_ARTIFACT
+                            path to macOS install proof manifest
+  PRODUCT_READINESS_SIGNING_ARTIFACT
+                            legacy alias for PRODUCT_READINESS_INSTALL_ARTIFACT
+  PRODUCT_READINESS_CAPTURE_VIDEO_SECONDS
+                            default: 0 for quick/lab-ready, 3 for dogfood/release
+  PRODUCT_READINESS_STOP    default: 0; set to 1 to stop dogfood stack at end
+  PRODUCT_READINESS_STEP_TIMEOUT_SECONDS
+                            default: 600 quick, 900 lab-ready, 1800 dogfood, 3600 release;
+                            set 0 to disable per-step timeout
+EOF
+}
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+mode="${1:-lab}"
+profile_arg="${2:-}"
+case "$mode" in
+  --self-test)
+    PRODUCT_READINESS_PROOF="$repo_root/bin/product-readiness-proof" node <<'NODE'
+const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const vm = require("node:vm");
+
+const scriptPath = process.env.PRODUCT_READINESS_PROOF;
+const source = fs.readFileSync(scriptPath, "utf8");
+const match = source.match(/update_manifest\(\) {\n\s*MANIFEST="\$manifest" node <<'NODE'\n([\s\S]*?)\nNODE\n}/);
+assert(match, "could not extract update_manifest node body");
+const updateManifestBody = match[1];
+const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-product-readiness-self-test-"));
+
+try {
+  const redBaseline = writeJson("red-baseline.json", {
+    kind: "eventloopos.lab_mac_baseline",
+    ok: false,
+    steps: [
+      { id: "macos_build", ok: true },
+      { id: "macos_launch", ok: true },
+      { id: "codex", ok: true },
+      { id: "macos_permissions", ok: true },
+    ],
+  });
+  const greenBaseline = writeJson("green-baseline.json", {
+    kind: "eventloopos.lab_mac_baseline",
+    ok: true,
+    steps: [
+      { id: "macos_build", ok: true },
+      { id: "macos_launch", ok: true },
+      { id: "codex", ok: true },
+      { id: "macos_permissions", ok: true },
+    ],
+  });
+  const redInstall = writeJson("red-install.json", {
+    kind: "eventloopos.macos_install_proof",
+    ok: false,
+    unsigned_dev_ok: true,
+  });
+  const greenInstall = writeJson("green-install.json", {
+    kind: "eventloopos.macos_install_proof",
+    ok: true,
+    unsigned_dev_ok: true,
+  });
+  const greenCodex = writeJson("green-codex.json", {
+    kind: "eventloopos.codex_status_proof",
+    ok: true,
+  });
+  const greenPermissions = writeJson("green-permissions.json", {
+    kind: "eventloopos.macos_permission_status",
+    ok: true,
+  });
+  const redDogfoodStatus = writeDogfoodStatusFixture("red-dogfood-status", { ok: false });
+  const greenDogfoodStatus = writeDogfoodStatusFixture("green-dogfood-status", { ok: true });
+  const missingChecksDogfoodStatus = writeDogfoodStatusFixture("missing-checks-dogfood-status", { ok: true, includeChecks: false });
+  const redScenario = writeJson("red-scenario.json", {
+    kind: "eventloopos.lab_scenario",
+    scenario: "queue-followup",
+    ok: true,
+  });
+  const greenQueueFollowup = writeScenarioFixture("green-queue-followup", "queue-followup");
+  const greenQueueFollowupWithVideo = writeScenarioFixture("green-queue-followup-with-video", "queue-followup", { includeVideo: true });
+  const greenFault = writeFaultFixture("green-fault", "codex-app-server-down");
+  const redFault = writeJson("red-fault.json", {
+    kind: "eventloopos.lab_fault_proof",
+    scenario: "codex-app-server-down",
+    ok: true,
+    assertions: [{ name: "actionable_failure", ok: true }],
+    artifacts: {},
+  });
+  const redLive = writeJson("red-live.json", {
+    kind: "eventloopos.agent_proof",
+    passed: false,
+  });
+  const greenLive = writeJson("green-live.json", {
+    kind: "eventloopos.agent_proof",
+    passed: true,
+  });
+  const queueUiLog = writeJson("queue-ui.log", {
+    note: "path exists but product coverage should require passed step",
+  });
+  const emptySnapshot = writeDir("empty-snapshot");
+  const greenSnapshot = writeSnapshotDir("green-snapshot");
+  const greenSnapshotAfter = writeSnapshotDir("green-snapshot-after");
+  const greenOrphan = writeOrphanFixture("green-orphan");
+  const greenWindowChurn = writeWindowChurnFixture("green-window-churn", { ok: true });
+
+  const redProduct = updateProduct({
+    evidence: {
+      baseline: redBaseline,
+      macos_install: redInstall,
+    },
+  });
+  assert.notEqual(coverage(redProduct, "install_macos_app").status, "passed");
+  assert.notEqual(coverage(redProduct, "codex_login_status").status, "passed");
+  assert.notEqual(coverage(redProduct, "first_run_permission_flow").status, "passed");
+
+  const greenProduct = updateProduct({
+    evidence: {
+      baseline: greenBaseline,
+      macos_install: greenInstall,
+      codex_status: greenCodex,
+      macos_permissions: greenPermissions,
+    },
+  });
+  assert.equal(coverage(greenProduct, "install_macos_app").status, "passed");
+  assert.equal(coverage(greenProduct, "codex_login_status").status, "passed");
+  assert.equal(coverage(greenProduct, "first_run_permission_flow").status, "passed");
+
+  const redNestedProduct = updateProduct({
+    profile: "release",
+    requested_runs: 3,
+    evidence: {
+      queue_followup_runs: [{ local_manifest: redScenario }],
+      codex_app_server_down_fault_runs: [{ local_manifest: redFault }],
+    },
+  });
+  assert.notEqual(coverage(redNestedProduct, "real_codex_task_start_bind").status, "passed");
+  assert.notEqual(coverage(redNestedProduct, "queue_review_items").status, "passed");
+  assert.notEqual(coverage(redNestedProduct, "fault_codex_app_server_down").status, "passed");
+  assert.equal(redNestedProduct.artifact_contract.scenario_artifacts.queue_followup_runs[0].ok, false);
+  assert.equal(redNestedProduct.artifact_contract.fault_artifacts.codex_app_server_down_fault_runs[0].ok, false);
+
+  const redSnapshotProduct = updateProduct({
+    profile: "dogfood",
+    evidence: {
+      snapshot_after: emptySnapshot,
+    },
+  });
+  assert.notEqual(coverage(redSnapshotProduct, "active_tasks_menu_window").status, "passed");
+  assert.equal(redSnapshotProduct.artifact_contract.snapshots.snapshot_after[0].ok, false);
+
+  const greenSnapshotProduct = updateProduct({
+    profile: "dogfood",
+    evidence: {
+      snapshot_after: greenSnapshot,
+    },
+  });
+  assert.equal(coverage(greenSnapshotProduct, "active_tasks_menu_window").status, "passed");
+  assert.equal(greenSnapshotProduct.artifact_contract.snapshots.snapshot_after[0].ok, true);
+
+  const labReadyProduct = updateProduct({
+    profile: "lab-ready",
+    evidence: {
+      dogfood_status_before: greenDogfoodStatus,
+      snapshot_before: greenSnapshot,
+      window_churn_before: greenWindowChurn,
+    },
+  });
+  assert.equal(coverage(labReadyProduct, "connect_orchestrator").status, "passed");
+  assert.equal(coverage(labReadyProduct, "active_tasks_menu_window").status, "passed");
+  assert.notEqual(coverage(labReadyProduct, "real_codex_task_start_bind").status, "passed");
+  assert.equal(labReadyProduct.profile_gate_passed, true);
+  assert.equal(labReadyProduct.passed, true);
+
+  const labReadyMissingStatusProduct = updateProduct({
+    profile: "lab-ready",
+    evidence: {
+      snapshot_before: greenSnapshot,
+    },
+  });
+  assert.equal(labReadyMissingStatusProduct.profile_gate_passed, false);
+  assert.equal(labReadyMissingStatusProduct.passed, false);
+  assert.equal(
+    labReadyMissingStatusProduct.profile_gate_reasons.some((reason) => reason.requirement.includes("dogfood status")),
+    true,
+  );
+
+  const labReadyMissingSnapshotProduct = updateProduct({
+    profile: "lab-ready",
+    evidence: {
+      dogfood_status_before: greenDogfoodStatus,
+    },
+  });
+  assert.equal(labReadyMissingSnapshotProduct.profile_gate_passed, false);
+  assert.equal(labReadyMissingSnapshotProduct.passed, false);
+  assert.equal(
+    labReadyMissingSnapshotProduct.profile_gate_reasons.some((reason) => reason.requirement.includes("snapshot")),
+    true,
+  );
+
+  const redDogfoodStatusProduct = updateProduct({
+    profile: "dogfood",
+    evidence: {
+      dogfood_status_before: redDogfoodStatus,
+    },
+  });
+  assert.notEqual(coverage(redDogfoodStatusProduct, "connect_orchestrator").status, "passed");
+  assert.equal(redDogfoodStatusProduct.artifact_contract.status_artifacts.dogfood_status_before[0].ok, false);
+
+  const greenDogfoodStatusProduct = updateProduct({
+    profile: "dogfood",
+    evidence: {
+      dogfood_status_before: greenDogfoodStatus,
+    },
+  });
+  assert.equal(coverage(greenDogfoodStatusProduct, "connect_orchestrator").status, "passed");
+  assert.equal(greenDogfoodStatusProduct.artifact_contract.status_artifacts.dogfood_status_before[0].ok, true);
+  assert.equal(greenDogfoodStatusProduct.profile_gate_passed, false);
+  assert.equal(greenDogfoodStatusProduct.passed, false);
+
+  const greenDogfoodProduct = updateProduct({
+    profile: "dogfood",
+    evidence: {
+      dogfood_status_before: greenDogfoodStatus,
+      dogfood_status_after: greenDogfoodStatus,
+      snapshot_before: greenSnapshot,
+      snapshot_after: greenSnapshotAfter,
+      queue_followup_runs: [{ local_manifest: greenQueueFollowup }],
+      window_churn_before: greenWindowChurn,
+      window_churn_after: greenWindowChurn,
+      orphan_proof: greenOrphan,
+    },
+  });
+  assert.equal(greenDogfoodProduct.profile_gate_passed, true);
+  assert.equal(greenDogfoodProduct.passed, true);
+  assert.equal(coverage(greenDogfoodProduct, "real_codex_task_start_bind").status, "passed");
+  assert.equal(coverage(greenDogfoodProduct, "queue_review_items").status, "passed");
+  assert.equal(coverage(greenDogfoodProduct, "no_orphan_windows_processes").status, "passed");
+
+  const partialVideoDogfoodProduct = updateProduct({
+    profile: "dogfood",
+    requested_runs: 3,
+    capture_video_seconds: 3,
+    evidence: {
+      queue_followup_runs: [{ local_manifest: greenQueueFollowupWithVideo }],
+    },
+  });
+  assert.notEqual(coverage(partialVideoDogfoodProduct, "queue_ui_video_artifact").status, "passed");
+
+  const completeVideoDogfoodProduct = updateProduct({
+    profile: "dogfood",
+    requested_runs: 1,
+    capture_video_seconds: 3,
+    evidence: {
+      queue_followup_runs: [{ local_manifest: greenQueueFollowupWithVideo }],
+    },
+  });
+  assert.equal(coverage(completeVideoDogfoodProduct, "queue_ui_video_artifact").status, "passed");
+
+  const threeScenarioRuns = [
+    { local_manifest: greenQueueFollowup },
+    { local_manifest: greenQueueFollowup },
+    { local_manifest: greenQueueFollowup },
+  ];
+  const threeFaultStyleRuns = [
+    { local_manifest: greenFault },
+    { local_manifest: greenFault },
+    { local_manifest: greenFault },
+  ];
+  const oneFaultRun = [{ local_manifest: greenFault }];
+  const fastFaultMatrixReleaseProduct = updateProduct({
+    profile: "release",
+    requested_runs: 3,
+    requested_fault_runs: 1,
+    evidence: {
+      queue_followup_runs: threeScenarioRuns,
+      queue_decision_runs: threeScenarioRuns,
+      codex_recovery_runs: threeScenarioRuns,
+      completion_workspace_runs: threeFaultStyleRuns,
+      codex_app_server_down_fault_runs: oneFaultRun,
+      orchestrator_crash_restart_fault_runs: oneFaultRun,
+      duplicate_idempotency_fault_runs: oneFaultRun,
+      postgres_unavailable_fault_runs: oneFaultRun,
+      postgres_migration_mismatch_fault_runs: oneFaultRun,
+      aerospace_unavailable_fault_runs: oneFaultRun,
+      aerospace_permission_missing_fault_runs: oneFaultRun,
+      ghostty_cleanup_failure_fault_runs: oneFaultRun,
+      screen_capture_denied_fault_runs: oneFaultRun,
+      queue_app_accessibility_denied_fault_runs: oneFaultRun,
+      aerospace_restore_server_down_fault_runs: oneFaultRun,
+      tailscale_vnc_disconnected_fault_runs: oneFaultRun,
+    },
+  });
+  assert.equal(fastFaultMatrixReleaseProduct.release_required_artifact_counts.queue_followup_runs, 3);
+  assert.equal(fastFaultMatrixReleaseProduct.release_required_artifact_counts.completion_workspace_runs, 3);
+  assert.equal(fastFaultMatrixReleaseProduct.release_required_artifact_counts.codex_app_server_down_fault_runs, 1);
+  assert.equal(fastFaultMatrixReleaseProduct.release_repeat_artifacts_passed, true);
+  assert.equal(coverage(fastFaultMatrixReleaseProduct, "flake_confidence_3x").status, "passed");
+
+  const missingChecksDogfoodStatusProduct = updateProduct({
+    profile: "dogfood",
+    evidence: {
+      dogfood_status_before: missingChecksDogfoodStatus,
+    },
+  });
+  assert.notEqual(coverage(missingChecksDogfoodStatusProduct, "connect_orchestrator").status, "passed");
+  assert.equal(missingChecksDogfoodStatusProduct.artifact_contract.status_artifacts.dogfood_status_before[0].ok, false);
+  assert.equal(
+    missingChecksDogfoodStatusProduct.artifact_contract.status_artifacts.dogfood_status_before[0].artifact_contract.failed_checks.includes("status_checks_green"),
+    true,
+  );
+
+  const redReleaseDogfoodStatusProduct = updateProduct({
+    profile: "release",
+    requested_runs: 3,
+    evidence: {
+      dogfood_status_before: redDogfoodStatus,
+    },
+  });
+  assert.equal(
+    redReleaseDogfoodStatusProduct.release_ready_reasons.some((reason) => reason.requirement.includes("dogfood status artifacts")),
+    true,
+  );
+
+  const redLocalEvidenceProduct = updateProduct({
+    mode: "local",
+    profile: "dogfood",
+    evidence: {
+      local_live_manifest: redLive,
+      queue_ui_error_text: queueUiLog,
+      queue_ui_presentation: queueUiLog,
+    },
+  });
+  assert.notEqual(coverage(redLocalEvidenceProduct, "connect_orchestrator").status, "passed");
+  assert.notEqual(coverage(redLocalEvidenceProduct, "status_history_explainability").status, "passed");
+  assert.notEqual(coverage(redLocalEvidenceProduct, "user_facing_dependency_error_text").status, "passed");
+  assert.equal(redLocalEvidenceProduct.profile_gate_passed, false);
+  assert.equal(redLocalEvidenceProduct.passed, false);
+
+  const greenLocalEvidenceProduct = updateProduct({
+    mode: "local",
+    profile: "dogfood",
+    steps: [{ name: "local queue ui error text proof", status: "passed" }],
+    evidence: {
+      local_live_manifest: greenLive,
+      queue_ui_error_text: queueUiLog,
+      queue_ui_presentation: queueUiLog,
+    },
+  });
+  assert.equal(coverage(greenLocalEvidenceProduct, "connect_orchestrator").status, "passed");
+  assert.equal(coverage(greenLocalEvidenceProduct, "status_history_explainability").status, "passed");
+  assert.equal(coverage(greenLocalEvidenceProduct, "user_facing_dependency_error_text").status, "passed");
+  assert.equal(greenLocalEvidenceProduct.profile_gate_passed, true);
+  assert.equal(greenLocalEvidenceProduct.passed, true);
+  console.log("product-readiness-proof self-test passed");
+} finally {
+  fs.rmSync(tempDir, { recursive: true, force: true });
+}
+
+function writeJson(name, value) {
+  const file = path.join(tempDir, name);
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
+  return file;
+}
+
+function writeDir(name) {
+  const dir = path.join(tempDir, name);
+  fs.mkdirSync(dir, { recursive: true });
+  return dir;
+}
+
+function writeSnapshotDir(name) {
+  const dir = writeDir(name);
+  fs.writeFileSync(path.join(dir, "health.json"), JSON.stringify({ ok: true }) + "\n");
+  fs.writeFileSync(path.join(dir, "activity.json"), JSON.stringify({ events: [] }) + "\n");
+  fs.writeFileSync(path.join(dir, "queue_state_ready.json"), JSON.stringify([]) + "\n");
+  fs.writeFileSync(path.join(dir, "task-messages_limit_50.json"), JSON.stringify([]) + "\n");
+  fs.writeFileSync(path.join(dir, "windows.json"), JSON.stringify([{ app: "EventLoopQueueApp" }]) + "\n");
+  fs.writeFileSync(path.join(dir, "ps.txt"), `${"123 1 /bin/zsh pnpm run dev:dogfood\n".repeat(4)}`);
+  fs.writeFileSync(path.join(dir, "screen.png"), Buffer.alloc(12000, 1));
+  return dir;
+}
+
+function writeDogfoodStatusFixture(name, { ok, includeChecks = true }) {
+  const dir = writeDir(name);
+  const checks = {
+    health_ok: true,
+    task_sessions_api_ok: true,
+    queue_api_ok: true,
+    dogfood_process_visible: ok,
+    listener_4480_visible: true,
+    queue_app_process_visible: true,
+    windows_artifact_exists: true,
+    ps_nonempty: true,
+  };
+  fs.writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify({
+    kind: "eventloopos.lab_dogfood_status",
+    ok,
+    passed: ok,
+    ...(includeChecks ? { checks } : {}),
+    artifacts: {
+      health: "health.json",
+      task_sessions: "task-sessions.json",
+      queue_ready: "queue-ready.json",
+      processes: "processes-interesting.txt",
+      ps: "ps.txt",
+      listeners: "listeners.txt",
+      windows: "windows.json",
+    },
+  }, null, 2)}\n`);
+  fs.writeFileSync(path.join(dir, "health.json"), JSON.stringify({ ok: true }) + "\n");
+  fs.writeFileSync(path.join(dir, "task-sessions.json"), JSON.stringify({ sessions: [] }) + "\n");
+  fs.writeFileSync(path.join(dir, "queue-ready.json"), JSON.stringify({ items: [] }) + "\n");
+  fs.writeFileSync(path.join(dir, "processes-interesting.txt"), `${"123 node dist/src/index.js\n".repeat(4)}`);
+  fs.writeFileSync(path.join(dir, "ps.txt"), `${"123 1 node dist/src/index.js\n".repeat(8)}`);
+  fs.writeFileSync(path.join(dir, "listeners.txt"), `${"node TCP *:4480 (LISTEN)\n".repeat(4)}`);
+  fs.writeFileSync(path.join(dir, "windows.json"), JSON.stringify([]) + "\n");
+  return path.join(dir, "manifest.json");
+}
+
+function writeScenarioFixture(name, scenario, { includeVideo = false } = {}) {
+  const dir = writeDir(name);
+  fs.mkdirSync(path.join(dir, "captures", "before"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "captures", "after"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "api", "after"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify({
+    kind: "eventloopos.lab_scenario",
+    scenario,
+    ok: true,
+    passed: true,
+    captures: {
+      before: "captures/before/capture-summary.json",
+      after: "captures/after/capture-summary.json",
+    },
+  }, null, 2)}\n`);
+  fs.writeFileSync(path.join(dir, "captures", "before", "capture-summary.json"), JSON.stringify({ ok: true }) + "\n");
+  fs.writeFileSync(path.join(dir, "captures", "after", "capture-summary.json"), JSON.stringify({
+    screen: { bytes: 12000 },
+    ...(includeVideo ? { video: { bytes: 12000 } } : {}),
+  }) + "\n");
+  fs.writeFileSync(path.join(dir, "captures", "after", "screen.png"), Buffer.alloc(12000, 1));
+  fs.writeFileSync(path.join(dir, "captures", "after", "windows.json"), JSON.stringify([{ app: "eventloopOS Queue" }]) + "\n");
+  fs.writeFileSync(path.join(dir, "captures", "after", "ps.txt"), `${"123 1 node dist/src/index.js\n".repeat(8)}`);
+  fs.writeFileSync(path.join(dir, "captures", "after", "processes-interesting.txt"), "EventLoopQueueApp\nnode dist/src/index.js\n");
+  fs.writeFileSync(path.join(dir, "captures", "after", "queue-ax-tree.txt"), `${"AXWindow eventloopOS Queue AXButton Approve Defer Ignore\n".repeat(4)}`);
+  fs.writeFileSync(path.join(dir, "api", "after", "health.json"), JSON.stringify({ ok: true }) + "\n");
+  fs.writeFileSync(path.join(dir, "api", "after", "task-messages_limit_120.json"), JSON.stringify([{ role: "assistant", content: "done" }]) + "\n");
+  fs.writeFileSync(path.join(dir, "api", "after", "activity_limit_120.json"), JSON.stringify([{ type: "queue.updated" }]) + "\n");
+  fs.writeFileSync(path.join(dir, "api", "after", "queue_state_ready.json"), JSON.stringify([{ id: "followup-1" }]) + "\n");
+  fs.writeFileSync(path.join(dir, "api-state.json"), `${JSON.stringify({ health: { ok: true }, queue: [{ id: "followup-1" }] })}\n${" ".repeat(120)}`);
+  fs.writeFileSync(path.join(dir, "task-messages.json"), JSON.stringify([{ role: "assistant", content: "done" }]) + "\n");
+  fs.writeFileSync(path.join(dir, "windows.json"), JSON.stringify([{ app: "eventloopOS Queue" }]) + "\n");
+  fs.writeFileSync(path.join(dir, "screenshot-after.png"), Buffer.alloc(12000, 1));
+  if (includeVideo) {
+    fs.writeFileSync(path.join(dir, "captures", "after", "screen.mov"), Buffer.alloc(12000, 1));
+    fs.writeFileSync(path.join(dir, "screen.mov"), Buffer.alloc(12000, 1));
+  }
+  return path.join(dir, "manifest.json");
+}
+
+function writeFaultFixture(name, scenario) {
+  const dir = writeDir(name);
+  fs.writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify({
+    kind: "eventloopos.lab_fault_proof",
+    scenario,
+    ok: true,
+    passed: true,
+    assertions: [{ name: "actionable_failure", ok: true }],
+    artifacts: {
+      api_state: "api-state.json",
+      process_list: "ps.txt",
+      windows_after: "windows.json",
+      capture_summary: "capture-summary.json",
+      screenshot_after: "screen.png",
+    },
+  }, null, 2)}\n`);
+  fs.writeFileSync(path.join(dir, "api-state.json"), JSON.stringify({ health: { ok: true } }) + "\n");
+  fs.writeFileSync(path.join(dir, "ps.txt"), `${"123 1 node dist/src/index.js\n".repeat(8)}`);
+  fs.writeFileSync(path.join(dir, "windows.json"), JSON.stringify([{ app: "eventloopOS Queue" }]) + "\n");
+  fs.writeFileSync(path.join(dir, "capture-summary.json"), JSON.stringify({ screen: { bytes: 12000 } }) + "\n");
+  fs.writeFileSync(path.join(dir, "screen.png"), Buffer.alloc(12000, 1));
+  return path.join(dir, "manifest.json");
+}
+
+function writeOrphanFixture(name) {
+  const dir = writeDir(name);
+  fs.writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify({
+    kind: "eventloopos.lab_orphan_proof",
+    ok: true,
+    passed: true,
+    assertions: [{ name: "no_orphans", ok: true }],
+    artifacts: {
+      processes: "processes-interesting.txt",
+      ps: "ps.txt",
+      listeners: "listeners.txt",
+      windows: "windows.json",
+      terminal_windows: "terminal-windows.txt",
+    },
+  }, null, 2)}\n`);
+  fs.writeFileSync(path.join(dir, "processes-interesting.txt"), "no orphan eventloopOS windows\n");
+  fs.writeFileSync(path.join(dir, "ps.txt"), `${"123 1 /bin/zsh clean\n".repeat(8)}`);
+  fs.writeFileSync(path.join(dir, "listeners.txt"), "");
+  fs.writeFileSync(path.join(dir, "windows.json"), JSON.stringify([]) + "\n");
+  fs.writeFileSync(path.join(dir, "terminal-windows.txt"), "0\n");
+  return path.join(dir, "manifest.json");
+}
+
+function writeWindowChurnFixture(name, { ok }) {
+  const dir = writeDir(name);
+  fs.mkdirSync(path.join(dir, "samples"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "manifest.json"), `${JSON.stringify({
+    kind: "eventloopos.lab_window_churn_guard",
+    ok,
+    passed: ok,
+    checks: {
+      enough_samples: true,
+      aerospace_samples_parse: true,
+      bounds_samples_parse: true,
+      max_single_window_changes_ok: ok,
+      total_bounds_changes_ok: ok,
+    },
+    failed_checks: ok ? [] : ["max_single_window_changes_ok"],
+    totals: {
+      aerospace_changes: ok ? 0 : 20,
+      bounds_changes: ok ? 0 : 20,
+      max_single_window_changes: ok ? 0 : 10,
+    },
+    artifacts: {
+      samples: "samples/",
+    },
+  }, null, 2)}\n`);
+  fs.writeFileSync(path.join(dir, "samples", "sample-1.aerospace.json"), "[]\n");
+  fs.writeFileSync(path.join(dir, "samples", "sample-1.bounds.json"), "[]\n");
+  return path.join(dir, "manifest.json");
+}
+
+function updateProduct(fields) {
+  const file = writeJson(`product-${Math.random().toString(36).slice(2)}.json`, {
+    schema_version: 1,
+    kind: "eventloopos.product_readiness_proof",
+    mode: "lab",
+    profile: "quick",
+    started_at: "2026-06-02T00:00:00Z",
+    requested_runs: 1,
+    required_release_runs: 3,
+    capture_video_seconds: 0,
+    release_options: {},
+    steps: [],
+    blockers: [],
+    evidence: {},
+    ...fields,
+  });
+  const previousManifest = process.env.MANIFEST;
+  process.env.MANIFEST = file;
+  vm.runInNewContext(updateManifestBody, { require, process, console });
+  if (previousManifest === undefined) {
+    delete process.env.MANIFEST;
+  } else {
+    process.env.MANIFEST = previousManifest;
+  }
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function coverage(manifest, id) {
+  const item = manifest.requirement_coverage.find((entry) => entry.id === id);
+  assert(item, `missing coverage item: ${id}`);
+  return item;
+}
+NODE
+    exit 0
+    ;;
+  lab|local) ;;
+  quick|lab-ready|dogfood|release)
+    profile_arg="$mode"
+    mode="lab"
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown mode: $mode" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+cd "$repo_root"
+
+profile="${profile_arg:-${PRODUCT_READINESS_PROFILE:-release}}"
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [[ -n "${PRODUCT_READINESS_RUNS:-}" ]]; then
+  runs="$PRODUCT_READINESS_RUNS"
+elif [[ "$mode" == "lab" && "$profile" == "release" ]]; then
+  runs=3
+else
+  runs=1
+fi
+fault_runs="${PRODUCT_READINESS_FAULT_RUNS:-$runs}"
+if [[ -n "${PRODUCT_READINESS_REBOOT:-}" ]]; then
+  include_reboot="$PRODUCT_READINESS_REBOOT"
+elif [[ "$mode" == "lab" && "$profile" == "release" ]]; then
+  include_reboot=1
+else
+  include_reboot=0
+fi
+if [[ -n "${PRODUCT_READINESS_FRESH_CLONE:-}" ]]; then
+  include_fresh_clone="$PRODUCT_READINESS_FRESH_CLONE"
+elif [[ "$mode" == "lab" && "$profile" == "release" ]]; then
+  include_fresh_clone=1
+else
+  include_fresh_clone=0
+fi
+if [[ -n "${PRODUCT_READINESS_POSTGRES_MIGRATION_MISMATCH:-}" ]]; then
+  include_postgres_migration_mismatch="$PRODUCT_READINESS_POSTGRES_MIGRATION_MISMATCH"
+elif [[ "$mode" == "lab" && "$profile" == "release" ]]; then
+  include_postgres_migration_mismatch=1
+else
+  include_postgres_migration_mismatch=0
+fi
+fast_preflight="${PRODUCT_READINESS_FAST_PREFLIGHT:-1}"
+lab_quick_scope="${PRODUCT_READINESS_LAB_QUICK_SCOPE:-setup}"
+lab_lock_enabled="${PRODUCT_READINESS_LAB_LOCK:-1}"
+lab_lock_ttl_seconds="${PRODUCT_READINESS_LOCK_TTL_SECONDS:-7200}"
+baseline_cache="${PRODUCT_READINESS_BASELINE_CACHE:-auto}"
+baseline_cache_ttl_seconds="${PRODUCT_READINESS_BASELINE_CACHE_TTL_SECONDS:-86400}"
+install_artifact="${PRODUCT_READINESS_INSTALL_ARTIFACT:-${PRODUCT_READINESS_SIGNING_ARTIFACT:-}}"
+stop_stack="${PRODUCT_READINESS_STOP:-0}"
+capture_video_seconds="${PRODUCT_READINESS_CAPTURE_VIDEO_SECONDS:-}"
+step_timeout_seconds="${PRODUCT_READINESS_STEP_TIMEOUT_SECONDS:-}"
+
+case "$profile" in
+  quick|lab-ready|dogfood|release) ;;
+  *)
+    echo "unknown PRODUCT_READINESS_PROFILE: $profile" >&2
+    exit 2
+    ;;
+esac
+if ! [[ "$runs" =~ ^[0-9]+$ ]] || [[ "$runs" -lt 1 ]]; then
+  echo "PRODUCT_READINESS_RUNS must be a positive integer; got: $runs" >&2
+  exit 2
+fi
+if ! [[ "$fault_runs" =~ ^[0-9]+$ ]] || [[ "$fault_runs" -lt 1 ]]; then
+  echo "PRODUCT_READINESS_FAULT_RUNS must be a positive integer; got: $fault_runs" >&2
+  exit 2
+fi
+
+if [[ -z "$capture_video_seconds" ]]; then
+  if [[ "$profile" == "quick" || "$profile" == "lab-ready" ]]; then
+    capture_video_seconds=0
+  else
+    capture_video_seconds=3
+  fi
+fi
+if [[ -z "$step_timeout_seconds" ]]; then
+  case "$profile" in
+    quick) step_timeout_seconds=600 ;;
+    lab-ready) step_timeout_seconds=900 ;;
+    dogfood) step_timeout_seconds=1800 ;;
+    release) step_timeout_seconds=3600 ;;
+  esac
+fi
+
+case "$lab_quick_scope" in
+  setup|transport) ;;
+  *)
+    echo "unknown PRODUCT_READINESS_LAB_QUICK_SCOPE: $lab_quick_scope" >&2
+    exit 2
+    ;;
+esac
+if [[ "$lab_quick_scope" == "transport" && "$profile" != "quick" ]]; then
+  echo "PRODUCT_READINESS_LAB_QUICK_SCOPE=transport is only valid with quick profile; current profile: $profile" >&2
+  echo "Use \`pnpm product:transport\` for SSH/VNC reachability, or unset PRODUCT_READINESS_LAB_QUICK_SCOPE for $profile." >&2
+  exit 2
+fi
+
+run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$-$mode-$profile"
+artifact_dir="artifacts/product-readiness/$run_id"
+manifest="$artifact_dir/manifest.json"
+lab_lock_dir="artifacts/.locks/product-readiness-lab.lock"
+baseline_cache_file="artifacts/.cache/product-readiness/lab-baseline-cache.json"
+mkdir -p "$artifact_dir/steps"
+
+init_manifest() {
+  MODE="$mode" PROFILE="$profile" LAB_QUICK_SCOPE="$lab_quick_scope" RUN_ID="$run_id" STARTED_AT="$started_at" ARTIFACT_DIR="$artifact_dir" RUNS="$runs" FAULT_RUNS="$fault_runs" CAPTURE_VIDEO_SECONDS="$capture_video_seconds" STEP_TIMEOUT_SECONDS="$step_timeout_seconds" INCLUDE_REBOOT="$include_reboot" INCLUDE_FRESH_CLONE="$include_fresh_clone" INCLUDE_POSTGRES_MIGRATION_MISMATCH="$include_postgres_migration_mismatch" FAST_PREFLIGHT="$fast_preflight" BASELINE_CACHE="$baseline_cache" LAB_LOCK_ENABLED="$lab_lock_enabled" STOP_STACK="$stop_stack" node <<'NODE' >"$manifest"
+const flag = (value) => value === "1" || value === "true";
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.product_readiness_proof",
+  mode: process.env.MODE,
+  profile: process.env.PROFILE,
+  lab_quick_scope: process.env.LAB_QUICK_SCOPE,
+  run_id: process.env.RUN_ID,
+  started_at: process.env.STARTED_AT,
+  finished_at: undefined,
+  duration_ms: undefined,
+  artifact_dir: process.env.ARTIFACT_DIR,
+  requested_runs: Number(process.env.RUNS),
+  requested_fault_runs: Number(process.env.FAULT_RUNS),
+  required_release_runs: 3,
+  capture_video_seconds: Number(process.env.CAPTURE_VIDEO_SECONDS ?? 0),
+  release_options: {
+    reboot: flag(process.env.INCLUDE_REBOOT),
+    fresh_clone: flag(process.env.INCLUDE_FRESH_CLONE),
+    postgres_migration_mismatch: flag(process.env.INCLUDE_POSTGRES_MIGRATION_MISMATCH),
+    fast_preflight: flag(process.env.FAST_PREFLIGHT),
+    baseline_cache: process.env.BASELINE_CACHE,
+    lab_lock: flag(process.env.LAB_LOCK_ENABLED),
+    stop_stack: flag(process.env.STOP_STACK),
+    step_timeout_seconds: Number(process.env.STEP_TIMEOUT_SECONDS ?? 0),
+    fault_runs: Number(process.env.FAULT_RUNS),
+  },
+  release_required_artifact_counts: {},
+  release_repeat_artifact_counts: {},
+  release_repeat_artifact_failures: {},
+  release_repeat_artifacts_passed: false,
+  profile_gate_passed: false,
+  profile_gate_reasons: [],
+  passed: false,
+  release_ready: false,
+  release_ready_reasons: [],
+  steps: [],
+  evidence: {},
+  requirement_coverage: [],
+  requirement_coverage_passed: false,
+  requirement_coverage_gaps: [],
+  blockers: [],
+};
+console.log(JSON.stringify(manifest, null, 2));
+NODE
+}
+
+update_manifest() {
+  MANIFEST="$manifest" node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const manifestPath = process.env.MANIFEST;
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+manifest.finished_at = new Date().toISOString();
+manifest.duration_ms = Date.parse(manifest.finished_at) - Date.parse(manifest.started_at);
+const stepsPassed = manifest.steps.every((step) => step.status === "passed" || step.optional === true);
+const blockersClear = (manifest.blockers ?? []).length === 0;
+manifest.requirement_coverage = buildRequirementCoverage(manifest);
+manifest.requirement_coverage_gaps = manifest.requirement_coverage.filter((item) => item.status !== "passed");
+manifest.requirement_coverage_passed = manifest.requirement_coverage_gaps.length === 0;
+manifest.profile_gate_reasons = buildProfileGateReasons(manifest);
+manifest.profile_gate_passed = manifest.profile_gate_reasons.length === 0;
+manifest.release_ready_reasons = buildReleaseReadyReasons(manifest, stepsPassed);
+manifest.release_ready = manifest.release_ready_reasons.length === 0;
+manifest.passed = stepsPassed && blockersClear && manifest.profile_gate_passed && (manifest.profile !== "release" || manifest.release_ready);
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+function buildReleaseReadyReasons(manifest, stepsPassed) {
+  const reasons = [];
+  if (manifest.mode !== "lab") {
+    reasons.push({
+      requirement: "release readiness requires lab mode",
+      evidence: `current mode: ${manifest.mode}`,
+    });
+  }
+  if (manifest.profile !== "release") {
+    reasons.push({
+      requirement: "release readiness requires release profile",
+      evidence: `current profile: ${manifest.profile}`,
+    });
+  }
+  if (!stepsPassed) {
+    reasons.push({
+      requirement: "all readiness proof steps must pass",
+      evidence: `${(manifest.steps ?? []).filter((step) => step.status !== "passed" && step.optional !== true).length} failed steps`,
+    });
+  }
+  if (manifest.requested_runs < manifest.required_release_runs) {
+    reasons.push({
+      requirement: "critical lab proofs must pass enough repeat runs",
+      evidence: `requested_runs=${manifest.requested_runs}; required_release_runs=${manifest.required_release_runs}`,
+    });
+  }
+  if (manifest.profile === "release" && manifest.requested_runs >= manifest.required_release_runs && manifest.release_repeat_artifacts_passed !== true) {
+    reasons.push({
+      requirement: "critical lab proofs must have required real artifact sets",
+      evidence: JSON.stringify({
+        required: manifest.release_required_artifact_counts ?? {},
+        actual: manifest.release_repeat_artifact_counts ?? {},
+      }),
+    });
+  }
+  if (manifest.profile === "release" && manifest.artifact_contract?.status_artifacts_passed === false) {
+    reasons.push({
+      requirement: "dogfood status artifacts must prove orchestrator/app health",
+      evidence: JSON.stringify(manifest.artifact_contract.status_artifacts ?? {}),
+    });
+  }
+  if ((manifest.blockers ?? []).length > 0) {
+    reasons.push({
+      requirement: "manifest blockers must be empty",
+      evidence: `${manifest.blockers.length} blockers`,
+    });
+  }
+  if (!manifest.requirement_coverage_passed) {
+    reasons.push({
+      requirement: "all real-user readiness requirements must have passing coverage",
+      evidence: `${manifest.requirement_coverage_gaps.length} coverage gaps`,
+    });
+  }
+  return reasons;
+}
+
+function buildProfileGateReasons(manifest) {
+  const reasons = [];
+  const contract = manifest.artifact_contract ?? {};
+  const evidence = manifest.evidence ?? {};
+  const steps = manifest.steps ?? [];
+  const okStatus = (key) => (contract.status_artifacts?.[key] ?? []).some((status) => status.ok === true);
+  const okSnapshot = (key) => (contract.snapshots?.[key] ?? []).some((status) => status.ok === true);
+  const okScenarioCount = (key) => (contract.scenario_artifacts?.[key] ?? []).filter((status) => status.ok === true).length;
+  const okSingle = (key) => (contract.single_artifacts?.[key] ?? []).some((status) => status.ok === true);
+  const evidenceHas = (key) => evidence[key] !== undefined && evidence[key] !== null && evidence[key] !== "";
+  const stepPassed = (needle) => steps.some((step) => step.name?.toLowerCase().includes(needle.toLowerCase()) && step.status === "passed");
+  const localManifestGreen = (key) => {
+    const file = evidence[key];
+    if (typeof file !== "string") return false;
+    try {
+      if (!fs.existsSync(file)) return false;
+      const nested = JSON.parse(fs.readFileSync(file, "utf8"));
+      return nested.ok === true || nested.passed === true;
+    } catch {
+      return false;
+    }
+  };
+  const requireReason = (condition, requirement, evidence) => {
+    if (!condition) reasons.push({ requirement, evidence });
+  };
+  if (manifest.mode === "local" && manifest.profile === "dogfood") {
+    requireReason(localManifestGreen("local_live_manifest"), "local dogfood requires a green proof:live manifest", "local_live_manifest");
+    requireReason(evidenceHas("queue_ui_presentation") && stepPassed("local queue ui error text proof"), "local dogfood requires green Queue UI presentation proof", "queue_ui_presentation");
+    return reasons;
+  }
+  if (manifest.mode !== "lab") {
+    return reasons;
+  }
+  if (manifest.profile === "lab-ready") {
+    requireReason(okStatus("dogfood_status_before"), "lab-ready requires a green dogfood status artifact", "dogfood_status_before");
+    requireReason(okSnapshot("snapshot_before"), "lab-ready requires a green desktop/API snapshot", "snapshot_before");
+    requireReason(okSingle("window_churn_before"), "lab-ready requires a green desktop churn guard before snapshot", "window_churn_before");
+  }
+  if (manifest.profile === "dogfood") {
+    const requestedRuns = Number(manifest.requested_runs ?? 1);
+    requireReason(okStatus("dogfood_status_before"), "dogfood requires a green before dogfood status artifact", "dogfood_status_before");
+    requireReason(okStatus("dogfood_status_after"), "dogfood requires a green after dogfood status artifact", "dogfood_status_after");
+    requireReason(okSnapshot("snapshot_before"), "dogfood requires a green before desktop/API snapshot", "snapshot_before");
+    requireReason(okSnapshot("snapshot_after"), "dogfood requires a green after desktop/API snapshot", "snapshot_after");
+    requireReason(okSingle("window_churn_before"), "dogfood requires a green before desktop churn guard", "window_churn_before");
+    requireReason(okSingle("window_churn_after"), "dogfood requires a green after desktop churn guard", "window_churn_after");
+    requireReason(okScenarioCount("queue_followup_runs") >= requestedRuns, "dogfood requires green real Codex queue-followup artifacts", `queue_followup_runs ${okScenarioCount("queue_followup_runs")}/${requestedRuns}`);
+    requireReason(okSingle("orphan_proof"), "dogfood requires green no-orphan cleanup proof", "orphan_proof");
+  }
+  return reasons;
+}
+
+function buildRequirementCoverage(manifest) {
+  const evidence = manifest.evidence ?? {};
+  const steps = manifest.steps ?? [];
+  const blockers = manifest.blockers ?? [];
+  const evidenceHas = (key) => {
+    const value = evidence[key];
+    if (Array.isArray(value)) return value.length > 0;
+    return value !== undefined && value !== null && value !== "";
+  };
+  const evidenceCount = (key) => Array.isArray(evidence[key]) ? evidence[key].length : evidenceHas(key) ? 1 : 0;
+  const evidenceAny = (...keys) => keys.some(evidenceHas);
+  const evidenceItems = (key) => {
+    const value = evidence[key];
+    if (Array.isArray(value)) return value;
+    return evidenceHas(key) ? [value] : [];
+  };
+  const evidenceManifestPath = (item) => typeof item === "string"
+    ? item
+    : item?.local_manifest ?? item?.manifest;
+  const readEvidenceManifest = (item) => {
+    const file = evidenceManifestPath(item);
+    if (!file) return undefined;
+    try {
+      if (!fs.existsSync(file)) return undefined;
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      return undefined;
+    }
+  };
+  const evidenceManifests = (key) => evidenceItems(key).map(readEvidenceManifest).filter(Boolean);
+  const manifestGreen = (nested) => nested?.ok === true || nested?.passed === true;
+  const evidenceGreen = (key, predicate = manifestGreen) => evidenceManifests(key).some(predicate);
+  const snapshotEvidenceStatuses = Object.fromEntries(
+    ["snapshot_before", "snapshot_after"].map((key) => [key, evidenceItems(key).map(snapshotEvidenceStatus)])
+  );
+  const snapshotEvidenceGreen = (...keys) => keys.some((key) =>
+    (snapshotEvidenceStatuses[key] ?? []).some((status) => status.ok === true)
+  );
+  const baselineStepGreen = (...ids) => evidenceManifests("baseline").some((nested) => {
+    if (!manifestGreen(nested)) return false;
+    const steps = Array.isArray(nested.steps) ? nested.steps : [];
+    return ids.every((id) => steps.some((step) => step.id === id && step.ok === true));
+  });
+  const installEvidenceGreen = evidenceGreen("macos_install", (nested) =>
+    manifestGreen(nested) && (nested.unsigned_dev_ok === true || nested.signed === true || nested.notarized === true)
+  );
+  const codexEvidenceGreen = evidenceGreen("codex_status");
+  const macosPermissionsEvidenceGreen = evidenceGreen("macos_permissions");
+  const dogfoodStatusEvidenceGreen = evidenceGreen("dogfood_status_before", (nested) =>
+    manifestGreen(nested)
+      && nested?.checks?.health_ok === true
+      && nested?.checks?.task_sessions_api_ok === true
+      && nested?.checks?.queue_api_ok === true
+      && nested?.checks?.dogfood_process_visible === true
+      && nested?.checks?.listener_4480_visible === true
+      && nested?.checks?.queue_app_process_visible === true
+  );
+  const installBaselineGreen = baselineStepGreen("macos_build", "macos_launch");
+  const codexBaselineGreen = baselineStepGreen("codex");
+  const permissionsBaselineGreen = baselineStepGreen("macos_permissions");
+  const stepPassed = (needle) => steps.some((step) => step.name.includes(needle) && step.status === "passed");
+  const stepFailed = (needle) => steps.some((step) => step.name.includes(needle) && step.status === "failed");
+  const localLiveEvidenceGreen = evidenceGreen("local_live_manifest");
+  const queueUiPresentationEvidenceGreen = evidenceHas("queue_ui_presentation") && stepPassed("local queue ui error text proof");
+  const queueUiErrorTextEvidenceGreen = evidenceHas("queue_ui_error_text") && stepPassed("local queue ui error text proof");
+  const blockerText = blockers.map((blocker) => `${blocker.requirement ?? ""} ${blocker.evidence ?? ""}`).join("\n").toLowerCase();
+  const blockedBy = (...needles) => needles.some((needle) => blockerText.includes(needle.toLowerCase()) || stepFailed(needle));
+  const releaseOnly = manifest.profile === "release";
+  const dogfoodOrRelease = manifest.profile === "dogfood" || releaseOnly;
+  const labReadyOrDogfoodOrRelease = manifest.profile === "lab-ready" || dogfoodOrRelease;
+  const labMode = manifest.mode === "lab";
+  const releaseRepeatEvidenceKeys = [
+    "queue_followup_runs",
+    "queue_decision_runs",
+    "codex_recovery_runs",
+    "completion_workspace_runs",
+    "codex_app_server_down_fault_runs",
+    "orchestrator_crash_restart_fault_runs",
+    "duplicate_idempotency_fault_runs",
+    "postgres_unavailable_fault_runs",
+    "postgres_migration_mismatch_fault_runs",
+    "aerospace_unavailable_fault_runs",
+    "aerospace_permission_missing_fault_runs",
+    "ghostty_cleanup_failure_fault_runs",
+    "screen_capture_denied_fault_runs",
+    "queue_app_accessibility_denied_fault_runs",
+    "aerospace_restore_server_down_fault_runs",
+    "tailscale_vnc_disconnected_fault_runs",
+  ];
+  const releaseEvidenceStatus = (item) => {
+    const manifestFile = typeof item === "string"
+      ? item
+      : item?.local_manifest ?? item?.manifest;
+    if (!manifestFile) {
+      return { ok: false, reason: "missing local_manifest" };
+    }
+    try {
+      if (!fs.existsSync(manifestFile)) {
+        return { ok: false, manifest: manifestFile, reason: "manifest file missing" };
+      }
+      const nested = JSON.parse(fs.readFileSync(manifestFile, "utf8"));
+      const artifactContract = artifactContractStatus(manifestFile, nested, manifest);
+      const ok = (nested.ok === true || nested.passed === true) && artifactContract.ok;
+      return {
+        ok,
+        manifest: manifestFile,
+        kind: nested.kind,
+        artifact_contract: artifactContract,
+        reason: ok ? undefined : (nested.ok === true || nested.passed === true) ? "nested artifact contract not green" : "nested manifest not green",
+      };
+    } catch (error) {
+      return { ok: false, manifest: manifestFile, reason: String(error?.message ?? error) };
+    }
+  };
+  const scenarioEvidenceKeys = [
+    "queue_followup_runs",
+    "queue_decision_runs",
+    "codex_recovery_runs",
+  ];
+  const statusEvidenceKeys = [
+    "dogfood_status_before",
+    "dogfood_status_after",
+  ];
+  const faultEvidenceKeys = [
+    "completion_workspace_runs",
+    "codex_app_server_down_fault_runs",
+    "orchestrator_crash_restart_fault_runs",
+    "duplicate_idempotency_fault_runs",
+    "postgres_unavailable_fault_runs",
+    "postgres_migration_mismatch_fault_runs",
+    "aerospace_unavailable_fault_runs",
+    "aerospace_permission_missing_fault_runs",
+    "ghostty_cleanup_failure_fault_runs",
+    "screen_capture_denied_fault_runs",
+    "queue_app_accessibility_denied_fault_runs",
+    "aerospace_restore_server_down_fault_runs",
+    "tailscale_vnc_disconnected_fault_runs",
+  ];
+  const faultRepeatEvidenceKeys = faultEvidenceKeys.filter((key) => key !== "completion_workspace_runs");
+  const singleArtifactEvidenceKeys = [
+    "window_churn_before",
+    "window_churn_after",
+    "orphan_proof",
+  ];
+  const releaseEvidenceStatuses = Object.fromEntries(
+    releaseRepeatEvidenceKeys.map((key) => [
+      key,
+      (Array.isArray(evidence[key]) ? evidence[key] : evidenceHas(key) ? [evidence[key]] : []).map(releaseEvidenceStatus),
+    ])
+  );
+  const scenarioArtifactStatuses = Object.fromEntries(
+    scenarioEvidenceKeys.map((key) => [key, releaseEvidenceStatuses[key] ?? []])
+  );
+  const statusArtifactStatuses = Object.fromEntries(
+    statusEvidenceKeys.map((key) => [
+      key,
+      (Array.isArray(evidence[key]) ? evidence[key] : evidenceHas(key) ? [evidence[key]] : []).map(releaseEvidenceStatus),
+    ])
+  );
+  const faultArtifactStatuses = Object.fromEntries(
+    faultEvidenceKeys.map((key) => [key, releaseEvidenceStatuses[key] ?? []])
+  );
+  const singleArtifactStatuses = Object.fromEntries(
+    singleArtifactEvidenceKeys.map((key) => [
+      key,
+      (Array.isArray(evidence[key]) ? evidence[key] : evidenceHas(key) ? [evidence[key]] : []).map(releaseEvidenceStatus),
+    ])
+  );
+  const scenarioArtifactStatusCount = Object.values(scenarioArtifactStatuses).flat().length;
+  const scenarioArtifactContractPassed = scenarioArtifactStatusCount > 0
+    && Object.values(scenarioArtifactStatuses).flat().every((status) => status.ok === true);
+  const statusArtifactStatusCount = Object.values(statusArtifactStatuses).flat().length;
+  const statusArtifactContractPassed = statusArtifactStatusCount > 0
+    && Object.values(statusArtifactStatuses).flat().every((status) => status.ok === true);
+  const singleArtifactStatusCount = Object.values(singleArtifactStatuses).flat().length;
+  const singleArtifactContractPassed = singleArtifactStatusCount > 0
+    && Object.values(singleArtifactStatuses).flat().every((status) => status.ok === true);
+  const requiredArtifactStatuses = Object.values(releaseEvidenceStatuses).flat();
+  const requiredArtifactStatusCount = requiredArtifactStatuses.length;
+  const requiredArtifactContractPassed = requiredArtifactStatusCount > 0
+    && requiredArtifactStatuses.every((status) => status.ok === true);
+  manifest.artifact_contract = {
+    snapshots: snapshotEvidenceStatuses,
+    scenario_artifacts_passed: scenarioArtifactContractPassed,
+    scenario_artifact_status_count: scenarioArtifactStatusCount,
+    scenario_artifacts: scenarioArtifactStatuses,
+    status_artifacts_passed: statusArtifactContractPassed,
+    status_artifact_status_count: statusArtifactStatusCount,
+    status_artifacts: statusArtifactStatuses,
+    required_artifacts_passed: requiredArtifactContractPassed,
+    required_artifact_status_count: requiredArtifactStatusCount,
+    fault_artifacts: faultArtifactStatuses,
+    single_artifacts_passed: singleArtifactContractPassed,
+    single_artifact_status_count: singleArtifactStatusCount,
+    single_artifacts: singleArtifactStatuses,
+  };
+  const releaseRepeatCounts = Object.fromEntries(
+    releaseRepeatEvidenceKeys.map((key) => [
+      key,
+      releaseEvidenceStatuses[key].filter((status) => status.ok).length,
+    ])
+  );
+  const releaseRequiredArtifactCounts = Object.fromEntries(
+    releaseRepeatEvidenceKeys.map((key) => [
+      key,
+      faultRepeatEvidenceKeys.includes(key)
+        ? Number(manifest.requested_fault_runs ?? manifest.requested_runs ?? 1)
+        : Number(manifest.requested_runs ?? 1),
+    ])
+  );
+  const releaseRepeatFailures = Object.fromEntries(
+    Object.entries(releaseEvidenceStatuses)
+      .map(([key, statuses]) => [key, statuses.filter((status) => !status.ok)])
+      .filter(([, failures]) => failures.length > 0)
+  );
+  const artifactEvidenceGreen = (...keys) => keys.some((key) =>
+    (releaseEvidenceStatuses[key] ?? []).some((status) => status.ok === true)
+  );
+  const releaseRepeatEvidencePassed = releaseRepeatEvidenceKeys.every(
+    (key) => releaseRepeatCounts[key] >= releaseRequiredArtifactCounts[key]
+  );
+  manifest.release_required_artifact_counts = releaseRequiredArtifactCounts;
+  manifest.release_repeat_artifact_counts = releaseRepeatCounts;
+  manifest.release_repeat_artifact_failures = releaseRepeatFailures;
+  manifest.release_repeat_artifacts_passed = releaseOnly && releaseRepeatEvidencePassed;
+  const item = (id, requirement, status, evidenceKeys = [], note = undefined) => ({
+    id,
+    requirement,
+    status,
+    evidence: evidenceKeys.filter(evidenceHas),
+    note,
+  });
+  const statusFor = ({ passed, blocked, pending, notRunNote }) => {
+    if (passed) return "passed";
+    if (blocked) return "blocked";
+    if (pending) return "pending";
+    return notRunNote ? "not_run" : "missing";
+  };
+  const coverage = [];
+  coverage.push(item(
+    "install_macos_app",
+    "Install eventloopOS Mac app",
+    statusFor({
+      passed: installEvidenceGreen || installBaselineGreen,
+      blocked: blockedBy("install", "baseline"),
+      pending: !releaseOnly && !evidenceAny("macos_install", "baseline"),
+    }),
+    ["macos_install", "baseline"],
+    releaseOnly ? undefined : "quick/local gates can prove unsigned-dev install; release requires lab install or supplied install proof",
+  ));
+  coverage.push(item(
+    "codex_login_status",
+    "Codex CLI login/status check passes",
+    statusFor({
+      passed: codexEvidenceGreen || codexBaselineGreen,
+      blocked: blockedBy("codex"),
+      pending: labMode && !evidenceAny("baseline", "codex_status"),
+    }),
+    ["codex_status", "baseline"],
+  ));
+  coverage.push(item(
+    "first_run_permission_flow",
+    "First-run permission/status flow is explicit",
+    statusFor({
+      passed: macosPermissionsEvidenceGreen || permissionsBaselineGreen || stepPassed("lab screen capture permission status"),
+      blocked: blockedBy("permission", "screen capture", "aerospace", "accessibility"),
+      pending: labMode && !evidenceAny("baseline"),
+    }),
+    ["macos_permissions", "failed_local_macos_permission_status_manifest", "baseline"],
+  ));
+  coverage.push(item(
+    "connect_orchestrator",
+    "Connect Mac app to orchestrator",
+    statusFor({
+      passed: dogfoodStatusEvidenceGreen || localLiveEvidenceGreen,
+      blocked: blockedBy("dogfood status", "orchestrator"),
+      pending: !labReadyOrDogfoodOrRelease,
+      notRunNote: !labReadyOrDogfoodOrRelease,
+    }),
+    ["dogfood_status_before", "snapshot_before", "local_live_manifest"],
+    labReadyOrDogfoodOrRelease ? undefined : "requires lab-ready, dogfood, or release profile",
+  ));
+  coverage.push(item(
+    "real_codex_task_start_bind",
+    "Start or bind task to real Codex session",
+    statusFor({
+      passed: artifactEvidenceGreen("queue_followup_runs", "completion_workspace_runs"),
+      blocked: blockedBy("queue followup", "codex completion"),
+      pending: !dogfoodOrRelease,
+      notRunNote: !dogfoodOrRelease,
+    }),
+    ["queue_followup_runs", "completion_workspace_runs"],
+  ));
+  coverage.push(item(
+    "active_tasks_menu_window",
+    "See active tasks in menu/window",
+    statusFor({
+      passed: artifactEvidenceGreen("queue_followup_runs") || snapshotEvidenceGreen("snapshot_before", "snapshot_after"),
+      blocked: blockedBy("queue followup", "snapshot", "accessibility"),
+      pending: !labReadyOrDogfoodOrRelease,
+      notRunNote: !labReadyOrDogfoodOrRelease,
+    }),
+    ["queue_followup_runs", "snapshot_before", "snapshot_after"],
+  ));
+  coverage.push(item(
+    "queue_review_items",
+    "Review queue items",
+    statusFor({
+      passed: artifactEvidenceGreen("queue_followup_runs"),
+      blocked: blockedBy("queue followup"),
+      pending: !dogfoodOrRelease,
+      notRunNote: !dogfoodOrRelease,
+    }),
+    ["queue_followup_runs"],
+  ));
+  coverage.push(item(
+    "status_history_explainability",
+    "Understand what agent did, what it needs, and what changed",
+    statusFor({
+      passed: queueUiPresentationEvidenceGreen || localLiveEvidenceGreen
+        || artifactEvidenceGreen("queue_followup_runs", "completion_workspace_runs"),
+      blocked: blockedBy("queue followup", "codex completion", "queue ui error text", "activity", "task messages"),
+      pending: !queueUiPresentationEvidenceGreen && !labReadyOrDogfoodOrRelease,
+      notRunNote: !labReadyOrDogfoodOrRelease,
+    }),
+    ["queue_ui_presentation", "queue_followup_runs", "completion_workspace_runs", "local_live_manifest"],
+    dogfoodOrRelease
+      ? "dogfood/release proofs must include API activity, task messages, and UI artifacts"
+      : labReadyOrDogfoodOrRelease
+        ? "lab-ready proves orchestrator/app status and desktop snapshot; dogfood/release proves live status history"
+        : "local quick proves visible Queue UI presentation states; dogfood/release proves live status history",
+  ));
+  coverage.push(item(
+    "approve_defer_ignore_followups",
+    "Approve, defer, and ignore/reject followups",
+    statusFor({
+      passed: artifactEvidenceGreen("completion_workspace_runs") && artifactEvidenceGreen("queue_decision_runs"),
+      blocked: blockedBy("queue decisions", "codex completion"),
+      pending: !releaseOnly,
+      notRunNote: !releaseOnly,
+    }),
+    ["completion_workspace_runs", "queue_decision_runs"],
+    releaseOnly ? undefined : "full approve/defer/ignore matrix runs in release profile",
+  ));
+  coverage.push(item(
+    "resume_after_interruption_restart",
+    "Resume task after interruption/restart",
+    statusFor({
+      passed: artifactEvidenceGreen("codex_recovery_runs", "orchestrator_crash_restart_fault_runs"),
+      blocked: blockedBy("codex recovery", "orchestrator crash"),
+      pending: !releaseOnly,
+      notRunNote: !releaseOnly,
+    }),
+    ["codex_recovery_runs", "orchestrator_crash_restart_fault_runs"],
+  ));
+  coverage.push(item(
+    "workspace_save_restore",
+    "Workspace context saved/restored through AeroSpace",
+    statusFor({
+      passed: artifactEvidenceGreen("completion_workspace_runs"),
+      blocked: blockedBy("codex completion workspace", "aerospace restore"),
+      pending: !releaseOnly,
+      notRunNote: !releaseOnly,
+    }),
+    ["completion_workspace_runs", "aerospace_restore_server_down_fault_runs"],
+  ));
+  coverage.push(item(
+    "observability_artifacts",
+    "Screenshots/logs/API/window/process artifacts captured",
+    statusFor({
+      passed: dogfoodOrRelease
+        ? manifest.artifact_contract?.required_artifacts_passed === true
+        : snapshotEvidenceGreen("snapshot_before", "snapshot_after") || artifactEvidenceGreen("queue_followup_runs"),
+      blocked: blockedBy("screen", "snapshot", "connectivity"),
+      pending: false,
+      notRunNote: !labMode,
+    }),
+    ["snapshot_before", "snapshot_after", "queue_followup_runs", "connectivity_status", "failed_lab_connectivity_status"],
+    labMode ? undefined : "lab mode captures remote screenshot/API/window/process bundles",
+  ));
+  coverage.push(item(
+    "desktop_stability_guard",
+    "Lab desktop stays stable during proof, with churn guard artifacts",
+    statusFor({
+      passed: labReadyOrDogfoodOrRelease
+        && (singleArtifactStatuses.window_churn_before ?? []).some((status) => status.ok === true)
+        && (!dogfoodOrRelease || (singleArtifactStatuses.window_churn_after ?? []).some((status) => status.ok === true)),
+      blocked: blockedBy("window churn", "desktop churn", "jitter", "aerospace"),
+      pending: !labReadyOrDogfoodOrRelease,
+      notRunNote: !labReadyOrDogfoodOrRelease,
+    }),
+    ["window_churn_before", "window_churn_after"],
+    labReadyOrDogfoodOrRelease ? "guard samples AeroSpace/window bounds and fails if repeated moves/layout changes suggest a loop" : "requires lab-ready, dogfood, or release profile",
+  ));
+  coverage.push(item(
+    "queue_ui_video_artifact",
+    "Queue UI screen recording artifact captured on dogfood/release proof",
+    statusFor({
+      passed: releaseRepeatCounts.queue_followup_runs >= Number(manifest.requested_runs ?? 1)
+        && dogfoodOrRelease
+        && Number(manifest.capture_video_seconds ?? 0) > 0
+        && manifest.artifact_contract?.scenario_artifacts_passed === true,
+      blocked: blockedBy("screen recording", "queue followup", "screen capture"),
+      pending: !dogfoodOrRelease || Number(manifest.capture_video_seconds ?? 0) <= 0,
+      notRunNote: !dogfoodOrRelease,
+    }),
+    ["queue_followup_runs"],
+    dogfoodOrRelease ? `capture_video_seconds=${manifest.capture_video_seconds}; queue_followup_runs=${releaseRepeatCounts.queue_followup_runs}/${manifest.requested_runs}; lab-mac-scenario asserts screen.mov exists when this is >0` : "requires dogfood or release profile",
+  ));
+  coverage.push(item(
+    "user_facing_dependency_error_text",
+    "App gives actionable error text when dependency or permission is missing",
+    statusFor({
+      passed: queueUiErrorTextEvidenceGreen
+        || artifactEvidenceGreen(
+          "screen_capture_denied_fault_runs",
+          "queue_app_accessibility_denied_fault_runs",
+          "aerospace_unavailable_fault_runs",
+          "aerospace_permission_missing_fault_runs",
+          "codex_app_server_down_fault_runs",
+          "postgres_unavailable_fault_runs",
+        ),
+      blocked: blockedBy("queue ui error text", "screen capture denied", "queue app accessibility", "aerospace unavailable", "aerospace permission", "codex app-server down", "postgres unavailable"),
+      pending: releaseOnly && !evidenceAny(
+        "screen_capture_denied_fault_runs",
+        "queue_app_accessibility_denied_fault_runs",
+        "aerospace_unavailable_fault_runs",
+        "aerospace_permission_missing_fault_runs",
+        "codex_app_server_down_fault_runs",
+        "postgres_unavailable_fault_runs",
+      ),
+    }),
+    [
+      "queue_ui_error_text",
+      "screen_capture_denied_fault_runs",
+      "queue_app_accessibility_denied_fault_runs",
+      "aerospace_unavailable_fault_runs",
+      "aerospace_permission_missing_fault_runs",
+      "codex_app_server_down_fault_runs",
+      "postgres_unavailable_fault_runs",
+    ],
+    releaseOnly ? undefined : "local quick proves visible Queue UI copy; release also requires fault matrix evidence",
+  ));
+  coverage.push(item(
+    "fault_codex_app_server_down",
+    "Codex app-server down is obvious/recoverable",
+    statusFor({
+      passed: artifactEvidenceGreen("codex_app_server_down_fault_runs"),
+      blocked: blockedBy("codex app-server down"),
+      pending: !releaseOnly,
+      notRunNote: !releaseOnly,
+    }),
+    ["codex_app_server_down_fault_runs"],
+  ));
+  coverage.push(item(
+    "fault_aerospace_down_permission",
+    "AeroSpace down or permission missing is obvious/recoverable",
+    statusFor({
+      passed: artifactEvidenceGreen("aerospace_unavailable_fault_runs", "aerospace_permission_missing_fault_runs"),
+      blocked: blockedBy("aerospace unavailable", "aerospace permission"),
+      pending: !releaseOnly,
+      notRunNote: !releaseOnly,
+    }),
+    ["aerospace_unavailable_fault_runs", "aerospace_permission_missing_fault_runs"],
+  ));
+  coverage.push(item(
+    "fault_screen_recording_accessibility",
+    "Screen Recording / Accessibility missing is obvious/recoverable",
+    statusFor({
+      passed: artifactEvidenceGreen("screen_capture_denied_fault_runs", "queue_app_accessibility_denied_fault_runs"),
+      blocked: blockedBy("screen capture denied", "queue app accessibility"),
+      pending: !releaseOnly,
+      notRunNote: !releaseOnly,
+    }),
+    ["screen_capture_denied_fault_runs", "queue_app_accessibility_denied_fault_runs"],
+  ));
+  coverage.push(item(
+    "fault_tailscale_vnc_disconnected",
+    "Tailscale/VNC disconnected is obvious/recoverable",
+    statusFor({
+      passed: artifactEvidenceGreen("tailscale_vnc_disconnected_fault_runs") || (!releaseOnly && evidenceAny("connectivity_status")),
+      blocked: blockedBy("connectivity status"),
+      pending: releaseOnly && !evidenceAny("tailscale_vnc_disconnected_fault_runs"),
+      notRunNote: !labMode,
+    }),
+    ["tailscale_vnc_disconnected_fault_runs", "connectivity_status", "failed_lab_connectivity_status"],
+    releaseOnly
+      ? "release requires `bin/lab-mac-connectivity-proof fault`, not only normal connectivity status"
+      : labMode ? undefined : "lab mode validates Tailscale/VNC transport",
+  ));
+  coverage.push(item(
+    "fault_orchestrator_crash_restart",
+    "Orchestrator crash/restart is obvious/recoverable",
+    statusFor({
+      passed: artifactEvidenceGreen("orchestrator_crash_restart_fault_runs"),
+      blocked: blockedBy("orchestrator crash"),
+      pending: !releaseOnly,
+      notRunNote: !releaseOnly,
+    }),
+    ["orchestrator_crash_restart_fault_runs"],
+  ));
+  coverage.push(item(
+    "fault_stale_codex_thread",
+    "Stale Codex thread is obvious/recoverable",
+    statusFor({
+      passed: artifactEvidenceGreen("codex_recovery_runs"),
+      blocked: blockedBy("codex recovery"),
+      pending: !releaseOnly,
+      notRunNote: !releaseOnly,
+    }),
+    ["codex_recovery_runs"],
+  ));
+  coverage.push(item(
+    "fault_duplicate_idempotency",
+    "Duplicate queue/idempotency edges are handled",
+    statusFor({
+      passed: artifactEvidenceGreen("duplicate_idempotency_fault_runs"),
+      blocked: blockedBy("duplicate idempotency"),
+      pending: !releaseOnly,
+      notRunNote: !releaseOnly,
+    }),
+    ["duplicate_idempotency_fault_runs"],
+  ));
+  coverage.push(item(
+    "fault_ghostty_cleanup",
+    "Ghostty/Terminal cleanup failures are reported and cleaned",
+    statusFor({
+      passed: artifactEvidenceGreen("ghostty_cleanup_failure_fault_runs"),
+      blocked: blockedBy("ghostty cleanup"),
+      pending: !releaseOnly,
+      notRunNote: !releaseOnly,
+    }),
+    ["ghostty_cleanup_failure_fault_runs"],
+  ));
+  coverage.push(item(
+    "fault_postgres_unavailable",
+    "Postgres unavailable is obvious/recoverable",
+    statusFor({
+      passed: artifactEvidenceGreen("postgres_unavailable_fault_runs"),
+      blocked: blockedBy("postgres unavailable"),
+      pending: !releaseOnly,
+      notRunNote: !releaseOnly,
+    }),
+    ["postgres_unavailable_fault_runs"],
+  ));
+  coverage.push(item(
+    "fault_postgres_migration_mismatch",
+    "Postgres migration mismatch is obvious/recoverable",
+    statusFor({
+      passed: artifactEvidenceGreen("postgres_migration_mismatch_fault_runs"),
+      blocked: blockedBy("postgres migration mismatch"),
+      pending: !releaseOnly || !evidenceAny("postgres_migration_mismatch_fault_runs"),
+      notRunNote: !releaseOnly,
+    }),
+    ["postgres_migration_mismatch_fault_runs"],
+    evidenceAny("postgres_migration_mismatch_fault_runs") ? undefined : "requires Postgres migration mismatch proof and a lab Postgres runtime",
+  ));
+  coverage.push(item(
+    "fresh_mac_account_setup",
+    "Fresh Mac account setup proof passes",
+    statusFor({
+      passed: evidenceGreen("fresh_clone_setup"),
+      blocked: blockedBy("fresh clone"),
+      pending: !releaseOnly || !evidenceAny("fresh_clone_setup"),
+      notRunNote: !releaseOnly,
+    }),
+    ["fresh_clone_setup"],
+    evidenceAny("fresh_clone_setup") ? undefined : "requires fresh-clone proof; release defaults enable this unless PRODUCT_READINESS_FRESH_CLONE=0",
+  ));
+  coverage.push(item(
+    "reboot_relaunch_remote",
+    "App/lab relaunch after full Mac reboot passes",
+    statusFor({
+      passed: evidenceGreen("reboot_proof"),
+      blocked: blockedBy("reboot", "connectivity status"),
+      pending: !releaseOnly || !evidenceAny("reboot_proof"),
+      notRunNote: !releaseOnly,
+    }),
+    ["reboot_proof"],
+    evidenceAny("reboot_proof") ? undefined : "requires reboot proof and reachable lab; release defaults enable this unless PRODUCT_READINESS_REBOOT=0",
+  ));
+  coverage.push(item(
+    "flake_confidence_3x",
+    "Critical happy-path lab proofs pass 3 times and fault matrix passes required count",
+    statusFor({
+      passed: manifest.requested_runs >= manifest.required_release_runs && releaseOnly && releaseRepeatEvidencePassed,
+      blocked: blockedBy("flake confidence"),
+      pending: releaseOnly && (manifest.requested_runs < manifest.required_release_runs || !releaseRepeatEvidencePassed),
+      notRunNote: !releaseOnly,
+    }),
+    releaseRepeatEvidenceKeys,
+    `requested_runs=${manifest.requested_runs}; requested_fault_runs=${manifest.requested_fault_runs}; required_release_runs=${manifest.required_release_runs}; required_artifact_counts=${JSON.stringify(releaseRequiredArtifactCounts)}; run_artifact_counts=${JSON.stringify(releaseRepeatCounts)}`,
+  ));
+  coverage.push(item(
+    "no_orphan_windows_processes",
+    "No orphaned windows/processes after proof",
+    statusFor({
+      passed: (singleArtifactStatuses.orphan_proof ?? []).some((status) => status.ok === true),
+      blocked: blockedBy("orphan"),
+      pending: !dogfoodOrRelease,
+      notRunNote: !dogfoodOrRelease,
+    }),
+    ["orphan_proof"],
+  ));
+  coverage.push(item(
+    "single_readiness_command",
+    "One command answers whether eventloopOS is usable today",
+    "passed",
+    [],
+    "bin/product-readiness-proof emits steps, evidence, blockers, and requirement_coverage",
+  ));
+  return coverage;
+
+  function artifactContractStatus(manifestFile, nested, parentManifest) {
+    if (nested?.kind === "eventloopos.lab_dogfood_status") {
+      return dogfoodStatusArtifactContractStatus(manifestFile, nested);
+    }
+    if (nested?.kind === "eventloopos.lab_fault_proof") {
+      return faultArtifactContractStatus(manifestFile, nested);
+    }
+    if (nested?.kind === "eventloopos.lab_connectivity_proof") {
+      return connectivityArtifactContractStatus(manifestFile, nested);
+    }
+    if (nested?.kind === "eventloopos.lab_orphan_proof") {
+      return orphanArtifactContractStatus(manifestFile, nested);
+    }
+    if (nested?.kind === "eventloopos.lab_window_churn_guard") {
+      return windowChurnArtifactContractStatus(manifestFile, nested);
+    }
+    return scenarioArtifactContractStatus(manifestFile, nested, parentManifest);
+  }
+
+  function dogfoodStatusArtifactContractStatus(manifestFile, nested) {
+    const dir = path.dirname(manifestFile);
+    const artifactMissing = artifactPaths(nested)
+      .filter((relative) => !fs.existsSync(path.join(dir, relative)));
+    const statusCheckValues = Object.values(nested.checks ?? {});
+    const checks = {
+      manifest_green: nested.ok === true || nested.passed === true,
+      status_checks_green: statusCheckValues.length > 0 && statusCheckValues.every((value) => value === true),
+      declared_artifacts_exist: artifactMissing.length === 0,
+      health_ok: readJsonIfExists(firstPath(dir, artifactValue(nested, "health"), "health.json"))?.ok === true,
+      task_sessions_api_exists: fileSize(firstPath(dir, artifactValue(nested, "task_sessions"), "task-sessions.json")) > 2,
+      queue_ready_api_exists: fileSize(firstPath(dir, artifactValue(nested, "queue_ready"), "queue-ready.json")) > 2,
+      process_list_nonempty: fileSize(firstPath(dir, artifactValue(nested, "processes"), "processes-interesting.txt")) > 20,
+      ps_nonempty: fileSize(firstPath(dir, artifactValue(nested, "ps"), "ps.txt")) > 100,
+      listener_artifact_exists: fs.existsSync(firstPath(dir, artifactValue(nested, "listeners"), "listeners.txt")),
+      window_artifact_exists: fs.existsSync(firstPath(dir, artifactValue(nested, "windows"), "windows.json")),
+    };
+    const failedChecks = Object.entries(checks)
+      .filter(([, value]) => value !== true)
+      .map(([key]) => key);
+    return {
+      ok: artifactMissing.length === 0 && failedChecks.length === 0,
+      kind: nested.kind,
+      manifest: manifestFile,
+      checks: { ...checks, declared_artifact_missing_count: artifactMissing.length },
+      missing: artifactMissing,
+      failed_checks: failedChecks,
+    };
+  }
+
+  function snapshotEvidenceStatus(item) {
+    const dir = typeof item === "string" ? item : item?.path ?? item?.dir;
+    if (!dir) {
+      return { ok: false, reason: "missing snapshot directory path" };
+    }
+    const files = {
+      health: path.join(dir, "health.json"),
+      activity: path.join(dir, "activity.json"),
+      queue_ready: path.join(dir, "queue_state_ready.json"),
+      task_messages: path.join(dir, "task-messages_limit_50.json"),
+      windows: path.join(dir, "windows.json"),
+      ps: path.join(dir, "ps.txt"),
+      screen: path.join(dir, "screen.png"),
+    };
+    const health = readJsonIfExists(files.health);
+    const checks = {
+      directory_exists: fs.existsSync(dir) && fs.statSync(dir).isDirectory(),
+      health_ok: health?.ok === true,
+      activity_exists: fileSize(files.activity) > 2,
+      queue_ready_exists: fileSize(files.queue_ready) > 2,
+      task_messages_exists: fileSize(files.task_messages) > 2,
+      windows_exists: fileSize(files.windows) > 2,
+      process_list_nonempty: fileSize(files.ps) > 100,
+      screen_nonempty: !fs.existsSync(files.screen) || fileSize(files.screen) > 10000,
+    };
+    const failedChecks = Object.entries(checks)
+      .filter(([, value]) => value !== true)
+      .map(([key]) => key);
+    return {
+      ok: failedChecks.length === 0,
+      dir,
+      checks,
+      failed_checks: failedChecks,
+    };
+  }
+
+  function scenarioArtifactContractStatus(manifestFile, nested, parentManifest) {
+    if (!nested || typeof nested !== "object" || !nested.scenario) {
+      return { ok: true, skipped: true, reason: "not a lab scenario artifact" };
+    }
+    const dir = path.dirname(manifestFile);
+    const requiredFiles = [
+      "manifest.json",
+      nested.captures?.before ?? "captures/before/capture-summary.json",
+      nested.captures?.after ?? "captures/after/capture-summary.json",
+      "captures/after/screen.png",
+      "captures/after/windows.json",
+      "captures/after/ps.txt",
+      "captures/after/processes-interesting.txt",
+      "captures/after/queue-ax-tree.txt",
+      "api/after/health.json",
+      "api/after/task-messages_limit_120.json",
+      "api/after/activity_limit_120.json",
+      "api/after/queue_state_ready.json",
+      "api-state.json",
+      "task-messages.json",
+      "windows.json",
+      "screenshot-after.png",
+    ];
+    if (Number(parentManifest.capture_video_seconds ?? 0) > 0) {
+      requiredFiles.push("captures/after/screen.mov");
+      requiredFiles.push("screen.mov");
+    }
+    const missing = requiredFiles.filter((relative) => !fs.existsSync(path.join(dir, relative)));
+    const afterCapture = readJsonIfExists(path.join(dir, nested.captures?.after ?? "captures/after/capture-summary.json"));
+    const apiHealth = readJsonIfExists(path.join(dir, "api/after/health.json"));
+    const checks = {
+      manifest_green: nested.ok === true || nested.passed === true,
+      after_screen_nonempty: Number(afterCapture?.screen?.bytes ?? 0) > 10000,
+      after_video_present: Number(parentManifest.capture_video_seconds ?? 0) <= 0 || Number(afterCapture?.video?.bytes ?? 0) > 10000,
+      api_health_ok: apiHealth?.ok === true,
+      api_state_alias_nonempty: fileSize(path.join(dir, "api-state.json")) > 100,
+      task_messages_alias_nonempty: fileSize(path.join(dir, "task-messages.json")) > 10,
+      windows_alias_nonempty: fileSize(path.join(dir, "windows.json")) > 2,
+      screenshot_after_alias_nonempty: fileSize(path.join(dir, "screenshot-after.png")) > 10000,
+      screen_recording_alias_present: Number(parentManifest.capture_video_seconds ?? 0) <= 0 || fileSize(path.join(dir, "screen.mov")) > 10000,
+      queue_ax_tree_nonempty: fileSize(path.join(dir, "captures/after/queue-ax-tree.txt")) > 100,
+      process_list_nonempty: fileSize(path.join(dir, "captures/after/ps.txt")) > 100,
+      missing_file_count: missing.length,
+    };
+    const failedChecks = Object.entries(checks)
+      .filter(([key, value]) => key !== "missing_file_count" && value !== true)
+      .map(([key]) => key);
+    return {
+      ok: missing.length === 0 && failedChecks.length === 0,
+      scenario: nested.scenario,
+      manifest: manifestFile,
+      checks,
+      missing,
+      failed_checks: failedChecks,
+    };
+  }
+
+  function windowChurnArtifactContractStatus(manifestFile, nested) {
+    const dir = path.dirname(manifestFile);
+    const artifactMissing = artifactPaths(nested)
+      .filter((relative) => !fs.existsSync(path.join(dir, relative)));
+    const checkValues = Object.values(nested.checks ?? {});
+    const checks = {
+      manifest_green: nested.ok === true || nested.passed === true,
+      status_checks_green: checkValues.length > 0 && checkValues.every((value) => value === true),
+      declared_artifacts_exist: artifactMissing.length === 0,
+      samples_directory_exists: fs.existsSync(path.join(dir, artifactValue(nested, "samples") || "samples")),
+      enough_samples: nested.checks?.enough_samples === true,
+      max_single_window_changes_ok: nested.checks?.max_single_window_changes_ok === true,
+      total_bounds_changes_ok: nested.checks?.total_bounds_changes_ok === true,
+    };
+    const failedChecks = Object.entries(checks)
+      .filter(([, value]) => value !== true)
+      .map(([key]) => key);
+    return {
+      ok: artifactMissing.length === 0 && failedChecks.length === 0,
+      kind: nested.kind,
+      manifest: manifestFile,
+      checks: { ...checks, declared_artifact_missing_count: artifactMissing.length },
+      missing: artifactMissing,
+      failed_checks: failedChecks,
+      totals: nested.totals,
+    };
+  }
+
+  function faultArtifactContractStatus(manifestFile, nested) {
+    const dir = path.dirname(manifestFile);
+    const artifactMissing = artifactPaths(nested)
+      .filter((relative) => !fs.existsSync(path.join(dir, relative)));
+    const captureSummary = firstJson(dir, artifactValue(nested, "capture_summary"), ...captureSummaryFallbacks(nested.scenario));
+    const apiStatePath = firstPath(dir, artifactValue(nested, "api_state"), "api-state.json");
+    const processPath = firstPath(
+      dir,
+      artifactValue(nested, "process_list"),
+      ...capturePathFallbacks(nested.scenario, "ps.txt"),
+      artifactValue(nested, "processes_after_cleanup"),
+      artifactValue(nested, "processes_after_proof"),
+      artifactValue(nested, "fault_processes_after"),
+    );
+    const windowPath = firstPath(
+      dir,
+      artifactValue(nested, "windows_after_fault"),
+      artifactValue(nested, "windows_after_restart"),
+      artifactValue(nested, "windows_after"),
+      artifactValue(nested, "windows_after_cleanup"),
+      artifactValue(nested, "windows_after_proof"),
+      artifactValue(nested, "windows"),
+      ...capturePathFallbacks(nested.scenario, "windows.json"),
+    );
+    const screenshotPath = firstPath(
+      dir,
+      artifactValue(nested, "screenshot_after_fault"),
+      artifactValue(nested, "screenshot_after_restart"),
+      artifactValue(nested, "screenshot_after"),
+      artifactValue(nested, "screenshot"),
+      ...capturePathFallbacks(nested.scenario, "screen.png"),
+    );
+    const isScreenDenied = nested.scenario === "screen-capture-denied";
+    const checks = {
+      manifest_green: nested.ok === true || nested.passed === true,
+      assertions_green: assertionsGreen(nested),
+      declared_artifacts_exist: artifactMissing.length === 0,
+      api_state_exists: fileSize(apiStatePath) > 0,
+      process_list_nonempty: fileSize(processPath) > 100,
+      window_list_exists: fileSize(windowPath) > 2,
+      capture_summary_exists: Boolean(captureSummary),
+      screenshot_nonempty: isScreenDenied || fileSize(screenshotPath) > 10000 || Number(captureSummary?.screen?.bytes ?? 0) > 10000,
+      screen_denied_zero_byte_with_actionable_error: !isScreenDenied || (
+        Number(captureSummary?.screen?.bytes ?? -1) === 0
+        && String(captureSummary?.screen?.failure_hint ?? "").length > 20
+        && fs.existsSync(firstPath(dir, artifactValue(nested, "screencapture_error"), ...capturePathFallbacks(nested.scenario, "screencapture.err")))
+      ),
+    };
+    const failedChecks = Object.entries(checks)
+      .filter(([, value]) => value !== true)
+      .map(([key]) => key);
+    return {
+      ok: artifactMissing.length === 0 && failedChecks.length === 0,
+      scenario: nested.scenario,
+      kind: nested.kind,
+      manifest: manifestFile,
+      checks: { ...checks, declared_artifact_missing_count: artifactMissing.length },
+      missing: artifactMissing,
+      failed_checks: failedChecks,
+    };
+  }
+
+  function connectivityArtifactContractStatus(manifestFile, nested) {
+    const dir = path.dirname(manifestFile);
+    const artifactMissing = artifactPaths(nested)
+      .filter((relative) => !fs.existsSync(path.join(dir, relative)));
+    const checks = {
+      manifest_green: nested.ok === true || nested.passed === true,
+      assertions_green: assertionsGreen(nested),
+      declared_artifacts_exist: artifactMissing.length === 0,
+      api_state_exists: fileSize(firstPath(dir, artifactValue(nested, "api_state"), "api-state.json")) > 0,
+      ssh_probe_artifacts_exist: fs.existsSync(firstPath(dir, artifactValue(nested, "ssh_probe_stdout"), "ssh-probe.out"))
+        && fs.existsSync(firstPath(dir, artifactValue(nested, "ssh_probe_stderr"), "ssh-probe.err")),
+      vnc_probe_artifacts_exist: fs.existsSync(firstPath(dir, artifactValue(nested, "vnc_port_probe_stdout"), "vnc-port-probe.out"))
+        && fs.existsSync(firstPath(dir, artifactValue(nested, "vnc_port_probe_stderr"), "vnc-port-probe.err")),
+    };
+    const failedChecks = Object.entries(checks)
+      .filter(([, value]) => value !== true)
+      .map(([key]) => key);
+    return {
+      ok: artifactMissing.length === 0 && failedChecks.length === 0,
+      kind: nested.kind,
+      manifest: manifestFile,
+      checks: { ...checks, declared_artifact_missing_count: artifactMissing.length },
+      missing: artifactMissing,
+      failed_checks: failedChecks,
+    };
+  }
+
+  function orphanArtifactContractStatus(manifestFile, nested) {
+    const dir = path.dirname(manifestFile);
+    const artifactMissing = artifactPaths(nested)
+      .filter((relative) => !fs.existsSync(path.join(dir, relative)));
+    const checks = {
+      manifest_green: nested.ok === true || nested.passed === true,
+      assertions_green: assertionsGreen(nested),
+      declared_artifacts_exist: artifactMissing.length === 0,
+      process_artifact_exists: fs.existsSync(firstPath(dir, artifactValue(nested, "processes"), "processes-interesting.txt")),
+      ps_artifact_nonempty: fileSize(firstPath(dir, artifactValue(nested, "ps"), "ps.txt")) > 100,
+      listener_artifact_exists: fs.existsSync(firstPath(dir, artifactValue(nested, "listeners"), "listeners.txt")),
+      window_artifact_exists: fs.existsSync(firstPath(dir, artifactValue(nested, "windows"), "windows.json")),
+      terminal_window_artifact_exists: fs.existsSync(firstPath(dir, artifactValue(nested, "terminal_windows"), "terminal-windows.txt")),
+    };
+    const failedChecks = Object.entries(checks)
+      .filter(([, value]) => value !== true)
+      .map(([key]) => key);
+    return {
+      ok: artifactMissing.length === 0 && failedChecks.length === 0,
+      kind: nested.kind,
+      manifest: manifestFile,
+      checks: { ...checks, declared_artifact_missing_count: artifactMissing.length },
+      missing: artifactMissing,
+      failed_checks: failedChecks,
+    };
+  }
+
+  function artifactValue(nested, key) {
+    const value = nested?.artifacts?.[key];
+    return typeof value === "string" ? value : undefined;
+  }
+
+  function artifactPaths(nested) {
+    return Object.values(nested?.artifacts ?? {})
+      .filter((value) => typeof value === "string");
+  }
+
+  function firstPath(dir, ...candidates) {
+    for (const candidate of candidates.flat().filter(Boolean)) {
+      const absolute = path.join(dir, candidate);
+      if (fs.existsSync(absolute)) return absolute;
+    }
+    return path.join(dir, candidates.flat().filter(Boolean)[0] ?? "__missing__");
+  }
+
+  function firstJson(dir, ...candidates) {
+    const found = firstPath(dir, ...candidates);
+    return readJsonIfExists(found);
+  }
+
+  function captureSummaryFallbacks(scenario) {
+    return capturePathFallbacks(scenario, "capture-summary.json");
+  }
+
+  function capturePathFallbacks(scenario, file) {
+    const dirsByScenario = {
+      "codex-app-server-down": ["captures/after-fault"],
+      "orchestrator-crash-restart": ["captures/after-restart"],
+      "queue-app-accessibility-denied": ["captures/accessibility-denied"],
+      "screen-capture-denied": ["captures/screen-denied"],
+    };
+    const dirs = [...(dirsByScenario[scenario] ?? []), "captures/after", "captures/after-fault", "captures/after-restart", "captures/accessibility-denied", "captures/screen-denied"];
+    return [...new Set(dirs)].map((captureDir) => `${captureDir}/${file}`);
+  }
+
+  function assertionsGreen(nested) {
+    return !Array.isArray(nested.assertions) || nested.assertions.every((assertion) => assertion?.ok === true);
+  }
+
+  function readJsonIfExists(file) {
+    try {
+      if (!fs.existsSync(file)) return undefined;
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      return undefined;
+    }
+  }
+
+  function fileSize(file) {
+    try {
+      return fs.statSync(file).size;
+    } catch {
+      return 0;
+    }
+  }
+}
+NODE
+}
+
+emit_readiness_summary() {
+  if [[ -x bin/readiness-summary ]]; then
+    node bin/readiness-summary "$manifest"
+  fi
+}
+
+emit_artifact_audit() {
+  if [[ ! -f bin/product-readiness-artifact-audit ]]; then
+    return
+  fi
+  local stdout_path="$artifact_dir/artifact-audit.stdout.log"
+  local stderr_path="$artifact_dir/artifact-audit.stderr.log"
+  local audit_rc=0
+  if node bin/product-readiness-artifact-audit "$manifest" >"$stdout_path" 2>"$stderr_path"; then
+    audit_rc=0
+  else
+    audit_rc=$?
+  fi
+  local audit_manifest
+  audit_manifest="$(awk '/^artifact audit manifest:/ { value=$4 } END { print value }' "$stdout_path")"
+  if [[ -n "$audit_manifest" && -f "$audit_manifest" ]]; then
+    add_evidence "artifact_audit" "\"$(repo_relative_path "$audit_manifest")\""
+    ARTIFACT_AUDIT_RC="$audit_rc" ARTIFACT_AUDIT_MANIFEST="$(repo_relative_path "$audit_manifest")" MANIFEST="$manifest" node <<'NODE'
+const fs = require("node:fs");
+const manifestPath = process.env.MANIFEST;
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+manifest.artifact_audit = {
+  manifest: process.env.ARTIFACT_AUDIT_MANIFEST,
+  ok: process.env.ARTIFACT_AUDIT_RC === "0",
+  exit_code: Number(process.env.ARTIFACT_AUDIT_RC),
+};
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+  fi
+}
+
+append_step() {
+  local name="$1"
+  local status="$2"
+  local stdout_path="$3"
+  local stderr_path="$4"
+  local started="$5"
+  local finished="$6"
+  local exit_code="$7"
+  local optional="${8:-false}"
+  local timed_out="${9:-false}"
+  local timeout_seconds="${10:-}"
+  STEP_NAME="$name" STEP_STATUS="$status" STDOUT_PATH="$stdout_path" STDERR_PATH="$stderr_path" \
+    STEP_STARTED="$started" STEP_FINISHED="$finished" STEP_EXIT_CODE="$exit_code" STEP_OPTIONAL="$optional" \
+    STEP_TIMED_OUT="$timed_out" STEP_TIMEOUT_SECONDS="$timeout_seconds" \
+    MANIFEST="$manifest" node <<'NODE'
+const fs = require("node:fs");
+const manifestPath = process.env.MANIFEST;
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const step = {
+  name: process.env.STEP_NAME,
+  status: process.env.STEP_STATUS,
+  started_at: process.env.STEP_STARTED,
+  finished_at: process.env.STEP_FINISHED,
+  duration_ms: Date.parse(process.env.STEP_FINISHED) - Date.parse(process.env.STEP_STARTED),
+  exit_code: Number(process.env.STEP_EXIT_CODE),
+  stdout_path: process.env.STDOUT_PATH,
+  stderr_path: process.env.STDERR_PATH,
+  optional: process.env.STEP_OPTIONAL === "true",
+};
+if (process.env.STEP_TIMED_OUT === "true") {
+  step.timed_out = true;
+}
+if (process.env.STEP_TIMEOUT_SECONDS) {
+  step.timeout_seconds = Number(process.env.STEP_TIMEOUT_SECONDS);
+}
+manifest.steps.push(step);
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+add_evidence() {
+  local key="$1"
+  local value_json="$2"
+  EVIDENCE_KEY="$key" EVIDENCE_JSON="$value_json" MANIFEST="$manifest" node <<'NODE'
+const fs = require("node:fs");
+const manifestPath = process.env.MANIFEST;
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+manifest.evidence[process.env.EVIDENCE_KEY] = JSON.parse(process.env.EVIDENCE_JSON);
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+add_blocker() {
+  local requirement="$1"
+  local evidence="$2"
+  REQUIREMENT="$requirement" EVIDENCE="$evidence" MANIFEST="$manifest" node <<'NODE'
+const fs = require("node:fs");
+const manifestPath = process.env.MANIFEST;
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+manifest.blockers.push({
+  requirement: process.env.REQUIREMENT,
+  evidence: process.env.EVIDENCE,
+});
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
+run_step_command() {
+  local stdout_path="$1"
+  local stderr_path="$2"
+  local result_path="$3"
+  shift 3
+  if [[ "$step_timeout_seconds" == "0" ]]; then
+    "$@" >"$stdout_path" 2>"$stderr_path"
+    local raw_code=$?
+    printf '{"timed_out":false,"timeout_seconds":0,"exit_code":%s}\n' "$raw_code" >"$result_path"
+    return "$raw_code"
+  fi
+  PRODUCT_READINESS_TIMEOUT_SECONDS="$step_timeout_seconds" \
+    PRODUCT_READINESS_TIMEOUT_STDOUT="$stdout_path" \
+    PRODUCT_READINESS_TIMEOUT_STDERR="$stderr_path" \
+    PRODUCT_READINESS_TIMEOUT_RESULT="$result_path" \
+    node - "$@" <<'NODE'
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+
+const timeoutSeconds = Number(process.env.PRODUCT_READINESS_TIMEOUT_SECONDS ?? "0");
+const stdoutPath = process.env.PRODUCT_READINESS_TIMEOUT_STDOUT;
+const stderrPath = process.env.PRODUCT_READINESS_TIMEOUT_STDERR;
+const resultPath = process.env.PRODUCT_READINESS_TIMEOUT_RESULT;
+const [command, ...args] = process.argv.slice(2);
+
+if (!command) {
+  fs.writeFileSync(resultPath, JSON.stringify({ timed_out: false, timeout_seconds: timeoutSeconds, exit_code: 2, error: "missing command" }) + "\n");
+  process.exit(2);
+}
+if (!Number.isFinite(timeoutSeconds) || timeoutSeconds < 0) {
+  fs.writeFileSync(resultPath, JSON.stringify({ timed_out: false, timeout_seconds: timeoutSeconds, exit_code: 2, error: "invalid timeout" }) + "\n");
+  process.exit(2);
+}
+
+const stdout = fs.createWriteStream(stdoutPath);
+const stderr = fs.createWriteStream(stderrPath);
+let timedOut = false;
+let killTimer;
+const child = spawn(command, args, {
+  cwd: process.cwd(),
+  env: process.env,
+  detached: process.platform !== "win32",
+  stdio: ["ignore", "pipe", "pipe"],
+});
+child.stdout.pipe(stdout, { end: false });
+child.stderr.pipe(stderr, { end: false });
+function finish(result) {
+  stdout.end(() => {
+    stderr.end(() => {
+      fs.writeFileSync(resultPath, JSON.stringify(result) + "\n");
+      process.exit(result.exit_code);
+    });
+  });
+}
+const timer = setTimeout(() => {
+  timedOut = true;
+  stderr.write(`\nproduct-readiness step timed out after ${timeoutSeconds}s\n`);
+  try {
+    if (process.platform !== "win32") {
+      process.kill(-child.pid, "SIGTERM");
+    } else {
+      child.kill("SIGTERM");
+    }
+  } catch {}
+  killTimer = setTimeout(() => {
+    try {
+      if (process.platform !== "win32") {
+        process.kill(-child.pid, "SIGKILL");
+      } else {
+        child.kill("SIGKILL");
+      }
+    } catch {}
+  }, 1000);
+  killTimer.unref?.();
+}, timeoutSeconds * 1000);
+timer.unref?.();
+
+child.on("error", (error) => {
+  clearTimeout(timer);
+  if (killTimer) clearTimeout(killTimer);
+  stderr.write(`${error.message}\n`);
+  finish({ timed_out: timedOut, timeout_seconds: timeoutSeconds, exit_code: 127, error: error.message });
+});
+
+child.on("exit", (code, signal) => {
+  clearTimeout(timer);
+  if (killTimer) clearTimeout(killTimer);
+  const exitCode = timedOut ? 124 : (code ?? 1);
+  finish({ timed_out: timedOut, timeout_seconds: timeoutSeconds, exit_code: exitCode, signal });
+});
+NODE
+}
+
+run_step() {
+  local name="$1"
+  shift
+  local safe
+  safe="$(printf "%s" "$name" | tr -cs 'A-Za-z0-9._-' '-' | sed 's/^-//; s/-$//')"
+  local stdout_path="$artifact_dir/steps/$safe.stdout.log"
+  local stderr_path="$artifact_dir/steps/$safe.stderr.log"
+  local timeout_result="$artifact_dir/steps/$safe.timeout.json"
+  local started
+  local finished
+  local code
+  local timed_out="false"
+  started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "product readiness start: $name"
+  set +e
+  run_step_command "$stdout_path" "$stderr_path" "$timeout_result" "$@"
+  code=$?
+  set -e
+  finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  if [[ -f "$timeout_result" ]] && grep -q '"timed_out":true' "$timeout_result"; then
+    timed_out="true"
+  fi
+  if [[ "$code" == "0" ]]; then
+    echo "product readiness pass: $name"
+    append_step "$name" passed "$stdout_path" "$stderr_path" "$started" "$finished" "$code" false "$timed_out" "$step_timeout_seconds"
+  else
+    echo "product readiness fail: $name" >&2
+    append_step "$name" failed "$stdout_path" "$stderr_path" "$started" "$finished" "$code" false "$timed_out" "$step_timeout_seconds"
+    if [[ "$mode" == "lab" && "$name" != "stop lab dogfood stack" ]]; then
+      local cleanup_stdout="$artifact_dir/steps/failed-step-lab-cleanup.stdout.log"
+      local cleanup_stderr="$artifact_dir/steps/failed-step-lab-cleanup.stderr.log"
+      local stop_aerospace=0
+      case "$name" in
+        *"window churn"*|*"aerospace"*|*"ghostty cleanup"*) stop_aerospace=1 ;;
+      esac
+      env LAB_DOGFOOD_STOP_AEROSPACE="$stop_aerospace" bin/lab-mac-dogfood stop >"$cleanup_stdout" 2>"$cleanup_stderr" || true
+      env LAB_DOGFOOD_STOP_AEROSPACE=0 bin/lab-mac-dogfood cleanup >>"$cleanup_stdout" 2>>"$cleanup_stderr" || true
+      add_evidence "failed_step_lab_cleanup" "\"$cleanup_stdout\""
+    fi
+    local failed_run
+    failed_run="$(latest_lab_run_from_log "$stdout_path")"
+    if [[ -n "$failed_run" && -d "$failed_run" ]]; then
+      copy_local_artifact "$failed_run" "failed-$safe"
+      add_evidence "failed_${safe//-/_}" "\"$artifact_dir/failed-$safe/manifest.json\""
+      add_blocker "Step failed: $name" "$artifact_dir/failed-$safe/manifest.json"
+    else
+      local failed_manifest
+      failed_manifest="$(latest_manifest_path_from_log "$stdout_path" "manifest:")"
+      if [[ -n "$failed_manifest" && -f "$failed_manifest" ]]; then
+        add_evidence "failed_${safe//-/_}_manifest" "\"$(repo_relative_path "$failed_manifest")\""
+        add_blocker "Step failed: $name" "$(repo_relative_path "$failed_manifest")"
+      else
+        add_blocker "Step failed: $name" "stdout: $stdout_path; stderr: $stderr_path"
+      fi
+    fi
+    update_manifest
+    emit_artifact_audit || true
+    update_manifest
+    emit_readiness_summary || true
+    echo "product readiness manifest: $manifest"
+    tail -n 80 "$stdout_path" || true
+    tail -n 80 "$stderr_path" >&2 || true
+    exit "$code"
+  fi
+}
+
+sync_remote_artifact() {
+  local remote_path="$1"
+  local local_name="$2"
+  local lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+  local lab_user="${LAB_MAC_USER:-claw}"
+  local lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+  local remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
+  mkdir -p "$artifact_dir/$local_name"
+  rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" \
+    "$lab_user@$lab_host:$remote_repo/$remote_path/" "$artifact_dir/$local_name/"
+}
+
+source_fingerprint() {
+  {
+    printf "HEAD "
+    git rev-parse HEAD 2>/dev/null || printf "unknown"
+    printf "\n"
+    for path in package.json pnpm-lock.yaml bin app/macos app/orchestrator app/shared app/native-host app/browser-extension app/test-harness; do
+      [[ -e "$path" ]] || continue
+      find "$path" -type f \
+        ! -path '*/node_modules/*' \
+        ! -path '*/.build/*' \
+        ! -path '*/dist/*' \
+        ! -path '*/build/*' \
+        ! -path '*/.next/*' \
+        -print0
+    done | sort -z | xargs -0 shasum 2>/dev/null || true
+  } | shasum | awk '{print $1}'
+}
+
+baseline_cache_enabled() {
+  case "$baseline_cache" in
+    1|true|yes|on) return 0 ;;
+    0|false|no|off) return 1 ;;
+    auto)
+      [[ "$profile" != "release" ]]
+      return
+      ;;
+    *)
+      echo "unknown PRODUCT_READINESS_BASELINE_CACHE: $baseline_cache" >&2
+      exit 2
+      ;;
+  esac
+}
+
+baseline_cache_lookup() {
+  baseline_cache_enabled || return 1
+  [[ -f "$baseline_cache_file" ]] || return 1
+  local lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+  local lab_user="${LAB_MAC_USER:-claw}"
+  local fingerprint="$1"
+  BASELINE_CACHE_FILE="$baseline_cache_file" LAB_HOST="$lab_host" LAB_USER="$lab_user" \
+    FINGERPRINT="$fingerprint" TTL_SECONDS="$baseline_cache_ttl_seconds" node <<'NODE'
+const fs = require("node:fs");
+const cacheFile = process.env.BASELINE_CACHE_FILE;
+const ttlSeconds = Number(process.env.TTL_SECONDS || "0");
+try {
+  const cache = JSON.parse(fs.readFileSync(cacheFile, "utf8"));
+  const ageSeconds = (Date.now() - Date.parse(cache.cached_at || "")) / 1000;
+  const ok =
+    cache.ok === true &&
+    cache.lab_host === process.env.LAB_HOST &&
+    cache.lab_user === process.env.LAB_USER &&
+    cache.source_fingerprint === process.env.FINGERPRINT &&
+    ttlSeconds > 0 &&
+    Number.isFinite(ageSeconds) &&
+    ageSeconds >= 0 &&
+    ageSeconds <= ttlSeconds &&
+    cache.local_artifact_dir &&
+    fs.existsSync(cache.local_artifact_dir) &&
+    fs.existsSync(`${cache.local_artifact_dir}/manifest.json`);
+  if (!ok) process.exit(1);
+  console.log(cache.local_artifact_dir);
+} catch {
+  process.exit(1);
+}
+NODE
+}
+
+write_baseline_cache() {
+  local local_artifact_dir="$1"
+  local remote_run="$2"
+  baseline_cache_enabled || return 0
+  local lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+  local lab_user="${LAB_MAC_USER:-claw}"
+  local fingerprint="$3"
+  mkdir -p "$(dirname "$baseline_cache_file")"
+  BASELINE_CACHE_FILE="$baseline_cache_file" LAB_HOST="$lab_host" LAB_USER="$lab_user" \
+    FINGERPRINT="$fingerprint" LOCAL_ARTIFACT_DIR="$local_artifact_dir" REMOTE_RUN="$remote_run" node <<'NODE'
+const fs = require("node:fs");
+const cache = {
+  schema_version: 1,
+  kind: "eventloopos.product_readiness_baseline_cache",
+  ok: true,
+  cached_at: new Date().toISOString(),
+  lab_host: process.env.LAB_HOST,
+  lab_user: process.env.LAB_USER,
+  source_fingerprint: process.env.FINGERPRINT,
+  local_artifact_dir: process.env.LOCAL_ARTIFACT_DIR,
+  remote_run: process.env.REMOTE_RUN,
+};
+fs.writeFileSync(process.env.BASELINE_CACHE_FILE, `${JSON.stringify(cache, null, 2)}\n`);
+NODE
+}
+
+copy_local_artifact() {
+  local source_path="$1"
+  local local_name="$2"
+  mkdir -p "$artifact_dir/$local_name"
+  rsync -a "$source_path/" "$artifact_dir/$local_name/"
+}
+
+latest_lab_run_from_log() {
+  local log="$1"
+  awk '/^artifacts\/lab-runs\// { value=$1 } END { print value }' "$log"
+}
+
+latest_install_run_from_log() {
+  local log="$1"
+  awk '/^artifacts\/install\// { value=$1 } END { print value }' "$log"
+}
+
+latest_manifest_path_from_log() {
+  local log="$1"
+  local marker="$2"
+  awk -v marker="$marker" '$0 ~ marker { value=$NF } END { print value }' "$log"
+}
+
+repo_relative_path() {
+  local value="$1"
+  case "$value" in
+    "$repo_root"/*) printf "%s\n" "${value#"$repo_root/"}" ;;
+    *) printf "%s\n" "$value" ;;
+  esac
+}
+
+lab_lock_acquired=0
+
+lab_lock_is_stale() {
+  if [[ ! -d "$lab_lock_dir" ]]; then
+    return 1
+  fi
+  LOCK_DIR="$lab_lock_dir" TTL_SECONDS="$lab_lock_ttl_seconds" node <<'NODE'
+const fs = require("node:fs");
+const lockDir = process.env.LOCK_DIR;
+const ttlSeconds = Number(process.env.TTL_SECONDS || "0");
+try {
+  const metadataPath = `${lockDir}/metadata.json`;
+  if (fs.existsSync(metadataPath)) {
+    const metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+    const pid = Number(metadata.pid);
+    if (Number.isInteger(pid) && pid > 0) {
+      try {
+        process.kill(pid, 0);
+      } catch (error) {
+        if (error?.code === "ESRCH") {
+          process.exit(0);
+        }
+      }
+    }
+  }
+  const stat = fs.statSync(lockDir);
+  const ageSeconds = (Date.now() - stat.mtimeMs) / 1000;
+  process.exit(ttlSeconds > 0 && ageSeconds > ttlSeconds ? 0 : 1);
+} catch {
+  process.exit(1);
+}
+NODE
+}
+
+write_lab_lock_metadata() {
+  local metadata="$artifact_dir/lab-lock.json"
+  cat >"$metadata" <<EOF
+{
+  "run_id": "$run_id",
+  "pid": $$,
+  "mode": "$mode",
+  "profile": "$profile",
+  "artifact_dir": "$artifact_dir",
+  "created_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+  cp "$metadata" "$lab_lock_dir/metadata.json"
+}
+
+acquire_lab_lock() {
+  if [[ "$lab_lock_enabled" != "1" ]]; then
+    return
+  fi
+  mkdir -p "$(dirname "$lab_lock_dir")"
+  if mkdir "$lab_lock_dir" 2>/dev/null; then
+    lab_lock_acquired=1
+    write_lab_lock_metadata
+    add_evidence "lab_lock" "\"$artifact_dir/lab-lock.json\""
+    return
+  fi
+  if lab_lock_is_stale; then
+    rm -rf "$lab_lock_dir"
+    if mkdir "$lab_lock_dir" 2>/dev/null; then
+      lab_lock_acquired=1
+      write_lab_lock_metadata
+      add_evidence "lab_lock" "\"$artifact_dir/lab-lock.json\""
+      return
+    fi
+  fi
+  local current_lock="$artifact_dir/current-lab-lock.json"
+  if [[ -f "$lab_lock_dir/metadata.json" ]]; then
+    cp "$lab_lock_dir/metadata.json" "$current_lock"
+  else
+    printf '{"error":"lock metadata missing"}\n' >"$current_lock"
+  fi
+  add_evidence "blocked_lab_lock" "\"$current_lock\""
+  add_blocker "Another product-readiness lab proof is already running" "$current_lock"
+  update_manifest
+  emit_artifact_audit || true
+  update_manifest
+  emit_readiness_summary || true
+  echo "product readiness blocked by lab lock: $current_lock" >&2
+  echo "Set PRODUCT_READINESS_LAB_LOCK=0 only for read-only probes." >&2
+  exit 1
+}
+
+write_remote_lab_lock() {
+  if [[ "$mode" != "lab" || "$lab_lock_acquired" != "1" ]]; then
+    return
+  fi
+  local lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+  local lab_user="${LAB_MAC_USER:-claw}"
+  local lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+  local remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
+  ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 \
+    "$lab_user@$lab_host" "mkdir -p '$remote_repo/$lab_lock_dir' && cat > '$remote_repo/$lab_lock_dir/metadata.json'" \
+    <"$artifact_dir/lab-lock.json" >/dev/null 2>&1 || true
+}
+
+remove_remote_lab_lock() {
+  if [[ "$mode" != "lab" ]]; then
+    return
+  fi
+  local lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+  local lab_user="${LAB_MAC_USER:-claw}"
+  local lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+  local remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
+  ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=8 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 \
+    "$lab_user@$lab_host" "rm -rf '$remote_repo/$lab_lock_dir'" >/dev/null 2>&1 || true
+}
+
+release_lab_lock() {
+  if [[ "$lab_lock_acquired" != "1" ]]; then
+    return
+  fi
+  remove_remote_lab_lock
+  local owner=""
+  if [[ -f "$lab_lock_dir/metadata.json" ]]; then
+    owner="$(RUN_ID="$run_id" LOCK_METADATA="$lab_lock_dir/metadata.json" node <<'NODE' || true
+const fs = require("node:fs");
+try {
+  const metadata = JSON.parse(fs.readFileSync(process.env.LOCK_METADATA, "utf8"));
+  if (metadata.run_id === process.env.RUN_ID) console.log("mine");
+} catch {}
+NODE
+)"
+  fi
+  if [[ "$owner" == "mine" ]]; then
+    rm -rf "$lab_lock_dir"
+  fi
+}
+
+latest_fresh_clone_manifest_from_log() {
+  local log="$1"
+  awk '/^fresh clone proof manifest:/ { value=$5 } END { print value }' "$log"
+}
+
+run_lab_completion_workspace_proof() {
+  local lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+  local lab_user="${LAB_MAC_USER:-claw}"
+  local lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+  ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 \
+    "$lab_user@$lab_host" 'cd /Users/'"$lab_user"'/dev/2026/eventloopOS && export PATH=/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin; run="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-codex-completion-workspace-proof"; mkdir -p "$run"; EVENTLOOPOS_CODEX_COMPLETION_WORKSPACE_ARTIFACT_DIR="$PWD/$run" pnpm test:e2e:event-loop:codex-completion-workspace >"$run/proof.out" 2>"$run/proof.err"; code=$?; echo "$run"; exit $code'
+}
+
+run_local() {
+  run_step "local codex status proof" pnpm codex:status-proof
+  local codex_manifest
+  codex_manifest="$(latest_manifest_path_from_log "$artifact_dir/steps/local-codex-status-proof.stdout.log" "codex status proof manifest:")"
+  if [[ -n "$codex_manifest" ]]; then
+    add_evidence "codex_status" "\"$(repo_relative_path "$codex_manifest")\""
+  fi
+
+  run_step "local macos install proof" pnpm macos:install-proof
+  local install_manifest
+  install_manifest="$(latest_manifest_path_from_log "$artifact_dir/steps/local-macos-install-proof.stdout.log" "macOS install proof manifest:")"
+  if [[ -n "$install_manifest" ]]; then
+    add_evidence "macos_install" "\"$(repo_relative_path "$install_manifest")\""
+  fi
+
+  run_step "local queue ui error text proof" bash -lc 'cd app/macos && swift test --filter QueueWindowPresentationTests'
+  add_evidence "queue_ui_error_text" "\"$artifact_dir/steps/local-queue-ui-error-text-proof.stdout.log\""
+  add_evidence "queue_ui_presentation" "\"$artifact_dir/steps/local-queue-ui-error-text-proof.stdout.log\""
+
+  run_step "local macos permission status" pnpm macos:permission-status
+  local permission_manifest
+  permission_manifest="$(latest_manifest_path_from_log "$artifact_dir/steps/local-macos-permission-status.stdout.log" "macOS permission status manifest:")"
+  if [[ -n "$permission_manifest" ]]; then
+    add_evidence "macos_permissions" "\"$(repo_relative_path "$permission_manifest")\""
+  fi
+
+  if [[ "$profile" == "quick" ]]; then
+    return
+  fi
+
+  run_step "local proof live" pnpm proof:live
+  local live_manifest
+  live_manifest="$(latest_manifest_path_from_log "$artifact_dir/steps/local-proof-live.stdout.log" "proof manifest:")"
+  if [[ -z "$live_manifest" && -f artifacts/proof-live-manifest.json ]]; then
+    live_manifest="artifacts/proof-live-manifest.json"
+  fi
+  if [[ -n "$live_manifest" && -f "$live_manifest" ]]; then
+    add_evidence "local_live_manifest" "\"$(repo_relative_path "$live_manifest")\""
+  else
+    add_blocker "Local dogfood proof did not emit a manifest" "$artifact_dir/steps/local-proof-live.stdout.log"
+  fi
+
+  if [[ "$profile" == "release" ]]; then
+    add_blocker "Release-ready proof requires remote Mac lab evidence" "local mode cannot prove reboot, fresh lab setup, VNC/Tailscale, or lab 3x flake confidence"
+  fi
+}
+
+run_lab() {
+  local queue_runs=()
+  local decision_runs=()
+  local recovery_runs=()
+  local workspace_runs=()
+  local codex_app_server_fault_runs=()
+  local restart_fault_runs=()
+  local duplicate_fault_runs=()
+  local postgres_fault_runs=()
+  local postgres_migration_mismatch_fault_runs=()
+  local aerospace_fault_runs=()
+  local aerospace_permission_fault_runs=()
+  local ghostty_cleanup_fault_runs=()
+  local screen_capture_fault_runs=()
+  local queue_app_accessibility_fault_runs=()
+  local aerospace_restore_fault_runs=()
+  local connectivity_fault_runs=()
+  local orphan_run=""
+  local stopped_stack_before_orphan="0"
+
+  if [[ "$fast_preflight" == "1" ]]; then
+    run_step "lab connectivity status" env LAB_CONNECTIVITY_SSH_TIMEOUT=5 LAB_CONNECTIVITY_VNC_TIMEOUT=5 bin/lab-mac-connectivity-proof status
+  else
+    run_step "lab connectivity status" bin/lab-mac-connectivity-proof status
+  fi
+  local connectivity_status_run
+  connectivity_status_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-connectivity-status.stdout.log")"
+  if [[ -n "$connectivity_status_run" ]]; then
+    copy_local_artifact "$connectivity_status_run" "connectivity-status"
+    add_evidence "connectivity_status" "\"$artifact_dir/connectivity-status/manifest.json\""
+  fi
+  if [[ "$profile" == "quick" && "$lab_quick_scope" == "transport" ]]; then
+    return
+  fi
+  run_step "sync lab checkout" bin/lab-mac-sync
+  write_remote_lab_lock
+
+  local baseline_fingerprint
+  local cached_baseline
+  baseline_fingerprint="$(source_fingerprint)"
+  cached_baseline="$(baseline_cache_lookup "$baseline_fingerprint" || true)"
+  if [[ -n "$cached_baseline" ]]; then
+    local cache_stdout="$artifact_dir/steps/lab-install-baseline-cached.stdout.log"
+    local cache_stderr="$artifact_dir/steps/lab-install-baseline-cached.stderr.log"
+    local cache_started
+    local cache_finished
+    cache_started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    mkdir -p "$artifact_dir/baseline"
+    rsync -a "$cached_baseline/" "$artifact_dir/baseline/"
+    cp "$baseline_cache_file" "$artifact_dir/baseline-cache.json"
+    {
+      echo "baseline cache hit"
+      echo "source_fingerprint=$baseline_fingerprint"
+      echo "cached_baseline=$cached_baseline"
+      echo "cache_file=$baseline_cache_file"
+    } >"$cache_stdout"
+    : >"$cache_stderr"
+    cache_finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    append_step "lab install baseline cached" passed "$cache_stdout" "$cache_stderr" "$cache_started" "$cache_finished" 0
+    add_evidence "baseline" "\"$artifact_dir/baseline/manifest.json\""
+    add_evidence "baseline_cache" "\"$artifact_dir/baseline-cache.json\""
+  else
+    run_step "lab install baseline" bin/lab-mac-baseline
+    local baseline_run
+    baseline_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-install-baseline.stdout.log")"
+    if [[ -n "$baseline_run" ]]; then
+      sync_remote_artifact "$baseline_run" "baseline"
+      add_evidence "baseline" "\"$artifact_dir/baseline/manifest.json\""
+      write_baseline_cache "$artifact_dir/baseline" "$baseline_run" "$baseline_fingerprint"
+      if [[ -f "$baseline_cache_file" ]]; then
+        cp "$baseline_cache_file" "$artifact_dir/baseline-cache.json"
+        add_evidence "baseline_cache" "\"$artifact_dir/baseline-cache.json\""
+      fi
+    fi
+  fi
+  run_step "lab screen capture permission status" bin/lab-mac-screen-capture-permission status
+
+  if [[ "$profile" == "lab-ready" || "$profile" == "dogfood" || "$profile" == "release" ]]; then
+    run_step "start lab dogfood real codex" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-dogfood start
+    run_step "lab dogfood status before" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-dogfood wait-ready
+    local before_status
+    before_status="$(latest_lab_run_from_log "$artifact_dir/steps/lab-dogfood-status-before.stdout.log")"
+    if [[ -n "$before_status" ]]; then
+      sync_remote_artifact "$before_status" "dogfood-status-before"
+      add_evidence "dogfood_status_before" "\"$artifact_dir/dogfood-status-before/manifest.json\""
+    fi
+    run_step "lab window churn guard before" bin/lab-mac-window-churn-guard status
+    local window_churn_before
+    window_churn_before="$(latest_lab_run_from_log "$artifact_dir/steps/lab-window-churn-guard-before.stdout.log")"
+    if [[ -n "$window_churn_before" ]]; then
+      sync_remote_artifact "$window_churn_before" "window-churn-before"
+      add_evidence "window_churn_before" "\"$artifact_dir/window-churn-before/manifest.json\""
+    fi
+    run_step "lab snapshot before" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-dogfood snapshot
+    local before_snapshot
+    before_snapshot="$(latest_lab_run_from_log "$artifact_dir/steps/lab-snapshot-before.stdout.log")"
+    if [[ -n "$before_snapshot" ]]; then
+      sync_remote_artifact "$before_snapshot" "snapshot-before"
+      add_evidence "snapshot_before" "\"$artifact_dir/snapshot-before\""
+    fi
+  fi
+
+  if [[ "$profile" == "dogfood" || "$profile" == "release" ]]; then
+    for ((i = 1; i <= runs; i += 1)); do
+    run_step "lab queue followup run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 LAB_MAC_CAPTURE_VIDEO_SECONDS="$capture_video_seconds" bin/lab-mac-scenario queue-followup
+    local queue_run
+    queue_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-queue-followup-run-$i.stdout.log")"
+    if [[ -n "$queue_run" ]]; then
+      queue_runs+=("$queue_run")
+      sync_remote_artifact "$queue_run" "queue-followup-$i"
+    fi
+
+    if [[ "$profile" != "release" ]]; then
+      continue
+    fi
+
+    run_step "lab queue decisions run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 LAB_MAC_CAPTURE_VIDEO_SECONDS="$capture_video_seconds" bin/lab-mac-scenario queue-decisions
+    local decision_run
+    decision_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-queue-decisions-run-$i.stdout.log")"
+    if [[ -n "$decision_run" ]]; then
+      decision_runs+=("$decision_run")
+      sync_remote_artifact "$decision_run" "queue-decisions-$i"
+    fi
+
+    run_step "lab codex recovery run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 LAB_MAC_CAPTURE_VIDEO_SECONDS="$capture_video_seconds" bin/lab-mac-scenario codex-recovery
+    local recovery_run
+    recovery_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-codex-recovery-run-$i.stdout.log")"
+    if [[ -n "$recovery_run" ]]; then
+      recovery_runs+=("$recovery_run")
+      sync_remote_artifact "$recovery_run" "codex-recovery-$i"
+    fi
+
+    run_step "lab codex completion workspace run $i" bin/lab-mac-completion-workspace-proof
+    local workspace_run
+    workspace_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-codex-completion-workspace-run-$i.stdout.log")"
+    if [[ -n "$workspace_run" ]]; then
+      workspace_runs+=("$workspace_run")
+      sync_remote_artifact "$workspace_run" "completion-workspace-$i"
+    fi
+
+    if [[ "$i" -gt "$fault_runs" ]]; then
+      continue
+    fi
+
+    run_step "lab codex app-server down fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof codex-app-server-down
+    local fault_run
+    fault_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-codex-app-server-down-fault-run-$i.stdout.log")"
+    if [[ -n "$fault_run" ]]; then
+      codex_app_server_fault_runs+=("$fault_run")
+      sync_remote_artifact "$fault_run" "fault-codex-app-server-down-$i"
+    fi
+
+    run_step "lab orchestrator crash restart fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof orchestrator-crash-restart
+    local restart_fault_run
+    restart_fault_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-orchestrator-crash-restart-fault-run-$i.stdout.log")"
+    if [[ -n "$restart_fault_run" ]]; then
+      restart_fault_runs+=("$restart_fault_run")
+      sync_remote_artifact "$restart_fault_run" "fault-orchestrator-crash-restart-$i"
+    fi
+
+    run_step "lab duplicate idempotency fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof duplicate-idempotency
+    local duplicate_fault_run
+    duplicate_fault_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-duplicate-idempotency-fault-run-$i.stdout.log")"
+    if [[ -n "$duplicate_fault_run" ]]; then
+      duplicate_fault_runs+=("$duplicate_fault_run")
+      sync_remote_artifact "$duplicate_fault_run" "fault-duplicate-idempotency-$i"
+    fi
+
+    run_step "lab postgres unavailable fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof postgres-unavailable
+    local postgres_fault_run
+    postgres_fault_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-postgres-unavailable-fault-run-$i.stdout.log")"
+    if [[ -n "$postgres_fault_run" ]]; then
+      postgres_fault_runs+=("$postgres_fault_run")
+      sync_remote_artifact "$postgres_fault_run" "fault-postgres-unavailable-$i"
+    fi
+
+    if [[ "$include_postgres_migration_mismatch" == "1" ]]; then
+      run_step "lab postgres migration mismatch fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof postgres-migration-mismatch
+      local postgres_migration_mismatch_fault_run
+      postgres_migration_mismatch_fault_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-postgres-migration-mismatch-fault-run-$i.stdout.log")"
+      if [[ -n "$postgres_migration_mismatch_fault_run" ]]; then
+        postgres_migration_mismatch_fault_runs+=("$postgres_migration_mismatch_fault_run")
+        sync_remote_artifact "$postgres_migration_mismatch_fault_run" "fault-postgres-migration-mismatch-$i"
+      fi
+    fi
+
+    run_step "lab aerospace unavailable fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof aerospace-unavailable
+    local aerospace_fault_run
+    aerospace_fault_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-aerospace-unavailable-fault-run-$i.stdout.log")"
+    if [[ -n "$aerospace_fault_run" ]]; then
+      aerospace_fault_runs+=("$aerospace_fault_run")
+      sync_remote_artifact "$aerospace_fault_run" "fault-aerospace-unavailable-$i"
+    fi
+
+    run_step "lab aerospace permission missing fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof aerospace-permission-missing
+    local aerospace_permission_fault_run
+    aerospace_permission_fault_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-aerospace-permission-missing-fault-run-$i.stdout.log")"
+    if [[ -n "$aerospace_permission_fault_run" ]]; then
+      aerospace_permission_fault_runs+=("$aerospace_permission_fault_run")
+      sync_remote_artifact "$aerospace_permission_fault_run" "fault-aerospace-permission-missing-$i"
+    fi
+
+    run_step "lab ghostty cleanup failure fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof ghostty-cleanup-failure
+    local ghostty_cleanup_fault_run
+    ghostty_cleanup_fault_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-ghostty-cleanup-failure-fault-run-$i.stdout.log")"
+    if [[ -n "$ghostty_cleanup_fault_run" ]]; then
+      ghostty_cleanup_fault_runs+=("$ghostty_cleanup_fault_run")
+      sync_remote_artifact "$ghostty_cleanup_fault_run" "fault-ghostty-cleanup-failure-$i"
+    fi
+
+    run_step "lab screen capture denied fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof screen-capture-denied
+    local screen_capture_fault_run
+    screen_capture_fault_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-screen-capture-denied-fault-run-$i.stdout.log")"
+    if [[ -n "$screen_capture_fault_run" ]]; then
+      screen_capture_fault_runs+=("$screen_capture_fault_run")
+      sync_remote_artifact "$screen_capture_fault_run" "fault-screen-capture-denied-$i"
+    fi
+
+    run_step "lab queue app accessibility denied fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof queue-app-accessibility-denied
+    local queue_app_accessibility_fault_run
+    queue_app_accessibility_fault_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-queue-app-accessibility-denied-fault-run-$i.stdout.log")"
+    if [[ -n "$queue_app_accessibility_fault_run" ]]; then
+      queue_app_accessibility_fault_runs+=("$queue_app_accessibility_fault_run")
+      sync_remote_artifact "$queue_app_accessibility_fault_run" "fault-queue-app-accessibility-denied-$i"
+    fi
+
+    run_step "lab aerospace restore server down fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof aerospace-restore-server-down
+    local aerospace_restore_fault_run
+    aerospace_restore_fault_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-aerospace-restore-server-down-fault-run-$i.stdout.log")"
+    if [[ -n "$aerospace_restore_fault_run" ]]; then
+      aerospace_restore_fault_runs+=("$aerospace_restore_fault_run")
+      sync_remote_artifact "$aerospace_restore_fault_run" "fault-aerospace-restore-server-down-$i"
+    fi
+
+    run_step "lab tailscale vnc disconnected fault run $i" bin/lab-mac-connectivity-proof fault
+    local connectivity_fault_run
+    connectivity_fault_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-tailscale-vnc-disconnected-fault-run-$i.stdout.log")"
+    if [[ -n "$connectivity_fault_run" ]]; then
+      connectivity_fault_runs+=("$connectivity_fault_run")
+      copy_local_artifact "$connectivity_fault_run" "fault-tailscale-vnc-disconnected-$i"
+    fi
+    done
+  fi
+
+  if [[ "$profile" == "dogfood" || "$profile" == "release" ]]; then
+    run_step "lab window churn guard after" bin/lab-mac-window-churn-guard status
+    local window_churn_after
+    window_churn_after="$(latest_lab_run_from_log "$artifact_dir/steps/lab-window-churn-guard-after.stdout.log")"
+    if [[ -n "$window_churn_after" ]]; then
+      sync_remote_artifact "$window_churn_after" "window-churn-after"
+      add_evidence "window_churn_after" "\"$artifact_dir/window-churn-after/manifest.json\""
+    fi
+    run_step "lab dogfood status after" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-dogfood status
+    local after_status
+    after_status="$(latest_lab_run_from_log "$artifact_dir/steps/lab-dogfood-status-after.stdout.log")"
+    if [[ -n "$after_status" ]]; then
+      sync_remote_artifact "$after_status" "dogfood-status-after"
+      add_evidence "dogfood_status_after" "\"$artifact_dir/dogfood-status-after/manifest.json\""
+    fi
+    run_step "lab snapshot after" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-dogfood snapshot
+    local after_snapshot
+    after_snapshot="$(latest_lab_run_from_log "$artifact_dir/steps/lab-snapshot-after.stdout.log")"
+    if [[ -n "$after_snapshot" ]]; then
+      sync_remote_artifact "$after_snapshot" "snapshot-after"
+      add_evidence "snapshot_after" "\"$artifact_dir/snapshot-after\""
+    fi
+    if [[ "$stop_stack" == "1" ]]; then
+      run_step "stop lab dogfood stack" bin/lab-mac-dogfood stop
+      stopped_stack_before_orphan="1"
+    fi
+    run_step "lab cleanup windows" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-dogfood cleanup
+    run_step "lab no orphan windows processes" bin/lab-mac-orphan-proof
+    orphan_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-no-orphan-windows-processes.stdout.log")"
+    if [[ -n "$orphan_run" ]]; then
+      sync_remote_artifact "$orphan_run" "orphan-proof"
+      add_evidence "orphan_proof" "\"$artifact_dir/orphan-proof/manifest.json\""
+    fi
+  fi
+
+  if [[ "$profile" != "release" ]]; then
+    :
+  elif [[ "$include_reboot" == "1" ]]; then
+    run_step "lab reboot proof" env LAB_MAC_REBOOT=1 LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-reboot-proof
+    local reboot_run
+    reboot_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-reboot-proof.stdout.log")"
+    if [[ -n "$reboot_run" ]]; then
+      mkdir -p "$artifact_dir/reboot-proof"
+      rsync -a "$reboot_run/" "$artifact_dir/reboot-proof/"
+      add_evidence "reboot_proof" "\"$artifact_dir/reboot-proof/manifest.json\""
+    fi
+  elif [[ "$profile" == "release" ]]; then
+    add_blocker "Release-ready reboot recovery requires reboot proof" "PRODUCT_READINESS_REBOOT=0 narrowed this run"
+  fi
+
+  if [[ "$profile" != "release" ]]; then
+    :
+  elif [[ "$include_fresh_clone" == "1" ]]; then
+    run_step "lab fresh clone setup proof" bin/lab-mac-fresh-clone-proof
+    local fresh_clone_run
+    fresh_clone_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-fresh-clone-setup-proof.stdout.log")"
+    if [[ -n "$fresh_clone_run" ]]; then
+      sync_remote_artifact "$fresh_clone_run" "fresh-clone-setup"
+      add_evidence "fresh_clone_setup" "\"$artifact_dir/fresh-clone-setup/manifest.json\""
+    fi
+  else
+    add_blocker "Release-ready setup requires fresh clone proof" "PRODUCT_READINESS_FRESH_CLONE=0 narrowed this run"
+  fi
+
+  if [[ "$profile" != "release" ]]; then
+    :
+  elif [[ -n "$install_artifact" && -f "$install_artifact" ]]; then
+    if INSTALL_ARTIFACT="$install_artifact" node <<'NODE'
+const fs = require("node:fs");
+const manifest = JSON.parse(fs.readFileSync(process.env.INSTALL_ARTIFACT, "utf8"));
+if (manifest.ok === true && (manifest.unsigned_dev_ok === true || (manifest.signed === true && manifest.notarized === true))) {
+  process.exit(0);
+}
+process.exit(1);
+NODE
+    then
+      add_evidence "macos_install" "\"$install_artifact\""
+    else
+      add_blocker "Release-ready install requires a passing signed/notarized or unsigned-dev app install proof" "$install_artifact failed validation"
+    fi
+  else
+    run_step "lab macos install proof" bin/lab-mac-install-proof
+    local install_run
+    install_run="$(latest_install_run_from_log "$artifact_dir/steps/lab-macos-install-proof.stdout.log")"
+    if [[ -n "$install_run" ]]; then
+      sync_remote_artifact "$install_run" "macos-install"
+      add_evidence "macos_install" "\"$artifact_dir/macos-install/manifest.json\""
+    else
+      add_blocker "Release-ready install requires signed/notarized or unsigned-dev app proof" "lab install proof did not print an artifacts/install run path"
+    fi
+  fi
+
+  QUEUE_RUNS="$(printf "%s\n" "${queue_runs[@]}")" \
+  DECISION_RUNS="$(printf "%s\n" "${decision_runs[@]}")" \
+  RECOVERY_RUNS="$(printf "%s\n" "${recovery_runs[@]}")" \
+  WORKSPACE_RUNS="$(printf "%s\n" "${workspace_runs[@]}")" \
+  FAULT_RUNS="$(printf "%s\n" "${codex_app_server_fault_runs[@]}")" \
+  RESTART_FAULT_RUNS="$(printf "%s\n" "${restart_fault_runs[@]}")" \
+  DUPLICATE_FAULT_RUNS="$(printf "%s\n" "${duplicate_fault_runs[@]}")" \
+  POSTGRES_FAULT_RUNS="$(printf "%s\n" "${postgres_fault_runs[@]}")" \
+  POSTGRES_MIGRATION_MISMATCH_FAULT_RUNS="$(printf "%s\n" "${postgres_migration_mismatch_fault_runs[@]}")" \
+  AEROSPACE_FAULT_RUNS="$(printf "%s\n" "${aerospace_fault_runs[@]}")" \
+  AEROSPACE_PERMISSION_FAULT_RUNS="$(printf "%s\n" "${aerospace_permission_fault_runs[@]}")" \
+  GHOSTTY_CLEANUP_FAULT_RUNS="$(printf "%s\n" "${ghostty_cleanup_fault_runs[@]}")" \
+  SCREEN_CAPTURE_FAULT_RUNS="$(printf "%s\n" "${screen_capture_fault_runs[@]}")" \
+  QUEUE_APP_ACCESSIBILITY_FAULT_RUNS="$(printf "%s\n" "${queue_app_accessibility_fault_runs[@]}")" \
+  AEROSPACE_RESTORE_FAULT_RUNS="$(printf "%s\n" "${aerospace_restore_fault_runs[@]}")" \
+  CONNECTIVITY_FAULT_RUNS="$(printf "%s\n" "${connectivity_fault_runs[@]}")" \
+  MANIFEST="$manifest" ARTIFACT_DIR="$artifact_dir" node <<'NODE'
+const fs = require("node:fs");
+const manifestPath = process.env.MANIFEST;
+const artifactDir = process.env.ARTIFACT_DIR;
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const split = (value) => value.split(/\n/).map((line) => line.trim()).filter(Boolean);
+manifest.evidence.queue_followup_runs = split(process.env.QUEUE_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/queue-followup-${index + 1}/manifest.json`,
+}));
+manifest.evidence.queue_decision_runs = split(process.env.DECISION_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/queue-decisions-${index + 1}/manifest.json`,
+}));
+manifest.evidence.codex_recovery_runs = split(process.env.RECOVERY_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/codex-recovery-${index + 1}/manifest.json`,
+}));
+manifest.evidence.completion_workspace_runs = split(process.env.WORKSPACE_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/completion-workspace-${index + 1}/manifest.json`,
+}));
+manifest.evidence.codex_app_server_down_fault_runs = split(process.env.FAULT_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/fault-codex-app-server-down-${index + 1}/manifest.json`,
+}));
+manifest.evidence.orchestrator_crash_restart_fault_runs = split(process.env.RESTART_FAULT_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/fault-orchestrator-crash-restart-${index + 1}/manifest.json`,
+}));
+manifest.evidence.duplicate_idempotency_fault_runs = split(process.env.DUPLICATE_FAULT_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/fault-duplicate-idempotency-${index + 1}/manifest.json`,
+}));
+manifest.evidence.postgres_unavailable_fault_runs = split(process.env.POSTGRES_FAULT_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/fault-postgres-unavailable-${index + 1}/manifest.json`,
+}));
+manifest.evidence.postgres_migration_mismatch_fault_runs = split(process.env.POSTGRES_MIGRATION_MISMATCH_FAULT_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/fault-postgres-migration-mismatch-${index + 1}/manifest.json`,
+}));
+manifest.evidence.aerospace_unavailable_fault_runs = split(process.env.AEROSPACE_FAULT_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/fault-aerospace-unavailable-${index + 1}/manifest.json`,
+}));
+manifest.evidence.aerospace_permission_missing_fault_runs = split(process.env.AEROSPACE_PERMISSION_FAULT_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/fault-aerospace-permission-missing-${index + 1}/manifest.json`,
+}));
+manifest.evidence.ghostty_cleanup_failure_fault_runs = split(process.env.GHOSTTY_CLEANUP_FAULT_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/fault-ghostty-cleanup-failure-${index + 1}/manifest.json`,
+}));
+manifest.evidence.screen_capture_denied_fault_runs = split(process.env.SCREEN_CAPTURE_FAULT_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/fault-screen-capture-denied-${index + 1}/manifest.json`,
+}));
+manifest.evidence.queue_app_accessibility_denied_fault_runs = split(process.env.QUEUE_APP_ACCESSIBILITY_FAULT_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/fault-queue-app-accessibility-denied-${index + 1}/manifest.json`,
+}));
+manifest.evidence.aerospace_restore_server_down_fault_runs = split(process.env.AEROSPACE_RESTORE_FAULT_RUNS).map((remote, index) => ({
+  remote,
+  local_manifest: `${artifactDir}/fault-aerospace-restore-server-down-${index + 1}/manifest.json`,
+}));
+manifest.evidence.tailscale_vnc_disconnected_fault_runs = split(process.env.CONNECTIVITY_FAULT_RUNS).map((local, index) => ({
+  local,
+  local_manifest: `${artifactDir}/fault-tailscale-vnc-disconnected-${index + 1}/manifest.json`,
+}));
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+
+  if [[ "$profile" != "release" ]]; then
+    :
+  elif [[ "$runs" -lt 3 ]]; then
+    add_blocker "Release-ready flake confidence requires at least 3 runs" "current run count: $runs"
+  fi
+  if [[ "$profile" == "release" && "$include_postgres_migration_mismatch" != "1" ]]; then
+    add_blocker "Release-ready Postgres migration mismatch proof is required" "PRODUCT_READINESS_POSTGRES_MIGRATION_MISMATCH=0 narrowed this run"
+  fi
+  if [[ "$stop_stack" == "1" && "$stopped_stack_before_orphan" != "1" ]]; then
+    run_step "stop lab dogfood stack" bin/lab-mac-dogfood stop
+  fi
+}
+
+init_manifest
+trap release_lab_lock EXIT
+
+if [[ "$mode" == "lab" ]]; then
+  acquire_lab_lock
+fi
+
+case "$mode" in
+  lab) run_lab ;;
+  local) run_local ;;
+esac
+
+update_manifest
+emit_artifact_audit || true
+update_manifest
+
+jq '{passed, release_ready, release_ready_reasons, requested_runs, requested_fault_runs, required_release_runs, release_required_artifact_counts, release_repeat_artifact_counts, requirement_coverage_passed, requirement_coverage_gaps: [.requirement_coverage_gaps[] | {id, status, requirement, note, evidence}], blockers, evidence, steps: [.steps[] | {name, status, duration_ms}]}' "$manifest"
+emit_readiness_summary || true
+echo "product readiness manifest: $manifest"

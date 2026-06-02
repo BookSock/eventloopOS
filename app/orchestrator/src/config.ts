@@ -8,6 +8,7 @@ export type OrchestratorConfig = {
   port: number;
   seedFixturePath?: string;
   databaseUrl?: string;
+  postgresMigrationsDir?: string;
   taskSessions: "off" | TaskSessionMode[];
   codexTaskMap?: Record<string, { task_id: string; terminal_ref?: string }>;
   codexTaskMapPath?: string;
@@ -87,6 +88,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ConfigValidati
       port,
       seedFixturePath: resolveConfiguredPath(env.ORCHESTRATOR_SEED_FIXTURE),
       databaseUrl: env.DATABASE_URL,
+      postgresMigrationsDir: resolveConfiguredPath(env.EVENTLOOPOS_POSTGRES_MIGRATIONS_DIR),
       taskSessions,
       codexTaskMap,
       codexTaskMapPath,

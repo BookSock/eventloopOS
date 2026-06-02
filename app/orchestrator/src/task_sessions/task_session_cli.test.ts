@@ -88,6 +88,22 @@ describe("task session CLI", () => {
     assert.deepEqual(options.eventIds, ["evt_1", "evt_2"]);
   });
 
+  it("parses replace command with positional prompt", () => {
+    const options = taskSessionCliOptionsFromEnvAndArgv(
+      {},
+      [
+        "replace",
+        "--session",
+        "codex_thread_lost",
+        "Continue the same task in a replacement Codex thread.",
+      ],
+    );
+
+    assert.equal(options.command, "replace");
+    assert.equal(options.taskSessionId, "codex_thread_lost");
+    assert.equal(options.text, "Continue the same task in a replacement Codex thread.");
+  });
+
   it("lists task sessions through orchestrator", async () => {
     const writes: string[] = [];
     let requestedUrl = "";
@@ -200,6 +216,51 @@ describe("task session CLI", () => {
         native_thread_id: "thread_abc",
         status: "sent",
       },
+    })}\n`]);
+  });
+
+  it("starts replacement task sessions through orchestrator", async () => {
+    const writes: string[] = [];
+    let requestedUrl = "";
+    let requestedBody = "";
+    let requestedIdempotencyKey = "";
+
+    const exitCode = await runTaskSessionCli({
+      command: "replace",
+      baseUrl: "http://127.0.0.1:4377",
+      taskSessionId: "codex_thread_lost",
+      text: "Continue recovered task.",
+      idempotencyKey: "idem_replace_lost",
+      stdout: { write: (chunk) => { writes.push(String(chunk)); return true; } },
+      fetchFn: (async (url, init) => {
+        requestedUrl = String(url);
+        requestedBody = String(init?.body);
+        requestedIdempotencyKey = String(new Headers(init?.headers).get("idempotency-key"));
+        return response({
+          ok: true,
+          started: {
+            task_session_id: "codex_thread_replacement",
+            task_id: "task_blog_feedback",
+          },
+          replacement_for_task_session_id: "codex_thread_lost",
+        }, 202);
+      }) as typeof fetch,
+    });
+
+    assert.equal(exitCode, 0);
+    assert.equal(requestedUrl, "http://127.0.0.1:4377/task-sessions/codex_thread_lost/replacement");
+    assert.equal(requestedIdempotencyKey, "idem_replace_lost");
+    assert.deepEqual(JSON.parse(requestedBody), {
+      prompt: "Continue recovered task.",
+      idempotency_key: "idem_replace_lost",
+    });
+    assert.deepEqual(writes, [`${JSON.stringify({
+      ok: true,
+      started: {
+        task_session_id: "codex_thread_replacement",
+        task_id: "task_blog_feedback",
+      },
+      replacement_for_task_session_id: "codex_thread_lost",
     })}\n`]);
   });
 

@@ -72,6 +72,28 @@ struct QueueWindowView: View {
         }
     }
 
+    private var harnessStatusText: String {
+        let stateLabel: String
+        switch viewModel.state {
+        case .idle:
+            stateLabel = "idle"
+        case .loading:
+            stateLabel = "loading"
+        case .loaded:
+            stateLabel = "loaded"
+        case .failed:
+            stateLabel = "failed"
+        }
+
+        return [
+            "eventloopOS harness status",
+            "state=\(stateLabel)",
+            "queue_count=\(viewModel.packets.count)",
+            "selected_task=\(viewModel.selectedTaskId ?? "none")",
+            "task_sessions=\(viewModel.taskSessions.count)",
+        ].joined(separator: " | ")
+    }
+
     var body: some View {
         NavigationSplitView {
             Group {
@@ -443,6 +465,20 @@ struct QueueWindowView: View {
                     .accessibilityIdentifier("queue-manual-mode-indicator")
             }
         }
+        .overlay(alignment: .bottomTrailing) {
+            Text(harnessStatusText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .padding(10)
+                .accessibilityIdentifier("queue-harness-status")
+                .accessibilityLabel(harnessStatusText)
+        }
         .task {
             await viewModel.loadQueue()
             viewModel.startAutomaticQueueRefresh()
@@ -729,12 +765,17 @@ private struct StatusBanner: View {
         case .loaded:
             EmptyView()
         case let .failed(message):
-            Text(message)
+            let actionableMessage = actionableQueueFailureMessage(message)
+            Text(actionableMessage)
                 .font(.caption)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 560, alignment: .leading)
                 .padding(8)
                 .background(.red.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityIdentifier("queue-error-message")
+                .accessibilityLabel(actionableMessage)
         }
     }
 }

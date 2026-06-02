@@ -45,6 +45,7 @@ export type DoctorReport = {
 export type DoctorOptions = {
   baseUrl: string;
   requireOrchestrator?: boolean;
+  requireDocker?: boolean;
   now?: () => Date;
   execFn?: ExecFunction;
   fetchFn?: typeof fetch;
@@ -65,6 +66,7 @@ export function doctorOptionsFromEnv(env: NodeJS.ProcessEnv): DoctorOptions {
   return {
     baseUrl: env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377",
     requireOrchestrator: env.EVENTLOOPOS_DOCTOR_REQUIRE_ORCHESTRATOR !== "0",
+    requireDocker: env.EVENTLOOPOS_DOCTOR_REQUIRE_DOCKER !== "0",
     voiceTranscriptCommand: transcriptCommandConfig.command,
     voiceTranscriptArgs: transcriptCommandConfig.args,
     voiceTranscriptCommandConfigured: transcriptCommandConfig.configured,
@@ -81,7 +83,7 @@ export async function runDoctor(options: DoctorOptions): Promise<DoctorReport> {
   const checks = await Promise.all([
     checkOrchestratorHealth(options.baseUrl, fetchFn, options.requireOrchestrator !== false),
     checkAerospaceDaemon(execFn),
-    checkDockerDaemon(execFn),
+    checkDockerDaemon(execFn, options.requireDocker !== false),
     checkBrowserE2E(execFn),
     checkMacBrowserRestoreSmoke(execFn, options.platform ?? process.platform),
     checkMcpSourcesConfig(options, readFileFn),
@@ -271,11 +273,21 @@ async function checkAerospaceDaemon(execFn: ExecFunction): Promise<DoctorCheck> 
         };
       }
     }
+    const mutationProbe = await aerospaceMutationProbe(execFn);
+    if (!mutationProbe.ok) {
+      return {
+        name: "aerospace_daemon",
+        ok: false,
+        detail: mutationProbe.detail,
+        command: mutationProbe.command,
+        source_url: "https://nikitabobko.github.io/AeroSpace/commands.html#layout",
+      };
+    }
 
     return {
       name: "aerospace_daemon",
       ok: true,
-      detail: `AeroSpace CLI returned ${windows.length} managed window(s)`,
+      detail: `AeroSpace CLI returned ${windows.length} managed window(s); mutation probe reached server`,
       command,
       source_url: "https://nikitabobko.github.io/AeroSpace/commands.html#list-windows",
     };
@@ -287,6 +299,24 @@ async function checkAerospaceDaemon(execFn: ExecFunction): Promise<DoctorCheck> 
       command,
       source_url: "https://nikitabobko.github.io/AeroSpace/commands.html#list-windows",
     };
+  }
+}
+
+async function aerospaceMutationProbe(execFn: ExecFunction): Promise<{ ok: true; command: string[] } | { ok: false; command: string[]; detail: string }> {
+  const command = ["aerospace", "layout", "--window-id", "2147483647", "floating"];
+  try {
+    await execFn(command[0] ?? "aerospace", command.slice(1));
+    return { ok: true, command };
+  } catch (error) {
+    const detail = classifyCommandFailure(error);
+    if (/client\/server versions don't match|versions don't match|server restart is required after each update|corrupted installation/i.test(detail)) {
+      return {
+        ok: false,
+        command,
+        detail: `AeroSpace CLI/server version mismatch blocks workspace mutations. Restart AeroSpace.app, then rerun setup status. If the mismatch remains after restart, reinstall the same AeroSpace build for both the CLI and app server. Detail: ${detail}`,
+      };
+    }
+    return { ok: true, command };
   }
 }
 
@@ -309,7 +339,7 @@ function jsonObjectPrefix(stdout: string): string {
   return stdout.slice(start, end + 1);
 }
 
-async function checkDockerDaemon(execFn: ExecFunction): Promise<DoctorCheck> {
+async function checkDockerDaemon(execFn: ExecFunction, required: boolean): Promise<DoctorCheck> {
   const command = ["docker", "info", "--format", "{{.ServerVersion}}"];
   try {
     const result = await execFn(command[0] ?? "docker", command.slice(1));
@@ -317,16 +347,22 @@ async function checkDockerDaemon(execFn: ExecFunction): Promise<DoctorCheck> {
 
     return {
       name: "docker_daemon",
-      ok: Boolean(version),
-      detail: version ? `Docker daemon responded: ${version}` : "Docker daemon returned empty ServerVersion",
+      ok: Boolean(version) || !required,
+      detail: version
+        ? `Docker daemon responded: ${version}`
+        : required
+          ? "Docker daemon returned empty ServerVersion"
+          : "optional Docker daemon check skipped: empty ServerVersion",
       command,
       source_url: "https://docs.docker.com/reference/cli/docker/system/info/",
     };
   } catch (error) {
     return {
       name: "docker_daemon",
-      ok: false,
-      detail: classifyCommandFailure(error),
+      ok: !required,
+      detail: required
+        ? classifyCommandFailure(error)
+        : `optional Docker daemon check skipped: ${classifyCommandFailure(error)}`,
       command,
       source_url: "https://docs.docker.com/reference/cli/docker/system/info/",
     };

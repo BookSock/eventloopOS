@@ -19,8 +19,8 @@ export async function sendObservedRouteResult(
   const durationMs = Math.max(0, performance.now() - startedAt);
   response.setHeader("x-route-name", routeName);
   response.setHeader("x-route-duration-ms", durationMs.toFixed(3));
-  await recordRouteMetrics(observability, routeName, result, durationMs).catch(() => undefined);
-  return sendRouteResult(response, context, result);
+  sendRouteResult(response, context, result);
+  void recordRouteMetrics(observability, routeName, result, durationMs).catch(() => undefined);
 }
 
 export function routeNameForPath(method: string | undefined, pathname: string): string | undefined {

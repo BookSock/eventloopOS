@@ -13,6 +13,10 @@ if (process.platform !== "darwin") {
 
 const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377";
 const smokeMs = parseOptionalPositiveInteger(process.env.EVENTLOOPOS_QUEUE_APP_RUN_SMOKE_MS);
+const appArgs = ["--orchestrator-url", orchestratorUrl];
+if (process.env.EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW === "1") {
+  appArgs.push("--harness-window");
+}
 
 let bundle;
 let child;
@@ -30,9 +34,10 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 try {
   bundle = await buildPackagedQueueAppBundle();
   child = openQueueApp(bundle.appBundle, {
-    appArgs: ["--orchestrator-url", orchestratorUrl],
+    appArgs,
     env: {
       EVENTLOOP_ORCHESTRATOR_URL: orchestratorUrl,
+      EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW: process.env.EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW,
     },
   });
   forwardOutput(child);

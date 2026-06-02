@@ -1,0 +1,1023 @@
+#!/usr/bin/env node
+import { mkdirSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { readdir, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import assert from "node:assert/strict";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+process.chdir(repoRoot);
+
+const args = process.argv.slice(2);
+if (args[0] === "--") args.shift();
+const jsonOnly = args.includes("--json") || truthy(process.env.PRODUCT_NEXT_JSON);
+const positionalArgs = args.filter((arg) => arg !== "--json");
+const mode = positionalArgs[0] ?? "status";
+if (mode === "--self-test") {
+  runSelfTest();
+  console.log("product-next self-test passed");
+  process.exit(0);
+}
+if (mode === "-h" || mode === "--help") {
+  console.log(`Usage: bin/product-next [status|run]
+
+Choose the fastest useful next eventloopOS readiness action.
+
+Default behavior:
+  - run a short lab SSH/VNC wait
+  - if lab is offline, refresh local quick setup status only when it can change the next action
+  - refresh readiness summary
+  - emit artifacts/product-next/<run>/manifest.json with selected_command
+
+Environment:
+  PRODUCT_NEXT_LAB_WAIT_TIMEOUT_SECONDS default: 18
+  PRODUCT_NEXT_LAB_WAIT_POLL_SECONDS    default: 6
+  PRODUCT_NEXT_LAB_WAIT_MAX_AGE_SECONDS default: 60; reuse a fresh lab wait
+                                      manifest instead of polling again
+  PRODUCT_NEXT_DECISION_CACHE_MAX_AGE_SECONDS
+                                      default: 30; reuse a fresh manual lab-local
+                                      bootstrap decision instead of rebuilding
+                                      wait/summary loops
+  PRODUCT_NEXT_LOCAL_QUICK              default: auto; set 1 to force local quick, 0 to skip
+  PRODUCT_NEXT_SUMMARY_MAX_AGE_SECONDS  default: 180; reuse fresh local quick blocker summary
+  PRODUCT_NEXT_MIN_REUSABLE_STEP_TIMEOUT_SECONDS
+                                      default: 60; do not reuse diagnostic short-timeout summaries
+  PRODUCT_NEXT_RUN_SELECTED             default: 0; set 1 or use "run" arg to execute selected command when safe on this controller
+  PRODUCT_NEXT_STRICT                   default: 0; set 1 to exit nonzero if selected command fails
+  PRODUCT_NEXT_JSON                     default: 0; set 1 or pass --json for quiet machine-readable JSON only
+`);
+  process.exit(0);
+}
+if (!["status", "run"].includes(mode)) {
+  console.error(`unknown mode: ${mode}`);
+  process.exit(2);
+}
+
+const runId = `${utcStamp()}-${process.pid}-product-next`;
+const runDir = path.join("artifacts", "product-next", runId);
+mkdirSync(path.join(repoRoot, runDir, "steps"), { recursive: true });
+
+const steps = [];
+const startedAt = new Date().toISOString();
+const runSelected = mode === "run" || truthy(process.env.PRODUCT_NEXT_RUN_SELECTED);
+const strict = truthy(process.env.PRODUCT_NEXT_STRICT);
+const localQuickSetting = process.env.PRODUCT_NEXT_LOCAL_QUICK ?? "auto";
+const summaryMaxAgeSeconds = Number(process.env.PRODUCT_NEXT_SUMMARY_MAX_AGE_SECONDS ?? "180");
+const minReusableStepTimeoutSeconds = Number(process.env.PRODUCT_NEXT_MIN_REUSABLE_STEP_TIMEOUT_SECONDS ?? "60");
+const labWaitMaxAgeSeconds = Number(process.env.PRODUCT_NEXT_LAB_WAIT_MAX_AGE_SECONDS ?? "60");
+const decisionCacheMaxAgeSeconds = Number(process.env.PRODUCT_NEXT_DECISION_CACHE_MAX_AGE_SECONDS ?? "30");
+const forceLocalQuick = truthy(localQuickSetting);
+const disableLocalQuick = falsy(localQuickSetting);
+
+const cachedProductNextManifestPath = await latestProductNextPath();
+const cachedProductNextManifest = cachedProductNextManifestPath ? readJsonIfExists(cachedProductNextManifestPath) : undefined;
+const decisionCached = !runSelected && reusableProductNextDecision(cachedProductNextManifest, decisionCacheMaxAgeSeconds);
+if (decisionCached) {
+  appendCachedStep("product next decision cached", 0, {
+    cached_manifest: cachedProductNextManifestPath,
+    cache_max_age_seconds: decisionCacheMaxAgeSeconds,
+    cached_finished_at: cachedProductNextManifest?.finished_at,
+    selected_command_clean: cachedProductNextManifest?.selected_command_clean,
+    selected_reason: cachedProductNextManifest?.selected_reason,
+  });
+  const finishedAt = new Date().toISOString();
+  const manifest = {
+    schema_version: 1,
+    kind: "eventloopos.product_next",
+    run_id: runId,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
+    artifact_dir: runDir,
+    mode,
+    cached_decision: true,
+    cached_decision_manifest: cachedProductNextManifestPath,
+    cache_max_age_seconds: decisionCacheMaxAgeSeconds,
+    checks: {
+      ...(cachedProductNextManifest?.checks ?? {}),
+      decision_cached: true,
+      decision_cache_manifest: cachedProductNextManifestPath,
+      decision_cache_max_age_seconds: decisionCacheMaxAgeSeconds,
+      selected_command_ran: false,
+      selected_command_skip_reason: cachedProductNextManifest?.selected_command_skip_reason,
+    },
+    selected_command: cachedProductNextManifest?.selected_command,
+    selected_command_clean: cachedProductNextManifest?.selected_command_clean,
+    selected_command_target: cachedProductNextManifest?.selected_command_target,
+    selected_command_run_hint: cachedProductNextManifest?.selected_command_run_hint,
+    selected_reason: cachedProductNextManifest?.selected_reason,
+    selected_command_autorun: cachedProductNextManifest?.selected_command_autorun,
+    selected_command_skip_reason: cachedProductNextManifest?.selected_command_skip_reason,
+    next_handoff: path.join(runDir, "NEXT.md"),
+    summary_product_manifest: cachedProductNextManifest?.summary_product_manifest,
+    summary_passed: cachedProductNextManifest?.summary_passed,
+    summary_release_ready: cachedProductNextManifest?.summary_release_ready,
+    summary_release_ready_reasons: cachedProductNextManifest?.summary_release_ready_reasons ?? [],
+    summary_requested_runs: cachedProductNextManifest?.summary_requested_runs,
+    summary_requested_fault_runs: cachedProductNextManifest?.summary_requested_fault_runs,
+    summary_required_release_runs: cachedProductNextManifest?.summary_required_release_runs,
+    summary_release_required_artifact_counts: cachedProductNextManifest?.summary_release_required_artifact_counts ?? {},
+    summary_release_repeat_artifact_counts: cachedProductNextManifest?.summary_release_repeat_artifact_counts ?? {},
+    summary_profile_gate_passed: cachedProductNextManifest?.summary_profile_gate_passed,
+    summary_profile_gate_reasons: cachedProductNextManifest?.summary_profile_gate_reasons ?? [],
+    summary_failed_steps: cachedProductNextManifest?.summary_failed_steps ?? [],
+    summary_requirement_gaps: cachedProductNextManifest?.summary_requirement_gaps ?? [],
+    summary_requirement_coverage_status_counts: cachedProductNextManifest?.summary_requirement_coverage_status_counts ?? {},
+    summary_artifact_contract_failures: cachedProductNextManifest?.summary_artifact_contract_failures ?? [],
+    summary_artifact_audit: cachedProductNextManifest?.summary_artifact_audit,
+    summary_artifact_audit_failures: cachedProductNextManifest?.summary_artifact_audit_failures ?? [],
+    macos_permission_status: cachedProductNextManifest?.macos_permission_status,
+    aerospace_repair: cachedProductNextManifest?.aerospace_repair,
+    lab_wait: cachedProductNextManifest?.lab_wait,
+    primary_next_action: cachedProductNextManifest?.primary_next_action,
+    next_command_groups: cachedProductNextManifest?.next_command_groups ?? {},
+    next_commands: cachedProductNextManifest?.next_commands ?? [],
+    steps,
+  };
+  const manifestPath = path.join(repoRoot, runDir, "manifest.json");
+  await writeFile(path.join(repoRoot, manifest.next_handoff), renderNextMarkdown(manifest), "utf8");
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  const output = outputFromManifest(manifest, manifestPath);
+  if (jsonOnly) {
+    console.log(JSON.stringify(output));
+  } else {
+    console.log(`product next manifest: ${path.relative(repoRoot, manifestPath)}`);
+    console.log(JSON.stringify(output, null, 2));
+  }
+  process.exit(0);
+}
+
+const cachedLabWaitManifestPath = await latestLabWaitPath("quick");
+const cachedLabWaitManifest = cachedLabWaitManifestPath ? readJsonIfExists(cachedLabWaitManifestPath) : undefined;
+const labWaitCached = reusableLabWait(cachedLabWaitManifest, labWaitMaxAgeSeconds);
+let labWait;
+let labWaitManifestPath = labWaitCached ? cachedLabWaitManifestPath : undefined;
+let labWaitManifest = labWaitCached ? cachedLabWaitManifest : undefined;
+if (labWaitCached) {
+  labWait = appendCachedStep("lab wait online quick cached", cachedLabWaitManifest?.passed === true ? 0 : 1, {
+    cached_manifest: cachedLabWaitManifestPath,
+    cache_max_age_seconds: labWaitMaxAgeSeconds,
+    cached_finished_at: cachedLabWaitManifest?.finished_at,
+  });
+} else {
+  labWait = runStep("lab wait online quick", "bin/lab-mac-wait-online", ["quick"], {
+    LAB_MAC_WAIT_TIMEOUT_SECONDS: process.env.PRODUCT_NEXT_LAB_WAIT_TIMEOUT_SECONDS ?? "18",
+    LAB_MAC_WAIT_POLL_SECONDS: process.env.PRODUCT_NEXT_LAB_WAIT_POLL_SECONDS ?? "6",
+    LAB_MAC_WAIT_CONNECT_TIMEOUT_SECONDS: process.env.PRODUCT_NEXT_LAB_WAIT_CONNECT_TIMEOUT_SECONDS ?? "2",
+  });
+  labWaitManifestPath = latestPathFromOutput(labWait.stdout, /^artifacts\/lab-runs\/.+-wait-online-quick$/m, "/manifest.json");
+  labWaitManifest = labWaitManifestPath ? readJsonIfExists(labWaitManifestPath) : undefined;
+}
+const labOnline = labWaitManifest?.passed === true;
+const labOfflineRequiresLabAction = labNeedsLocalBootstrap(labWaitManifest);
+const previousSummaryPath = await latestSummaryPath();
+const previousSummary = previousSummaryPath ? readJsonIfExists(previousSummaryPath) : undefined;
+const previousSummaryFresh = isFresh(previousSummary?.generated_at, summaryMaxAgeSeconds);
+const reusableLocalQuickSummary = !labOnline
+  && localQuickSetting === "auto"
+  && previousSummaryFresh
+  && previousSummary?.mode === "local"
+  && previousSummary?.profile === "quick"
+  && previousSummary?.passed !== true
+  && reusableSummary(previousSummary, minReusableStepTimeoutSeconds);
+
+let localQuick;
+let localQuickSkippedReason;
+if (!labOnline && disableLocalQuick) {
+  localQuickSkippedReason = "PRODUCT_NEXT_LOCAL_QUICK disabled";
+} else if (reusableLocalQuickSummary && !forceLocalQuick) {
+  localQuickSkippedReason = "fresh local quick readiness summary already has current blocker";
+} else if (!labOnline && labOfflineRequiresLabAction && !forceLocalQuick) {
+  localQuickSkippedReason = "lab is offline or invisible enough that lab bootstrap is the only useful next action";
+} else if (!labOnline) {
+  localQuick = runStep("local quick setup status", "bin/product-readiness-proof", ["local", "quick"]);
+}
+
+const summaryStep = runStep("readiness summary", "node", ["bin/readiness-summary", "--json"]);
+const summaryOutput = parseJsonObject(summaryStep.stdout);
+const summaryPath = summaryOutput?.manifest
+  ?? firstMatch(summaryStep.stdout, /^readiness summary: (.+)$/m)
+  ?? await latestSummaryPath();
+const summary = summaryPath ? readJsonIfExists(summaryPath) : undefined;
+
+const summaryCommandGroups = summary?.next_command_groups ?? {};
+const labWaitCommandGroups = commandGroupsFromLabWait(labWaitManifest);
+const commandGroups = mergeCommandGroups(summaryCommandGroups, labWaitCommandGroups);
+const summaryNextCommands = flattenCommandGroups(commandGroups, summary?.next_commands ?? []);
+const selected = chooseCommand({ labOnline, summaryNextCommands, commandGroups, primaryNextAction: summary?.primary_next_action });
+const selectedCleanCommand = cleanCommand(selected.command);
+const selectedTarget = selected.target ?? commandTarget(selected.command);
+const selectedRunHint = runHint(selected);
+const selectedNonAutorunReason = nonAutorunSkipReason(selected);
+const summaryStatus = summaryPassthrough(summary);
+
+let selectedStep;
+let selectedSkipReason = selectedNonAutorunReason;
+if (runSelected && selected.command && selected.autorun !== false) {
+  selectedStep = runShellStep("selected command", selected.command);
+} else if (runSelected && selected.command) {
+  selectedSkipReason = selectedNonAutorunReason;
+}
+
+const finishedAt = new Date().toISOString();
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.product_next",
+  run_id: runId,
+  started_at: startedAt,
+  finished_at: finishedAt,
+  duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
+  artifact_dir: runDir,
+  mode,
+  checks: {
+    lab_online: labOnline,
+    lab_wait_manifest: labWaitManifestPath,
+    lab_wait_cached: labWaitCached,
+    lab_wait_cache_manifest: labWaitCached ? cachedLabWaitManifestPath : undefined,
+    local_quick_ran: Boolean(localQuick),
+    local_quick_skipped_reason: localQuickSkippedReason,
+    reused_summary_manifest: reusableLocalQuickSummary ? previousSummaryPath : undefined,
+    readiness_summary_manifest: summaryPath,
+    selected_command_autorun: selected.autorun !== false,
+    selected_command_target: selectedTarget,
+    selected_command_ran: Boolean(selectedStep),
+    selected_command_passed: selectedStep ? selectedStep.exit_code === 0 : undefined,
+    selected_command_skip_reason: selectedSkipReason,
+  },
+  selected_command: selected.command,
+  selected_command_clean: selectedCleanCommand,
+  selected_command_target: selectedTarget,
+  selected_command_run_hint: selectedRunHint,
+  selected_reason: selected.reason,
+  selected_command_autorun: selected.autorun !== false,
+  selected_command_skip_reason: selectedSkipReason,
+  next_handoff: path.join(runDir, "NEXT.md"),
+  ...summaryStatus,
+  next_command_groups: commandGroups,
+  next_commands: summaryNextCommands,
+  steps,
+};
+const manifestPath = path.join(repoRoot, runDir, "manifest.json");
+await writeFile(path.join(repoRoot, manifest.next_handoff), renderNextMarkdown(manifest), "utf8");
+await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+
+const output = {
+  manifest: path.relative(repoRoot, manifestPath),
+  lab_online: labOnline,
+  lab_wait_cached: labWaitCached,
+  lab_wait_cache_manifest: labWaitCached ? cachedLabWaitManifestPath : undefined,
+  local_quick_ran: Boolean(localQuick),
+  local_quick_skipped_reason: localQuickSkippedReason,
+  reused_summary_manifest: reusableLocalQuickSummary ? previousSummaryPath : undefined,
+  readiness_summary_manifest: summaryPath,
+  selected_command: selected.command,
+  selected_command_clean: selectedCleanCommand,
+  selected_command_target: selectedTarget,
+  selected_command_run_hint: selectedRunHint,
+  selected_reason: selected.reason,
+  selected_command_autorun: selected.autorun !== false,
+  next_handoff: manifest.next_handoff,
+  selected_command_ran: Boolean(selectedStep),
+  selected_command_passed: selectedStep ? selectedStep.exit_code === 0 : undefined,
+  selected_command_skip_reason: selectedSkipReason,
+  ...summaryStatus,
+};
+if (jsonOnly) {
+  console.log(JSON.stringify(output));
+} else {
+  console.log(`product next manifest: ${path.relative(repoRoot, manifestPath)}`);
+  console.log(JSON.stringify(output, null, 2));
+}
+
+if (strict && selectedStep && selectedStep.exit_code !== 0) {
+  process.exit(selectedStep.exit_code);
+}
+process.exit(0);
+
+function renderNextMarkdown(manifest) {
+  const lines = [
+    "# eventloopOS Next Readiness Action",
+    "",
+    `Generated: ${manifest.finished_at}`,
+    `Run artifact: ${manifest.artifact_dir}`,
+    "",
+    "## Selected Action",
+  ];
+  if (manifest.selected_command_clean) {
+    lines.push("```sh", manifest.selected_command_clean, "```");
+  } else {
+    lines.push("- No selected command.");
+  }
+  lines.push(`- Target: \`${manifest.selected_command_target ?? "unknown"}\``);
+  lines.push(`- Autorun safe: \`${manifest.selected_command_autorun === true}\``);
+  if (manifest.selected_reason) {
+    lines.push(`- Reason: ${manifest.selected_reason}`);
+  }
+  if (manifest.selected_command_run_hint) {
+    lines.push(`- Run hint: ${manifest.selected_command_run_hint}`);
+  }
+  if (manifest.selected_command_skip_reason) {
+    lines.push(`- Skip reason: ${manifest.selected_command_skip_reason}`);
+  }
+  if (manifest.summary_requested_runs !== undefined) {
+    lines.push(`- Readiness runs: \`${manifest.summary_requested_runs}/${manifest.summary_required_release_runs ?? "?"}\``);
+  }
+  if (manifest.summary_requested_fault_runs !== undefined) {
+    lines.push(`- Readiness fault runs: \`${manifest.summary_requested_fault_runs}\``);
+  }
+  if (manifest.summary_release_required_artifact_counts && Object.keys(manifest.summary_release_required_artifact_counts).length > 0) {
+    lines.push(`- Required artifact counts: ${formatChecks(manifest.summary_release_required_artifact_counts)}`);
+  }
+  if (manifest.summary_artifact_audit) {
+    lines.push(`- Artifact audit: \`${manifest.summary_artifact_audit.ok}\` (${manifest.summary_artifact_audit.manifest})`);
+  }
+  if ((manifest.summary_artifact_audit_failures ?? []).length > 0) {
+    lines.push(`- Artifact audit failures: \`${manifest.summary_artifact_audit_failures.length}\``);
+  }
+  if (manifest.selected_command_target === "lab" && /pnpm lab:local-bootstrap/.test(String(manifest.selected_command_clean ?? ""))) {
+    lines.push(
+      "",
+      "## Lab Operator Handoff",
+      "- Run the selected command on the lab Mac after local login.",
+      "- After it finishes, open or paste the emitted `OPERATOR.md` from the local-bootstrap artifact.",
+      "- Then run the controller commands listed in that handoff."
+    );
+  }
+  if (manifest.lab_wait) {
+    lines.push("", "## Lab Wait");
+    if (manifest.lab_wait.manifest) lines.push(`- Manifest: \`${manifest.lab_wait.manifest}\``);
+    if (manifest.lab_wait.checks) lines.push(`- Checks: ${formatChecks(manifest.lab_wait.checks)}`);
+    for (const fix of manifest.lab_wait.fixes ?? []) {
+      lines.push(`- Fix: ${fix}`);
+    }
+  }
+  if (manifest.macos_permission_status) {
+    lines.push("", "## macOS Permission Status");
+    if (manifest.macos_permission_status.manifest) lines.push(`- Manifest: \`${manifest.macos_permission_status.manifest}\``);
+    if (manifest.macos_permission_status.checks) lines.push(`- Checks: ${formatChecks(manifest.macos_permission_status.checks)}`);
+    for (const failure of manifest.macos_permission_status.failures ?? []) {
+      lines.push(`- ${failure.requirement}: ${failure.fix}`);
+    }
+  }
+  if (manifest.aerospace_repair) {
+    lines.push("", "## AeroSpace Repair");
+    if (manifest.aerospace_repair.manifest) lines.push(`- Manifest: \`${manifest.aerospace_repair.manifest}\``);
+    if (manifest.aerospace_repair.checks) lines.push(`- Checks: ${formatChecks(manifest.aerospace_repair.checks)}`);
+    for (const command of manifest.aerospace_repair.fix_commands ?? []) {
+      lines.push("```sh", command, "```");
+    }
+  }
+  if ((manifest.summary_requirement_gaps ?? []).length > 0) {
+    lines.push("", "## First Requirement Gaps");
+    for (const gap of manifest.summary_requirement_gaps.slice(0, 5)) {
+      lines.push(`- ${gap.id}: ${gap.status} - ${gap.requirement}`);
+    }
+  }
+  lines.push("", "## Evidence");
+  lines.push(`- Product-next manifest: \`${manifest.artifact_dir}/manifest.json\``);
+  if (manifest.checks?.readiness_summary_manifest) {
+    lines.push(`- Readiness summary: \`${manifest.checks.readiness_summary_manifest}\``);
+  }
+  if (manifest.summary_product_manifest) {
+    lines.push(`- Product readiness: \`${manifest.summary_product_manifest}\``);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function formatChecks(checks) {
+  return Object.entries(checks)
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join(", ");
+}
+
+function chooseCommand({ labOnline, summaryNextCommands, commandGroups, primaryNextAction }) {
+  if (labOnline) {
+    if ((commandGroups.lab ?? []).includes("pnpm product:lab-ready")) {
+      return { command: "pnpm product:lab-ready", reason: "lab transport/setup is green; verify dogfood stack readiness before real Codex scenario" };
+    }
+    if ((commandGroups.lab ?? []).includes("pnpm product:dogfood")) {
+      return { command: "pnpm product:dogfood", reason: "lab transport is online and lab quick was already green" };
+    }
+    return { command: "pnpm product:quick", reason: "lab transport is online; refresh full lab quick before dogfood" };
+  }
+  if (primaryNextAction?.command) {
+    return {
+      command: primaryNextAction.command,
+      reason: primaryNextAction.reason ?? "readiness summary primary action",
+      autorun: primaryNextAction.autorun !== false && primaryNextAction.target !== "lab",
+      target: primaryNextAction.target ?? commandTarget(primaryNextAction.command),
+      skip_reason: primaryNextAction.autorun === false || primaryNextAction.target === "lab"
+        ? "selected command must be run on the lab Mac after local login"
+        : undefined,
+    };
+  }
+  const lab = commandGroups.lab ?? [];
+  if (lab.length > 0) {
+    const command = lab[0];
+    return {
+      command,
+      reason: "lab offline; use lab recovery/wait command before local-only setup work",
+      autorun: !commandRequiresOtherMachine(command),
+      target: commandRequiresOtherMachine(command) ? "lab" : "controller",
+      skip_reason: commandRequiresOtherMachine(command)
+        ? "selected command must be run on the lab Mac after local login"
+        : undefined,
+    };
+  }
+  const local = commandGroups.local ?? [];
+  if (local.length > 0) {
+    return { command: local[0], reason: "lab offline; fix/verify local Mac setup while waiting", autorun: true };
+  }
+  if (summaryNextCommands.length > 0) {
+    const command = summaryNextCommands[0];
+    return {
+      command,
+      reason: "readiness summary has pending next command",
+      autorun: !commandRequiresOtherMachine(command),
+      target: commandRequiresOtherMachine(command) ? "lab" : "controller",
+      skip_reason: commandRequiresOtherMachine(command)
+        ? "selected command must be run on the lab Mac after local login"
+        : undefined,
+    };
+  }
+  return { command: "pnpm lab:wait-online:quick", reason: "lab offline and no fresher product blocker exists", autorun: true };
+}
+
+function commandRequiresOtherMachine(command) {
+  return /run on the lab mac|pnpm lab:local-bootstrap/i.test(String(command ?? ""));
+}
+
+function cleanCommand(command) {
+  if (!command) return undefined;
+  return String(command).replace(/\s+#\s+run on the lab mac after local login\s*$/i, "");
+}
+
+function commandTarget(command) {
+  if (!command) return undefined;
+  return commandRequiresOtherMachine(command) ? "lab" : "controller";
+}
+
+function runHint(selected) {
+  if (!selected.command) return undefined;
+  if (selected.autorun === false || commandRequiresOtherMachine(selected.command)) {
+    return `Run on lab Mac after local login: ${cleanCommand(selected.command)}`;
+  }
+  return `Run on controller: ${cleanCommand(selected.command)}`;
+}
+
+function nonAutorunSkipReason(selected) {
+  return selected.command && selected.autorun === false
+    ? selected.skip_reason ?? "selected command is manual or must run on another machine"
+    : undefined;
+}
+
+function summaryPassthrough(summary) {
+  return {
+    summary_product_manifest: summary?.product_manifest,
+    summary_passed: summary?.passed,
+    summary_release_ready: summary?.release_ready,
+    summary_release_ready_reasons: summary?.release_ready_reasons ?? [],
+    summary_requested_runs: summary?.requested_runs,
+    summary_requested_fault_runs: summary?.requested_fault_runs,
+    summary_required_release_runs: summary?.required_release_runs,
+    summary_release_required_artifact_counts: summary?.release_required_artifact_counts ?? {},
+    summary_release_repeat_artifact_counts: summary?.release_repeat_artifact_counts ?? {},
+    summary_profile_gate_passed: summary?.profile_gate_passed,
+    summary_profile_gate_reasons: summary?.profile_gate_reasons ?? [],
+    summary_failed_steps: summary?.failed_steps ?? [],
+    summary_requirement_gaps: summary?.requirement_gaps ?? [],
+    summary_requirement_coverage_status_counts: summary?.requirement_coverage_status_counts ?? {},
+    summary_artifact_contract_failures: summary?.artifact_contract_failures ?? [],
+    summary_artifact_audit: summary?.artifact_audit,
+    summary_artifact_audit_failures: summary?.artifact_audit?.failures ?? [],
+    macos_permission_status: summary?.macos_permission_status,
+    aerospace_repair: summary?.aerospace_repair,
+    lab_wait: summary?.lab_wait,
+    primary_next_action: summary?.primary_next_action,
+  };
+}
+
+function outputFromManifest(manifest, manifestPath) {
+  return {
+    manifest: path.relative(repoRoot, manifestPath),
+    lab_online: manifest.checks?.lab_online,
+    lab_wait_cached: manifest.checks?.lab_wait_cached,
+    lab_wait_cache_manifest: manifest.checks?.lab_wait_cache_manifest,
+    decision_cached: manifest.cached_decision === true,
+    decision_cache_manifest: manifest.cached_decision_manifest,
+    local_quick_ran: manifest.checks?.local_quick_ran,
+    local_quick_skipped_reason: manifest.checks?.local_quick_skipped_reason,
+    reused_summary_manifest: manifest.checks?.reused_summary_manifest,
+    readiness_summary_manifest: manifest.checks?.readiness_summary_manifest,
+    selected_command: manifest.selected_command,
+    selected_command_clean: manifest.selected_command_clean,
+    selected_command_target: manifest.selected_command_target,
+    selected_command_run_hint: manifest.selected_command_run_hint,
+    selected_reason: manifest.selected_reason,
+    selected_command_autorun: manifest.selected_command_autorun,
+    next_handoff: manifest.next_handoff,
+    selected_command_ran: manifest.checks?.selected_command_ran,
+    selected_command_passed: manifest.checks?.selected_command_passed,
+    selected_command_skip_reason: manifest.selected_command_skip_reason,
+    ...summaryPassthrough({
+      product_manifest: manifest.summary_product_manifest,
+      passed: manifest.summary_passed,
+      release_ready: manifest.summary_release_ready,
+      release_ready_reasons: manifest.summary_release_ready_reasons,
+      requested_runs: manifest.summary_requested_runs,
+      requested_fault_runs: manifest.summary_requested_fault_runs,
+      required_release_runs: manifest.summary_required_release_runs,
+      release_required_artifact_counts: manifest.summary_release_required_artifact_counts,
+      release_repeat_artifact_counts: manifest.summary_release_repeat_artifact_counts,
+      profile_gate_passed: manifest.summary_profile_gate_passed,
+      profile_gate_reasons: manifest.summary_profile_gate_reasons,
+      failed_steps: manifest.summary_failed_steps,
+      requirement_gaps: manifest.summary_requirement_gaps,
+      requirement_coverage_status_counts: manifest.summary_requirement_coverage_status_counts,
+      artifact_contract_failures: manifest.summary_artifact_contract_failures,
+      artifact_audit: manifest.summary_artifact_audit,
+      macos_permission_status: manifest.macos_permission_status,
+      aerospace_repair: manifest.aerospace_repair,
+      lab_wait: manifest.lab_wait,
+      primary_next_action: manifest.primary_next_action,
+    }),
+  };
+}
+
+function reusableSummary(summary, minTimeoutSeconds) {
+  const timeout = summary?.release_options?.step_timeout_seconds;
+  if (timeout === undefined || timeout === null) return true;
+  const numeric = Number(timeout);
+  if (!Number.isFinite(numeric)) return false;
+  return numeric === 0 || numeric >= minTimeoutSeconds;
+}
+
+function commandGroupsFromLabWait(manifest) {
+  if (!manifest || manifest.passed === true) {
+    return {};
+  }
+  const controller = manifest.controller_tailscale ?? {};
+  const waitCommand = controller.suggested_controller_wait_command ?? "pnpm lab:wait-online:quick";
+  const statusCommand = controller.suggested_controller_status_command ?? "pnpm setup:lab-status";
+  const bootstrapCommand = controller.suggested_local_bootstrap_command
+    ? `${controller.suggested_local_bootstrap_command} # run on the lab Mac after local login`
+    : "LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap # run on the lab Mac after local login";
+  const localBootstrapNeeded = labNeedsLocalBootstrap(manifest);
+  const lab = localBootstrapNeeded
+    ? [bootstrapCommand, waitCommand, statusCommand]
+    : [waitCommand, statusCommand, bootstrapCommand];
+  return { lab };
+}
+
+function labNeedsLocalBootstrap(manifest) {
+  if (!manifest || manifest.passed === true) return false;
+  if (manifest.checks?.lab_tailscale_visible === false
+    && manifest.checks?.ssh_reachable !== true
+    && manifest.checks?.vnc_reachable !== true) {
+    return true;
+  }
+  if (manifest.checks?.lab_tailscale_offline !== true) return false;
+  const lastSeenSeconds = Number(manifest.checks?.lab_offline_last_seen_seconds);
+  return Number.isFinite(lastSeenSeconds) && lastSeenSeconds > 10 * 60;
+}
+
+function mergeCommandGroups(...groupsList) {
+  const merged = { local: [], lab: [], release: [] };
+  for (const groups of groupsList) {
+    for (const key of Object.keys(merged)) {
+      merged[key].push(...(groups?.[key] ?? []));
+    }
+  }
+  return Object.fromEntries(
+    Object.entries(merged).map(([key, commands]) => [key, [...new Set(commands)]])
+  );
+}
+
+function flattenCommandGroups(commandGroups, fallbackCommands) {
+  const commands = [
+    ...(commandGroups.lab ?? []),
+    ...(commandGroups.local ?? []),
+    ...(commandGroups.release ?? []),
+    ...(fallbackCommands ?? []),
+  ];
+  return [...new Set(commands)];
+}
+
+function runShellStep(name, command) {
+  return runStep(name, "bash", ["-lc", command]);
+}
+
+function appendCachedStep(name, exitCode, cache) {
+  const started = new Date().toISOString();
+  const finished = started;
+  const id = slug(name);
+  const stdoutPath = path.join(runDir, "steps", `${id}.stdout.log`);
+  const stderrPath = path.join(runDir, "steps", `${id}.stderr.log`);
+  mkdirSync(path.dirname(path.join(repoRoot, stdoutPath)), { recursive: true });
+  writeFileSync(path.join(repoRoot, stdoutPath), `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+  writeFileSync(path.join(repoRoot, stderrPath), "", "utf8");
+  const step = {
+    name,
+    command: "cached lab wait manifest",
+    exit_code: exitCode,
+    signal: null,
+    started_at: started,
+    finished_at: finished,
+    duration_ms: 0,
+    stdout_path: stdoutPath,
+    stderr_path: stderrPath,
+    cached: true,
+    cache,
+  };
+  steps.push(step);
+  return { ...step, stdout: JSON.stringify(cache), stderr: "" };
+}
+
+function runStep(name, command, args, extraEnv = {}) {
+  const id = slug(name);
+  const stdoutPath = path.join(runDir, "steps", `${id}.stdout.log`);
+  const stderrPath = path.join(runDir, "steps", `${id}.stderr.log`);
+  const started = new Date().toISOString();
+  const result = spawnSync(command, args, {
+    cwd: repoRoot,
+    env: { ...process.env, ...extraEnv },
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  const finished = new Date().toISOString();
+  const stdout = result.stdout ?? "";
+  const stderr = result.stderr ?? "";
+  mkdirSync(path.dirname(path.join(repoRoot, stdoutPath)), { recursive: true });
+  writeFileSync(path.join(repoRoot, stdoutPath), stdout, "utf8");
+  writeFileSync(path.join(repoRoot, stderrPath), stderr, "utf8");
+  const step = {
+    name,
+    command: [command, ...args].join(" "),
+    exit_code: result.status ?? 1,
+    signal: result.signal,
+    started_at: started,
+    finished_at: finished,
+    duration_ms: Date.parse(finished) - Date.parse(started),
+    stdout_path: stdoutPath,
+    stderr_path: stderrPath,
+  };
+  steps.push(step);
+  return { ...step, stdout, stderr };
+}
+
+function latestPathFromOutput(output, regex, suffix = "") {
+  let value;
+  for (const line of output.split(/\n/)) {
+    if (regex.test(line)) {
+      value = line;
+    }
+  }
+  return value ? `${value}${suffix}` : undefined;
+}
+
+function firstMatch(output, regex) {
+  return output.match(regex)?.[1];
+}
+
+function parseJsonObject(output) {
+  try {
+    const trimmed = String(output ?? "").trim();
+    if (!trimmed) return undefined;
+    return JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+}
+
+function readJsonIfExists(relativePath) {
+  const absolute = path.resolve(repoRoot, relativePath);
+  if (!existsSync(absolute)) return undefined;
+  try {
+    return JSON.parse(readFileSync(absolute, "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function isFresh(iso, maxAgeSeconds) {
+  const timestamp = Date.parse(iso ?? "");
+  if (!Number.isFinite(timestamp) || !Number.isFinite(maxAgeSeconds) || maxAgeSeconds < 0) return false;
+  const ageSeconds = (Date.now() - timestamp) / 1000;
+  return ageSeconds >= 0 && ageSeconds <= maxAgeSeconds;
+}
+
+async function latestSummaryPath() {
+  const dir = path.join(repoRoot, "artifacts", "readiness-summary");
+  if (!existsSync(dir)) return undefined;
+  const entries = await readdir(dir);
+  return entries
+    .filter((entry) => entry.endsWith("-summary.json"))
+    .sort()
+    .at(-1)
+    ? path.join("artifacts", "readiness-summary", entries.filter((entry) => entry.endsWith("-summary.json")).sort().at(-1))
+    : undefined;
+}
+
+async function latestLabWaitPath(waitMode) {
+  const dir = path.join(repoRoot, "artifacts", "lab-runs");
+  if (!existsSync(dir)) return undefined;
+  const suffix = `-wait-online-${waitMode}`;
+  const entries = await readdir(dir);
+  const latest = entries
+    .filter((entry) => entry.endsWith(suffix))
+    .sort()
+    .at(-1);
+  return latest ? path.join("artifacts", "lab-runs", latest, "manifest.json") : undefined;
+}
+
+async function latestProductNextPath() {
+  const dir = path.join(repoRoot, "artifacts", "product-next");
+  if (!existsSync(dir)) return undefined;
+  const entries = (await readdir(dir))
+    .filter((entry) => entry.endsWith("-product-next"))
+    .sort()
+    .reverse();
+  for (const entry of entries) {
+    const manifestPath = path.join("artifacts", "product-next", entry, "manifest.json");
+    const manifest = readJsonIfExists(manifestPath);
+    if (manifest && manifest.cached_decision !== true) {
+      return manifestPath;
+    }
+  }
+  return undefined;
+}
+
+function reusableLabWait(manifest, maxAgeSeconds) {
+  if (!manifest || manifest.kind !== "eventloopos.lab_mac_wait_online") return false;
+  if (manifest.wait_mode !== "quick") return false;
+  return isFresh(manifest.finished_at, maxAgeSeconds);
+}
+
+function reusableProductNextDecision(manifest, maxAgeSeconds) {
+  if (!manifest || manifest.kind !== "eventloopos.product_next") return false;
+  if (!Number.isFinite(maxAgeSeconds) || maxAgeSeconds <= 0) return false;
+  if (manifest.cached_decision === true) return false;
+  if (!isFresh(manifest.finished_at, maxAgeSeconds)) return false;
+  if (manifest.selected_command_target !== "lab") return false;
+  if (manifest.selected_command_autorun !== false) return false;
+  if (manifest.checks?.selected_command_ran === true) return false;
+  if (!/pnpm lab:local-bootstrap/.test(String(manifest.selected_command_clean ?? manifest.selected_command ?? ""))) return false;
+  return manifest.checks?.lab_online === false
+    || /lab is offline|run on lab Mac/i.test(String(manifest.selected_reason ?? manifest.selected_command_run_hint ?? ""));
+}
+
+function truthy(value) {
+  return ["1", "true", "yes", "on"].includes(String(value ?? "").toLowerCase());
+}
+
+function falsy(value) {
+  return ["0", "false", "no", "off"].includes(String(value ?? "").toLowerCase());
+}
+
+function utcStamp() {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function slug(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+}
+
+function runSelfTest() {
+  const labBootstrap = "LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap # run on the lab Mac after local login";
+  const primarySelected = chooseCommand({
+    labOnline: false,
+    summaryNextCommands: [],
+    commandGroups: { local: ["pnpm setup:prompt"], lab: [labBootstrap], release: [] },
+    primaryNextAction: {
+      command: labBootstrap,
+      target: "lab",
+      autorun: false,
+      reason: "lab is offline long enough that lab-local bootstrap is the highest-signal next step",
+    },
+  });
+  assert.equal(primarySelected.command, labBootstrap);
+  assert.equal(primarySelected.autorun, false);
+  assert.equal(primarySelected.target, "lab");
+  assert.equal(primarySelected.skip_reason, "selected command must be run on the lab Mac after local login");
+  assert.equal(nonAutorunSkipReason(primarySelected), "selected command must be run on the lab Mac after local login");
+  assert.equal(cleanCommand(primarySelected.command), "LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap");
+  assert.equal(runHint(primarySelected), "Run on lab Mac after local login: LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap");
+  assert.equal(reusableSummary({ release_options: { step_timeout_seconds: 0.001 } }, 60), false);
+  assert.equal(reusableSummary({ release_options: { step_timeout_seconds: 59 } }, 60), false);
+  assert.equal(reusableSummary({ release_options: { step_timeout_seconds: 60 } }, 60), true);
+  assert.equal(reusableSummary({ release_options: { step_timeout_seconds: 0 } }, 60), true);
+  assert.equal(reusableSummary({ release_options: {} }, 60), true);
+  assert.equal(reusableLabWait({
+    kind: "eventloopos.lab_mac_wait_online",
+    wait_mode: "quick",
+    finished_at: new Date().toISOString(),
+  }, 60), true);
+  assert.equal(reusableLabWait({
+    kind: "eventloopos.lab_mac_wait_online",
+    wait_mode: "long",
+    finished_at: new Date().toISOString(),
+  }, 60), false);
+  assert.equal(reusableLabWait({
+    kind: "eventloopos.other",
+    wait_mode: "quick",
+    finished_at: new Date().toISOString(),
+  }, 60), false);
+  assert.equal(reusableLabWait({
+    kind: "eventloopos.lab_mac_wait_online",
+    wait_mode: "quick",
+    finished_at: "2000-01-01T00:00:00Z",
+  }, 60), false);
+  const reusableOfflineDecision = {
+    kind: "eventloopos.product_next",
+    finished_at: new Date().toISOString(),
+    selected_command_clean: "LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap",
+    selected_command_target: "lab",
+    selected_command_autorun: false,
+    selected_reason: "lab is offline or invisible enough that lab-local bootstrap is the highest-signal next step",
+    checks: {
+      lab_online: false,
+      selected_command_ran: false,
+    },
+  };
+  assert.equal(reusableProductNextDecision(reusableOfflineDecision, 30), true);
+  assert.equal(reusableProductNextDecision({ ...reusableOfflineDecision, cached_decision: true }, 30), false);
+  assert.equal(reusableProductNextDecision({ ...reusableOfflineDecision, selected_command_target: "controller" }, 30), false);
+  assert.equal(reusableProductNextDecision({ ...reusableOfflineDecision, selected_command_autorun: true }, 30), false);
+  assert.equal(reusableProductNextDecision({ ...reusableOfflineDecision, checks: { lab_online: false, selected_command_ran: true } }, 30), false);
+  assert.equal(reusableProductNextDecision({ ...reusableOfflineDecision, finished_at: "2000-01-01T00:00:00Z" }, 30), false);
+  assert.equal(reusableProductNextDecision(reusableOfflineDecision, 0), false);
+  const cachedOutput = outputFromManifest({
+    kind: "eventloopos.product_next",
+    cached_decision: true,
+    cached_decision_manifest: "artifacts/product-next/original/manifest.json",
+    selected_command_clean: reusableOfflineDecision.selected_command_clean,
+    selected_command_target: "lab",
+    selected_command_run_hint: "Run on lab Mac after local login: LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap",
+    selected_reason: reusableOfflineDecision.selected_reason,
+    selected_command_autorun: false,
+    selected_command_skip_reason: "selected command must be run on the lab Mac after local login",
+    checks: {
+      lab_online: false,
+      selected_command_ran: false,
+    },
+    summary_requirement_gaps: [{ id: "connect_orchestrator", status: "pending" }],
+  }, path.join(repoRoot, "artifacts/product-next/cached/manifest.json"));
+  assert.equal(cachedOutput.decision_cached, true);
+  assert.equal(cachedOutput.selected_command_target, "lab");
+  assert.equal(cachedOutput.summary_requirement_gaps[0].id, "connect_orchestrator");
+
+  const fallbackGroups = commandGroupsFromLabWait({
+    passed: false,
+    checks: {
+      lab_tailscale_offline: true,
+      lab_offline_last_seen_seconds: 601,
+    },
+    controller_tailscale: {
+      suggested_local_bootstrap_command: "LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap",
+      suggested_controller_wait_command: "pnpm lab:wait-online:quick",
+      suggested_controller_status_command: "pnpm setup:lab-status",
+    },
+  });
+  assert.deepEqual(fallbackGroups.lab, [
+    labBootstrap,
+    "pnpm lab:wait-online:quick",
+    "pnpm setup:lab-status",
+  ]);
+  const invisibleGroups = commandGroupsFromLabWait({
+    passed: false,
+    checks: {
+      ssh_reachable: false,
+      vnc_reachable: false,
+      lab_tailscale_visible: false,
+    },
+    controller_tailscale: {
+      suggested_local_bootstrap_command: "LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap",
+      suggested_controller_wait_command: "pnpm lab:wait-online:quick",
+      suggested_controller_status_command: "pnpm setup:lab-status",
+    },
+  });
+  assert.deepEqual(invisibleGroups.lab, [
+    labBootstrap,
+    "pnpm lab:wait-online:quick",
+    "pnpm setup:lab-status",
+  ]);
+
+  const onlineSelected = chooseCommand({
+    labOnline: true,
+    summaryNextCommands: [],
+    commandGroups: { local: [], lab: ["pnpm product:lab-ready"], release: [] },
+    primaryNextAction: {
+      command: labBootstrap,
+      target: "lab",
+      autorun: false,
+    },
+  });
+  assert.equal(onlineSelected.command, "pnpm product:lab-ready");
+  assert.equal(nonAutorunSkipReason(onlineSelected), undefined);
+
+  const dogfoodSelected = chooseCommand({
+    labOnline: true,
+    summaryNextCommands: [],
+    commandGroups: { local: [], lab: ["pnpm product:dogfood"], release: [] },
+    primaryNextAction: {
+      command: labBootstrap,
+      target: "lab",
+      autorun: false,
+    },
+  });
+  assert.equal(dogfoodSelected.command, "pnpm product:dogfood");
+  assert.equal(nonAutorunSkipReason(dogfoodSelected), undefined);
+  assert.equal(commandTarget("pnpm setup:status"), "controller");
+  assert.equal(commandTarget("pnpm lab:local-bootstrap"), "lab");
+
+  const summaryStatus = summaryPassthrough({
+    product_manifest: "artifacts/product-readiness/example/manifest.json",
+    passed: false,
+    release_ready: false,
+    release_ready_reasons: [{ requirement: "release requires lab mode", evidence: "local" }],
+    requested_runs: 3,
+    requested_fault_runs: 1,
+    required_release_runs: 3,
+    release_required_artifact_counts: { queue_followup_runs: 3, codex_app_server_down_fault_runs: 1 },
+    release_repeat_artifact_counts: { queue_followup_runs: 2, codex_app_server_down_fault_runs: 1 },
+    profile_gate_passed: false,
+    profile_gate_reasons: [{ requirement: "dogfood requires green queue artifacts", evidence: "queue_followup_runs 0/1" }],
+    failed_steps: [{ name: "local macos permission status", timed_out: false }],
+    requirement_gaps: [{ id: "queue_ui_video_artifact", status: "pending" }],
+    requirement_coverage_status_counts: { passed: 3, pending: 1 },
+    artifact_contract_failures: [{ key: "codex_app_server_down_fault_runs", status: { manifest: "fault/manifest.json" } }],
+    artifact_audit: { ok: false, manifest: "audit/manifest.json", failures: [{ evidence_key: "product_outcome" }] },
+    macos_permission_status: { ok: false, checks: { aerospace_server_ready: false } },
+    aerospace_repair: { ok: false, checks: { launchservices_server_ready: false } },
+    lab_wait: { ok: false, checks: { lab_tailscale_offline: true } },
+    primary_next_action: { command: labBootstrap, target: "lab" },
+  });
+  assert.equal(summaryStatus.summary_product_manifest, "artifacts/product-readiness/example/manifest.json");
+  assert.equal(summaryStatus.summary_passed, false);
+  assert.equal(summaryStatus.summary_release_ready, false);
+  assert.equal(summaryStatus.summary_release_ready_reasons[0].requirement, "release requires lab mode");
+  assert.equal(summaryStatus.summary_requested_runs, 3);
+  assert.equal(summaryStatus.summary_requested_fault_runs, 1);
+  assert.equal(summaryStatus.summary_required_release_runs, 3);
+  assert.equal(summaryStatus.summary_release_required_artifact_counts.codex_app_server_down_fault_runs, 1);
+  assert.equal(summaryStatus.summary_release_repeat_artifact_counts.queue_followup_runs, 2);
+  assert.equal(summaryStatus.summary_profile_gate_passed, false);
+  assert.equal(summaryStatus.summary_profile_gate_reasons[0].requirement, "dogfood requires green queue artifacts");
+  assert.equal(summaryStatus.summary_failed_steps[0].name, "local macos permission status");
+  assert.equal(summaryStatus.summary_requirement_gaps[0].id, "queue_ui_video_artifact");
+  assert.equal(summaryStatus.summary_requirement_coverage_status_counts.passed, 3);
+  assert.equal(summaryStatus.summary_artifact_contract_failures[0].key, "codex_app_server_down_fault_runs");
+  assert.equal(summaryStatus.summary_artifact_audit.ok, false);
+  assert.equal(summaryStatus.summary_artifact_audit_failures[0].evidence_key, "product_outcome");
+  assert.equal(summaryStatus.macos_permission_status.checks.aerospace_server_ready, false);
+  assert.equal(summaryStatus.aerospace_repair.checks.launchservices_server_ready, false);
+  assert.equal(summaryStatus.lab_wait.checks.lab_tailscale_offline, true);
+  assert.equal(summaryStatus.primary_next_action.target, "lab");
+  const nextMarkdown = renderNextMarkdown({
+    finished_at: "2026-06-02T00:00:00Z",
+    artifact_dir: "artifacts/product-next/example",
+    selected_command_clean: "LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap",
+    selected_command_target: "lab",
+    selected_command_autorun: false,
+    selected_reason: "lab is offline or invisible enough that lab-local bootstrap is the highest-signal next step",
+    selected_command_run_hint: "Run on lab Mac after local login: LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap",
+    lab_wait: { manifest: "artifacts/lab-runs/wait/manifest.json", checks: { ssh_reachable: false, vnc_reachable: false } },
+    macos_permission_status: { checks: { aerospace_server_ready: false }, failures: [{ requirement: "aerospace_server_ready", fix: "open AeroSpace" }] },
+    aerospace_repair: { fix_commands: ["open -a AeroSpace"] },
+    summary_requirement_gaps: [{ id: "first_run_permission_flow", status: "blocked", requirement: "First-run permission/status flow is explicit" }],
+    summary_product_manifest: "artifacts/product-readiness/example/manifest.json",
+    checks: { readiness_summary_manifest: "artifacts/readiness-summary/example.json" },
+  });
+  assert.match(nextMarkdown, /eventloopOS Next Readiness Action/);
+  assert.match(nextMarkdown, /LAB_CONTROLLER_TAILSCALE_IP=100\.76\.35\.66 pnpm lab:local-bootstrap/);
+  assert.match(nextMarkdown, /Lab Operator Handoff/);
+  assert.match(nextMarkdown, /ssh_reachable=false/);
+  assert.match(nextMarkdown, /aerospace_server_ready=false/);
+  assert.match(nextMarkdown, /open -a AeroSpace/);
+  assert.match(nextMarkdown, /first_run_permission_flow/);
+
+  assert.deepEqual(summaryPassthrough(undefined), {
+    summary_product_manifest: undefined,
+    summary_passed: undefined,
+    summary_release_ready: undefined,
+    summary_release_ready_reasons: [],
+    summary_requested_runs: undefined,
+    summary_requested_fault_runs: undefined,
+    summary_required_release_runs: undefined,
+    summary_release_required_artifact_counts: {},
+    summary_release_repeat_artifact_counts: {},
+    summary_profile_gate_passed: undefined,
+    summary_profile_gate_reasons: [],
+    summary_failed_steps: [],
+    summary_requirement_gaps: [],
+    summary_requirement_coverage_status_counts: {},
+    summary_artifact_contract_failures: [],
+    summary_artifact_audit: undefined,
+    summary_artifact_audit_failures: [],
+    macos_permission_status: undefined,
+    aerospace_repair: undefined,
+    lab_wait: undefined,
+    primary_next_action: undefined,
+  });
+}

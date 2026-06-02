@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
-export type TaskSessionCliCommand = "list" | "bind" | "messages" | "followup";
+export type TaskSessionCliCommand = "list" | "bind" | "messages" | "followup" | "replace";
 
 export type TaskSessionCliOptions = {
   command: TaskSessionCliCommand;
@@ -16,6 +16,7 @@ export type TaskSessionCliOptions = {
   idempotencyKey?: string;
   status?: string;
   limit?: number;
+  httpTimeoutMs?: number;
   fetchFn?: typeof fetch;
   stdout?: Pick<NodeJS.WriteStream, "write">;
   stderr?: Pick<NodeJS.WriteStream, "write">;
@@ -39,6 +40,7 @@ export function taskSessionCliOptionsFromEnvAndArgv(
     idempotencyKey: args.idempotencyKey ?? env.EVENTLOOPOS_IDEMPOTENCY_KEY,
     status: args.status ?? env.EVENTLOOPOS_TASK_MESSAGE_STATUS,
     limit: args.limit ?? numberFromEnv(env.EVENTLOOPOS_TASK_MESSAGE_LIMIT),
+    httpTimeoutMs: args.httpTimeoutMs ?? numberFromEnv(env.EVENTLOOPOS_TASK_SESSION_HTTP_TIMEOUT_MS) ?? 45_000,
   };
 }
 
@@ -52,6 +54,9 @@ export async function runTaskSessionCli(options: TaskSessionCliOptions): Promise
   if (options.command === "followup") {
     return await sendTaskFollowup(options);
   }
+  if (options.command === "replace") {
+    return await replaceTaskSession(options);
+  }
   return await bindTaskSession(options);
 }
 
@@ -64,6 +69,7 @@ async function listTaskSessions(options: TaskSessionCliOptions): Promise<number>
     const response = await fetchFn(new URL("/task-sessions", options.baseUrl), {
       method: "GET",
       headers: { "content-type": "application/json" },
+      signal: abortSignalFor(options),
     });
     const body = await response.json() as unknown;
     stdout.write(`${JSON.stringify(body)}\n`);
@@ -94,6 +100,7 @@ async function listTaskMessages(options: TaskSessionCliOptions): Promise<number>
     const response = await fetchFn(url, {
       method: "GET",
       headers: { "content-type": "application/json" },
+      signal: abortSignalFor(options),
     });
     const body = await response.json() as unknown;
     stdout.write(`${JSON.stringify(body)}\n`);
@@ -125,6 +132,7 @@ async function bindTaskSession(options: TaskSessionCliOptions): Promise<number> 
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ task_id: taskId }),
+      signal: abortSignalFor(options),
     });
     const body = await response.json() as unknown;
     stdout.write(`${JSON.stringify(body)}\n`);
@@ -166,6 +174,7 @@ async function sendTaskFollowup(options: TaskSessionCliOptions): Promise<number>
         event_ids: eventIds,
         idempotency_key: idempotencyKey,
       }),
+      signal: abortSignalFor(options),
     });
     const body = await readResponseJson(response);
     stdout.write(`${JSON.stringify(body)}\n`);
@@ -175,6 +184,49 @@ async function sendTaskFollowup(options: TaskSessionCliOptions): Promise<number>
     return response.ok ? 0 : 1;
   } catch (error) {
     stderr.write(`task followup failed: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+}
+
+async function replaceTaskSession(options: TaskSessionCliOptions): Promise<number> {
+  const fetchFn = options.fetchFn ?? fetch;
+  const stdout = options.stdout ?? process.stdout;
+  const stderr = options.stderr ?? process.stderr;
+  const taskSessionId = options.taskSessionId?.trim();
+  const prompt = options.text?.trim();
+
+  if (!taskSessionId) {
+    stderr.write("task session id must be provided with --session or EVENTLOOPOS_TASK_SESSION_ID\n");
+    return 1;
+  }
+  if (!prompt) {
+    stderr.write("replacement prompt must be provided as a positional argument, with --text, or EVENTLOOPOS_TASK_MESSAGE_TEXT\n");
+    return 1;
+  }
+
+  const idempotencyKey = options.idempotencyKey ?? `task_replace_${stableHash([taskSessionId, prompt])}`;
+
+  try {
+    const response = await fetchFn(new URL(`/task-sessions/${encodeURIComponent(taskSessionId)}/replacement`, options.baseUrl), {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "idempotency-key": idempotencyKey,
+      },
+      body: JSON.stringify({
+        prompt,
+        idempotency_key: idempotencyKey,
+      }),
+      signal: abortSignalFor(options),
+    });
+    const body = await readResponseJson(response);
+    stdout.write(`${JSON.stringify(body)}\n`);
+    if (!response.ok) {
+      stderr.write(`task replacement failed with HTTP ${response.status}\n`);
+    }
+    return response.ok ? 0 : 1;
+  } catch (error) {
+    stderr.write(`task replacement failed: ${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
 }
@@ -203,7 +255,7 @@ function parseArgs(argv: string[]): Partial<TaskSessionCliOptions> {
     if (arg === "--") {
       continue;
     }
-    if (arg === "list" || arg === "bind" || arg === "messages" || arg === "followup") {
+    if (arg === "list" || arg === "bind" || arg === "messages" || arg === "followup" || arg === "replace") {
       options.command = arg;
       continue;
     }
@@ -240,6 +292,9 @@ function parseArgs(argv: string[]): Partial<TaskSessionCliOptions> {
       case "--limit":
         options.limit = parseLimit(readArgValue(argv, ++index, arg));
         break;
+      case "--timeout-ms":
+        options.httpTimeoutMs = Number(readArgValue(argv, ++index, arg));
+        break;
       case "--task":
       case "--task-hint":
         options.taskHint = readArgValue(argv, ++index, arg);
@@ -272,7 +327,7 @@ function readArgValue(argv: string[], index: number, flag: string): string {
 }
 
 function commandFromEnv(input: string | undefined): TaskSessionCliCommand | undefined {
-  if (input === "list" || input === "bind" || input === "messages" || input === "followup") return input;
+  if (input === "list" || input === "bind" || input === "messages" || input === "followup" || input === "replace") return input;
   return undefined;
 }
 
@@ -287,6 +342,12 @@ function parseLimit(input: string): number {
 function numberFromEnv(input: string | undefined): number | undefined {
   if (!input) return undefined;
   return parseLimit(input);
+}
+
+function abortSignalFor(options: TaskSessionCliOptions): AbortSignal | undefined {
+  const timeoutMs = options.httpTimeoutMs;
+  if (!timeoutMs || !Number.isFinite(timeoutMs) || timeoutMs <= 0) return undefined;
+  return AbortSignal.timeout(timeoutMs);
 }
 
 function appendQuery(url: URL, name: string, value: string | undefined): void {

@@ -1,0 +1,795 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-scenario [queue-followup|queue-decisions|codex-recovery]
+
+Run end-to-end remote Mac lab scenarios and write timestamped artifacts under
+artifacts/lab-runs.
+
+Environment:
+  LAB_MAC_HOST              default: 100.71.111.25
+  LAB_MAC_USER              default: claw
+  LAB_MAC_KEY               default: ~/.ssh/eventloop_lab_mac
+  LAB_DOGFOOD_URL           default: http://127.0.0.1:4480
+  LAB_DOGFOOD_REAL_CODEX    default: 0 for queue-followup, 1 for codex-recovery
+  LAB_DOGFOOD_POSTGRES      default: 0
+  LAB_DOGFOOD_DATABASE_URL  optional DATABASE_URL for Postgres mode
+  LAB_MAC_CAPTURE_VIDEO_SECONDS default: 0
+  LAB_RECOVERY_RESTART_STACK    default: 1 for codex-recovery
+EOF
+}
+
+scenario="${1:-queue-followup}"
+case "$scenario" in
+  queue-followup|queue-decisions|codex-recovery) ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown scenario: $scenario" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+url="${LAB_DOGFOOD_URL:-http://127.0.0.1:4480}"
+default_real_codex=0
+if [[ "$scenario" == "codex-recovery" ]]; then
+  default_real_codex=1
+fi
+real_codex="${LAB_DOGFOOD_REAL_CODEX:-$default_real_codex}"
+postgres="${LAB_DOGFOOD_POSTGRES:-0}"
+database_url="${LAB_DOGFOOD_DATABASE_URL:-}"
+recovery_restart_stack="${LAB_RECOVERY_RESTART_STACK:-1}"
+remote="${lab_user}@${lab_host}"
+remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
+run_id="$(date +%Y%m%d-%H%M%S)-lab-scenario-$scenario"
+remote_run="artifacts/lab-runs/$run_id"
+ssh_opts=(-i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8)
+
+ssh_remote() {
+  ssh "${ssh_opts[@]}" "$remote" "$@"
+}
+
+wait_for_health() {
+  for _ in {1..90}; do
+    if ssh_remote "curl -fsS --max-time 3 '$url/health' >/dev/null 2>&1"; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "orchestrator did not become healthy at $url" >&2
+  return 1
+}
+
+ensure_stack() {
+  if ssh_remote "curl -fsS --max-time 3 '$url/health' >/dev/null 2>&1"; then
+    return 0
+  fi
+  LAB_MAC_HOST="$lab_host" \
+  LAB_MAC_USER="$lab_user" \
+  LAB_MAC_KEY="$lab_key" \
+  LAB_DOGFOOD_URL="$url" \
+  LAB_DOGFOOD_REAL_CODEX="$real_codex" \
+  LAB_DOGFOOD_POSTGRES="$postgres" \
+  LAB_DOGFOOD_DATABASE_URL="$database_url" \
+  bin/lab-mac-dogfood start
+  wait_for_health
+}
+
+restart_stack() {
+  LAB_MAC_HOST="$lab_host" \
+  LAB_MAC_USER="$lab_user" \
+  LAB_MAC_KEY="$lab_key" \
+  LAB_DOGFOOD_URL="$url" \
+  bin/lab-mac-dogfood stop >/dev/null
+  LAB_MAC_HOST="$lab_host" \
+  LAB_MAC_USER="$lab_user" \
+  LAB_MAC_KEY="$lab_key" \
+  LAB_DOGFOOD_URL="$url" \
+  LAB_DOGFOOD_REAL_CODEX="$real_codex" \
+  LAB_DOGFOOD_POSTGRES="$postgres" \
+  LAB_DOGFOOD_DATABASE_URL="$database_url" \
+  bin/lab-mac-dogfood start >/dev/null
+  wait_for_health
+}
+
+capture_desktop() {
+  local label="$1"
+  LAB_MAC_HOST="$lab_host" \
+  LAB_MAC_USER="$lab_user" \
+  LAB_MAC_KEY="$lab_key" \
+  LAB_DOGFOOD_URL="$url" \
+  bin/lab-mac-desktop-capture "$remote_run" "$label" >/dev/null
+}
+
+sync_artifacts() {
+  mkdir -p "$remote_run"
+  rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" "$remote:$remote_repo/$remote_run/" "$remote_run/"
+}
+
+run_remote_scenario() {
+  local name="$1"
+  local phase="${2:-all}"
+  ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$url' '$name' '$phase'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+run="$2"
+url="$3"
+scenario="$4"
+phase="$5"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run/api"
+
+post_json() {
+  local path="$1"
+  local body_file="$2"
+  local output_file="$3"
+  local idempotency_key="$4"
+  curl -fsS --max-time 60 \
+    -H "content-type: application/json" \
+    -H "idempotency-key: $idempotency_key" \
+    -d @"$body_file" \
+    "$url$path" >"$output_file"
+}
+
+get_endpoint() {
+  local endpoint="$1"
+  local output_name
+  output_name="$(printf "%s" "$endpoint" | tr '?/=&' '____')"
+  curl -fsS --max-time 3 "$url/$endpoint" >"$run/api/$output_name.json" 2>"$run/api/$output_name.err" || true
+}
+
+collect_api_state() {
+  local phase="$1"
+  mkdir -p "$run/api/$phase"
+  for endpoint in health metrics "activity?limit=120" "queue?state=ready" "queue?state=leased" "queue?state=deferred" "queue?state=done" "queue?state=dead" tasks task-sessions "task-messages?limit=120"; do
+    local output_name
+    output_name="$(printf "%s" "$endpoint" | tr '?/=&' '____')"
+    curl -fsS --max-time 3 "$url/$endpoint" >"$run/api/$phase/$output_name.json" 2>"$run/api/$phase/$output_name.err" || true
+  done
+}
+
+open_queue_window_from_menu() {
+  local output="$run/open-queue-window.out"
+  local error="$run/open-queue-window.err"
+  osascript >"$output" 2>"$error" <<'APPLESCRIPT' &
+on waitForMenuBarExtra()
+  repeat with attempt from 1 to 80
+    tell application "System Events"
+      if exists process "eventloopOS Queue" then
+        tell process "eventloopOS Queue"
+          if (count of menu bars) is greater than or equal to 2 then return
+        end tell
+      end if
+    end tell
+    delay 0.1
+  end repeat
+  error "eventloopOS Queue menu bar extra did not appear"
+end waitForMenuBarExtra
+
+on clickMenuItem(itemName)
+  waitForMenuBarExtra()
+  tell application "System Events"
+    tell process "eventloopOS Queue"
+      tell menu bar item 1 of menu bar 2
+        click
+        delay 0.2
+        click menu item itemName of menu 1
+      end tell
+    end tell
+  end tell
+end clickMenuItem
+
+clickMenuItem("Refresh Queue")
+delay 0.5
+clickMenuItem("Open Queue")
+delay 1.0
+return "opened queue window"
+APPLESCRIPT
+  local osascript_pid="$!"
+  for _ in {1..25}; do
+    if ! kill -0 "$osascript_pid" 2>/dev/null; then
+      wait "$osascript_pid"
+      return "$?"
+    fi
+    sleep 1
+  done
+  kill -TERM "$osascript_pid" 2>/dev/null || true
+  sleep 1
+  kill -KILL "$osascript_pid" 2>/dev/null || true
+  {
+    echo
+    echo "open_queue_window_from_menu timed out after 25s"
+  } >>"$error"
+  return 124
+}
+
+write_manifest() {
+  SCENARIO="$scenario" RUN="$run" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+
+const run = process.env.RUN;
+const scenario = process.env.SCENARIO;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(run, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const json = (relative, fallback = undefined) => {
+  const text = read(relative);
+  if (!text) return fallback;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return fallback;
+  }
+};
+const exists = (relative) => fs.existsSync(path.join(run, relative));
+
+const start = json("start-response.json", {});
+const followup = json("followup-response.json", {});
+const lost = json("lost-followup-response.json", {});
+const replacement = json("replacement-response.json", {});
+const replacementFollowup = json("replacement-followup-response.json", {});
+const before = json("captures/before/capture-summary.json", {});
+const after = json("captures/after/capture-summary.json", {});
+const apiAfterMessages = json("api/after/task-messages_limit_120.json", json("api/after/task-messages_limit_80.json", { messages: [] }));
+const apiAfterActivity = json("api/after/activity_limit_120.json", json("api/after/activity_limit_80.json", { events: [] }));
+const queueReady = json("api/after/queue_state_ready.json", { items: [] });
+const queueDeferred = json("api/after/queue_state_deferred.json", { items: [] });
+const queueDone = json("api/after/queue_state_done.json", { items: [] });
+const queueDead = json("api/after/queue_state_dead.json", { items: [] });
+const startQueueItem = start?.queue_item;
+const deferResponse = json("defer-response.json", {});
+const ignoreStart = json("ignore-start-response.json", {});
+const ignoreResponse = json("ignore-response.json", {});
+const taskId = read("task-id.txt");
+const ignoreTaskId = read("ignore-task-id.txt");
+const taskSessionId = read("task-session-id.txt");
+const replacementSessionId = read("replacement-task-session-id.txt");
+const messages = Array.isArray(apiAfterMessages.messages) ? apiAfterMessages.messages : [];
+const activityEvents = Array.isArray(apiAfterActivity.events) ? apiAfterActivity.events : [];
+
+const assertions = [
+  {
+    name: "orchestrator_healthy",
+    ok: json("api/after/health.json", {}).ok === true,
+  },
+  {
+    name: "desktop_capture_after_nonempty",
+    ok: Number(after?.screen?.bytes ?? 0) > 10000,
+    details: after?.screen,
+  },
+  {
+    name: "desktop_screen_recording_after_present",
+    ok: Number(after?.video?.requested_seconds ?? 0) <= 0 || Number(after?.video?.bytes ?? 0) > 10000,
+    details: after?.video,
+  },
+  {
+    name: "active_console_session",
+    ok: after?.login_done === true,
+    details: { console_user: after?.console_user, frontmost_app: after?.frontmost_app },
+  },
+  {
+    name: "queue_app_process_visible_to_gui_tools",
+    ok: after?.queue_app?.process_present === true,
+    details: after?.queue_app,
+  },
+  {
+    name: "queue_app_menu_ax_visible",
+    ok: after?.queue_app?.menu_items_present === true,
+    details: after?.queue_app,
+  },
+  {
+    name: "queue_app_accessibility_tree_present",
+    ok: after?.queue_app?.ax_tree_present === true,
+    details: after?.queue_app,
+  },
+  {
+    name: "queue_app_window_title_visible",
+    ok: after?.queue_app?.ax_window_title_present === true
+      || Number(after?.queue_app?.aerospace_window_count ?? 0) > 0
+      || Number(after?.queue_app?.system_events_window_count ?? 0) > 0,
+    details: after?.queue_app,
+  },
+  {
+    name: "queue_app_harness_status_visible",
+    ok: after?.queue_app?.harness_status_present === true,
+    details: {
+      harness_status_line: after?.queue_app?.harness_status_line,
+      ax_tree_bytes: after?.queue_app?.ax_tree_bytes,
+    },
+  },
+  {
+    name: "task_session_started",
+    ok: Boolean(taskSessionId) && start?.ok === true,
+    details: { task_id: taskId, task_session_id: taskSessionId },
+  },
+  {
+    name: "durable_task_messages_present",
+    ok: scenario === "queue-decisions"
+      ? messages.some((message) => message.task_id === taskId && message.origin === "task_session_start")
+        && messages.some((message) => message.task_id === ignoreTaskId && message.origin === "task_session_start")
+      : messages.some((message) => message.task_id === taskId && message.origin === "task_session_start")
+        && messages.some((message) => message.task_id === taskId && message.origin === "task_session_api"),
+    details: messages
+      .filter((message) => message.task_id === taskId || message.task_id === ignoreTaskId)
+      .map((message) => ({
+        id: message.id,
+        task_id: message.task_id,
+        origin: message.origin,
+        status: message.status,
+        idempotency_key: message.idempotency_key,
+      })),
+  },
+  {
+    name: "queue_paper_created",
+    ok: startQueueItem?.task_id === taskId || [...(queueReady.items ?? []), ...(queueDone.items ?? [])].some((item) => item.task_id === taskId),
+    details: {
+      start_queue_item_id: startQueueItem?.id,
+      ready_count: queueReady.count,
+      done_count: queueDone.count,
+    },
+  },
+];
+
+if (scenario === "queue-decisions") {
+  assertions.push(
+    {
+      name: "defer_decision_persisted",
+      ok: deferResponse?.ok === true
+        && deferResponse?.decision?.action === "defer"
+        && deferResponse?.item?.task_id === taskId
+        && deferResponse?.item?.state === "deferred"
+        && [...(queueDeferred.items ?? [])].some((item) => item.task_id === taskId && item.state === "deferred"),
+      details: {
+        decision: deferResponse?.decision,
+        item: deferResponse?.item ? {
+          id: deferResponse.item.id,
+          task_id: deferResponse.item.task_id,
+          state: deferResponse.item.state,
+          due_at: deferResponse.item.due_at,
+        } : undefined,
+      },
+    },
+    {
+      name: "ignore_decision_persisted",
+      ok: ignoreStart?.ok === true
+        && ignoreResponse?.ok === true
+        && ignoreResponse?.decision?.action === "ignore"
+        && ignoreResponse?.item?.task_id === ignoreTaskId
+        && ignoreResponse?.item?.state === "dead"
+        && [...(queueDead.items ?? [])].some((item) => item.task_id === ignoreTaskId && item.state === "dead"),
+      details: {
+        start_queue_item_id: ignoreStart?.queue_item?.id,
+        decision: ignoreResponse?.decision,
+        item: ignoreResponse?.item ? {
+          id: ignoreResponse.item.id,
+          task_id: ignoreResponse.item.task_id,
+          state: ignoreResponse.item.state,
+        } : undefined,
+      },
+    },
+    {
+      name: "defer_ignore_activity_visible",
+      ok: activityEvents.some((event) => event.type === "queue_item_deferred" && event.task_id === taskId)
+        && activityEvents.some((event) => event.type === "queue_item_ignored" && event.task_id === ignoreTaskId),
+      details: activityEvents
+        .filter((event) => event.task_id === taskId || event.task_id === ignoreTaskId)
+        .map((event) => ({
+          type: event.type,
+          task_id: event.task_id,
+          queue_item_id: event.queue_item_id,
+          status: event.status,
+        })),
+    },
+  );
+} else if (scenario === "codex-recovery") {
+  assertions.push(
+    {
+      name: "old_session_followup_failed_as_lost",
+      ok: lost?.message?.status === "failed" && /lost|thread not found|websocket is closed|connection/i.test(String(lost?.message?.error ?? lost?.details?.error ?? "")),
+      details: lost?.message ?? lost,
+    },
+    {
+      name: "replacement_session_started",
+      ok: Boolean(replacementSessionId) && replacement?.ok === true,
+      details: { replacement_task_session_id: replacementSessionId },
+    },
+    {
+      name: "replacement_followup_sent",
+      ok: replacementFollowup?.message?.status === "sent",
+      details: replacementFollowup?.message ?? replacementFollowup,
+    },
+  );
+} else {
+  assertions.push({
+    name: "followup_sent",
+    ok: followup?.message?.status === "sent",
+    details: followup?.message ? {
+      id: followup.message.id,
+      status: followup.message.status,
+      native_thread_id: followup.message.native_thread_id,
+      native_turn_id: followup.message.native_turn_id,
+    } : followup,
+  });
+}
+
+const ok = assertions.every((assertion) => assertion.ok);
+const nonScreenshotOk = assertions
+  .filter((assertion) => assertion.name !== "desktop_capture_after_nonempty")
+  .every((assertion) => assertion.ok);
+const completionBlockers = [];
+const screenDetails = after?.screen ?? {};
+if (Number(screenDetails.bytes ?? 0) <= 10000) {
+  completionBlockers.push({
+    requirement: "SSH-driven screenshot/video timeline artifact",
+    type: screenDetails.tcc_terminal_screen_capture === "denied"
+      ? "macos_tcc_screen_capture_denied"
+      : "desktop_capture_missing",
+    evidence: {
+      error: screenDetails.error,
+      failure_hint: screenDetails.failure_hint,
+      tcc_terminal_screen_capture: screenDetails.tcc_terminal_screen_capture,
+    },
+    repair_command: "bin/lab-mac-screen-capture-permission prompt",
+    verify_command: "bin/lab-mac-screen-capture-permission status",
+  });
+}
+const videoDetails = after?.video ?? {};
+if (Number(videoDetails.requested_seconds ?? 0) > 0 && Number(videoDetails.bytes ?? 0) <= 10000) {
+  completionBlockers.push({
+    requirement: "SSH-driven screen recording artifact",
+    type: "desktop_screen_recording_missing",
+    evidence: videoDetails,
+    repair_command: "bin/lab-mac-screen-capture-permission prompt",
+    verify_command: "LAB_MAC_CAPTURE_VIDEO_SECONDS=3 bin/lab-mac-scenario queue-followup",
+  });
+}
+console.log(JSON.stringify({
+  ok,
+  non_screenshot_ok: nonScreenshotOk,
+  completion_blockers: completionBlockers,
+  scenario,
+  run,
+  task_id: taskId,
+  task_session_id: taskSessionId,
+  replacement_task_session_id: replacementSessionId || undefined,
+  started_at: read("started-at.txt"),
+  finished_at: new Date().toISOString(),
+  captures: {
+    before: exists("captures/before/capture-summary.json") ? "captures/before/capture-summary.json" : undefined,
+    after: exists("captures/after/capture-summary.json") ? "captures/after/capture-summary.json" : undefined,
+  },
+  api: {
+    before: "api/before",
+    after: "api/after",
+  },
+  assertions,
+}, null, 2));
+NODE
+}
+
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+collect_api_state "$([[ "$phase" == "all" || "$phase" == "start-only" ]] && echo before || echo before_recovery)"
+
+if [[ "$phase" == "recovery-after-restart" ]]; then
+  task_id="$(cat "$run/task-id.txt")"
+  task_session_id="$(cat "$run/task-session-id.txt")"
+  stamp="$(cat "$run/stamp.txt")"
+  if ! open_queue_window_from_menu; then
+    printf "%s\n" "$?" >"$run/open-queue-window-recovery.rc"
+  fi
+  set +e
+  EVENTLOOPOS_TASK_SESSION_SKIP_BUILD=1 bin/task-session followup \
+    --base-url "$url" \
+    --session "$task_session_id" \
+    --event "evt_${task_id}_lost" \
+    --idempotency-key "lab-scenario-$scenario-lost-followup-$stamp" \
+    "This should fail because the original native Codex thread is stale after a lab stack restart." \
+    >"$run/lost-followup-response.json" 2>"$run/lost-followup-response.err"
+  printf "%s\n" "$?" >"$run/lost-followup-response.rc"
+  set -e
+  EVENTLOOPOS_TASK_SESSION_SKIP_BUILD=1 bin/task-session replace \
+    --base-url "$url" \
+    --session "$task_session_id" \
+    --idempotency-key "lab-scenario-$scenario-replace-$stamp" \
+    "Replacement for $task_id after stale native Codex thread. Reply exactly: eventloopos-lab-replacement-ok." \
+    >"$run/replacement-response.json" 2>"$run/replacement-response.err"
+  replacement_task_session_id="$(jq -r '.started.task_session_id' "$run/replacement-response.json")"
+  printf "%s\n" "$replacement_task_session_id" >"$run/replacement-task-session-id.txt"
+  EVENTLOOPOS_TASK_SESSION_SKIP_BUILD=1 bin/task-session followup \
+    --base-url "$url" \
+    --session "$replacement_task_session_id" \
+    --event "evt_${task_id}_replacement" \
+    --idempotency-key "lab-scenario-$scenario-replacement-followup-$stamp" \
+    "Replacement followup for $task_id. Reply exactly: eventloopos-lab-replacement-followup-ok." \
+    >"$run/replacement-followup-response.json" 2>"$run/replacement-followup-response.err"
+  collect_api_state after
+  date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+  write_manifest
+  exit 0
+fi
+
+stamp="$(date +%Y%m%d%H%M%S)"
+task_id="task_lab_scenario_${scenario//-/_}_$stamp"
+task_title="Lab scenario $scenario $stamp"
+start_key="lab-scenario-$scenario-start-$stamp"
+followup_key="lab-scenario-$scenario-followup-$stamp"
+printf "%s\n" "$task_id" >"$run/task-id.txt"
+printf "%s\n" "$stamp" >"$run/stamp.txt"
+
+cat >"$run/start-request.json" <<JSON
+{
+  "task_id": "$task_id",
+  "prompt": "Dogfood harness scenario $scenario $stamp. Reply exactly: eventloopos-lab-scenario-ok.",
+  "cwd": "$repo",
+  "idempotency_key": "$start_key",
+  "queue_paper": true
+}
+JSON
+
+post_json "/task-sessions" "$run/start-request.json" "$run/start-response.json" "$start_key"
+jq -e '.ok == true and (.started.task_session_id // "") != ""' "$run/start-response.json" >/dev/null
+task_session_id="$(jq -r '.started.task_session_id' "$run/start-response.json")"
+printf "%s\n" "$task_session_id" >"$run/task-session-id.txt"
+
+queue_ready_seen=0
+for _ in {1..12}; do
+  curl -fsS --max-time 3 "$url/queue?state=ready" >"$run/queue-ready-after-start.json" 2>"$run/queue-ready-after-start.err" || true
+  if jq -e --arg task_id "$task_id" '.items[]? | select(.task_id == $task_id)' "$run/queue-ready-after-start.json" >/dev/null; then
+    queue_ready_seen=1
+    break
+  fi
+  sleep 1
+done
+if [[ "$queue_ready_seen" != "1" ]]; then
+  echo "queue paper was not visible in ready queue after bounded poll" >"$run/queue-ready-after-start.timeout"
+fi
+
+if ! open_queue_window_from_menu; then
+  printf "%s\n" "$?" >"$run/open-queue-window.rc"
+fi
+
+if [[ "$phase" == "start-only" ]]; then
+  collect_api_state after_start
+  date -u +%Y-%m-%dT%H:%M:%SZ >"$run/start-phase-finished-at.txt"
+  exit 0
+fi
+
+if [[ "$scenario" == "queue-decisions" ]]; then
+  queue_item_id="$(jq -r '.queue_item.id // empty' "$run/start-response.json")"
+  if [[ -z "$queue_item_id" ]]; then
+    queue_item_id="$(jq -r --arg task_id "$task_id" '.items[]? | select(.task_id == $task_id) | .id' "$run/queue-ready-after-start.json" | head -1)"
+  fi
+  if [[ -z "$queue_item_id" ]]; then
+    echo "missing queue item id for defer decision" >&2
+    exit 1
+  fi
+  due_at="$(node -e 'console.log(new Date(Date.now() + 60 * 60 * 1000).toISOString())')"
+  cat >"$run/defer-request.json" <<JSON
+{
+  "action": "defer",
+  "actor_id": "lab-readiness",
+  "due_at": "$due_at"
+}
+JSON
+  post_json "/queue/$queue_item_id/defer" "$run/defer-request.json" "$run/defer-response.json" "lab-scenario-$scenario-defer-$stamp"
+  jq -e '.ok == true and .decision.action == "defer" and .item.state == "deferred"' "$run/defer-response.json" >/dev/null
+
+  ignore_task_id="task_lab_scenario_${scenario//-/_}_ignore_$stamp"
+  printf "%s\n" "$ignore_task_id" >"$run/ignore-task-id.txt"
+  cat >"$run/ignore-start-request.json" <<JSON
+{
+  "task_id": "$ignore_task_id",
+  "prompt": "Dogfood harness scenario $scenario ignore branch $stamp. Reply exactly: eventloopos-lab-ignore-ok.",
+  "cwd": "$repo",
+  "idempotency_key": "lab-scenario-$scenario-ignore-start-$stamp",
+  "queue_paper": true
+}
+JSON
+  post_json "/task-sessions" "$run/ignore-start-request.json" "$run/ignore-start-response.json" "lab-scenario-$scenario-ignore-start-$stamp"
+  jq -e '.ok == true and (.queue_item.id // "") != ""' "$run/ignore-start-response.json" >/dev/null
+  ignore_queue_item_id="$(jq -r '.queue_item.id' "$run/ignore-start-response.json")"
+  cat >"$run/ignore-request.json" <<JSON
+{
+  "action": "ignore",
+  "actor_id": "lab-readiness"
+}
+JSON
+  post_json "/queue/$ignore_queue_item_id/ignore" "$run/ignore-request.json" "$run/ignore-response.json" "lab-scenario-$scenario-ignore-$stamp"
+  jq -e '.ok == true and .decision.action == "ignore" and .item.state == "dead"' "$run/ignore-response.json" >/dev/null
+  collect_api_state after
+  date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+  write_manifest
+  exit 0
+fi
+
+EVENTLOOPOS_TASK_SESSION_SKIP_BUILD=1 bin/task-session followup \
+  --base-url "$url" \
+  --session "$task_session_id" \
+  --event "evt_$task_id" \
+  --idempotency-key "$followup_key" \
+  "Scenario followup for $task_id. Reply exactly: eventloopos-lab-followup-ok." \
+  >"$run/followup-response.json" 2>"$run/followup-response.err"
+jq -e '.message.status == "sent"' "$run/followup-response.json" >/dev/null
+
+if [[ "$scenario" == "codex-recovery" ]]; then
+  pkill -TERM -f "codex app-server" 2>/dev/null || true
+  sleep 2
+  pkill -KILL -f "codex app-server" 2>/dev/null || true
+  curl -fsS --max-time 3 "$url/health" >"$run/health-after-codex-kill.json" 2>"$run/health-after-codex-kill.err" || true
+  set +e
+  EVENTLOOPOS_TASK_SESSION_SKIP_BUILD=1 bin/task-session followup \
+    --base-url "$url" \
+    --session "$task_session_id" \
+    --event "evt_${task_id}_lost" \
+    --idempotency-key "lab-scenario-$scenario-lost-followup-$stamp" \
+    "This should fail because the native Codex app-server thread was killed." \
+    >"$run/lost-followup-response.json" 2>"$run/lost-followup-response.err"
+  printf "%s\n" "$?" >"$run/lost-followup-response.rc"
+  set -e
+  EVENTLOOPOS_TASK_SESSION_SKIP_BUILD=1 bin/task-session replace \
+    --base-url "$url" \
+    --session "$task_session_id" \
+    --idempotency-key "lab-scenario-$scenario-replace-$stamp" \
+    "Replacement for $task_id after stale native Codex thread. Reply exactly: eventloopos-lab-replacement-ok." \
+    >"$run/replacement-response.json" 2>"$run/replacement-response.err"
+  replacement_task_session_id="$(jq -r '.started.task_session_id' "$run/replacement-response.json")"
+  printf "%s\n" "$replacement_task_session_id" >"$run/replacement-task-session-id.txt"
+  EVENTLOOPOS_TASK_SESSION_SKIP_BUILD=1 bin/task-session followup \
+    --base-url "$url" \
+    --session "$replacement_task_session_id" \
+    --event "evt_${task_id}_replacement" \
+    --idempotency-key "lab-scenario-$scenario-replacement-followup-$stamp" \
+    "Replacement followup for $task_id. Reply exactly: eventloopos-lab-replacement-followup-ok." \
+    >"$run/replacement-followup-response.json" 2>"$run/replacement-followup-response.err"
+fi
+
+collect_api_state after
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+write_manifest
+REMOTE
+}
+
+ensure_stack
+LAB_MAC_HOST="$lab_host" \
+LAB_MAC_USER="$lab_user" \
+LAB_MAC_KEY="$lab_key" \
+LAB_DOGFOOD_URL="$url" \
+bin/lab-mac-dogfood cleanup >/dev/null || true
+ssh_remote "cd '$remote_repo' && mkdir -p '$remote_run' && date -u +%Y-%m-%dT%H:%M:%SZ >'$remote_run/local-started-at.txt'"
+capture_desktop before
+if [[ "$scenario" == "codex-recovery" && "$recovery_restart_stack" == "1" ]]; then
+  run_remote_scenario "$scenario" start-only
+  restart_stack
+  run_remote_scenario "$scenario" recovery-after-restart
+else
+  run_remote_scenario "$scenario"
+fi
+capture_desktop after
+ssh_remote "bash -s -- '$remote_repo' '$remote_run' '$scenario'" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+run="$2"
+scenario="$3"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+SCENARIO="$scenario" RUN="$run" node <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const manifestPath = path.join(process.env.RUN, "manifest.json");
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const after = JSON.parse(fs.readFileSync(path.join(process.env.RUN, "captures/after/capture-summary.json"), "utf8"));
+manifest.captures.after = "captures/after/capture-summary.json";
+manifest.assertions = manifest.assertions.map((assertion) => assertion.name === "desktop_capture_after_nonempty"
+  ? { ...assertion, ok: Number(after?.screen?.bytes ?? 0) > 10000, details: after.screen }
+  : assertion.name === "desktop_screen_recording_after_present"
+    ? { ...assertion, ok: Number(after?.video?.requested_seconds ?? 0) <= 0 || Number(after?.video?.bytes ?? 0) > 10000, details: after.video }
+  : assertion.name === "active_console_session"
+    ? { ...assertion, ok: after?.login_done === true, details: { console_user: after?.console_user, frontmost_app: after?.frontmost_app } }
+    : assertion.name === "queue_app_process_visible_to_gui_tools"
+      ? { ...assertion, ok: after?.queue_app?.process_present === true, details: after.queue_app }
+      : assertion.name === "queue_app_menu_ax_visible"
+        ? { ...assertion, ok: after?.queue_app?.menu_items_present === true, details: after.queue_app }
+        : assertion.name === "queue_app_accessibility_tree_present"
+          ? { ...assertion, ok: after?.queue_app?.ax_tree_present === true, details: after.queue_app }
+          : assertion.name === "queue_app_window_title_visible"
+            ? { ...assertion, ok: after?.queue_app?.ax_window_title_present === true || Number(after?.queue_app?.aerospace_window_count ?? 0) > 0 || Number(after?.queue_app?.system_events_window_count ?? 0) > 0, details: after.queue_app }
+            : assertion.name === "queue_app_harness_status_visible"
+              ? { ...assertion, ok: after?.queue_app?.harness_status_present === true, details: { harness_status_line: after?.queue_app?.harness_status_line, ax_tree_bytes: after?.queue_app?.ax_tree_bytes } }
+            : assertion);
+manifest.ok = manifest.assertions.every((assertion) => assertion.ok);
+manifest.non_screenshot_ok = manifest.assertions
+  .filter((assertion) => assertion.name !== "desktop_capture_after_nonempty")
+  .every((assertion) => assertion.ok);
+manifest.completion_blockers = [];
+if (Number(after?.screen?.bytes ?? 0) <= 10000) {
+  manifest.completion_blockers.push({
+    requirement: "SSH-driven screenshot/video timeline artifact",
+    type: after?.screen?.tcc_terminal_screen_capture === "denied"
+      ? "macos_tcc_screen_capture_denied"
+      : "desktop_capture_missing",
+    evidence: {
+      error: after?.screen?.error,
+      failure_hint: after?.screen?.failure_hint,
+      tcc_terminal_screen_capture: after?.screen?.tcc_terminal_screen_capture,
+    },
+    repair_command: "bin/lab-mac-screen-capture-permission prompt",
+    verify_command: "bin/lab-mac-screen-capture-permission status",
+  });
+}
+if (Number(after?.video?.requested_seconds ?? 0) > 0 && Number(after?.video?.bytes ?? 0) <= 10000) {
+  manifest.completion_blockers.push({
+    requirement: "SSH-driven screen recording artifact",
+    type: "desktop_screen_recording_missing",
+    evidence: after?.video,
+    repair_command: "bin/lab-mac-screen-capture-permission prompt",
+    verify_command: "LAB_MAC_CAPTURE_VIDEO_SECONDS=3 bin/lab-mac-scenario queue-followup",
+  });
+}
+const copyIfPresent = (from, to) => {
+  const source = path.join(process.env.RUN, from);
+  if (fs.existsSync(source)) fs.copyFileSync(source, path.join(process.env.RUN, to));
+};
+copyIfPresent("captures/before/screen.png", "screenshot-before.png");
+copyIfPresent("captures/after/screen.png", "screenshot-after.png");
+copyIfPresent("captures/after/screen.mov", "screen.mov");
+copyIfPresent("captures/after/windows.json", "windows.json");
+copyIfPresent("api/after/task-messages_limit_120.json", "task-messages.json");
+copyIfPresent("api/after/task-messages_limit_80.json", "task-messages.json");
+const readJson = (relative, fallback) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(process.env.RUN, relative), "utf8"));
+  } catch {
+    return fallback;
+  }
+};
+fs.writeFileSync(path.join(process.env.RUN, "api-state.json"), JSON.stringify({
+  health: readJson("api/after/health.json", null),
+  metrics: readJson("api/after/metrics.json", null),
+  activity: readJson("api/after/activity_limit_80.json", null),
+  queue_ready: readJson("api/after/queue_state_ready.json", null),
+  queue_leased: readJson("api/after/queue_state_leased.json", null),
+  queue_done: readJson("api/after/queue_state_done.json", null),
+  tasks: readJson("api/after/tasks.json", null),
+  task_sessions: readJson("api/after/task-sessions.json", null),
+  task_messages: readJson("api/after/task-messages_limit_120.json", readJson("api/after/task-messages_limit_80.json", null)),
+}, null, 2) + "\n");
+manifest.timeline_artifacts = {
+  manifest: "manifest.json",
+  api_state: "api-state.json",
+  task_messages: "task-messages.json",
+  windows: "windows.json",
+  screenshot_before: fs.existsSync(path.join(process.env.RUN, "screenshot-before.png")) ? "screenshot-before.png" : undefined,
+  screenshot_after: fs.existsSync(path.join(process.env.RUN, "screenshot-after.png")) ? "screenshot-after.png" : undefined,
+  screenshot_before_error: fs.existsSync(path.join(process.env.RUN, "captures/before/screencapture.err")) ? "captures/before/screencapture.err" : undefined,
+  screenshot_after_error: fs.existsSync(path.join(process.env.RUN, "captures/after/screencapture.err")) ? "captures/after/screencapture.err" : undefined,
+  screen_recording: fs.existsSync(path.join(process.env.RUN, "screen.mov")) ? "screen.mov" : undefined,
+  screen_recording_error: fs.existsSync(path.join(process.env.RUN, "captures/after/screenrecord.err")) ? "captures/after/screenrecord.err" : undefined,
+};
+fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + "\n");
+NODE
+REMOTE
+sync_artifacts
+
+echo "$remote_run"
+jq '{ok, scenario, task_id, task_session_id, replacement_task_session_id, assertions: [.assertions[] | {name, ok}]}' "$remote_run/manifest.json"
+if ! jq -e '.ok == true' "$remote_run/manifest.json" >/dev/null; then
+  exit 1
+fi

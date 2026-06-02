@@ -1,0 +1,404 @@
+#!/usr/bin/env node
+import { spawn } from "node:child_process";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const action = process.argv[2] ?? "status";
+const runId = `${utcStamp()}-macos-permission-status`;
+const artifactDir = path.resolve(process.env.MACOS_PERMISSION_STATUS_ARTIFACT_DIR ?? path.join(repoRoot, "artifacts", "macos-permissions", runId));
+const logsDir = path.join(artifactDir, "logs");
+const manifestPath = path.join(artifactDir, "manifest.json");
+const allowNonDarwin = process.env.MACOS_PERMISSION_STATUS_ALLOW_NON_DARWIN === "1";
+
+if (action === "-h" || action === "--help") {
+  console.log(`Usage: bin/macos-permission-status [status|prompt]
+
+Modes:
+  status  Check Screen Recording, Accessibility/System Events, and AeroSpace.
+  prompt  Run status, open relevant Privacy & Security panes/apps for failed checks,
+          and write prompt guidance into the manifest.
+`);
+  process.exit(0);
+}
+
+if (!["status", "prompt"].includes(action)) {
+  console.error(`unknown action: ${action}`);
+  process.exit(2);
+}
+
+await mkdir(logsDir, { recursive: true });
+
+if (process.platform !== "darwin" && !allowNonDarwin) {
+  await writeManifest({
+    ok: false,
+    checks: {
+      darwin_host: false,
+    },
+    failures: [
+      {
+        requirement: "macOS permission status must run on macOS",
+        fix: `Run this on the Mac that will dogfood eventloopOS; current process.platform=${process.platform}.`,
+      },
+    ],
+  });
+  console.log(`macOS permission status manifest: ${manifestPath}`);
+  process.exit(1);
+}
+
+const tempDir = await mkdtemp(path.join(tmpdir(), "eventloopos-permission-status-"));
+const screenPath = path.join(tempDir, "screen.png");
+
+const commands = {
+  consoleUser: await runCommand("stat", ["-f", "%Su", "/dev/console"]),
+  screenCapture: await runCommand("screencapture", ["-x", screenPath]),
+  systemEvents: await runCommand("osascript", [
+    "-e",
+    'tell application "System Events" to get name of first application process whose frontmost is true',
+  ]),
+  tccUser: await runShell(
+    "tcc-user",
+    'sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" \'select service,client,client_type,auth_value,auth_reason,indirect_object_identifier from access where service="kTCCServiceScreenCapture" or service="kTCCServiceAccessibility" or service="kTCCServiceAppleEvents" order by service,client;\'',
+  ),
+  tccSystem: await runShell(
+    "tcc-system",
+    'sqlite3 "/Library/Application Support/com.apple.TCC/TCC.db" \'select service,client,client_type,auth_value,auth_reason,indirect_object_identifier from access where service="kTCCServiceScreenCapture" or service="kTCCServiceAccessibility" or service="kTCCServiceAppleEvents" order by service,client;\'',
+  ),
+  aerospacePath: await runCommand("bash", ["-lc", "command -v aerospace"]),
+  aerospaceVersion: await runCommand("bash", ["-lc", "command -v aerospace >/dev/null 2>&1 && aerospace --version"]),
+  aerospaceAppVersion: await runCommand("bash", ["-lc", 'if [[ -x /Applications/AeroSpace.app/Contents/MacOS/AeroSpace ]]; then /Applications/AeroSpace.app/Contents/MacOS/AeroSpace --version; else echo "AeroSpace.app binary missing"; exit 1; fi']),
+  aerospaceCliShasum: await runCommand("bash", ["-lc", 'if command -v aerospace >/dev/null 2>&1; then shasum "$(command -v aerospace)"; else echo "aerospace CLI missing"; exit 1; fi']),
+  aerospaceAppShasum: await runCommand("bash", ["-lc", 'if [[ -x /Applications/AeroSpace.app/Contents/MacOS/AeroSpace ]]; then shasum /Applications/AeroSpace.app/Contents/MacOS/AeroSpace; else echo "AeroSpace.app binary missing"; exit 1; fi']),
+  aerospaceProcess: await runCommand("bash", ["-lc", "pgrep -fl 'AeroSpace.app/Contents/MacOS/AeroSpace'"]),
+  aerospaceWorkspace: await runCommand("bash", ["-lc", "command -v aerospace >/dev/null 2>&1 && aerospace list-workspaces --focused"]),
+  aerospaceMutationProbe: await runCommand("bash", ["-lc", "command -v aerospace >/dev/null 2>&1 && aerospace layout --window-id 2147483647 floating"]),
+};
+
+const screenBytes = existsSync(screenPath) ? await fileSize(screenPath) : 0;
+await rm(tempDir, { recursive: true, force: true });
+
+const screenError = `${commands.screenCapture.stdout}\n${commands.screenCapture.stderr}`;
+const systemEventsError = `${commands.systemEvents.stdout}\n${commands.systemEvents.stderr}`;
+const aerospaceError = `${commands.aerospaceWorkspace.stdout}\n${commands.aerospaceWorkspace.stderr}`;
+const aerospaceMutationError = `${commands.aerospaceMutationProbe.stdout}\n${commands.aerospaceMutationProbe.stderr}`;
+const aerospaceMutationMismatch = /client\/server versions don't match|versions don't match|server restart is required after each update|corrupted installation/i.test(aerospaceMutationError);
+const aerospaceProcessVisible = commands.aerospaceProcess.code === 0 && commands.aerospaceProcess.stdout.trim().length > 0;
+const aerospaceVersionEvidence = aerospaceVersionSummary(commands);
+const aerospaceProcessEvidence = commands.aerospaceProcess.stdout.trim();
+const aerospaceLaunchFix = aerospaceProcessVisible
+  ? [
+      "AeroSpace.app process is visible, but the CLI cannot reach the server.",
+      "Quit/reopen AeroSpace normally, re-grant AeroSpace Accessibility in System Settings > Privacy & Security, then rerun `pnpm setup:status`.",
+      "If this keeps failing, run `pnpm macos:aerospace-repair:restart` to capture LaunchServices diagnostics.",
+      aerospaceProcessEvidence,
+      aerospaceError.trim(),
+    ].filter(Boolean).join(" ")
+  : [
+      "AeroSpace.app process is not running.",
+      "Open AeroSpace normally with `open -a AeroSpace`, approve any Accessibility prompt, then rerun `pnpm setup:status`.",
+      "If `open -a AeroSpace` opens no durable process/server, run `pnpm macos:aerospace-repair:restart` to capture LaunchServices diagnostics.",
+      aerospaceError.trim(),
+    ].filter(Boolean).join(" ");
+const aerospaceMutationFix = commands.aerospaceWorkspace.code === 0
+  ? [
+      "Restart AeroSpace.app so the CLI client and app server versions match, then rerun `pnpm macos:permission-status`.",
+      "If the mismatch remains after restart, reinstall the same AeroSpace build for both the CLI and app server.",
+      "This check uses a harmless missing-window layout command to prove workspace mutation commands can reach the running server.",
+      aerospaceVersionEvidence,
+      aerospaceMutationError.trim(),
+    ].filter(Boolean).join(" ")
+  : [
+      "AeroSpace server is not ready, so workspace mutation commands cannot be trusted yet.",
+      aerospaceLaunchFix,
+      "If the server starts and then exits after reinstall, re-grant AeroSpace Accessibility because macOS may reset approval when the app bundle changes.",
+      aerospaceVersionEvidence,
+    ].filter(Boolean).join(" ");
+const tccRows = `${await readCommandLog(commands.tccUser.stdout_path)}\n${await readCommandLog(commands.tccSystem.stdout_path)}`;
+const terminalScreenTcc = terminalTccStatus(tccRows, "kTCCServiceScreenCapture");
+const terminalAccessibilityTcc = terminalTccStatus(tccRows, "kTCCServiceAccessibility");
+const terminalAppleEventsTcc = terminalTccStatus(tccRows, "kTCCServiceAppleEvents");
+
+const assertions = [
+  assertion("darwin_host", process.platform === "darwin", "Run this checker on the macOS machine that will run eventloopOS."),
+  assertion(
+    "screen_recording_usable",
+    commands.screenCapture.code === 0 && screenBytes > 0,
+    [
+      "Grant the controlling terminal app Screen & System Audio Recording in System Settings > Privacy & Security.",
+      "If this is a remote lab, keep the user logged in and ensure the display/framebuffer is awake.",
+      screenHint(screenError, terminalScreenTcc),
+    ].filter(Boolean).join(" "),
+  ),
+  assertion(
+    "accessibility_system_events_usable",
+    commands.systemEvents.code === 0 && commands.systemEvents.stdout.trim().length > 0,
+    [
+      "Grant the controlling terminal app Accessibility in System Settings > Privacy & Security.",
+      "This is required for Queue UI inspection/clicks and reliable desktop proof capture.",
+      accessibilityHint(systemEventsError, terminalAccessibilityTcc, terminalAppleEventsTcc),
+    ].filter(Boolean).join(" "),
+  ),
+  assertion(
+    "aerospace_cli_available",
+    commands.aerospacePath.code === 0 && commands.aerospacePath.stdout.trim().length > 0,
+    "Install AeroSpace and ensure `aerospace` is on PATH. For dogfood, launch AeroSpace before workspace restore proofs.",
+  ),
+  assertion(
+    "aerospace_app_process_visible",
+    aerospaceProcessVisible,
+    aerospaceLaunchFix,
+  ),
+  assertion(
+    "aerospace_server_ready",
+    commands.aerospaceWorkspace.code === 0 && commands.aerospaceWorkspace.stdout.trim().length > 0,
+    aerospaceLaunchFix,
+  ),
+  assertion(
+    "aerospace_mutation_commands_ready",
+    commands.aerospacePath.code === 0 && commands.aerospaceWorkspace.code === 0 && !aerospaceMutationMismatch,
+    aerospaceMutationFix,
+  ),
+];
+
+const failures = assertions.filter((item) => !item.ok).map((item) => ({
+  requirement: item.name,
+  fix: item.fix,
+}));
+const prompt = action === "prompt" ? await runPromptActions(assertions, commands) : undefined;
+
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.macos_permission_status",
+  run_id: runId,
+  action,
+  generated_at: new Date().toISOString(),
+  artifact_dir: artifactDir,
+  ok: failures.length === 0,
+  checks: Object.fromEntries(assertions.map((item) => [item.name, item.ok])),
+  assertions,
+  failures,
+  details: {
+    console_user: commands.consoleUser.stdout.trim(),
+    screen_bytes: screenBytes,
+    terminal_tcc: {
+      screen_capture: terminalScreenTcc,
+      accessibility: terminalAccessibilityTcc,
+      apple_events: terminalAppleEventsTcc,
+    },
+    aerospace_path: commands.aerospacePath.stdout.trim(),
+    aerospace_process_list: aerospaceProcessEvidence,
+    aerospace_version: {
+      cli_version_output: `${commands.aerospaceVersion.stdout}\n${commands.aerospaceVersion.stderr}`.trim(),
+      app_version_output: `${commands.aerospaceAppVersion.stdout}\n${commands.aerospaceAppVersion.stderr}`.trim(),
+      cli_shasum: commands.aerospaceCliShasum.stdout.trim(),
+      app_shasum: commands.aerospaceAppShasum.stdout.trim(),
+      cli_app_hash_match: firstField(commands.aerospaceCliShasum.stdout) !== "" && firstField(commands.aerospaceCliShasum.stdout) === firstField(commands.aerospaceAppShasum.stdout),
+      summary: aerospaceVersionEvidence,
+    },
+    focused_workspace: commands.aerospaceWorkspace.stdout.trim(),
+    aerospace_mutation_probe: {
+      command: commands.aerospaceMutationProbe.command,
+      code: commands.aerospaceMutationProbe.code,
+      mismatch_detected: aerospaceMutationMismatch,
+    },
+  },
+  prompt,
+  commands,
+};
+
+await writeManifest(manifest);
+console.log(`macOS permission status manifest: ${manifestPath}`);
+console.log(JSON.stringify({
+  ok: manifest.ok,
+  action: manifest.action,
+  checks: manifest.checks,
+  failures: manifest.failures,
+  prompt: manifest.prompt,
+}, null, 2));
+
+if (!manifest.ok) {
+  process.exit(1);
+}
+
+async function runShell(name, script) {
+  return await runCommand("bash", ["-lc", script], name);
+}
+
+async function runPromptActions(assertions, commands) {
+  const failed = new Set(assertions.filter((item) => !item.ok).map((item) => item.name));
+  const promptCommands = {};
+  const opened = [];
+  if (failed.has("screen_recording_usable")) {
+    promptCommands.openScreenRecording = await runCommand("open", [
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture",
+    ], "prompt-open-screen-recording");
+    opened.push("System Settings > Privacy & Security > Screen & System Audio Recording");
+  }
+  if (failed.has("accessibility_system_events_usable") || failed.has("aerospace_server_ready") || failed.has("aerospace_mutation_commands_ready")) {
+    promptCommands.openAccessibility = await runCommand("open", [
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility",
+    ], "prompt-open-accessibility");
+    opened.push("System Settings > Privacy & Security > Accessibility");
+  }
+  if (failed.has("accessibility_system_events_usable")) {
+    promptCommands.openAutomation = await runCommand("open", [
+      "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation",
+    ], "prompt-open-automation");
+    opened.push("System Settings > Privacy & Security > Automation");
+  }
+  if ((failed.has("aerospace_server_ready") || failed.has("aerospace_mutation_commands_ready")) && commands.aerospacePath.code === 0) {
+    promptCommands.openAerospace = await runCommand("open", ["-a", "AeroSpace"], "prompt-open-aerospace");
+    opened.push("AeroSpace.app");
+  }
+  return {
+    requested: true,
+    opened,
+    commands: promptCommands,
+    next_steps: [
+      "Approve any visible macOS Privacy & Security prompts for Terminal, AeroSpace, and eventloopOS-related apps.",
+      "After approvals, quit/reopen affected apps if macOS asks, then rerun `pnpm macos:permission-status`.",
+      "If AeroSpace reports a CLI/server version mismatch after restart, reinstall AeroSpace so the CLI and app bundle come from the same build.",
+      "On the lab Mac, rerun `pnpm product:quick` after this status is green.",
+    ],
+  };
+}
+
+async function runCommand(file, args, explicitName) {
+  const safe = explicitName ?? [file, ...args].join(" ").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-|-$/g, "").slice(0, 96);
+  const stdoutPath = path.join(logsDir, `${safe}.stdout.log`);
+  const stderrPath = path.join(logsDir, `${safe}.stderr.log`);
+  const startedAt = new Date().toISOString();
+  const result = await new Promise((resolve) => {
+    const child = spawn(file, args, {
+      cwd: repoRoot,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      resolve({
+        code: 127,
+        signal: undefined,
+        stdout,
+        stderr: `${stderr}${error.message}`,
+      });
+    });
+    child.on("exit", (code, signal) => {
+      resolve({
+        code: code ?? 1,
+        signal: signal ?? undefined,
+        stdout,
+        stderr,
+      });
+    });
+  });
+  const finishedAt = new Date().toISOString();
+  await writeFile(stdoutPath, result.stdout, "utf8");
+  await writeFile(stderrPath, result.stderr, "utf8");
+  return {
+    command: [file, ...args],
+    code: result.code,
+    signal: result.signal,
+    started_at: startedAt,
+    finished_at: finishedAt,
+    duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
+    stdout_path: stdoutPath,
+    stderr_path: stderrPath,
+    stdout: result.stdout.slice(0, 2000),
+    stderr: result.stderr.slice(0, 2000),
+  };
+}
+
+async function writeManifest(manifest) {
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+async function fileSize(filePath) {
+  const { stat } = await import("node:fs/promises");
+  return (await stat(filePath)).size;
+}
+
+async function readCommandLog(filePath) {
+  const { readFile } = await import("node:fs/promises");
+  try {
+    return await readFile(filePath, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+function assertion(name, ok, fix) {
+  return {
+    name,
+    ok: Boolean(ok),
+    fix,
+  };
+}
+
+function terminalTccStatus(rows, service) {
+  const matching = rows.split(/\r?\n/).filter((line) => line.startsWith(`${service}|com.apple.Terminal|`));
+  if (matching.some((line) => line.split("|")[3] === "2")) {
+    return "allowed";
+  }
+  if (matching.some((line) => line.split("|")[3] === "0")) {
+    return "denied";
+  }
+  if (matching.length > 0) {
+    return "present_unknown";
+  }
+  return "not_recorded";
+}
+
+function screenHint(error, terminalTcc) {
+  if (terminalTcc === "denied") {
+    return "Detected Terminal denied for Screen Recording.";
+  }
+  if (/not authorized|permission|TCC|cannot|denied/i.test(error)) {
+    return `Screen capture error: ${error.trim()}`;
+  }
+  return "";
+}
+
+function accessibilityHint(error, accessibilityTcc, appleEventsTcc) {
+  const hints = [];
+  if (accessibilityTcc === "denied") {
+    hints.push("Detected Terminal denied for Accessibility.");
+  }
+  if (appleEventsTcc === "denied") {
+    hints.push("Detected Terminal denied for AppleEvents/System Events automation.");
+  }
+  if (/not allowed|not authorized|assistive|accessibility|permission|denied/i.test(error)) {
+    hints.push(`System Events error: ${error.trim()}`);
+  }
+  return hints.join(" ");
+}
+
+function aerospaceVersionSummary(commands) {
+  const cliVersion = `${commands.aerospaceVersion.stdout}\n${commands.aerospaceVersion.stderr}`.trim().replace(/\s+/g, " ");
+  const appVersion = `${commands.aerospaceAppVersion.stdout}\n${commands.aerospaceAppVersion.stderr}`.trim().replace(/\s+/g, " ");
+  const cliHash = firstField(commands.aerospaceCliShasum.stdout);
+  const appHash = firstField(commands.aerospaceAppShasum.stdout);
+  const parts = [];
+  if (cliVersion) parts.push(`CLI version output: ${cliVersion}`);
+  if (appVersion) parts.push(`App version output: ${appVersion}`);
+  if (cliHash || appHash) parts.push(`CLI/app hashes: ${cliHash || "missing"} / ${appHash || "missing"}`);
+  return parts.length > 0 ? `AeroSpace install evidence: ${parts.join("; ")}.` : "";
+}
+
+function firstField(value) {
+  return value.trim().split(/\s+/)[0] ?? "";
+}
+
+function utcStamp() {
+  return new Date().toISOString().replaceAll("-", "").replaceAll(":", "").replace(/\.\d{3}Z$/, "Z");
+}

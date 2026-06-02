@@ -1,0 +1,223 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-wait-online [quick|long]
+
+Wait for the remote Mac lab to come back on SSH and VNC, then write one
+manifest. Use this after reboot or while someone is finishing local recovery.
+
+Modes:
+  quick  Short reachability check for agents/status loops. Defaults to 45s.
+  long   Reboot/operator handoff wait. Defaults to 600s.
+
+Environment:
+  LAB_MAC_HOST                 default: 100.71.111.25
+  LAB_MAC_USER                 default: claw
+  LAB_MAC_KEY                  default: ~/.ssh/eventloop_lab_mac
+  LAB_MAC_WAIT_TIMEOUT_SECONDS default: 45 in quick mode, 600 in long mode
+  LAB_MAC_WAIT_POLL_SECONDS    default: 15
+  LAB_MAC_WAIT_CONNECT_TIMEOUT_SECONDS
+                              default: 2 in quick mode, 5 in long mode
+  LAB_MAC_WAIT_REQUIRE_VNC     default: 1
+EOF
+}
+
+wait_mode="${1:-long}"
+case "$wait_mode" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  ""|long|quick)
+    ;;
+  *)
+    echo "unknown argument: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+case "$wait_mode" in
+  quick) default_timeout_seconds=45 ;;
+  *) default_timeout_seconds=600 ;;
+esac
+case "$wait_mode" in
+  quick) default_connect_timeout_seconds=2 ;;
+  *) default_connect_timeout_seconds=5 ;;
+esac
+timeout_seconds="${LAB_MAC_WAIT_TIMEOUT_SECONDS:-$default_timeout_seconds}"
+poll_seconds="${LAB_MAC_WAIT_POLL_SECONDS:-15}"
+connect_timeout_seconds="${LAB_MAC_WAIT_CONNECT_TIMEOUT_SECONDS:-$default_connect_timeout_seconds}"
+require_vnc="${LAB_MAC_WAIT_REQUIRE_VNC:-1}"
+remote="${lab_user}@${lab_host}"
+run="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-wait-online-$wait_mode"
+manifest="$run/manifest.json"
+ssh_opts=(-i "$lab_key" -o BatchMode=yes -o ConnectTimeout="$connect_timeout_seconds" -o ServerAliveInterval="$connect_timeout_seconds" -o ServerAliveCountMax=1)
+controller_tailnet_ip="${LAB_CONTROLLER_TAILSCALE_IP:-}"
+if [[ -z "$controller_tailnet_ip" ]] && command -v tailscale >/dev/null 2>&1; then
+  controller_tailnet_ip="$(tailscale ip -4 2>/dev/null | head -n 1 || true)"
+fi
+if [[ -z "$controller_tailnet_ip" ]]; then
+  controller_tailnet_ip="100.76.35.66"
+fi
+
+mkdir -p "$run"
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+deadline=$((SECONDS + timeout_seconds))
+attempt=0
+ssh_ok=false
+vnc_ok=false
+
+printf "%s\n" "$started_at" >"$run/started-at.txt"
+printf "%s\n" "$remote" >"$run/remote.txt"
+printf "%s\n" "$wait_mode" >"$run/wait-mode.txt"
+printf "%s\n" "$timeout_seconds" >"$run/timeout-seconds.txt"
+printf "%s\n" "$poll_seconds" >"$run/poll-seconds.txt"
+printf "%s\n" "$connect_timeout_seconds" >"$run/connect-timeout-seconds.txt"
+printf "%s\n" "$require_vnc" >"$run/require-vnc.txt"
+: >"$run/polls.log"
+: >"$run/last-tailscale-status.out"
+: >"$run/last-tailscale-status.err"
+
+while (( SECONDS <= deadline )); do
+  attempt=$((attempt + 1))
+  poll_stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  {
+    echo "== poll $attempt $poll_stamp =="
+    if command -v tailscale >/dev/null 2>&1; then
+      tailscale status >"$run/last-tailscale-status.out" 2>"$run/last-tailscale-status.err" || true
+      grep -E "$lab_host|eventloop-lab-mac|$lab_user" "$run/last-tailscale-status.out" || true
+    else
+      echo "tailscale cli missing"
+      echo "tailscale cli missing" >"$run/last-tailscale-status.err"
+    fi
+  } >>"$run/polls.log"
+
+  if ssh "${ssh_opts[@]}" "$remote" "date -u +%Y-%m-%dT%H:%M:%SZ; hostname; whoami" >"$run/last-ssh.out" 2>"$run/last-ssh.err"; then
+    ssh_ok=true
+  else
+    ssh_ok=false
+  fi
+
+  if command -v nc >/dev/null 2>&1 && nc -vz -G "$connect_timeout_seconds" "$lab_host" 5900 >"$run/last-vnc.out" 2>"$run/last-vnc.err"; then
+    vnc_ok=true
+  else
+    vnc_ok=false
+  fi
+
+  printf "poll=%s ssh=%s vnc=%s\n" "$attempt" "$ssh_ok" "$vnc_ok" | tee -a "$run/polls.log"
+  if [[ "$ssh_ok" == "true" && ( "$require_vnc" != "1" || "$vnc_ok" == "true" ) ]]; then
+    break
+  fi
+
+  if (( SECONDS + poll_seconds > deadline )); then
+    break
+  fi
+  sleep "$poll_seconds"
+done
+
+finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+printf "%s\n" "$finished_at" >"$run/finished-at.txt"
+
+RUN="$run" WAIT_MODE="$wait_mode" STARTED_AT="$started_at" FINISHED_AT="$finished_at" ATTEMPTS="$attempt" SSH_OK="$ssh_ok" VNC_OK="$vnc_ok" REQUIRE_VNC="$require_vnc" LAB_HOST="$lab_host" CONNECT_TIMEOUT_SECONDS="$connect_timeout_seconds" CONTROLLER_TAILNET_IP="$controller_tailnet_ip" node <<'NODE' >"$manifest"
+const fs = require("node:fs");
+const path = require("node:path");
+
+const run = process.env.RUN;
+const read = (name) => {
+  try {
+    return fs.readFileSync(path.join(run, name), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const sshOk = process.env.SSH_OK === "true";
+const vncOk = process.env.VNC_OK === "true";
+const requireVnc = process.env.REQUIRE_VNC === "1";
+const passed = sshOk && (!requireVnc || vncOk);
+const tailscaleStatus = read("last-tailscale-status.out");
+const tailscaleStatusError = read("last-tailscale-status.err");
+const labHost = process.env.LAB_HOST ?? "";
+const statusLines = tailscaleStatus.split(/\n/).filter((line) => {
+  return line.includes(labHost) || /eventloop-lab-mac|claw|tagged-devices/i.test(line);
+});
+const labStatusLine = statusLines.find((line) => line.includes(labHost) || /eventloop-lab-mac/i.test(line)) ?? "";
+const labTailscaleVisible = labStatusLine.length > 0;
+const labTailscaleOffline = /offline|last seen/i.test(labStatusLine);
+const labOfflineLastSeenSeconds = parseLastSeenSeconds(labStatusLine);
+const controllerTailnetIp = process.env.CONTROLLER_TAILNET_IP ?? "100.76.35.66";
+const suggestedLocalBootstrapCommand = `LAB_CONTROLLER_TAILSCALE_IP=${controllerTailnetIp} pnpm lab:local-bootstrap`;
+const suggestedControllerWaitCommand = "pnpm lab:wait-online:quick";
+const suggestedControllerStatusCommand = "pnpm setup:lab-status";
+const fixes = [];
+if (!sshOk) {
+  fixes.push(`Lab SSH did not return. On the lab Mac, log into the lab user, confirm Tailscale is connected, confirm Remote Login is enabled for administrators, then run ${suggestedLocalBootstrapCommand} from the eventloopOS checkout.`);
+}
+if (requireVnc && !vncOk) {
+  fixes.push(`Lab VNC did not return. On the lab Mac, confirm Screen Sharing or Remote Management is enabled and administrators can control the screen, then run ${suggestedControllerStatusCommand} from the controller.`);
+}
+console.log(JSON.stringify({
+  schema_version: 1,
+  kind: "eventloopos.lab_mac_wait_online",
+  started_at: process.env.STARTED_AT,
+  finished_at: process.env.FINISHED_AT,
+  duration_ms: Date.parse(process.env.FINISHED_AT) - Date.parse(process.env.STARTED_AT),
+  artifact_dir: run,
+  wait_mode: process.env.WAIT_MODE,
+  lab_host: labHost,
+  attempts: Number(process.env.ATTEMPTS),
+  connect_timeout_seconds: Number(process.env.CONNECT_TIMEOUT_SECONDS),
+  require_vnc: requireVnc,
+  passed,
+  checks: {
+    ssh_reachable: sshOk,
+    vnc_reachable: vncOk,
+    lab_tailscale_visible: labTailscaleVisible,
+    lab_tailscale_offline: labTailscaleOffline,
+    lab_offline_last_seen_seconds: labOfflineLastSeenSeconds,
+  },
+  controller_tailscale: {
+    controller_tailnet_ip: controllerTailnetIp,
+    status_excerpt: statusLines,
+    lab_status_line: labStatusLine,
+    stderr: tailscaleStatusError,
+    suggested_local_bootstrap_command: suggestedLocalBootstrapCommand,
+    suggested_controller_wait_command: suggestedControllerWaitCommand,
+    suggested_controller_status_command: suggestedControllerStatusCommand,
+  },
+  evidence: {
+    polls: `${run}/polls.log`,
+    last_tailscale_status_stdout: `${run}/last-tailscale-status.out`,
+    last_tailscale_status_stderr: `${run}/last-tailscale-status.err`,
+    last_ssh_stdout: `${run}/last-ssh.out`,
+    last_ssh_stderr: `${run}/last-ssh.err`,
+    last_vnc_stdout: `${run}/last-vnc.out`,
+    last_vnc_stderr: `${run}/last-vnc.err`,
+  },
+  fixes,
+}, null, 2));
+
+function parseLastSeenSeconds(line) {
+  const match = String(line ?? "").match(/last seen\s+(\d+)\s*([smhd])\s+ago/i);
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return undefined;
+  const unit = match[2].toLowerCase();
+  if (unit === "s") return value;
+  if (unit === "m") return value * 60;
+  if (unit === "h") return value * 60 * 60;
+  if (unit === "d") return value * 24 * 60 * 60;
+  return undefined;
+}
+NODE
+
+echo "$run"
+node -e 'const fs=require("node:fs"); const manifest=JSON.parse(fs.readFileSync(process.argv[1],"utf8")); console.log(JSON.stringify({passed: manifest.passed, wait_mode: manifest.wait_mode, attempts: manifest.attempts, connect_timeout_seconds: manifest.connect_timeout_seconds, checks: manifest.checks, controller_tailscale: manifest.controller_tailscale, fixes: manifest.fixes}, null, 2)); process.exit(manifest.passed ? 0 : 1)' "$manifest"

@@ -67,6 +67,7 @@ export type ForceFloatingProof = {
   attempted: boolean;
   tiling_refused?: boolean;
   tiling_refusal_detail?: string;
+  initial_layout_after_force_floating?: string;
   scratch_layout_after_force_tile?: string;
   restored_layout_after_move_back?: string;
 };
@@ -162,6 +163,23 @@ export async function runIsolatedAerospaceSmoke(options: {
     smokeWindowId = target.id;
     const targetScratchWorkspace = target.workspace === scratchWorkspace ? `${scratchWorkspace}-2` : scratchWorkspace;
 
+    if (options.proveForceFloating) {
+      const forceFloatingCommand = layoutWindowPlan(target.id, "floating");
+      assertOnlyTargetsSmokeWindow([forceFloatingCommand], target.id);
+      await executeCommands(controller, [forceFloatingCommand]);
+      commands.push(forceFloatingCommand);
+      const initialFloatingLayout = await readAerospaceWindowLayout(options.exec ?? execAerospace, target.id);
+      forceFloatingProof = {
+        attempted: true,
+        initial_layout_after_force_floating: initialFloatingLayout,
+      };
+      if (initialFloatingLayout !== "floating") {
+        throw new Error(
+          `AeroSpace force-floating proof could not place smoke window ${target.id} into a floating start state; current layout: ${initialFloatingLayout ?? "missing"}`,
+        );
+      }
+    }
+
     const disturbCommand = moveToWorkspacePlan(target.id, targetScratchWorkspace);
     assertOnlyTargetsSmokeWindow([disturbCommand], target.id);
     await executeCommands(controller, [disturbCommand]);
@@ -200,6 +218,7 @@ export async function runIsolatedAerospaceSmoke(options: {
         await executeCommands(controller, [forceTileCommand]);
         const scratchLayout = await readAerospaceWindowLayout(options.exec ?? execAerospace, target.id);
         forceFloatingProof = {
+          ...forceFloatingProof,
           attempted: true,
           scratch_layout_after_force_tile: scratchLayout,
         };
@@ -213,6 +232,7 @@ export async function runIsolatedAerospaceSmoke(options: {
           throw error;
         }
         forceFloatingProof = {
+          ...forceFloatingProof,
           attempted: true,
           tiling_refused: true,
           tiling_refusal_detail: error instanceof Error ? error.message : String(error),
@@ -503,14 +523,39 @@ async function readAerospaceWindowLayout(exec: ExecFunction, windowId: number): 
 
 function isNonTilingLayoutError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes("The window is non-tiling");
+  return message.includes("The window is non-tiling") || /^Command failed: aerospace layout --window-id \d+ .*\nexit: 2$/m.test(message);
 }
 
 async function launchDefaultSmokeWindow(runId: string): Promise<SmokeWindowHandle> {
+  const requestedApp = process.env.EVENTLOOPOS_ISOLATED_AEROSPACE_SMOKE_APP?.trim().toLowerCase();
+  if (requestedApp === "native" || requestedApp === "swift") {
+    return await launchNativeSmokeWindow(runId);
+  }
+  if (requestedApp === "textedit") {
+    return await launchTextEditSmokeWindow(runId);
+  }
+  if (requestedApp === "ghostty") {
+    return await launchGhosttySmokeWindow(runId);
+  }
+  if (requestedApp && requestedApp !== "auto") {
+    throw new Error(`unsupported isolated AeroSpace smoke app: ${requestedApp}`);
+  }
+  if (await canRunCommand("swiftc", ["--version"])) {
+    return await launchNativeSmokeWindow(runId);
+  }
   if (await canOpenApp("Ghostty")) {
     return await launchGhosttySmokeWindow(runId);
   }
   return await launchTextEditSmokeWindow(runId);
+}
+
+async function canRunCommand(command: string, args: string[]): Promise<boolean> {
+  try {
+    await execFileAsync(command, args, { timeout: 5_000 });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function canOpenApp(appName: string): Promise<boolean> {
@@ -592,6 +637,100 @@ async function launchTextEditSmokeWindow(runId: string): Promise<SmokeWindowHand
   };
 }
 
+async function launchNativeSmokeWindow(runId: string): Promise<SmokeWindowHandle> {
+  const dir = await mkdtemp(join(tmpdir(), "eventloopos-isolated-aerospace-"));
+  const title = `eventloopOS-isolated-smoke-${runId}`;
+  const appName = "eventloopOS Smoke Window";
+  const appBundle = join(dir, `${appName}.app`);
+  const contentsDir = join(appBundle, "Contents");
+  const macosDir = join(contentsDir, "MacOS");
+  const sourcePath = join(dir, "SmokeWindow.swift");
+  const binaryPath = join(macosDir, "eventloopos-aerospace-smoke");
+  await mkdir(macosDir, { recursive: true });
+  await writeFile(sourcePath, nativeSmokeWindowSource(title), "utf8");
+  await writeFile(join(contentsDir, "Info.plist"), nativeSmokeWindowInfoPlist(appName, runId), "utf8");
+  await execFileAsync("swiftc", [sourcePath, "-o", binaryPath], { timeout: 20_000, maxBuffer: 1024 * 1024 });
+  await execFileAsync("open", ["-n", appBundle], { timeout: 5_000 });
+
+  return {
+    title,
+    appName,
+    cleanup: async () => await cleanupNativeSmokeWindow(binaryPath, dir),
+  };
+}
+
+async function cleanupNativeSmokeWindow(binaryPath: string, dir: string): Promise<SmokeWindowCleanupResult> {
+  try {
+    try {
+      await execFileAsync("pkill", ["-TERM", "-f", binaryPath], { timeout: 2_000 });
+    } catch {
+      // Process may already be gone.
+    }
+    await rm(dir, { recursive: true, force: true });
+    return { attempted: true, ok: true };
+  } catch (error) {
+    await rm(dir, { recursive: true, force: true });
+    return {
+      attempted: true,
+      ok: false,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function nativeSmokeWindowSource(title: string): string {
+  return `
+import AppKit
+
+final class SmokeDelegate: NSObject, NSApplicationDelegate {
+  var window: NSWindow?
+
+  func applicationDidFinishLaunching(_ notification: Notification) {
+    let frame = NSRect(x: 120, y: 120, width: 640, height: 360)
+    let style: NSWindow.StyleMask = [.titled, .closable, .resizable, .miniaturizable]
+    let window = NSWindow(contentRect: frame, styleMask: style, backing: .buffered, defer: false)
+    window.title = ${JSON.stringify(title)}
+    window.isReleasedWhenClosed = false
+    window.center()
+    window.makeKeyAndOrderFront(nil)
+    self.window = window
+    NSApp.activate(ignoringOtherApps: true)
+  }
+}
+
+let app = NSApplication.shared
+let delegate = SmokeDelegate()
+app.delegate = delegate
+app.setActivationPolicy(.regular)
+app.run()
+`;
+}
+
+function nativeSmokeWindowInfoPlist(appName: string, runId: string): string {
+  const bundleId = `dev.eventloopos.aerospace-smoke.${runId.replace(/[^A-Za-z0-9-]/g, "-")}`;
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>eventloopos-aerospace-smoke</string>
+  <key>CFBundleIdentifier</key>
+  <string>${bundleId}</string>
+  <key>CFBundleName</key>
+  <string>${appName}</string>
+  <key>CFBundleDisplayName</key>
+  <string>${appName}</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+</dict>
+</plist>
+`;
+}
+
 function titleMatches(window: AerospaceWindow, title: string): boolean {
   return window.title === title || window.title.includes(title);
 }
@@ -601,15 +740,66 @@ function findWindow(windows: AerospaceWindow[], windowId: number): AerospaceWind
 }
 
 async function execAerospace(command: string, args: string[]): Promise<{ stdout: string; stderr?: string }> {
-  const { stdout, stderr } = await execFileAsync(command, args, {
-    timeout: 5_000,
-    maxBuffer: 1024 * 1024,
-  });
+  let stdout = "";
+  let stderr = "";
+  try {
+    const result = await execFileAsync(command, args, {
+      timeout: 5_000,
+      maxBuffer: 1024 * 1024,
+    });
+    stdout = result.stdout;
+    stderr = result.stderr;
+  } catch (error) {
+    throw new Error(formatExecError(command, args, error));
+  }
 
   return {
     stdout,
     stderr,
   };
+}
+
+function maybeInjectAerospaceRestoreFailure(exec: ExecFunction): ExecFunction {
+  if (process.env.EVENTLOOPOS_INJECT_AEROSPACE_RESTORE_FAILURE !== "1") {
+    return exec;
+  }
+
+  let moveNodeToWorkspaceCount = 0;
+  return async (command, args) => {
+    if (command === "aerospace" && args[0] === "move-node-to-workspace") {
+      moveNodeToWorkspaceCount += 1;
+      if (moveNodeToWorkspaceCount >= 2) {
+        throw new Error(
+          "AeroSpace server unavailable during restore: injected lab fault. Restart AeroSpace, grant Accessibility, then rerun workspace restore proof.",
+        );
+      }
+    }
+    return await exec(command, args);
+  };
+}
+
+function formatExecError(command: string, args: string[], error: unknown): string {
+  const parts = [`Command failed: ${[command, ...args].join(" ")}`];
+  if (isExecError(error)) {
+    if (typeof error.code === "number" || typeof error.code === "string") parts.push(`exit: ${error.code}`);
+    if (typeof error.signal === "string") parts.push(`signal: ${error.signal}`);
+    if (typeof error.stdout === "string" && error.stdout.trim()) parts.push(`stdout: ${error.stdout.trim()}`);
+    if (typeof error.stderr === "string" && error.stderr.trim()) parts.push(`stderr: ${error.stderr.trim()}`);
+  } else if (error instanceof Error && error.message) {
+    parts.push(error.message);
+  } else {
+    parts.push(String(error));
+  }
+  return parts.join("\n");
+}
+
+function isExecError(error: unknown): error is {
+  code?: number | string;
+  signal?: string;
+  stdout?: string;
+  stderr?: string;
+} {
+  return typeof error === "object" && error !== null;
 }
 
 function escapeAppleScriptString(value: string): string {
@@ -640,6 +830,7 @@ async function main(): Promise<number> {
     runId,
     artifactDir: process.env.EVENTLOOPOS_ISOLATED_AEROSPACE_ARTIFACT_DIR ?? defaultArtifactDir(runId),
     proveForceFloating: process.env.EVENTLOOPOS_PROVE_FORCE_FLOATING !== "0",
+    exec: maybeInjectAerospaceRestoreFailure(execAerospace),
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   return result.ok ? 0 : 1;

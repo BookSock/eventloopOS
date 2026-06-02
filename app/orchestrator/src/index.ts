@@ -14,6 +14,7 @@ import { loadConfig, type OrchestratorConfig } from "./config.js";
 import { PostgresQueueStore } from "./db/postgres_queue_store.js";
 import { createInMemoryGatewayStore, createPostgresGatewayStore } from "./gateway_store.js";
 import { createInMemoryObservability } from "./observability.js";
+import { loadOrCreatePersistentInMemoryStore, withStorePersistence } from "./persistent_in_memory_gateway_store.js";
 import { createRuntime } from "./runtime.js";
 import {
   createSeededDevelopmentMcpSourceRegistry,
@@ -257,13 +258,41 @@ async function createGatewayRuntime(): Promise<{
   close?: () => Promise<void>;
 }> {
   if (config.ok && config.value.databaseUrl) {
-    const postgres = new PostgresQueueStore({ connectionString: config.value.databaseUrl });
-    await postgres.migrate();
+    const postgres = new PostgresQueueStore({
+      connectionString: config.value.databaseUrl,
+      migrationsDir: config.value.postgresMigrationsDir,
+    });
+    try {
+      await postgres.migrate();
+    } catch (error) {
+      await postgres.close().catch(() => undefined);
+      throw new Error([
+        "Postgres unavailable or migrations failed.",
+        "Check DATABASE_URL, start the database, or run without Postgres using EVENTLOOPOS_DOGFOOD_POSTGRES=0 for local dogfood.",
+        "If EVENTLOOPOS_POSTGRES_MIGRATIONS_DIR is set, verify the migration directory and SQL files.",
+        `Postgres error: ${error instanceof Error ? error.message : String(error)}`,
+      ].join("\n"));
+    }
     return {
       store: createPostgresGatewayStore(postgres),
       observability: new PostgresObservability(postgres.pool),
       persistTerminalRefs: true,
       close: () => postgres.close(),
+    };
+  }
+
+  if (process.env.EVENTLOOPOS_IN_MEMORY_STORE_FILE) {
+    const inMemoryStore = await loadOrCreatePersistentInMemoryStore(
+      process.env.EVENTLOOPOS_IN_MEMORY_STORE_FILE,
+      () => createSeededStore(config.ok ? config.value.seedFixturePath : undefined),
+    );
+    return {
+      store: withStorePersistence(
+        createInMemoryGatewayStore(inMemoryStore),
+        inMemoryStore,
+        process.env.EVENTLOOPOS_IN_MEMORY_STORE_FILE,
+      ),
+      persistTerminalRefs: true,
     };
   }
 

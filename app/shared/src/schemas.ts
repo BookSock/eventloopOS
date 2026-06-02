@@ -362,6 +362,7 @@ export const TaskMessageSchema = z
     idempotency_key: id,
     sent_at: isoDateTime.optional(),
     status: z.enum(["queued", "sent", "failed", "blocked"]),
+    recovery_hint: nonEmpty.optional(),
     evidence: z.array(EvidenceRefSchema)
   })
   .strict();

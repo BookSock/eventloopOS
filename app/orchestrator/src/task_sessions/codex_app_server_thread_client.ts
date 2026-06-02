@@ -14,7 +14,7 @@ export type CodexAppServerThreadClientOptions = {
 export class CodexAppServerThreadClient implements CodexNativeThreadClient {
   private readonly threadListLimit: number;
   private readonly taskIdByThreadId: Record<string, string>;
-  private readonly taskIdForThreadId?: (threadId: string) => Promise<string | undefined> | string | undefined;
+  private readonly taskIdResolver?: (threadId: string) => Promise<string | undefined> | string | undefined;
 
   constructor(
     private readonly request: CodexAppServerRequest,
@@ -22,7 +22,7 @@ export class CodexAppServerThreadClient implements CodexNativeThreadClient {
   ) {
     this.threadListLimit = options.threadListLimit ?? 100;
     this.taskIdByThreadId = options.taskIdByThreadId ?? {};
-    this.taskIdForThreadId = options.taskIdForThreadId;
+    this.taskIdResolver = options.taskIdForThreadId;
   }
 
   async listThreads(): Promise<CodexNativeThread[]> {
@@ -130,6 +130,10 @@ export class CodexAppServerThreadClient implements CodexNativeThreadClient {
     };
   }
 
+  async taskIdForThreadId(threadId: string): Promise<string | undefined> {
+    return await this.mappedTaskIdForThread(threadId);
+  }
+
   private async threadFromAppServer(input: unknown): Promise<CodexNativeThread> {
     const thread = requireRecord(input, "app-server thread");
     const id = requireString(thread.id, "app-server thread id");
@@ -149,7 +153,7 @@ export class CodexAppServerThreadClient implements CodexNativeThreadClient {
   }
 
   private async mappedTaskIdForThread(threadId: string): Promise<string | undefined> {
-    return await this.taskIdForThreadId?.(threadId) ?? this.taskIdByThreadId[threadId];
+    return await this.taskIdResolver?.(threadId) ?? this.taskIdByThreadId[threadId];
   }
 }
 

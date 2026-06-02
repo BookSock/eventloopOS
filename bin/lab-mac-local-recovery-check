@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-local-recovery-check
+
+Run this on the lab Mac after logging in locally when remote SSH/VNC/Tailscale
+did not come back after reboot. It writes an artifact manifest with pass/fail
+checks and exact recovery fixes.
+
+Environment:
+  LAB_CONTROLLER_TAILSCALE_IP optional controller 100.x IP or MagicDNS name to
+                              ping from the lab Mac.
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    echo "unknown argument: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+run="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-local-recovery-check"
+steps_dir="$run/steps"
+steps_file="$run/steps.jsonl"
+manifest="$run/manifest.json"
+mkdir -p "$steps_dir"
+: >"$steps_file"
+
+append_step() {
+  local id="$1"
+  local name="$2"
+  local required="$3"
+  local fix="$4"
+  local started="$5"
+  local finished="$6"
+  local exit_code="$7"
+  local stdout_path="$8"
+  local stderr_path="$9"
+  STEP_ID="$id" STEP_NAME="$name" STEP_REQUIRED="$required" STEP_FIX="$fix" \
+    STEP_STARTED="$started" STEP_FINISHED="$finished" STEP_EXIT_CODE="$exit_code" \
+    STEP_STDOUT="$stdout_path" STEP_STDERR="$stderr_path" node <<'NODE' >>"$steps_file"
+const step = {
+  id: process.env.STEP_ID,
+  name: process.env.STEP_NAME,
+  required: process.env.STEP_REQUIRED === "1",
+  ok: Number(process.env.STEP_EXIT_CODE) === 0,
+  exit_code: Number(process.env.STEP_EXIT_CODE),
+  started_at: process.env.STEP_STARTED,
+  finished_at: process.env.STEP_FINISHED,
+  duration_ms: Date.parse(process.env.STEP_FINISHED) - Date.parse(process.env.STEP_STARTED),
+  stdout_path: process.env.STEP_STDOUT,
+  stderr_path: process.env.STEP_STDERR,
+  fix: process.env.STEP_FIX,
+};
+console.log(JSON.stringify(step));
+NODE
+}
+
+run_step() {
+  local id="$1"
+  local name="$2"
+  local required="$3"
+  local fix="$4"
+  shift 4
+  local stdout_path="$steps_dir/$id.stdout.log"
+  local stderr_path="$steps_dir/$id.stderr.log"
+  local started
+  local finished
+  local code
+  started="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  set +e
+  "$@" >"$stdout_path" 2>"$stderr_path"
+  code=$?
+  set -e
+  finished="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  append_step "$id" "$name" "$required" "$fix" "$started" "$finished" "$code" "$stdout_path" "$stderr_path"
+  if [[ "$code" == "0" ]]; then
+    echo "local recovery pass: $name"
+  else
+    echo "local recovery fail: $name"
+  fi
+}
+
+write_manifest() {
+  RUN="$run" STEPS_FILE="$steps_file" node <<'NODE' >"$manifest"
+const fs = require("node:fs");
+const run = process.env.RUN;
+const steps = fs.readFileSync(process.env.STEPS_FILE, "utf8")
+  .split(/\n/)
+  .filter(Boolean)
+  .map((line) => JSON.parse(line));
+const failedRequired = steps.filter((step) => step.required && !step.ok);
+const failedOptional = steps.filter((step) => !step.required && !step.ok);
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.lab_mac_local_recovery_check",
+  run,
+  generated_at: new Date().toISOString(),
+  ok: failedRequired.length === 0,
+  required_count: steps.filter((step) => step.required).length,
+  optional_count: steps.filter((step) => !step.required).length,
+  failed_required_count: failedRequired.length,
+  failed_optional_count: failedOptional.length,
+  steps,
+  fixes: failedRequired.map((step) => ({
+    id: step.id,
+    requirement: step.name,
+    fix: step.fix,
+    stdout_path: step.stdout_path,
+    stderr_path: step.stderr_path,
+  })),
+  optional_warnings: failedOptional.map((step) => ({
+    id: step.id,
+    requirement: step.name,
+    fix: step.fix,
+    stdout_path: step.stdout_path,
+    stderr_path: step.stderr_path,
+  })),
+};
+fs.writeFileSync(`${run}/summary.json`, `${JSON.stringify({
+  ok: manifest.ok,
+  failed_required_count: manifest.failed_required_count,
+  fixes: manifest.fixes,
+  optional_warnings: manifest.optional_warnings,
+}, null, 2)}\n`);
+console.log(JSON.stringify(manifest, null, 2));
+NODE
+}
+
+run_step console_user "Console user is logged in" 1 "Log into the lab user account locally, then rerun this check." \
+  bash -lc 'console_user="$(stat -f %Su /dev/console 2>/dev/null || true)"; who="$(whoami)"; echo "console_user=$console_user"; echo "whoami=$who"; test "$console_user" = "$who"'
+
+run_step tailscale_cli "Tailscale CLI available" 1 "Install or launch Tailscale, then make sure /Applications/Tailscale.app exists and the CLI is on PATH." \
+  bash -lc 'export PATH="/Applications/Tailscale.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$PATH"; command -v tailscale; tailscale version | head -3'
+
+run_step tailscale_ip "Tailscale connected with 100.x IP" 1 "Open Tailscale, sign into the correct tailnet, enable launch at login, and verify tailscale ip -4 prints the lab 100.x address." \
+  bash -lc 'export PATH="/Applications/Tailscale.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$PATH"; tailscale ip -4 | tee /tmp/eventloopos-local-tailscale-ip.txt; grep -E "^100\\." /tmp/eventloopos-local-tailscale-ip.txt'
+
+run_step tailscale_self_status "Tailscale self status visible" 1 "Open Tailscale, confirm it says connected, and rerun. If this fails while tailscale ip -4 works, restart Tailscale.app." \
+  bash -lc 'export PATH="/Applications/Tailscale.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$PATH"; tailscale status --self | tee /tmp/eventloopos-local-tailscale-self.txt; grep -E "100\\." /tmp/eventloopos-local-tailscale-self.txt'
+
+run_step remote_login "Remote Login enabled" 1 "Open System Settings > General > Sharing, enable Remote Login, and allow administrators." \
+  bash -lc 'systemsetup -getremotelogin 2>/dev/null | tee /tmp/eventloopos-local-remote-login.txt; grep -qi "On" /tmp/eventloopos-local-remote-login.txt'
+
+run_step ssh_listener "SSH port 22 listening" 1 "After enabling Remote Login, verify sshd is listening. If not, toggle Remote Login off/on." \
+  bash -lc 'lsof -nP -iTCP:22 -sTCP:LISTEN | tee /tmp/eventloopos-local-ssh-listener.txt; grep -q ":22" /tmp/eventloopos-local-ssh-listener.txt'
+
+run_step tailscale_ssh_reachable "SSH reachable on Tailscale IP" 1 "Remote Login is not reachable on the tailnet IP. Verify Tailscale is connected, Remote Login is enabled, and local firewall/security software allows port 22 on the Tailscale interface." \
+  bash -lc 'export PATH="/Applications/Tailscale.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$PATH"; ip="$(tailscale ip -4 | head -1)"; echo "tailscale_ip=$ip"; test -n "$ip"; nc -G 3 -z "$ip" 22'
+
+run_step screen_sharing_listener "Screen Sharing/VNC port 5900 listening" 1 "Open System Settings > General > Sharing, enable Screen Sharing or Remote Management, allow administrators to control the screen, then rerun this check." \
+  bash -lc 'launchctl print system/com.apple.screensharing >/tmp/eventloopos-local-screensharing-launchd.txt 2>&1 || true; lsof -nP -iTCP:5900 -sTCP:LISTEN | tee /tmp/eventloopos-local-vnc-listener.txt; grep -q ":5900" /tmp/eventloopos-local-vnc-listener.txt'
+
+run_step tailscale_vnc_reachable "VNC reachable on Tailscale IP" 1 "Screen Sharing/VNC is not reachable on the tailnet IP. Verify Screen Sharing or Remote Management is enabled, administrators can control the screen, and local firewall/security software allows port 5900 on the Tailscale interface." \
+  bash -lc 'export PATH="/Applications/Tailscale.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$PATH"; ip="$(tailscale ip -4 | head -1)"; echo "tailscale_ip=$ip"; test -n "$ip"; nc -G 3 -z "$ip" 5900'
+
+run_step controller_tailnet_ping "Controller tailnet peer reachable" 0 "Set LAB_CONTROLLER_TAILSCALE_IP to the controller Mac's 100.x IP or MagicDNS name and verify Tailscale ACL/routing allows the lab to reach it." \
+  bash -lc 'export PATH="/Applications/Tailscale.app/Contents/MacOS:/opt/homebrew/bin:/usr/local/bin:$PATH"; target="${LAB_CONTROLLER_TAILSCALE_IP:-}"; if [[ -z "$target" ]]; then echo "LAB_CONTROLLER_TAILSCALE_IP not configured"; exit 0; fi; tailscale ping --c 1 --timeout=5s "$target"'
+
+run_step auto_login "Lab user automatic login enabled" 1 "Enable automatic login for the lab user so Tailscale, AeroSpace, and Screen Sharing GUI state come back after reboot." \
+  bash -lc 'auto_user="$(defaults read /Library/Preferences/com.apple.loginwindow autoLoginUser 2>/dev/null || true)"; echo "autoLoginUser=$auto_user"; test "$auto_user" = "$(whoami)"'
+
+run_step lab_self_heal_plist "Lab self-heal LaunchAgent plist installed" 1 "Run LAB_CONTROLLER_TAILSCALE_IP=${LAB_CONTROLLER_TAILSCALE_IP:-100.76.35.66} pnpm lab:self-heal -- install on the lab Mac after local recovery checks are green." \
+  bash -lc 'plist="$HOME/Library/LaunchAgents/com.eventloopos.lab-self-heal.plist"; echo "plist=$plist"; test -f "$plist"; plutil -lint "$plist"; grep -q "bin/lab-mac-self-heal run" "$plist"'
+
+run_step lab_self_heal_loaded "Lab self-heal LaunchAgent loaded" 1 "Load the self-heal LaunchAgent with LAB_CONTROLLER_TAILSCALE_IP=${LAB_CONTROLLER_TAILSCALE_IP:-100.76.35.66} pnpm lab:self-heal -- install, then verify with pnpm lab:self-heal -- status." \
+  bash -lc 'launchctl print "gui/$(id -u)/com.eventloopos.lab-self-heal"'
+
+run_step power_sleep_disabled "System sleep disabled" 1 "Set System Settings > Displays/Battery/Lock Screen to prevent sleep, or run the lab setup power commands again." \
+  bash -lc 'pmset -g custom | tee /tmp/eventloopos-local-pmset.txt; ! grep -E "^[[:space:]]*sleep[[:space:]]+[1-9]" /tmp/eventloopos-local-pmset.txt'
+
+run_step caffeinate_running "caffeinate keep-awake running" 0 "Start a keep-awake helper with caffeinate -dims >/tmp/eventloopos-caffeinate.out 2>&1 & if the lab may sleep." \
+  bash -lc 'pgrep -fl "caffeinate -dims"'
+
+run_step filevault_disabled "FileVault disabled for reboot lab" 0 "For remote reboot testing, keep FileVault disabled or have an out-of-band way to unlock the disk after reboot." \
+  bash -lc 'fdesetup status 2>/dev/null | tee /tmp/eventloopos-local-filevault.txt; grep -qi "FileVault is Off" /tmp/eventloopos-local-filevault.txt'
+
+write_manifest
+echo "$run"
+jq '{ok, failed_required_count, fixes, optional_warnings}' "$manifest"
+jq -e '.ok == true' "$manifest" >/dev/null

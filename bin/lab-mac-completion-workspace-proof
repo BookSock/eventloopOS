@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-completion-workspace-proof
+
+Run the Codex completion/workspace proof on the remote Mac lab and print the
+remote artifact run path.
+
+Environment:
+  LAB_MAC_HOST default: 100.71.111.25
+  LAB_MAC_USER default: claw
+  LAB_MAC_KEY  default: ~/.ssh/eventloop_lab_mac
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    echo "unknown argument: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
+
+ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 \
+  "$lab_user@$lab_host" "bash -s -- '$remote_repo'" <<'REMOTE'
+set -euo pipefail
+
+remote_repo="$1"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$remote_repo"
+
+run="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-codex-completion-workspace-proof"
+mkdir -p "$run"
+EVENTLOOPOS_CODEX_COMPLETION_WORKSPACE_ARTIFACT_DIR="$PWD/$run" \
+  pnpm test:e2e:event-loop:codex-completion-workspace >"$run/proof.out" 2>"$run/proof.err"
+code=$?
+echo "$run"
+exit "$code"
+REMOTE

@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-gui-smoke [live-ui|live-handoff|aerospace-isolated|all]
+
+Open Terminal.app on the remote Mac and run GUI/TCC-sensitive smoke tests there.
+Use VNC to approve macOS privacy prompts when first requested.
+EOF
+}
+
+target="${1:-all}"
+case "$target" in
+  live-ui|live-handoff|aerospace-isolated|all) ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown target: $target" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+eventloop_path="${LAB_MAC_EVENTLOOP_PATH:-\$HOME/dev/2026/eventloopOS}"
+remote_bin="/Users/$lab_user/.eventloop-lab/bin"
+remote="${lab_user}@${lab_host}"
+
+install_runner() {
+  local name="$1"
+  local command="$2"
+  local remote_file="$3"
+
+  ssh -i "$lab_key" -o BatchMode=yes "$remote" "mkdir -p ~/.eventloop-lab/bin && cat > '$remote_file' <<'EOF'
+#!/bin/bash
+set -euo pipefail
+export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\"
+cd \"$eventloop_path\"
+run=\"artifacts/lab-runs/\$(date +%Y%m%d-%H%M%S)-terminal-$name\"
+mkdir -p \"\$run\"
+echo \"running $name in Terminal.app\" | tee \"\$run/terminal.log\"
+set +e
+$command >\"\$run/$name.log\" 2>&1
+rc=\$?
+set -e
+echo \"status:\$rc\" | tee \"\$run/status.txt\"
+echo \"\$run\" | tee -a \"\$run/terminal.log\"
+exit \$rc
+EOF
+chmod +x '$remote_file'"
+}
+
+open_runner() {
+  local remote_file="$1"
+  ssh -i "$lab_key" -o BatchMode=yes "$remote" "open -a Terminal '$remote_file'"
+}
+
+if [[ "$target" == "live-ui" || "$target" == "all" ]]; then
+  install_runner \
+    "live-ui" \
+    "EVENTLOOPOS_ENABLE_MACOS_LIVE_UI_SMOKE=1 pnpm test:e2e:macos-live-ui" \
+    "$remote_bin/run-live-ui.command"
+  open_runner "$remote_bin/run-live-ui.command"
+fi
+
+if [[ "$target" == "live-handoff" || "$target" == "all" ]]; then
+  install_runner \
+    "live-handoff" \
+    "EVENTLOOPOS_ENABLE_MACOS_LIVE_HANDOFF_SMOKE=1 pnpm test:e2e:macos-live-handoff" \
+    "$remote_bin/run-live-handoff.command"
+  open_runner "$remote_bin/run-live-handoff.command"
+fi
+
+if [[ "$target" == "aerospace-isolated" || "$target" == "all" ]]; then
+  install_runner \
+    "aerospace-isolated" \
+    "EVENTLOOPOS_ISOLATED_AEROSPACE_SMOKE_APP=native pnpm live:aerospace:isolated" \
+    "$remote_bin/run-aerospace-isolated.command"
+  open_runner "$remote_bin/run-aerospace-isolated.command"
+fi

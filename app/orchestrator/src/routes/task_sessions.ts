@@ -7,7 +7,7 @@ import {
   type DurableTaskMessageStatus,
   type TaskMessageHistoryQuery,
 } from "../task_sessions/task_message_history.js";
-import { sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
+import { recordTaskStartMessageWithActivity, sendTaskFollowupWithActivity } from "../task_sessions/task_followup_audit.js";
 import { taskSessionMatchesTask } from "../task_sessions/session_selection.js";
 import type { TaskSessionController } from "../task_sessions/types.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
@@ -15,6 +15,8 @@ import { parseWorkspaceSnapshot } from "../workspace/controller.js";
 import type { WorkspaceSnapshot } from "../workspace/aerospace.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
+
+const TASK_SESSION_RUNTIME_TIMEOUT_MS = 45_000;
 
 export async function handleTaskSessionsRoute(input: {
   method: string | undefined;
@@ -99,6 +101,21 @@ export async function handleTaskSessionsRoute(input: {
       body: parsed.value,
       idempotencyKey: input.idempotencyKey,
       occurredAt: input.now.toISOString(),
+      requestId: input.requestId,
+    });
+  }
+
+  const taskReplacementMatch = input.pathname.match(/^\/task-sessions\/([^/]+)\/replacement$/);
+  if (input.method === "POST" && taskReplacementMatch) {
+    const parsed = await input.readJsonBody();
+    if (!parsed.ok) return schemaError(parsed.message);
+
+    return handleTaskSessionReplacementRoute({
+      runtime: input.runtime,
+      taskSessionId: decodeURIComponent(taskReplacementMatch[1] ?? ""),
+      body: parsed.value,
+      idempotencyKey: input.idempotencyKey,
+      now: input.now,
       requestId: input.requestId,
     });
   }
@@ -276,7 +293,12 @@ export async function handleListTaskSessionsRoute(input: {
     };
   }
 
-  const sessions = await taskSessions.listSessions();
+  let sessions: unknown[];
+  try {
+    sessions = await withTimeout(taskSessions.listSessions(), TASK_SESSION_RUNTIME_TIMEOUT_MS, "task session list timed out");
+  } catch (error) {
+    return taskSessionRuntimeFailure(error, input.requestId);
+  }
   return {
     ok: true,
     status: 200,
@@ -303,7 +325,12 @@ export async function handleGetTaskSessionRoute(input: {
     };
   }
 
-  const session = await taskSessions.getSession(input.taskSessionId);
+  let session: Awaited<ReturnType<NonNullable<TaskSessionController["getSession"]>>>;
+  try {
+    session = await withTimeout(taskSessions.getSession(input.taskSessionId), TASK_SESSION_RUNTIME_TIMEOUT_MS, "task session lookup timed out");
+  } catch (error) {
+    return taskSessionRuntimeFailure(error, input.requestId);
+  }
   if (!session) {
     return {
       ok: false,
@@ -350,12 +377,55 @@ export async function handleStartTaskSessionRoute(input: {
     };
   }
 
-  const started = await taskSessions.startTaskSession({
+  const existingTaskMessage = await store.getTaskMessageByIdempotencyKey(validation.idempotencyKey);
+  if (existingTaskMessage) {
+    const message = taskMessageRecordToApiMessage(existingTaskMessage);
+    return {
+      ok: true,
+      status: 202,
+      body: {
+        ok: true,
+        started: {
+          ok: existingTaskMessage.status === "sent",
+          task_id: validation.taskId,
+          task_session_id: existingTaskMessage.task_session_id,
+          message,
+          deduped: true,
+          error: existingTaskMessage.error,
+        },
+        task_message: message,
+        request_id: input.requestId,
+      },
+    };
+  }
+
+  const started = await withTimeout(taskSessions.startTaskSession({
+      task_id: validation.taskId,
+      prompt: validation.prompt,
+      cwd: validation.cwd,
+      model: validation.model,
+      idempotency_key: validation.idempotencyKey,
+    }),
+    TASK_SESSION_RUNTIME_TIMEOUT_MS,
+    "task session start timed out",
+  ).catch((error) => ({
+    ok: false,
     task_id: validation.taskId,
+    error: error instanceof Error ? error.message : String(error),
+  }));
+
+  const taskMessage = await recordTaskStartMessageWithActivity({
+    taskSessions,
+    observability,
+    taskMessageStore: store,
+  }, {
+    started,
     prompt: validation.prompt,
-    cwd: validation.cwd,
-    model: validation.model,
     idempotency_key: validation.idempotencyKey,
+    task_id: validation.taskId,
+  }, {
+    origin: "task_session_start",
+    occurredAt: input.now.toISOString(),
   });
 
   if (isRecord(started) && started.ok === false) {
@@ -368,6 +438,15 @@ export async function handleStartTaskSessionRoute(input: {
     };
   }
 
+  const taskRecord = await store.createTask({
+    taskId: validation.taskId,
+    primaryAnchor: {
+      kind: "codex_thread",
+      id: taskStartPrimaryAnchorId(started, validation.taskId),
+    },
+    capturedLayout: validation.workspaceSnapshot ?? emptyWorkspaceSnapshot(),
+    now: input.now,
+  });
   const workspaceRecord = validation.workspaceSnapshot
     ? await store.saveTaskWorkspaceSnapshot({
       taskId: validation.taskId,
@@ -398,10 +477,102 @@ export async function handleStartTaskSessionRoute(input: {
     body: {
       ok: true,
       started,
-      workspace_snapshot: workspaceRecord,
+      task_message: taskMessage,
+      task: taskRecord.task,
+      workspace_snapshot: workspaceRecord ?? taskRecord.layout,
       queue_item: queuedPaper?.queue_item,
       review_packet: queuedPaper?.review_packet,
       request_id: input.requestId,
+    },
+  };
+}
+
+function taskStartPrimaryAnchorId(started: unknown, fallbackTaskId: string): string {
+  if (isRecord(started)) {
+    if (typeof started.native_thread_id === "string" && started.native_thread_id.trim()) {
+      return started.native_thread_id.trim();
+    }
+    if (typeof started.task_session_id === "string" && started.task_session_id.trim()) {
+      return started.task_session_id.trim();
+    }
+  }
+  return fallbackTaskId;
+}
+
+function emptyWorkspaceSnapshot(): WorkspaceSnapshot {
+  return {
+    backend: "aerospace",
+    windows: [],
+  };
+}
+
+export async function handleTaskSessionReplacementRoute(input: {
+  runtime: Runtime;
+  taskSessionId: string;
+  body: unknown;
+  idempotencyKey?: string;
+  now: Date;
+  requestId: string;
+}): Promise<RouteResult> {
+  const { taskSessions } = input.runtime;
+  if (!taskSessions?.getSession || !taskSessions.startTaskSession) {
+    return {
+      ok: false,
+      status: 501,
+      code: "task_replacement_unavailable",
+      message: "task session replacement is not configured",
+    };
+  }
+
+  const validation = validateTaskReplacementRequest(input.body, input.idempotencyKey);
+  if (!validation.ok) return schemaError(validation.message);
+
+  let replacedSession: Awaited<ReturnType<NonNullable<TaskSessionController["getSession"]>>>;
+  try {
+    replacedSession = await withTimeout(taskSessions.getSession(input.taskSessionId), TASK_SESSION_RUNTIME_TIMEOUT_MS, "task session lookup timed out");
+  } catch (error) {
+    return taskSessionRuntimeFailure(error, input.requestId);
+  }
+  if (!replacedSession) {
+    return {
+      ok: false,
+      status: 404,
+      code: "not_found",
+      message: `task session ${input.taskSessionId} was not found`,
+    };
+  }
+  const taskId = isRecord(replacedSession) && typeof replacedSession.task_id === "string" ? replacedSession.task_id : "";
+  if (!taskId) {
+    return {
+      ok: false,
+      status: 409,
+      code: "task_session_unbound",
+      message: `task session ${input.taskSessionId} is not bound to a task`,
+    };
+  }
+
+  const replacement = await handleStartTaskSessionRoute({
+    runtime: input.runtime,
+    body: {
+      task_id: taskId,
+      prompt: validation.prompt,
+      cwd: validation.cwd ?? (isRecord(replacedSession) && typeof replacedSession.cwd === "string" ? replacedSession.cwd : undefined),
+      model: validation.model,
+      idempotency_key: validation.idempotencyKey,
+    },
+    idempotencyKey: validation.idempotencyKey,
+    now: input.now,
+    requestId: input.requestId,
+  });
+  if (!replacement.ok) return replacement;
+
+  return {
+    ok: true,
+    status: replacement.status,
+    body: {
+      ...replacement.body,
+      replaced_session: replacedSession,
+      replacement_for_task_session_id: input.taskSessionId,
     },
   };
 }
@@ -434,27 +605,42 @@ export async function handleTaskFollowupRoute(input: {
     };
   }
 
-  const message = await sendTaskFollowupWithActivity({
-    taskSessions: taskSessions,
-    observability: observability,
-    taskMessageStore: store,
-  }, {
-    task_session_id: input.taskSessionId,
-    text: validation.text,
-    event_ids: validation.eventIds,
-    idempotency_key: validation.idempotencyKey,
-  }, {
-    origin: "task_session_api",
-    occurredAt: input.occurredAt,
-    policy: {
-      hook: "before_task_message",
-      surface: "task_message",
-      untrusted_source_text: validation.untrustedSourceText ?? validation.text,
-      evidence: [],
-      scope_kind: "agent_session",
-      scope_id: input.taskSessionId,
-    },
-  });
+  let session: Awaited<ReturnType<NonNullable<TaskSessionController["getSession"]>>> | undefined;
+  if (taskSessions.getSession) {
+    try {
+      session = await withTimeout(taskSessions.getSession(input.taskSessionId), TASK_SESSION_RUNTIME_TIMEOUT_MS, "task session lookup timed out");
+    } catch (error) {
+      session = undefined;
+    }
+  }
+  const taskId = isRecord(session) && typeof session.task_id === "string" ? session.task_id : undefined;
+  let message: Awaited<ReturnType<typeof sendTaskFollowupWithActivity>>;
+  try {
+    message = await withTimeout(sendTaskFollowupWithActivity({
+      taskSessions: taskSessions,
+      observability: observability,
+      taskMessageStore: store,
+    }, {
+      task_session_id: input.taskSessionId,
+      text: validation.text,
+      event_ids: validation.eventIds,
+      idempotency_key: validation.idempotencyKey,
+    }, {
+      origin: "task_session_api",
+      occurredAt: input.occurredAt,
+      taskId,
+      policy: {
+        hook: "before_task_message",
+        surface: "task_message",
+        untrusted_source_text: validation.untrustedSourceText ?? validation.text,
+        evidence: [],
+        scope_kind: "agent_session",
+        scope_id: input.taskSessionId,
+      },
+    }), TASK_SESSION_RUNTIME_TIMEOUT_MS, "task followup timed out");
+  } catch (error) {
+    return taskSessionRuntimeFailure(error, input.requestId);
+  }
 
   return {
     ok: true,
@@ -633,6 +819,42 @@ function validateTaskFollowupRequest(
     untrustedSourceText: typeof input.untrusted_source_text === "string" && input.untrusted_source_text
       ? input.untrusted_source_text
       : undefined,
+  };
+}
+
+function validateTaskReplacementRequest(
+  input: unknown,
+  headerIdempotencyKey: string | undefined,
+): {
+  ok: true;
+  prompt: string;
+  cwd?: string;
+  model?: string;
+  idempotencyKey: string;
+} | { ok: false; message: string } {
+  if (!isRecord(input)) {
+    return { ok: false, message: "task replacement request must be an object" };
+  }
+
+  const prompt = typeof input.prompt === "string" && input.prompt.trim()
+    ? input.prompt.trim()
+    : typeof input.text === "string" && input.text.trim()
+      ? input.text.trim()
+      : "";
+  if (!prompt) return { ok: false, message: "prompt or text must be a non-empty string" };
+
+  const bodyIdempotencyKey = typeof input.idempotency_key === "string" && input.idempotency_key
+    ? input.idempotency_key
+    : undefined;
+  const idempotencyKey = headerIdempotencyKey ?? bodyIdempotencyKey;
+  if (!idempotencyKey) return { ok: false, message: "idempotency_key or Idempotency-Key header is required" };
+
+  return {
+    ok: true,
+    prompt,
+    cwd: typeof input.cwd === "string" && input.cwd.trim() ? input.cwd.trim() : undefined,
+    model: typeof input.model === "string" && input.model.trim() ? input.model.trim() : undefined,
+    idempotencyKey,
   };
 }
 
@@ -818,6 +1040,34 @@ function validateTaskBindingRequest(input: unknown): { ok: true; taskId: string;
     ok: true,
     taskId,
     terminalRef,
+  };
+}
+
+async function withTimeout<T>(promise: Promise<T> | T, timeoutMs: number, message: string): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(promise),
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function taskSessionRuntimeFailure(error: unknown, requestId: string): RouteResult {
+  const message = error instanceof Error ? error.message : String(error);
+  const timedOut = /timed out/i.test(message);
+  return {
+    ok: false,
+    status: timedOut ? 504 : 500,
+    code: timedOut ? "task_session_runtime_timeout" : "task_session_runtime_error",
+    message,
+    details: {
+      request_id: requestId,
+    },
   };
 }
 

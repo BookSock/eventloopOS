@@ -26,8 +26,14 @@ cd eventloopOS
 fnm use
 corepack enable
 pnpm install
-pnpm run dev:doctor:preflight
+pnpm setup:status
 ```
+
+`pnpm setup:status` is the fastest setup gate. It checks Codex status,
+unsigned-dev app install, and macOS Screen Recording / Accessibility / AeroSpace
+readiness without remote lab work, real Codex dogfood scenarios, screenshots, or
+restart faults. If it reports missing permissions, run `pnpm setup:prompt`,
+approve the Privacy & Security prompts, and rerun `pnpm setup:status`.
 
 `dev:doctor:preflight` builds the orchestrator and checks local tools before the orchestrator is running. It treats the `http://127.0.0.1:4377/health` check as optional, but still checks Docker, AeroSpace, browser tooling, Swift, MCP config shape, optional voice command config, and Codex app-server readiness. For a stricter check after the stack is running, use `pnpm run dev:doctor`. Launch AeroSpace once after installing it so the CLI can talk to the app server.
 
@@ -112,10 +118,16 @@ It creates one unique temporary TextEdit document, waits for that newly-created 
 Start the local dogfood stack:
 
 ```sh
-pnpm run dev:dogfood
+pnpm setup:dogfood
 ```
 
-This starts dev Postgres through Docker, verifies AeroSpace, starts a shared Codex app-server, builds the orchestrator, and launches the Mac queue app. It does not require Slack, Gmail, GitHub, or Chrome. By default, workspace restore execution is disabled until a restore is explicitly confirmed. Press `Ctrl-C` in the terminal to stop the stack. When the queue app quits with a saved manual workspace, it asks the workspace backend to restore that layout before terminating.
+This starts memory-mode dogfood, verifies AeroSpace, starts a shared Codex
+app-server, builds the orchestrator, and launches the Mac queue app. It does not
+require Docker, Postgres, Slack, Gmail, GitHub, or Chrome. By default, workspace
+restore execution is disabled until a restore is explicitly confirmed. Press
+`Ctrl-C` in the terminal to stop the stack. When the queue app quits with a
+saved manual workspace, it asks the workspace backend to restore that layout
+before terminating.
 
 In the queue app:
 

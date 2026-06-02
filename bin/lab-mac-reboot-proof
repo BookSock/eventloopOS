@@ -1,0 +1,344 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: LAB_MAC_REBOOT=1 bin/lab-mac-reboot-proof
+
+Reboot the remote Mac lab, wait for SSH to return, restart the real-Codex
+dogfood stack, run one queue followup scenario, and write a manifest.
+
+Environment:
+  LAB_MAC_REBOOT                 required: 1
+  LAB_MAC_HOST                   default: 100.71.111.25
+  LAB_MAC_USER                   default: claw
+  LAB_MAC_KEY                    default: ~/.ssh/eventloop_lab_mac
+  LAB_MAC_LOGIN_PASSWORD         optional: sudo fallback when GUI restart is ignored
+  LAB_DOGFOOD_URL                default: http://127.0.0.1:4480
+  LAB_MAC_REBOOT_TIMEOUT_SECONDS default: 420
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    echo "unknown argument: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+if [[ "${LAB_MAC_REBOOT:-0}" != "1" ]]; then
+  echo "refusing to reboot lab Mac without LAB_MAC_REBOOT=1" >&2
+  usage >&2
+  exit 2
+fi
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+lab_login_password="${LAB_MAC_LOGIN_PASSWORD:-}"
+url="${LAB_DOGFOOD_URL:-http://127.0.0.1:4480}"
+timeout_seconds="${LAB_MAC_REBOOT_TIMEOUT_SECONDS:-420}"
+remote="${lab_user}@${lab_host}"
+remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
+run_id="$(date +%Y%m%d-%H%M%S)-reboot-proof"
+run_dir="artifacts/lab-runs/$run_id"
+manifest="$run_dir/manifest.json"
+ssh_opts=(-i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8)
+
+mkdir -p "$run_dir"
+
+ssh_remote() {
+  ssh "${ssh_opts[@]}" "$remote" "$@"
+}
+
+sync_run() {
+  mkdir -p "$run_dir"
+  rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" \
+    "$remote:$remote_repo/$run_dir/" "$run_dir/" >/dev/null 2>&1 || true
+}
+
+write_manifest() {
+  local status="$1"
+  local finished_at
+  finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  STATUS="$status" RUN_ID="$run_id" RUN_DIR="$run_dir" STARTED_AT="$started_at" FINISHED_AT="$finished_at" \
+  REBOOT_REQUESTED="$reboot_requested" SSH_WENT_DOWN="$ssh_went_down" SSH_CAME_BACK="$ssh_came_back" \
+  BOOT_TIME_CHANGED="$boot_time_changed" DOGFOOD_RESTARTED="$dogfood_restarted" POST_REBOOT_SCENARIO_OK="$post_reboot_scenario_ok" \
+  REMOTE_SCENARIO_RUN="$remote_scenario_run" node <<'NODE' >"$manifest"
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.lab_mac_reboot_proof",
+  run_id: process.env.RUN_ID,
+  started_at: process.env.STARTED_AT,
+  finished_at: process.env.FINISHED_AT,
+  duration_ms: Date.parse(process.env.FINISHED_AT) - Date.parse(process.env.STARTED_AT),
+  artifact_dir: process.env.RUN_DIR,
+  status: process.env.STATUS,
+  passed: process.env.STATUS === "passed",
+  checks: {
+    reboot_requested: process.env.REBOOT_REQUESTED === "true",
+    ssh_went_down: process.env.SSH_WENT_DOWN === "true",
+    ssh_came_back: process.env.SSH_CAME_BACK === "true",
+    boot_time_changed: process.env.BOOT_TIME_CHANGED === "true",
+    dogfood_restarted: process.env.DOGFOOD_RESTARTED === "true",
+    post_reboot_queue_followup_ok: process.env.POST_REBOOT_SCENARIO_OK === "true",
+  },
+  evidence: {
+    before_state: `${process.env.RUN_DIR}/before-state.txt`,
+    after_state: `${process.env.RUN_DIR}/after-state.txt`,
+    post_reboot_status: `${process.env.RUN_DIR}/post-reboot-status.log`,
+    post_reboot_snapshot: `${process.env.RUN_DIR}/post-reboot-snapshot`,
+    post_reboot_queue_followup: process.env.REMOTE_SCENARIO_RUN
+      ? `${process.env.RUN_DIR}/post-reboot-queue-followup`
+      : undefined,
+  },
+  fixes: [],
+};
+if (!manifest.checks.ssh_came_back) {
+  manifest.fixes.push("Verify Remote Login, Tailscale startup, Screen Sharing, and auto-login; then run `pnpm product:quick` before retrying `LAB_MAC_REBOOT=1 bin/lab-mac-reboot-proof`.");
+}
+if (!manifest.checks.boot_time_changed) {
+  manifest.fixes.push("Verify the lab user can request restart from SSH via System Events, or rerun with LAB_MAC_LOGIN_PASSWORD so the proof can use sudo shutdown fallback.");
+}
+if (!manifest.checks.dogfood_restarted) {
+  manifest.fixes.push("Inspect post-reboot-status.log and latest dogfood-live artifact on lab Mac.");
+}
+if (!manifest.checks.post_reboot_queue_followup_ok) {
+  manifest.fixes.push("Inspect post-reboot queue followup manifest and app/orchestrator logs.");
+}
+console.log(JSON.stringify(manifest, null, 2));
+NODE
+}
+
+collect_remote_state() {
+  local phase="$1"
+  ssh_remote "bash -s -- '$remote_repo' '$run_dir' '$url' '$phase'" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+run="$2"
+url="$3"
+phase="$4"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run"
+{
+  echo "phase=$phase"
+  echo "date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "hostname=$(hostname)"
+  echo "computer_name=$(scutil --get ComputerName 2>/dev/null || true)"
+  echo "console_user=$(stat -f %Su /dev/console 2>/dev/null || true)"
+  echo "boot_time_epoch=$(sysctl -n kern.boottime 2>/dev/null | sed -E 's/.*sec = ([0-9]+).*/\1/' || true)"
+  echo "uptime=$(uptime)"
+  echo "tailscale_ip=$(tailscale ip -4 2>/dev/null || true)"
+  echo
+  echo "== health =="
+  curl -fsS --max-time 5 "$url/health" 2>/dev/null || echo "health: unavailable"
+  echo
+  echo "== processes =="
+  pgrep -fl "bin/dev-dogfood|codex app-server|EventLoopQueueApp|node dist/src/index" || true
+  echo
+  echo "== power =="
+  pmset -g custom 2>/dev/null | grep -E "displaysleep| sleep |powernap" || true
+  pgrep -lf "caffeinate -dims" || true
+} >"$run/$phase-state.txt"
+REMOTE
+}
+
+install_and_request_reboot() {
+  ssh_remote "bash -s -- '$remote_repo' '$run_dir'" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+run="$2"
+cd "$repo"
+mkdir -p "$run"
+cat >"$run/request-reboot.command" <<'EOF'
+#!/bin/bash
+set -u
+{
+  echo "reboot_request_started=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  osascript -e 'tell application "System Events" to restart'
+  rc=$?
+  echo "osascript_restart_rc=$rc"
+  if [[ "$rc" != "0" ]]; then
+    sudo -n /sbin/shutdown -r now
+    echo "sudo_shutdown_rc=$?"
+  fi
+} > /tmp/eventloopos-reboot-proof.out 2> /tmp/eventloopos-reboot-proof.err
+EOF
+chmod +x "$run/request-reboot.command"
+nohup "$repo/$run/request-reboot.command" >/dev/null 2>&1 < /dev/null &
+REMOTE
+}
+
+request_sudo_reboot() {
+  if [[ -z "$lab_login_password" ]]; then
+    return 1
+  fi
+  local quoted_repo
+  local quoted_run
+  quoted_repo="$(printf "%q" "$remote_repo")"
+  quoted_run="$(printf "%q" "$run_dir")"
+  printf "%s\n" "$lab_login_password" | ssh "${ssh_opts[@]}" "$remote" \
+    "cd $quoted_repo && mkdir -p $quoted_run && sudo -S -p '' /sbin/shutdown -r now >$quoted_run/sudo-reboot.out 2>$quoted_run/sudo-reboot.err"
+}
+
+ssh_probe() {
+  ssh "${ssh_opts[@]}" "$remote" "true" >/dev/null 2>&1
+}
+
+wait_for_ssh_down() {
+  local deadline=$((SECONDS + 90))
+  while (( SECONDS < deadline )); do
+    if ! ssh_probe; then
+      return 0
+    fi
+    sleep 3
+  done
+  return 1
+}
+
+wait_for_ssh_up() {
+  local deadline=$((SECONDS + timeout_seconds))
+  while (( SECONDS < deadline )); do
+    if ssh_probe; then
+      return 0
+    fi
+    sleep 10
+  done
+  return 1
+}
+
+state_value() {
+  local file="$1"
+  local key="$2"
+  awk -F= -v key="$key" '$1 == key { print substr($0, index($0, "=") + 1); exit }' "$file" 2>/dev/null || true
+}
+
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+reboot_requested=false
+ssh_went_down=false
+ssh_came_back=false
+boot_time_changed=false
+dogfood_restarted=false
+post_reboot_scenario_ok=false
+remote_scenario_run=""
+
+echo "lab reboot proof run: $run_dir"
+
+collect_remote_state before
+sync_run
+cp "$run_dir/before-state.txt" "$run_dir/before-state.local-copy.txt" 2>/dev/null || true
+
+install_and_request_reboot
+reboot_requested=true
+echo "reboot requested for $remote"
+
+if wait_for_ssh_down; then
+  ssh_went_down=true
+  echo "ssh went down"
+else
+  echo "ssh did not go down within 90s after GUI restart request" >&2
+  if [[ -n "$lab_login_password" ]]; then
+    echo "requesting sudo reboot fallback"
+    request_sudo_reboot || true
+    if wait_for_ssh_down; then
+      ssh_went_down=true
+      echo "ssh went down after sudo fallback"
+    else
+      echo "ssh did not go down after sudo fallback; continuing to wait for reachable host" >&2
+    fi
+  else
+    echo "continuing to wait for reachable host" >&2
+  fi
+fi
+
+if wait_for_ssh_up; then
+  ssh_came_back=true
+  echo "ssh came back"
+else
+  echo "ssh did not come back within ${timeout_seconds}s" >&2
+  sync_run
+  write_manifest failed
+  jq '{passed, checks, evidence, fixes}' "$manifest"
+  echo "$run_dir"
+  exit 1
+fi
+
+sleep 15
+collect_remote_state after
+sync_run
+before_boot_time="$(state_value "$run_dir/before-state.txt" boot_time_epoch)"
+after_boot_time="$(state_value "$run_dir/after-state.txt" boot_time_epoch)"
+if [[ -n "$before_boot_time" && -n "$after_boot_time" && "$before_boot_time" != "$after_boot_time" ]]; then
+  boot_time_changed=true
+fi
+
+set +e
+LAB_MAC_HOST="$lab_host" LAB_MAC_USER="$lab_user" LAB_MAC_KEY="$lab_key" LAB_DOGFOOD_URL="$url" \
+LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-dogfood start >"$run_dir/restart-dogfood.out" 2>"$run_dir/restart-dogfood.err"
+start_code=$?
+set -e
+if [[ "$start_code" == "0" ]]; then
+  for _ in {1..90}; do
+    if ssh_remote "curl -fsS --max-time 3 '$url/health' >/dev/null 2>&1"; then
+      dogfood_restarted=true
+      break
+    fi
+    sleep 2
+  done
+fi
+
+set +e
+LAB_MAC_HOST="$lab_host" LAB_MAC_USER="$lab_user" LAB_MAC_KEY="$lab_key" LAB_DOGFOOD_URL="$url" \
+LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-dogfood status >"$run_dir/post-reboot-status.log" 2>"$run_dir/post-reboot-status.err"
+LAB_MAC_HOST="$lab_host" LAB_MAC_USER="$lab_user" LAB_MAC_KEY="$lab_key" LAB_DOGFOOD_URL="$url" \
+LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-dogfood snapshot >"$run_dir/post-reboot-snapshot.log" 2>"$run_dir/post-reboot-snapshot.err"
+snapshot_code=$?
+set -e
+if [[ "$snapshot_code" == "0" ]]; then
+  snapshot_run="$(awk '/^artifacts\/lab-runs\// { value=$1 } END { print value }' "$run_dir/post-reboot-snapshot.log")"
+  if [[ -n "$snapshot_run" ]]; then
+    mkdir -p "$run_dir/post-reboot-snapshot"
+    rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" \
+      "$remote:$remote_repo/$snapshot_run/" "$run_dir/post-reboot-snapshot/" >/dev/null 2>&1 || true
+  fi
+fi
+
+if [[ "$dogfood_restarted" == "true" ]]; then
+  set +e
+  LAB_MAC_HOST="$lab_host" LAB_MAC_USER="$lab_user" LAB_MAC_KEY="$lab_key" LAB_DOGFOOD_URL="$url" \
+  LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-scenario queue-followup >"$run_dir/post-reboot-queue-followup.log" 2>"$run_dir/post-reboot-queue-followup.err"
+  scenario_code=$?
+  set -e
+  if [[ "$scenario_code" == "0" ]]; then
+    post_reboot_scenario_ok=true
+    remote_scenario_run="$(awk '/^artifacts\/lab-runs\// { value=$1 } END { print value }' "$run_dir/post-reboot-queue-followup.log")"
+    if [[ -n "$remote_scenario_run" ]]; then
+      mkdir -p "$run_dir/post-reboot-queue-followup"
+      rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" \
+        "$remote:$remote_repo/$remote_scenario_run/" "$run_dir/post-reboot-queue-followup/" >/dev/null 2>&1 || true
+    fi
+  fi
+fi
+
+if [[ "$reboot_requested" == "true" && "$boot_time_changed" == "true" && "$ssh_came_back" == "true" && "$dogfood_restarted" == "true" && "$post_reboot_scenario_ok" == "true" ]]; then
+  write_manifest passed
+  jq '{passed, checks, evidence, fixes}' "$manifest"
+  echo "$run_dir"
+  exit 0
+fi
+
+write_manifest failed
+jq '{passed, checks, evidence, fixes}' "$manifest"
+echo "$run_dir"
+exit 1

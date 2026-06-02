@@ -39,6 +39,17 @@ artifacts/terminal-send-live/*
 artifacts/onboarding-live/*
 artifacts/mvp-audit/*
 artifacts/fresh-clone/*
+artifacts/codex-status/*
+artifacts/install/*
+artifacts/macos-aerospace-repair/*
+artifacts/macos-permissions/*
+artifacts/product-readiness/*
+artifacts/product-readiness-artifact-audit/*
+artifacts/product-next/*
+artifacts/proof-repeat/*
+artifacts/readiness-summary/*
+artifacts/lab-runs/*
+artifacts/.cache/*
 artifacts/proof-manifest.json
 artifacts/proof-agent-smoke-manifest.json
 artifacts/proof-deep-manifest.json

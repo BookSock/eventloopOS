@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createServer } from "node:net";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { execFile, spawn } from "node:child_process";
 
@@ -12,6 +12,7 @@ const manifestPath = resolve(artifactDir, "manifest.json");
 const codexTaskMapPath = resolve(artifactDir, "codex-task-map.json");
 const codexWorkdir = resolve(artifactDir, "codex-workdir");
 const ghosttyCodexRemoteHelperPath = resolve(repoRoot, "bin/ghostty-codex-remote");
+const injectGhosttyCleanupFailure = process.env.EVENTLOOPOS_PROOF_INJECT_GHOSTTY_CLEANUP_FAILURE === "1";
 const taskId = "task_completion_workspace_proof";
 const markerPrefix = "EVENTLOOPOS_AGENT_RUN ";
 const taskPrompt = [
@@ -34,6 +35,7 @@ const manifest = {
   codex_app_server_url: undefined,
   ghostty_remote_tui: undefined,
   ghostty_cleanup: undefined,
+  ghostty_cleanup_fault_injected: injectGhosttyCleanupFailure,
   steps: [],
   passed: false,
 };
@@ -414,10 +416,13 @@ async function launchGhosttyCodexTui(task) {
   const before = await listAerospaceWindows();
   const beforeIds = new Set(before.map((window) => window.window_id));
   const launcherPath = ghosttyCodexRemoteHelperPath;
+  const codexHome = process.env.CODEX_HOME ?? `${process.env.HOME}/.codex`;
+  assert(existsSync(codexHome), `Codex home does not exist for Ghostty remote TUI: ${codexHome}`);
   const title = `eventloopOS-codexw-smoke-${runId}`;
   ghosttyRemoteTui = {
     title,
     launcher_path: launcherPath,
+    codex_home: codexHome,
     native_thread_id: task.native_thread_id,
   };
   manifest.ghostty_remote_tui = ghosttyRemoteTui;
@@ -427,7 +432,7 @@ async function launchGhosttyCodexTui(task) {
     "-na",
     "Ghostty",
     "--env",
-    `CODEX_HOME=${process.env.CODEX_HOME ?? `${process.env.HOME}/.codex-work`}`,
+    `CODEX_HOME=${codexHome}`,
     "--env",
     `EVENTLOOPOS_CODEX_APP_SERVER_URL=${appServer.url}`,
     "--env",
@@ -444,17 +449,18 @@ async function launchGhosttyCodexTui(task) {
   const launched = await waitForGhosttySmokeWindow(title, beforeIds, launcherPath, 30_000);
   const originalWorkspace = launched.workspace;
   const scratchWorkspace = originalWorkspace === "eventloop-smoke" ? "eventloop-smoke-alt" : "eventloop-smoke";
-  await execFilePromise("aerospace", ["move-node-to-workspace", "--window-id", String(launched.window_id), scratchWorkspace]);
+  const movedToScratch = await moveGhosttySmokeWindow(title, launched, scratchWorkspace);
   await sleep(500);
-  await assertNoNonTestWindowMoved(before, new Set([launched.window_id]));
-  await execFilePromise("aerospace", ["move-node-to-workspace", "--window-id", String(launched.window_id), originalWorkspace]);
+  await assertNoNonTestWindowMoved(before, new Set([movedToScratch.window_id]));
+  const movedBack = await moveGhosttySmokeWindow(title, movedToScratch, originalWorkspace);
   await sleep(500);
-  await assertNoNonTestWindowMoved(before, new Set([launched.window_id]));
+  await assertNoNonTestWindowMoved(before, new Set([movedBack.window_id]));
 
   const proof = {
     title,
     launcher_path: launcherPath,
-    window_id: launched.window_id,
+    codex_home: codexHome,
+    window_id: movedBack.window_id,
     original_workspace: originalWorkspace,
     scratch_workspace: scratchWorkspace,
     native_thread_id: task.native_thread_id,
@@ -463,6 +469,26 @@ async function launchGhosttyCodexTui(task) {
   manifest.ghostty_remote_tui = proof;
   writeManifest();
   return proof;
+}
+
+async function moveGhosttySmokeWindow(title, candidate, workspace) {
+  const refreshed = await findGhosttySmokeWindow(title, candidate.window_id) ?? candidate;
+  try {
+    await execFilePromise("aerospace", ["move-node-to-workspace", "--window-id", String(refreshed.window_id), workspace]);
+  } catch (error) {
+    if (!String(error instanceof Error ? error.message : error).includes("Invalid <window-id>")) throw error;
+    const replacement = await findGhosttySmokeWindow(title, undefined);
+    assert(replacement, `Ghostty smoke window disappeared before move to ${workspace}: ${title}`);
+    await execFilePromise("aerospace", ["move-node-to-workspace", "--window-id", String(replacement.window_id), workspace]);
+    return {
+      ...replacement,
+      workspace,
+    };
+  }
+  return {
+    ...refreshed,
+    workspace,
+  };
 }
 
 async function waitForLoadedCodexThread(appServerConnection, threadId, timeoutMs) {
@@ -496,6 +522,7 @@ function loadedThreadId(thread) {
 
 async function cleanupGhosttyRemoteTui() {
   if (!ghosttyRemoteTui) return;
+  if (injectGhosttyCleanupFailure) return;
   if (ghosttyRemoteTui.launcher_path) {
     try {
       await execFilePromise("pkill", ["-f", ghosttyRemoteTui.launcher_path], { timeoutMs: 5_000 });
@@ -598,6 +625,12 @@ async function waitForGhosttySmokeWindow(title, beforeIds, launcherPath, timeout
     return fallbackCandidate;
   }
   throw new Error(`timed out waiting for new Ghostty smoke window titled ${title}`);
+}
+
+async function findGhosttySmokeWindow(title, preferredWindowId) {
+  const windows = await listAerospaceWindows();
+  const candidates = windows.filter((window) => window.app_name === "Ghostty" && window.title.includes(title));
+  return candidates.find((window) => window.window_id === preferredWindowId) ?? candidates[0];
 }
 
 async function pgrep(pattern) {

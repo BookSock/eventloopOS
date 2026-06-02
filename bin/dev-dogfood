@@ -9,6 +9,7 @@ const orchestratorEndpoint = parseHttpEndpoint(orchestratorUrl);
 const postgresPort = process.env.EVENTLOOPOS_POSTGRES_PORT ?? defaultPostgresPort(profile);
 const postgresContainer = process.env.EVENTLOOPOS_POSTGRES_CONTAINER ?? defaultPostgresContainer(profile);
 const usePostgres = process.env.EVENTLOOPOS_DOGFOOD_POSTGRES !== "0";
+const providedDatabaseUrl = process.env.DATABASE_URL;
 const launchQueueApp = process.env.EVENTLOOPOS_DOGFOOD_QUEUE_APP !== "0";
 const smokeMs = parseOptionalPositiveInteger(process.env.EVENTLOOPOS_DOGFOOD_SMOKE_MS);
 const emptySeedFixture = "fixtures/empty-review-packets.json";
@@ -25,7 +26,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 
 try {
   await requireAerospace();
-  const databaseUrl = usePostgres ? await startPostgres() : undefined;
+  const databaseUrl = usePostgres ? await resolveDatabaseUrl() : undefined;
   await runChecked("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "build"]);
   const taskSessionModes = process.env.ORCHESTRATOR_TASK_SESSIONS ?? "codex_app_server";
   const codexAppServerUrl = await maybeStartSharedCodexAppServer(taskSessionModes);
@@ -33,6 +34,9 @@ try {
   const orchestrator = spawnChild("pnpm", ["--filter", "@eventloopos/orchestrator", "run", "start"], {
     DATABASE_URL: databaseUrl,
     EVENTLOOPOS_DOGFOOD_PROFILE: profile,
+    EVENTLOOPOS_IN_MEMORY_STORE_FILE: usePostgres
+      ? undefined
+      : process.env.EVENTLOOPOS_IN_MEMORY_STORE_FILE ?? defaultInMemoryStorePath(profile),
     ORCHESTRATOR_HOST: process.env.ORCHESTRATOR_HOST ?? orchestratorEndpoint.host,
     ORCHESTRATOR_PORT: process.env.ORCHESTRATOR_PORT ?? String(orchestratorEndpoint.port),
     ORCHESTRATOR_TASK_SESSIONS: taskSessionModes,
@@ -43,6 +47,7 @@ try {
     ORCHESTRATOR_SEED_FIXTURE: process.env.ORCHESTRATOR_SEED_FIXTURE ?? (usePostgres ? undefined : emptySeedFixture),
     ORCHESTRATOR_WORKSPACE: process.env.ORCHESTRATOR_WORKSPACE ?? "aerospace",
     ORCHESTRATOR_WORKSPACE_EXECUTE: process.env.ORCHESTRATOR_WORKSPACE_EXECUTE ?? "disabled",
+    EVENTLOOPOS_POSTGRES_MIGRATIONS_DIR: process.env.EVENTLOOPOS_POSTGRES_MIGRATIONS_DIR,
   });
   await waitForHealth(orchestratorUrl, 15_000);
 
@@ -52,12 +57,15 @@ try {
     ? spawnChild("pnpm", ["run", "run:queue-app"], {
       EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl,
       EVENTLOOPOS_QUEUE_APP_RUN_SMOKE_MS: smokeMs === undefined ? undefined : String(smokeMs),
+      EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW: process.env.EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW,
     })
     : undefined;
 
   process.stdout.write(`eventloopOS dogfood stack ready at ${orchestratorUrl}\n`);
   process.stdout.write(`Dogfood profile: ${profile}\n`);
-  if (usePostgres) {
+  if (usePostgres && providedDatabaseUrl) {
+    process.stdout.write("Database: supplied DATABASE_URL\n");
+  } else if (usePostgres) {
     process.stdout.write(`Dev Postgres: ${postgresContainer} on 127.0.0.1:${postgresPort}\n`);
   }
   if (codexAppServerUrl) {
@@ -69,7 +77,9 @@ try {
   } else {
     process.stdout.write("Queue app disabled for this stack. Ctrl-C here stops orchestrator, poll loop, and dev Postgres.\n");
   }
-  const appCode = app ? await waitForExit(app) : await waitForExit(orchestrator);
+  // `open -W` can return even while the LSUIElement Queue app remains alive, so
+  // the orchestrator is the durable lifecycle owner for dogfood mode.
+  const appCode = await waitForExit(orchestrator);
   await cleanup();
   process.exitCode = appCode ?? 0;
 } catch (error) {
@@ -85,11 +95,13 @@ async function requireAerospace() {
 
   try {
     await runChecked("aerospace", ["--version"], { echo: false });
-  } catch {
+    await runChecked("aerospace", ["list-workspaces", "--focused"], { echo: false });
+  } catch (error) {
     throw new Error([
       "AeroSpace is required for eventloopOS dogfood.",
       "Install it with: brew install --cask nikitabobko/tap/aerospace",
-      "Then launch AeroSpace and rerun pnpm run dev:dogfood.",
+      "Then launch AeroSpace, grant Accessibility access if prompted, and rerun pnpm run dev:dogfood.",
+      `AeroSpace readiness check failed: ${error instanceof Error ? error.message : String(error)}`,
       "Set EVENTLOOPOS_DOGFOOD_REQUIRE_AEROSPACE=0 only for queue/router hacking without workspace restore.",
     ].join("\n"));
   }
@@ -103,6 +115,13 @@ async function startPostgres() {
     throw new Error(`dev Postgres did not return a postgres URL: ${result.stdout}`);
   }
   return url;
+}
+
+async function resolveDatabaseUrl() {
+  if (providedDatabaseUrl) {
+    return providedDatabaseUrl;
+  }
+  return await startPostgres();
 }
 
 function maybeStartPollLoop() {
@@ -286,6 +305,10 @@ function defaultPostgresPort(selectedProfile) {
 function defaultPostgresContainer(selectedProfile) {
   if (selectedProfile === "default") return "eventloopos-postgres";
   return `eventloopos-postgres-${selectedProfile}`;
+}
+
+function defaultInMemoryStorePath(selectedProfile) {
+  return `.eventloopos/${selectedProfile}/gateway-store.json`;
 }
 
 function defaultCodexTaskMapPath(selectedProfile) {

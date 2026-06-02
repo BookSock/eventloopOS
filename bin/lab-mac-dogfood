@@ -1,0 +1,559 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-dogfood [smoke|start|status|wait-ready|cleanup|snapshot|snapshot-gui|snapshot-vnc|stop|tail]
+
+Run or inspect the eventloopOS dogfood stack on the remote Mac lab.
+
+Defaults use a non-sensitive lab profile with in-memory storage and fake task
+sessions. Set LAB_DOGFOOD_REAL_CODEX=1 after Codex CLI is installed/authenticated
+on the lab Mac.
+
+Environment:
+  LAB_MAC_HOST              default: 100.71.111.25
+  LAB_MAC_USER              default: claw
+  LAB_MAC_KEY               default: ~/.ssh/eventloop_lab_mac
+  LAB_DOGFOOD_PROFILE       default: lab-smoke
+  LAB_DOGFOOD_URL           default: http://127.0.0.1:4480
+  LAB_DOGFOOD_SMOKE_MS      default: 8000
+  LAB_DOGFOOD_REAL_CODEX    default: 0
+  LAB_DOGFOOD_POSTGRES      default: 0
+  LAB_DOGFOOD_DATABASE_URL  optional DATABASE_URL for Postgres mode
+  LAB_DOGFOOD_QUEUE_APP     default: 1
+  LAB_DOGFOOD_MCP_POLL      default: 0
+  LAB_DOGFOOD_MCP_SOURCES   default: off
+  LAB_DOGFOOD_READY_TIMEOUT_SECONDS default: 90
+  LAB_DOGFOOD_READY_POLL_SECONDS    default: 5
+  LAB_MAC_VNC_USER          default: LAB_MAC_USER
+  LAB_MAC_VNC_PASSWORD      required for snapshot-vnc
+  LAB_MAC_LOGIN_PASSWORD    optional; snapshot-vnc types it before capture
+EOF
+}
+
+action="${1:-smoke}"
+case "$action" in
+  smoke|start|status|wait-ready|cleanup|snapshot|snapshot-gui|snapshot-vnc|stop|tail) ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown action: $action" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+profile="${LAB_DOGFOOD_PROFILE:-lab-smoke}"
+url="${LAB_DOGFOOD_URL:-http://127.0.0.1:4480}"
+smoke_ms="${LAB_DOGFOOD_SMOKE_MS:-8000}"
+real_codex="${LAB_DOGFOOD_REAL_CODEX:-0}"
+postgres="${LAB_DOGFOOD_POSTGRES:-0}"
+database_url="${LAB_DOGFOOD_DATABASE_URL:-}"
+queue_app="${LAB_DOGFOOD_QUEUE_APP:-1}"
+mcp_poll="${LAB_DOGFOOD_MCP_POLL:-0}"
+mcp_sources="${LAB_DOGFOOD_MCP_SOURCES:-off}"
+ready_timeout_seconds="${LAB_DOGFOOD_READY_TIMEOUT_SECONDS:-90}"
+ready_poll_seconds="${LAB_DOGFOOD_READY_POLL_SECONDS:-5}"
+vnc_user="${LAB_MAC_VNC_USER:-$lab_user}"
+vnc_password="${LAB_MAC_VNC_PASSWORD:-}"
+login_password="${LAB_MAC_LOGIN_PASSWORD:-}"
+remote="${lab_user}@${lab_host}"
+remote_bin="/Users/$lab_user/.eventloop-lab/bin"
+remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
+ssh_opts=(-i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8)
+
+ssh_remote() {
+  ssh "${ssh_opts[@]}" "$remote" "$@"
+}
+
+remote_env_lines() {
+  cat <<EOF
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export EVENTLOOPOS_DOGFOOD_PROFILE="$profile"
+export EVENTLOOPOS_ORCHESTRATOR_URL="$url"
+export EVENTLOOPOS_DOGFOOD_POSTGRES="$postgres"
+export EVENTLOOPOS_DOGFOOD_QUEUE_APP="$queue_app"
+export EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW="${EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW:-1}"
+export EVENTLOOPOS_DOGFOOD_SHARED_CODEX_APP_SERVER=0
+export EVENTLOOPOS_DOGFOOD_MCP_POLL="$mcp_poll"
+export ORCHESTRATOR_MCP_SOURCES="$mcp_sources"
+EOF
+  if [[ -n "$database_url" ]]; then
+    cat <<EOF
+export DATABASE_URL="$database_url"
+EOF
+  fi
+if [[ "$real_codex" == "1" ]]; then
+    cat <<'EOF'
+export ORCHESTRATOR_TASK_SESSIONS="${ORCHESTRATOR_TASK_SESSIONS:-codex_app_server}"
+export EVENTLOOPOS_DOGFOOD_SHARED_CODEX_APP_SERVER=0
+EOF
+  else
+    cat <<'EOF'
+export ORCHESTRATOR_TASK_SESSIONS=fake
+EOF
+  fi
+}
+
+install_start_runner() {
+  local remote_file="$remote_bin/run-dogfood.command"
+  local env_block
+  env_block="$(remote_env_lines)"
+  ssh_remote "mkdir -p '$remote_bin' && cat > '$remote_file' <<'EOF'
+#!/bin/bash
+set -euo pipefail
+$env_block
+cd \"$remote_repo\"
+run=\"artifacts/lab-runs/\$(date +%Y%m%d-%H%M%S)-dogfood-live\"
+mkdir -p \"\$run\"
+echo \"dogfood live run: \$run\" | tee \"\$run/terminal.log\"
+echo \"url=$url\" | tee -a \"\$run/terminal.log\"
+pnpm run dev:dogfood >\"\$run/dogfood.log\" 2>&1
+rc=\$?
+echo \"status:\$rc\" | tee \"\$run/status.txt\"
+echo \"\$run\" | tee -a \"\$run/terminal.log\"
+exit \$rc
+EOF
+chmod +x '$remote_file'"
+}
+
+case "$action" in
+  start)
+    LAB_DOGFOOD_STOP_AEROSPACE=0 "$0" stop >/dev/null 2>&1 || true
+    install_start_runner
+    ssh_remote "bash -lc 'nohup \"$remote_bin/run-dogfood.command\" >/tmp/eventloopos-lab-dogfood-start.out 2>/tmp/eventloopos-lab-dogfood-start.err < /dev/null &'"
+    echo "started dogfood background runner on $remote"
+    ;;
+  status)
+    LAB_MAC_HOST="$lab_host" LAB_MAC_USER="$lab_user" LAB_MAC_KEY="$lab_key" LAB_DOGFOOD_URL="$url" LAB_DOGFOOD_QUEUE_APP="$queue_app" bin/lab-mac-dogfood-status
+    exit $?
+    env_block="$(remote_env_lines)"
+    ssh_remote "bash -lc '
+set +e
+export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\"
+$env_block
+cd \"$remote_repo\" 2>/dev/null || exit 1
+run=\"artifacts/lab-runs/\$(date +%Y%m%d-%H%M%S)-dogfood-status\"
+mkdir -p \"\$run\"
+printf \"%s\n\" \"$remote\" >\"\$run/remote.txt\"
+printf \"%s\n\" \"$remote_repo\" >\"\$run/repo.txt\"
+printf \"%s\n\" \"$url\" >\"\$run/orchestrator-url.txt\"
+printf \"%s\n\" \"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >\"\$run/started-at.txt\"
+
+echo \"remote=$remote\"
+echo \"repo=$remote_repo\"
+echo \"url=$url\"
+echo \"status_run=\$run\"
+echo \"\$run\"
+echo
+echo \"== codex ==\"
+command -v codex | tee \"\$run/codex-path.txt\" || true
+codex --version >\"\$run/codex-version.txt\" 2>\"\$run/codex-version.err\" || true
+cat \"\$run/codex-version.txt\" || true
+codex login status >\"\$run/codex-login-status.txt\" 2>\"\$run/codex-login-status.err\" || true
+cat \"\$run/codex-login-status.txt\" || true
+sed -n \"1,40p\" ~/.codex/config.toml >\"\$run/codex-config-head.txt\" 2>/dev/null || true
+cat \"\$run/codex-config-head.txt\" || true
+echo
+echo \"== health ==\"
+curl -fsS --max-time 10 \"$url/health\" >\"\$run/health.json\" 2>\"\$run/health.err\" || echo \"health: unavailable\" >\"\$run/health.unavailable\"
+cat \"\$run/health.json\" 2>/dev/null || cat \"\$run/health.unavailable\" 2>/dev/null || true
+echo
+echo \"== task sessions ==\"
+curl -fsS --max-time 10 \"$url/task-sessions\" >\"\$run/task-sessions.json\" 2>\"\$run/task-sessions.err\" || echo \"task-sessions: unavailable\" >\"\$run/task-sessions.unavailable\"
+jq \"{count, sessions: [.sessions[]? | {id, provider, status, task_id, native_thread_id}]}\" \"\$run/task-sessions.json\" 2>/dev/null || cat \"\$run/task-sessions.unavailable\" 2>/dev/null || true
+echo
+echo \"== queue ==\"
+curl -fsS --max-time 10 \"$url/queue?state=ready\" >\"\$run/queue-ready.json\" 2>\"\$run/queue-ready.err\" || echo \"queue: unavailable\" >\"\$run/queue-ready.unavailable\"
+jq \"{count, ids: [.items[]?.id]}\" \"\$run/queue-ready.json\" 2>/dev/null || cat \"\$run/queue-ready.unavailable\" 2>/dev/null || true
+echo
+echo \"== processes ==\"
+pgrep -fl \"bin/dev-dogfood|codex app-server|EventLoopQueueApp|node dist/src/index\" >\"\$run/processes-interesting.txt\" 2>/dev/null || true
+cat \"\$run/processes-interesting.txt\" || true
+ps -axo pid,ppid,comm,args >\"\$run/ps.txt\" 2>/dev/null || true
+echo
+echo \"== listeners ==\"
+lsof -nP -iTCP -sTCP:LISTEN >\"\$run/listeners.txt\" 2>\"\$run/listeners.err\" || true
+grep -E \"4480|codex|node\" \"\$run/listeners.txt\" || true
+echo
+echo \"== latest live run ==\"
+latest=\$(ls -td artifacts/lab-runs/*dogfood-live 2>/dev/null | head -1)
+if [[ -n \"\$latest\" ]]; then
+  echo \"\$latest\"
+  printf \"%s\n\" \"\$latest\" >\"\$run/latest-live-run.txt\"
+  tail -n 40 \"\$latest/dogfood.log\" 2>/dev/null || true
+else
+  echo \"none\"
+  printf \"%s\n\" \"none\" >\"\$run/latest-live-run.txt\"
+fi
+echo
+echo \"== vnc/power ==\"
+echo \"console_user=\$(stat -f %Su /dev/console 2>/dev/null || true)\"
+ioreg -n Root -d1 2>/dev/null | grep -i \"IOConsoleUsers\" | tr \",\" \"\\n\" | grep -E \"kCGSSession(OnConsole|UserName|LoginDone)Key|kCGSessionLongUserNameKey\" || true
+printf \"screensaver idleTime=\"; defaults -currentHost read com.apple.screensaver idleTime 2>/dev/null || true
+printf \"askForPassword=\"; defaults read com.apple.screensaver askForPassword 2>/dev/null || true
+pmset -g custom 2>/dev/null | grep -E \"displaysleep| sleep |powernap\" || true
+pgrep -lf \"caffeinate -dims\" || true
+echo
+echo \"== windows ==\"
+aerospace list-windows --all --json --format \"%{window-id}%{app-name}%{window-title}%{window-layout}%{workspace}\" >\"\$run/windows.json\" 2>\"\$run/windows.err\" || true
+jq \"{count: length, apps: ([.[].\\\"app-name\\\"] | group_by(.) | map({app: .[0], count: length}))}\" \"\$run/windows.json\" 2>/dev/null || true
+printf \"%s\n\" \"\$(date -u +%Y-%m-%dT%H:%M:%SZ)\" >\"\$run/finished-at.txt\"
+RUN=\"\$run\" LAB_DOGFOOD_QUEUE_APP=\"$queue_app\" node <<NODE >\"\$run/manifest.json\"
+const fs = require(\"node:fs\");
+const path = require(\"node:path\");
+const run = process.env.RUN;
+const read = (name) => {
+  try { return fs.readFileSync(path.join(run, name), \"utf8\"); } catch { return \"\"; }
+};
+const readJson = (name) => {
+  try { return JSON.parse(read(name)); } catch { return undefined; }
+};
+const statSize = (name) => {
+  try { return fs.statSync(path.join(run, name)).size; } catch { return 0; }
+};
+const health = readJson(\"health.json\");
+const taskSessions = readJson(\"task-sessions.json\");
+const queueReady = readJson(\"queue-ready.json\");
+const processes = read(\"processes-interesting.txt\");
+const listeners = read(\"listeners.txt\");
+const windows = readJson(\"windows.json\");
+const queueAppRequired = process.env.LAB_DOGFOOD_QUEUE_APP !== \"0\";
+const checks = {
+  health_ok: health?.ok === true,
+  task_sessions_api_ok: Array.isArray(taskSessions?.sessions),
+  queue_api_ok: Array.isArray(queueReady?.items),
+  dogfood_process_visible: /bin\\/dev-dogfood|node .*dist\\/src\\/index\\.js|node dist\\/src\\/index\\.js/.test(processes),
+  listener_4480_visible: /:4480\\b/.test(listeners),
+  queue_app_process_visible: !queueAppRequired || /EventLoopQueueApp/.test(processes),
+  windows_artifact_exists: Array.isArray(windows),
+  ps_nonempty: statSize(\"ps.txt\") > 100,
+};
+const failedChecks = Object.entries(checks).filter(([, value]) => value !== true).map(([key]) => key);
+const manifest = {
+  schema_version: 1,
+  kind: \"eventloopos.lab_dogfood_status\",
+  started_at: read(\"started-at.txt\").trim(),
+  finished_at: read(\"finished-at.txt\").trim(),
+  artifact_dir: run,
+  ok: failedChecks.length === 0,
+  passed: failedChecks.length === 0,
+  url: read(\"orchestrator-url.txt\").trim(),
+  queue_app_required: queueAppRequired,
+  checks,
+  failed_checks: failedChecks,
+  artifacts: {
+    health: \"health.json\",
+    task_sessions: \"task-sessions.json\",
+    queue_ready: \"queue-ready.json\",
+    processes: \"processes-interesting.txt\",
+    ps: \"ps.txt\",
+    listeners: \"listeners.txt\",
+    windows: \"windows.json\",
+  },
+};
+console.log(JSON.stringify(manifest, null, 2));
+NODE
+echo \"dogfood status manifest: \$run/manifest.json\"
+cat \"\$run/manifest.json\"
+jq -e '.ok == true' \"\$run/manifest.json\" >/dev/null
+'"
+    ;;
+  wait-ready)
+    start_time="$(date +%s)"
+    deadline=$((start_time + ready_timeout_seconds))
+    attempt=0
+    last_status=1
+    last_stdout=""
+    last_stderr=""
+    while :; do
+      attempt=$((attempt + 1))
+      attempt_stdout="$(mktemp -t eventloopos-dogfood-status-stdout.XXXXXX)"
+      attempt_stderr="$(mktemp -t eventloopos-dogfood-status-stderr.XXXXXX)"
+      set +e
+      LAB_DOGFOOD_STATUS_WINDOWS=0 "$0" status >"$attempt_stdout" 2>"$attempt_stderr"
+      last_status=$?
+      set -e
+      cat "$attempt_stdout"
+      cat "$attempt_stderr" >&2
+      last_stdout="$attempt_stdout"
+      last_stderr="$attempt_stderr"
+      if [[ "$last_status" == "0" ]]; then
+        echo "dogfood ready after attempt $attempt"
+        rm -f "$last_stdout" "$last_stderr"
+        exit 0
+      fi
+      now="$(date +%s)"
+      if [[ "$now" -ge "$deadline" ]]; then
+        echo "dogfood wait-ready timed out after ${ready_timeout_seconds}s and $attempt attempts" >&2
+        echo "last status stdout: $last_stdout" >&2
+        echo "last status stderr: $last_stderr" >&2
+        exit "$last_status"
+      fi
+      sleep "$ready_poll_seconds"
+      rm -f "$last_stdout" "$last_stderr"
+    done
+    ;;
+  cleanup)
+    ssh_remote "bash -lc '
+set +e
+export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\"
+windows=\$(aerospace list-windows --all --json --format \"%{window-id}%{app-name}%{window-title}%{workspace}\" 2>/dev/null || printf \"[]\")
+printf \"%s\" \"\$windows\" > /tmp/eventloopos-lab-cleanup-windows.json
+closed=0
+while read -r window_id; do
+  [[ -z \"\$window_id\" ]] && continue
+  aerospace close --window-id \"\$window_id\" >/dev/null 2>&1
+  closed=\$((closed + 1))
+done < <(jq -r \".[] | select(.\\\"app-name\\\" == \\\"eventloopOS Queue\\\") | .\\\"window-id\\\"\" /tmp/eventloopos-lab-cleanup-windows.json 2>/dev/null)
+osascript <<'\"'\"'APPLESCRIPT'\"'\"' >/tmp/eventloopos-lab-cleanup-queue.out 2>/tmp/eventloopos-lab-cleanup-queue.err || true
+set closedQueueWindows to 0
+tell application \"System Events\"
+  repeat with queueProcessName in {\"eventloopOS Queue\", \"EventLoopQueueApp\"}
+    if exists process queueProcessName then
+      tell process queueProcessName
+        repeat with candidateWindow in windows
+          try
+            perform action \"AXClose\" of candidateWindow
+            set closedQueueWindows to closedQueueWindows + 1
+          end try
+        end repeat
+      end tell
+    end if
+  end repeat
+end tell
+return \"system_events_closed_queue_windows=\" & closedQueueWindows
+APPLESCRIPT
+osascript <<'\"'\"'APPLESCRIPT'\"'\"' >/tmp/eventloopos-lab-cleanup-terminal.out 2>/tmp/eventloopos-lab-cleanup-terminal.err || true
+set closedCaptureWindows to 0
+tell application \"Terminal\"
+  repeat with candidateWindow in windows
+    try
+      set windowName to name of candidateWindow as string
+      set windowBusy to false
+      try
+        set windowBusy to busy of selected tab of candidateWindow
+      end try
+      if windowName contains \"gui-screencapture.command\" and windowBusy is false then
+        close candidateWindow
+        set closedCaptureWindows to closedCaptureWindows + 1
+      end if
+    end try
+  end repeat
+end tell
+return \"terminal_closed_nonbusy_capture_windows=\" & closedCaptureWindows
+APPLESCRIPT
+echo \"cleanup_requested_queue_windows=\$closed\"
+cat /tmp/eventloopos-lab-cleanup-queue.out 2>/dev/null || true
+cat /tmp/eventloopos-lab-cleanup-terminal.out 2>/dev/null || true
+terminal_counts=\$(osascript <<'\"'\"'APPLESCRIPT'\"'\"' 2>/dev/null || true
+tell application \"Terminal\"
+  set totalWindows to count of windows
+  set captureWindows to 0
+  repeat with candidateWindow in windows
+    try
+      if (name of candidateWindow as string) contains \"gui-screencapture.command\" then set captureWindows to captureWindows + 1
+    end try
+  end repeat
+end tell
+return (totalWindows as string) & \" \" & (captureWindows as string)
+APPLESCRIPT
+)
+terminal_total=\$(printf \"%s\" \"\$terminal_counts\" | awk \"{print \\\$1+0}\")
+terminal_capture=\$(printf \"%s\" \"\$terminal_counts\" | awk \"{print \\\$2+0}\")
+if [[ \"\$terminal_total\" -gt 0 && \"\$terminal_total\" -eq \"\$terminal_capture\" ]]; then
+  pkill -x Terminal >/dev/null 2>&1 || true
+  echo \"terminal_killed_capture_only_windows=\$terminal_capture\"
+elif [[ \"\$terminal_capture\" -gt 0 ]]; then
+  echo \"terminal_capture_windows_left_open=\$terminal_capture\"
+fi
+echo \"cleanup_note=cleanup closes only non-busy Terminal capture windows; busy Terminal windows are left alone to avoid macOS termination prompts.\"
+aerospace list-windows --all --json --format \"%{window-id}%{app-name}%{window-title}%{workspace}\" 2>/dev/null | jq \"{count: length, apps: ([.[].\\\"app-name\\\"] | group_by(.) | map({app: .[0], count: length}))}\" 2>/dev/null || true
+'"
+    ;;
+  smoke)
+    env_block="$(remote_env_lines)"
+    ssh_remote "bash -lc '
+set -euo pipefail
+$env_block
+cd \"$remote_repo\"
+run=\"artifacts/lab-runs/\$(date +%Y%m%d-%H%M%S)-dogfood-smoke\"
+mkdir -p \"\$run\"
+{
+  echo \"run=\$run\"
+  echo \"started=\$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+  set +e
+  EVENTLOOPOS_DOGFOOD_SMOKE_MS=\"$smoke_ms\" pnpm run dev:dogfood
+  rc=\$?
+  set -e
+  echo \"dogfood_rc=\$rc\"
+  echo \"finished=\$(date -u +%Y-%m-%dT%H:%M:%SZ)\"
+} >\"\$run/dogfood.log\" 2>&1
+echo \"status:\$rc\" | tee \"\$run/status.txt\"
+aerospace list-windows --all --json --format \"%{window-id}%{app-name}%{window-title}%{window-layout}%{workspace}\" >\"\$run/windows-after.json\" 2>\"\$run/windows-after.err\" || true
+ps -axo pid,ppid,comm,args >\"\$run/ps-after.txt\" || true
+echo \"\$run\"
+exit \$rc
+'"
+    ;;
+  snapshot)
+    ssh_remote "bash -lc '
+set -euo pipefail
+export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\"
+cd \"$remote_repo\"
+run=\"artifacts/lab-runs/\$(date +%Y%m%d-%H%M%S)-dogfood-snapshot\"
+mkdir -p \"\$run\"
+printf \"%s\n\" \"$url\" >\"\$run/orchestrator-url.txt\"
+for endpoint in health metrics activity \"queue?state=ready\" \"queue?state=done\" tasks task-sessions \"task-messages?limit=50\"; do
+  name=\$(printf \"%s\" \"\$endpoint\" | tr \"?/=&\" \"____\")
+  curl -fsS --max-time 10 \"$url/\$endpoint\" >\"\$run/\$name.json\" 2>\"\$run/\$name.err\" || true
+done
+aerospace list-windows --all --json --format \"%{window-id}%{app-name}%{window-title}%{window-layout}%{workspace}\" >\"\$run/windows.json\" 2>\"\$run/windows.err\" || true
+aerospace list-workspaces --focused >\"\$run/focused-workspace.txt\" 2>\"\$run/focused-workspace.err\" || true
+ps -axo pid,ppid,comm,args >\"\$run/ps.txt\" || true
+lsof -nP -iTCP -sTCP:LISTEN >\"\$run/listeners.txt\" 2>\"\$run/listeners.err\" || true
+screencapture -x \"\$run/screen.png\" >\"\$run/screencapture.out\" 2>\"\$run/screencapture.err\" || true
+echo \"\$run\"
+'"
+    ;;
+  snapshot-gui)
+    remote_file="$remote_bin/run-dogfood-snapshot.command"
+    latest_file="$remote_bin/latest-dogfood-gui-snapshot.txt"
+    ssh_remote "mkdir -p '$remote_bin' && rm -f '$latest_file' && cat > '$remote_file' <<'EOF'
+#!/bin/bash
+set -euo pipefail
+export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin\"
+cd \"$remote_repo\"
+run=\"artifacts/lab-runs/\$(date +%Y%m%d-%H%M%S)-dogfood-gui-snapshot\"
+mkdir -p \"\$run\"
+printf \"%s\n\" \"$url\" >\"\$run/orchestrator-url.txt\"
+for endpoint in health metrics activity \"queue?state=ready\" \"queue?state=done\" tasks task-sessions \"task-messages?limit=50\"; do
+  name=\$(printf \"%s\" \"\$endpoint\" | tr \"?/=&\" \"____\")
+  curl -fsS --max-time 10 \"$url/\$endpoint\" >\"\$run/\$name.json\" 2>\"\$run/\$name.err\" || true
+done
+aerospace list-windows --all --json --format \"%{window-id}%{app-name}%{window-title}%{window-layout}%{workspace}\" >\"\$run/windows.json\" 2>\"\$run/windows.err\" || true
+aerospace list-workspaces --focused >\"\$run/focused-workspace.txt\" 2>\"\$run/focused-workspace.err\" || true
+ps -axo pid,ppid,comm,args >\"\$run/ps.txt\" || true
+lsof -nP -iTCP -sTCP:LISTEN >\"\$run/listeners.txt\" 2>\"\$run/listeners.err\" || true
+screencapture -x \"\$run/screen.png\" >\"\$run/screencapture.out\" 2>\"\$run/screencapture.err\" || true
+echo \"\$run\" >\"$latest_file\"
+date -u +%Y-%m-%dT%H:%M:%SZ >\"\$run/done.txt\"
+echo \"dogfood GUI snapshot: \$run\"
+EOF
+chmod +x '$remote_file'"
+    ssh_remote "open -a Terminal '$remote_file'"
+    for _ in {1..60}; do
+      latest="$(ssh_remote "cat '$latest_file' 2>/dev/null || true" | tr -d '\r')"
+      if [[ -n "$latest" ]]; then
+        if ssh_remote "test -f '$remote_repo/$latest/done.txt'"; then
+          echo "$latest"
+          ssh_remote "test -f '$remote_repo/$latest/screen.png' && echo 'screen.png:ok' || { echo 'screen.png:missing'; cat '$remote_repo/$latest/screencapture.err' 2>/dev/null || true; }"
+          exit 0
+        fi
+      fi
+      sleep 1
+    done
+    echo "timed out waiting for GUI snapshot runner" >&2
+    exit 1
+    ;;
+  snapshot-vnc)
+    if [[ -z "$vnc_password" ]]; then
+      echo "LAB_MAC_VNC_PASSWORD is required for snapshot-vnc" >&2
+      exit 2
+    fi
+    if ! command -v uv >/dev/null 2>&1; then
+      echo "snapshot-vnc requires uv so it can run vncdotool" >&2
+      exit 2
+    fi
+
+    remote_run="$(LAB_MAC_HOST="$lab_host" LAB_MAC_USER="$lab_user" LAB_MAC_KEY="$lab_key" LAB_DOGFOOD_URL="$url" "$0" snapshot | tail -1 | tr -d '\r')"
+    local_run="$remote_run"
+    mkdir -p "$local_run"
+    rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" "$remote:$remote_repo/$remote_run/" "$local_run/"
+    LAB_MAC_VNC_HOST="$lab_host" \
+    LAB_MAC_VNC_CAPTURE_PASSWORD="$vnc_password" \
+    LAB_MAC_LOGIN_PASSWORD="$login_password" \
+    LAB_MAC_VNC_CAPTURE_OUTPUT="$local_run/screen-vnc.png" \
+    uv run --with vncdotool python - <<'PY' >"$local_run/vnc-capture.out" 2>"$local_run/vnc-capture.err"
+import os
+import sys
+
+from vncdotool import rfb
+from vncdotool.command import vncdo
+
+# macOS offers Apple Remote Desktop auth before legacy VNC auth. vncdotool
+# prefers the highest supported auth number, then fails before capture. Force
+# the legacy VNC path because the lab only needs a screenshot artifact.
+rfb.RFBClient.SUPPORTED_AUTHS = {rfb.AuthTypes.VNC_AUTHENTICATION}
+commands = []
+login_password = os.environ.get("LAB_MAC_LOGIN_PASSWORD")
+if login_password:
+    commands += ["key", "enter", "pause", "1", "type", login_password, "key", "enter", "pause", "3"]
+commands += ["capture", os.environ["LAB_MAC_VNC_CAPTURE_OUTPUT"]]
+sys.argv = [
+    "vncdotool",
+    "-s",
+    f"{os.environ['LAB_MAC_VNC_HOST']}::5900",
+    "-p",
+    os.environ["LAB_MAC_VNC_CAPTURE_PASSWORD"],
+    "--timeout",
+    "20",
+] + commands
+vncdo()
+PY
+    if [[ ! -s "$local_run/screen-vnc.png" ]]; then
+      echo "screen-vnc.png:missing" >&2
+      cat "$local_run/vnc-capture.err" >&2 || true
+      exit 1
+    fi
+    bytes="$(wc -c <"$local_run/screen-vnc.png" | tr -d ' ')"
+    sha="$(shasum -a 256 "$local_run/screen-vnc.png" | awk '{print $1}')"
+    dimensions="$(sips -g pixelWidth -g pixelHeight "$local_run/screen-vnc.png" 2>/dev/null | awk '/pixelWidth|pixelHeight/ {print $2}' | paste -sd x -)"
+    {
+      printf '{\n'
+      printf '  "source": "legacy_vnc",\n'
+      printf '  "host": "%s",\n' "$lab_host"
+      printf '  "output": "screen-vnc.png",\n'
+      printf '  "bytes": %s,\n' "$bytes"
+      printf '  "sha256": "%s",\n' "$sha"
+      printf '  "dimensions": "%s",\n' "$dimensions"
+      printf '  "forced_vnc_auth": true,\n'
+      printf '  "login_password_provided": %s,\n' "$([[ -n "$login_password" ]] && echo true || echo false)"
+      printf '  "note": "macOS legacy VNC may capture the login window instead of the active Screen Sharing desktop; inspect screen-vnc.png."\n'
+      printf '}\n'
+    } >"$local_run/vnc-capture-metadata.json"
+    scp "${ssh_opts[@]}" "$local_run/screen-vnc.png" "$remote:$remote_repo/$remote_run/screen-vnc.png" >/dev/null
+    scp "${ssh_opts[@]}" "$local_run/vnc-capture-metadata.json" "$remote:$remote_repo/$remote_run/vnc-capture-metadata.json" >/dev/null
+    echo "$remote_run"
+    echo "$local_run"
+    echo "screen-vnc.png:ok"
+    ;;
+  stop)
+    ssh_remote "bash -lc '
+set +e
+pkill -TERM -f \"bin/dev-dogfood|pnpm run dev:dogfood|EventLoopQueueApp|node dist/src/index.js|codex app-server\" 2>/dev/null
+sleep 2
+	pkill -KILL -f \"bin/dev-dogfood|pnpm run dev:dogfood|EventLoopQueueApp|node dist/src/index.js|codex app-server\" 2>/dev/null
+	lsof -tiTCP:4480 -sTCP:LISTEN 2>/dev/null | xargs kill -TERM 2>/dev/null
+	sleep 1
+	lsof -tiTCP:4480 -sTCP:LISTEN 2>/dev/null | xargs kill -KILL 2>/dev/null
+	if [[ \"${LAB_DOGFOOD_STOP_AEROSPACE:-0}\" == \"1\" ]]; then
+	  launchctl bootout gui/\$(id -u) ~/Library/LaunchAgents/com.eventloopos.lab-self-heal.plist >/dev/null 2>&1 || true
+	  pkill -TERM -f \"run-aerospace.command|AeroSpace.app/Contents/MacOS/AeroSpace\" 2>/dev/null || true
+	  sleep 1
+	  pkill -KILL -f \"run-aerospace.command|AeroSpace.app/Contents/MacOS/AeroSpace\" 2>/dev/null || true
+	fi
+	exit 0
+	'"
+    echo "stopped dogfood-ish processes on $remote"
+    ;;
+  tail)
+    ssh_remote "bash -lc 'RUN=\$(ls -td \"$remote_repo\"/artifacts/lab-runs/*dogfood* 2>/dev/null | head -1); echo \"\$RUN\"; tail -n 200 \"\$RUN\"/dogfood.log 2>/dev/null || true'"
+    ;;
+esac

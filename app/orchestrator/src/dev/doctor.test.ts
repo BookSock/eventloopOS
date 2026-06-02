@@ -14,9 +14,13 @@ describe("developer doctor", () => {
         return response({ ok: true }, 200);
       },
       execFn: async (command, args) => {
-        if (command === "aerospace") {
+        if (command === "aerospace" && args[0] === "list-windows") {
           assert.deepEqual(args, captureWorkspacePlan().args);
           return { stdout: JSON.stringify([{ "window-id": 1, "app-name": "Ghostty" }]), stderr: "" };
+        }
+        if (command === "aerospace" && args[0] === "layout") {
+          assert.deepEqual(args, ["layout", "--window-id", "2147483647", "floating"]);
+          throw new Error("Window 2147483647 not found");
         }
         if (command === "docker") {
           assert.deepEqual(args, ["info", "--format", "{{.ServerVersion}}"]);
@@ -55,7 +59,7 @@ describe("developer doctor", () => {
         {
           name: "aerospace_daemon",
           ok: true,
-          detail: "AeroSpace CLI returned 1 managed window(s)",
+          detail: "AeroSpace CLI returned 1 managed window(s); mutation probe reached server",
           command: [captureWorkspacePlan().command, ...captureWorkspacePlan().args],
           source_url: "https://nikitabobko.github.io/AeroSpace/commands.html#list-windows",
         },
@@ -101,6 +105,49 @@ describe("developer doctor", () => {
         },
       ],
     });
+  });
+
+  it("fails AeroSpace when client and server versions mismatch on mutation commands", async () => {
+    const report = await runDoctor({
+      baseUrl: "http://127.0.0.1:4377",
+      platform: "darwin",
+      requireOrchestrator: false,
+      requireDocker: false,
+      fetchFn: async () => {
+        throw new Error("offline");
+      },
+      execFn: async (command, args) => {
+        if (command === "aerospace" && args[0] === "list-windows") {
+          return { stdout: JSON.stringify([{ "window-id": 1, "app-name": "Ghostty" }]), stderr: "" };
+        }
+        if (command === "aerospace" && args[0] === "layout") {
+          const error = new Error("layout failed") as Error & { stderr: string };
+          error.stderr = "Warning: AeroSpace client/server versions don't match\n  - aerospace CLI client version: 0.0.0-SNAPSHOT\n  - AeroSpace.app server version: 0.0.0-SNAPSHOT\n  Possible fixes:\n  - Restart AeroSpace.app (server restart is required after each update)\n  - Reinstall and restart AeroSpace (corrupted installation)";
+          throw error;
+        }
+        if (command === "docker") {
+          throw new Error("offline");
+        }
+        if (command === "pnpm") {
+          return { stdout: "Version 1.59.1\n", stderr: "" };
+        }
+        if (command === "swift") {
+          return { stdout: "swift-driver version: 1.127.8 Apple Swift version 6.2.1\n", stderr: "" };
+        }
+        throw new Error(`unexpected command ${command}`);
+      },
+      codexCheckFn: async () => ({
+        name: "codex_app_server",
+        ok: true,
+        detail: "Codex app-server responded; sampled 1 thread(s)",
+      }),
+    });
+
+    const aerospace = report.checks.find((check) => check.name === "aerospace_daemon");
+    assert.equal(report.ok, false);
+    assert.equal(aerospace?.ok, false);
+    assert.match(aerospace?.detail ?? "", /version mismatch blocks workspace mutations/);
+    assert.match(aerospace?.detail ?? "", /Restart AeroSpace\.app/);
   });
 
   it("fails AeroSpace when native Space has windows but managed list is empty", async () => {
@@ -488,17 +535,22 @@ describe("developer doctor", () => {
     assert.equal(parsed.checks[0].detail, "fetch failed");
   });
 
-  it("can treat orchestrator health as optional for fresh-clone preflight", async () => {
+  it("can treat orchestrator health and Docker as optional for fresh-clone preflight", async () => {
     const writes: string[] = [];
     const exitCode = await runDoctorCli({
       baseUrl: "http://127.0.0.1:4377",
       requireOrchestrator: false,
+      requireDocker: false,
       platform: "darwin",
       fetchFn: async () => {
         throw new Error("fetch failed");
       },
       execFn: async (command, args) => {
-        if (command === "docker") return { stdout: "29.3.1\n", stderr: "" };
+        if (command === "docker") {
+          const error = new Error("missing docker") as Error & { code: string };
+          error.code = "ENOENT";
+          throw error;
+        }
         if (command === "pnpm") return { stdout: "Version 1.59.1\n", stderr: "" };
         if (command === "swift") {
           assert.deepEqual(args, ["--version"]);
@@ -525,11 +577,16 @@ describe("developer doctor", () => {
     assert.equal(parsed.checks[0].name, "orchestrator_health");
     assert.equal(parsed.checks[0].ok, true);
     assert.equal(parsed.checks[0].detail, "optional orchestrator health check skipped: fetch failed");
+    assert.equal(parsed.checks[2].name, "docker_daemon");
+    assert.equal(parsed.checks[2].ok, true);
+    assert.equal(parsed.checks[2].detail, "optional Docker daemon check skipped: binary missing");
   });
 
   it("reads optional orchestrator health mode from env", () => {
     assert.equal(doctorOptionsFromEnv({ EVENTLOOPOS_DOCTOR_REQUIRE_ORCHESTRATOR: "0" }).requireOrchestrator, false);
     assert.equal(doctorOptionsFromEnv({}).requireOrchestrator, true);
+    assert.equal(doctorOptionsFromEnv({ EVENTLOOPOS_DOCTOR_REQUIRE_DOCKER: "0" }).requireDocker, false);
+    assert.equal(doctorOptionsFromEnv({}).requireDocker, true);
   });
 });
 

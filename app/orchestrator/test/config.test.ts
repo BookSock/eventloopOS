@@ -21,11 +21,13 @@ describe("orchestrator config schema", () => {
   it("accepts DATABASE_URL for persistent Postgres mode", () => {
     const result = loadConfig({
       DATABASE_URL: "postgres://eventloop:test@127.0.0.1:5432/eventloop",
+      EVENTLOOPOS_POSTGRES_MIGRATIONS_DIR: "app/orchestrator/migrations",
     });
 
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.equal(result.value.databaseUrl, "postgres://eventloop:test@127.0.0.1:5432/eventloop");
+      assert.ok(result.value.postgresMigrationsDir?.endsWith("app/orchestrator/migrations"));
     }
   });
 

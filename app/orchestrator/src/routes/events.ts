@@ -494,6 +494,8 @@ export async function routeEventThroughGateway(
   if (injected) {
     if (isRecord(injected.taskMessage) && injected.taskMessage.status === "blocked") {
       taskMessageError = "task followup blocked";
+    } else if (isRecord(injected.taskMessage) && injected.taskMessage.status === "failed") {
+      taskMessageError = typeof injected.taskMessage.error === "string" ? injected.taskMessage.error : "task followup failed";
     } else {
       const result = await options.store.recordEventRoute(event, injected.routeDecision, now);
       await recordRoutedEventActivity(options, event, result.route_decision, {

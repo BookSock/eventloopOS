@@ -12,17 +12,20 @@ export type PersistentTerminalRefControllerOptions = {
   inner: TaskSessionController;
   store: Pick<GatewayStore, "getTaskSessionTerminalRef" | "setTaskSessionTerminalRef">;
   now?: () => Date;
+  terminalRefTimeoutMs?: number;
 };
 
 export class PersistentTerminalRefController implements TaskSessionController {
   private readonly inner: TaskSessionController;
   private readonly store: Pick<GatewayStore, "getTaskSessionTerminalRef" | "setTaskSessionTerminalRef">;
   private readonly now: () => Date;
+  private readonly terminalRefTimeoutMs: number;
 
   constructor(options: PersistentTerminalRefControllerOptions) {
     this.inner = options.inner;
     this.store = options.store;
     this.now = options.now ?? (() => new Date());
+    this.terminalRefTimeoutMs = options.terminalRefTimeoutMs ?? 1_000;
   }
 
   async listSessions(): Promise<TaskRuntimeSession[]> {
@@ -70,7 +73,10 @@ export class PersistentTerminalRefController implements TaskSessionController {
     }
     const binding = await this.inner.bindTaskSession(input);
     if (binding.ok && input.terminal_ref) {
-      await this.store.setTaskSessionTerminalRef(input.task_session_id, input.terminal_ref, this.now());
+      await bestEffortWithTimeout(
+        this.store.setTaskSessionTerminalRef(input.task_session_id, input.terminal_ref, this.now()),
+        this.terminalRefTimeoutMs,
+      );
     }
     if (binding.session) {
       binding.session = await this.hydrateSession(binding.session);
@@ -82,8 +88,24 @@ export class PersistentTerminalRefController implements TaskSessionController {
     if (typeof session.terminal_ref === "string" && session.terminal_ref) return session;
     const id = typeof session.id === "string" ? session.id : undefined;
     if (!id) return session;
-    const stored = await this.store.getTaskSessionTerminalRef(id);
+    const stored = await bestEffortWithTimeout(this.store.getTaskSessionTerminalRef(id), this.terminalRefTimeoutMs);
     if (!stored) return session;
     return { ...session, terminal_ref: stored.terminal_ref };
+  }
+}
+
+async function bestEffortWithTimeout<T>(promise: Promise<T> | T, timeoutMs: number): Promise<T | undefined> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      Promise.resolve(promise),
+      new Promise<undefined>((resolve) => {
+        timeout = setTimeout(() => resolve(undefined), timeoutMs);
+      }),
+    ]);
+  } catch {
+    return undefined;
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }

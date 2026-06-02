@@ -1,0 +1,1170 @@
+#!/usr/bin/env node
+import { readdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import assert from "node:assert/strict";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const args = process.argv.slice(2);
+if (args[0] === "--") args.shift();
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/readiness-summary [product-readiness-manifest] [--json]
+
+Summarize current eventloopOS product readiness, emit JSON and Markdown artifacts,
+and print next actions.
+
+Environment:
+  READINESS_SUMMARY_JSON default: 0; set 1 or pass --json for quiet machine-readable JSON only
+  READINESS_SUMMARY_MIN_REUSABLE_STEP_TIMEOUT_SECONDS
+                         default: 60; implicit summaries ignore product manifests
+                         created with lower per-step timeout values
+`);
+  process.exit(0);
+}
+if (args.includes("--self-test")) {
+  runSelfTest();
+  console.log("readiness-summary self-test passed");
+  process.exit(0);
+}
+const jsonOnly = args.includes("--json") || truthy(process.env.READINESS_SUMMARY_JSON);
+const positionalArgs = args.filter((arg) => arg !== "--json" && arg !== "--self-test");
+const explicitManifest = positionalArgs[0];
+const minReusableStepTimeoutSeconds = Number(process.env.READINESS_SUMMARY_MIN_REUSABLE_STEP_TIMEOUT_SECONDS ?? "60");
+const productManifest = explicitManifest
+  ? path.resolve(repoRoot, explicitManifest)
+  : await latestManifestByKind(
+      path.join(repoRoot, "artifacts", "product-readiness"),
+      "eventloopos.product_readiness_proof",
+      /manifest\.json$/,
+      (manifest) => reusableProductReadinessManifest(manifest, minReusableStepTimeoutSeconds),
+    );
+const labConnectivityManifest = await latestManifestByKind(path.join(repoRoot, "artifacts", "lab-runs"), "eventloopos.lab_connectivity_proof", /lab-connectivity-status\/manifest\.json$/);
+const labWaitManifest = await latestManifestByKind(path.join(repoRoot, "artifacts", "lab-runs"), "eventloopos.lab_mac_wait_online", /wait-online-(quick|long)\/manifest\.json$/);
+const outputDir = path.join(repoRoot, "artifacts", "readiness-summary");
+const outputStem = `${utcStamp()}-${process.pid}-summary`;
+const outputPath = path.join(outputDir, `${outputStem}.json`);
+const markdownOutputPath = path.join(outputDir, `${outputStem}.md`);
+const aerospaceRepairMaxAgeSeconds = Number(process.env.READINESS_AEROSPACE_REPAIR_MAX_AGE_SECONDS ?? "1800");
+const labWaitMaxAgeSeconds = Number(process.env.READINESS_LAB_WAIT_MAX_AGE_SECONDS ?? "900");
+
+if (!productManifest) {
+  console.error("No product-readiness manifest found. Run `pnpm setup:status` or `pnpm setup:lab-status` first.");
+  process.exit(2);
+}
+
+const product = await readJson(productManifest);
+const labConnectivity = labConnectivityManifest ? await readJson(labConnectivityManifest) : undefined;
+const labWait = labWaitManifest ? await readJson(labWaitManifest) : undefined;
+const labWaitFreshness = labWait
+  ? manifestFreshness(labWait, new Date().toISOString(), labWaitMaxAgeSeconds)
+  : undefined;
+const currentLabWait = labWaitFreshness?.current ? labWait : undefined;
+const includeLocalAerospaceRepair = product.mode === "local";
+const aerospaceRepairManifest = includeLocalAerospaceRepair
+  ? await latestManifestByKind(path.join(repoRoot, "artifacts", "macos-aerospace-repair"), "eventloopos.macos_aerospace_repair")
+  : undefined;
+const aerospaceRepair = aerospaceRepairManifest ? await readJson(aerospaceRepairManifest) : undefined;
+const aerospaceRepairFreshness = aerospaceRepair
+  ? manifestFreshness(aerospaceRepair, product.started_at, aerospaceRepairMaxAgeSeconds)
+  : undefined;
+const currentAerospaceRepair = aerospaceRepairFreshness?.current ? aerospaceRepair : undefined;
+const productLabConnectivity = product.mode === "lab" ? labConnectivity : undefined;
+const evidenceDetails = await resolveEvidence(product.evidence ?? {});
+const macosPermissionStatus = Object.values(evidenceDetails).find((item) => item?.kind === "eventloopos.macos_permission_status" && item.ok === false)
+  ?? Object.values(evidenceDetails).find((item) => item?.kind === "eventloopos.macos_permission_status");
+const artifactAudit = evidenceDetails.artifact_audit?.kind === "eventloopos.product_readiness_artifact_audit"
+  ? evidenceDetails.artifact_audit
+  : undefined;
+const failedSteps = (product.steps ?? []).filter((step) => step.status !== "passed" && step.optional !== true);
+const blockers = product.blockers ?? [];
+const requirementCoverage = product.requirement_coverage ?? [];
+const coverageGaps = requirementCoverage.filter((item) => item.status !== "passed");
+const nextCommandGroups = recommendCommandGroups(product, productLabConnectivity, evidenceDetails, currentAerospaceRepair, currentLabWait);
+const nextCommands = flattenCommandGroups(nextCommandGroups);
+const primaryNextAction = choosePrimaryNextAction(product, nextCommandGroups, currentLabWait);
+const artifactContractFailures = artifactContractStatusFailures(product.artifact_contract);
+const summary = {
+  schema_version: 1,
+  kind: "eventloopos.readiness_summary",
+  generated_at: new Date().toISOString(),
+  product_manifest: rel(productManifest),
+  markdown_summary: rel(markdownOutputPath),
+  lab_connectivity_manifest: productLabConnectivity && labConnectivityManifest ? rel(labConnectivityManifest) : undefined,
+  lab_wait_manifest: currentLabWait && labWaitManifest ? rel(labWaitManifest) : undefined,
+  mode: product.mode,
+  profile: product.profile,
+  requested_runs: product.requested_runs,
+  requested_fault_runs: product.requested_fault_runs,
+  required_release_runs: product.required_release_runs,
+  capture_video_seconds: product.capture_video_seconds,
+  release_options: product.release_options,
+  release_required_artifact_counts: product.profile === "release" ? product.release_required_artifact_counts : undefined,
+  release_repeat_artifact_counts: product.profile === "release" ? product.release_repeat_artifact_counts : undefined,
+  release_repeat_artifact_failures: product.profile === "release" ? product.release_repeat_artifact_failures : undefined,
+  release_repeat_artifacts_passed: product.profile === "release" ? product.release_repeat_artifacts_passed : undefined,
+  artifact_contract: product.artifact_contract,
+  artifact_contract_failures: artifactContractFailures,
+  profile_gate_passed: product.profile_gate_passed,
+  profile_gate_reasons: product.profile_gate_reasons ?? [],
+  passed: product.passed,
+  release_ready: product.release_ready,
+  release_ready_reasons: product.release_ready_reasons ?? [],
+  failed_step_count: failedSteps.length,
+  blocker_count: blockers.length,
+  requirement_coverage_count: requirementCoverage.length,
+  requirement_coverage_status_counts: countBy(requirementCoverage, "status"),
+  requirement_coverage_passed: product.requirement_coverage_passed ?? coverageGaps.length === 0,
+  blockers,
+  failed_steps: failedSteps.map((step) => ({
+    name: step.name,
+    status: step.status,
+    exit_code: step.exit_code,
+    duration_ms: step.duration_ms,
+    optional: step.optional,
+    timed_out: step.timed_out,
+    timeout_seconds: step.timeout_seconds,
+    stdout_path: step.stdout_path,
+    stderr_path: step.stderr_path,
+  })),
+  requirement_gaps: coverageGaps.map((item) => ({
+    id: item.id,
+    status: item.status,
+    requirement: item.requirement,
+    note: item.note,
+    evidence: item.evidence,
+  })),
+  evidence: evidenceDetails,
+  artifact_audit: artifactAudit,
+  macos_permission_status: macosPermissionStatus,
+  aerospace_repair: aerospaceRepair
+    ? {
+        ...summarizeManifest(rel(aerospaceRepairManifest), aerospaceRepair),
+        current_for_product_run: aerospaceRepairFreshness.current,
+        freshness: aerospaceRepairFreshness,
+      }
+    : undefined,
+  lab_connectivity: productLabConnectivity
+    ? {
+        ok: productLabConnectivity.ok,
+        failed_assertions: (productLabConnectivity.assertions ?? []).filter((assertion) => !assertion.ok).map((assertion) => ({
+          name: assertion.name,
+          fix: assertion.details?.fix,
+          stderr: assertion.details?.stderr,
+        })),
+      }
+    : undefined,
+  lab_wait: labWait
+    ? {
+        ...summarizeManifest(rel(labWaitManifest), labWait),
+        current_for_product_run: labWaitFreshness.current,
+        freshness: labWaitFreshness,
+      }
+    : undefined,
+  next_command_groups: nextCommandGroups,
+  next_commands: nextCommands,
+  primary_next_action: primaryNextAction,
+};
+
+await mkdirp(outputDir);
+await writeFile(outputPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
+await writeFile(markdownOutputPath, renderMarkdownSummary(summary), "utf8");
+
+const output = {
+  manifest: rel(outputPath),
+  markdown_summary: rel(markdownOutputPath),
+  product_manifest: summary.product_manifest,
+  passed: summary.passed,
+  release_ready: summary.release_ready,
+  release_ready_reasons: summary.release_ready_reasons,
+  mode: summary.mode,
+  profile: summary.profile,
+  requested_runs: summary.requested_runs,
+  requested_fault_runs: summary.requested_fault_runs,
+  required_release_runs: summary.required_release_runs,
+  capture_video_seconds: summary.capture_video_seconds,
+  release_options: summary.release_options,
+  release_required_artifact_counts: summary.release_required_artifact_counts,
+  release_repeat_artifact_counts: summary.release_repeat_artifact_counts,
+  release_repeat_artifact_failures: summary.release_repeat_artifact_failures,
+  release_repeat_artifacts_passed: summary.release_repeat_artifacts_passed,
+  artifact_contract: summary.artifact_contract,
+  artifact_contract_failures: summary.artifact_contract_failures,
+  artifact_audit: summary.artifact_audit,
+  profile_gate_passed: summary.profile_gate_passed,
+  profile_gate_reasons: summary.profile_gate_reasons,
+  blockers: summary.blockers,
+  failed_steps: summary.failed_steps,
+  requirement_coverage_status_counts: summary.requirement_coverage_status_counts,
+  requirement_gaps: summary.requirement_gaps,
+  macos_permission_status: summary.macos_permission_status,
+  aerospace_repair: summary.aerospace_repair,
+  lab_connectivity: summary.lab_connectivity,
+  lab_wait: summary.lab_wait,
+  primary_next_action: summary.primary_next_action,
+  next_command_groups: summary.next_command_groups,
+  next_commands: summary.next_commands,
+};
+if (jsonOnly) {
+  console.log(JSON.stringify(output));
+} else {
+  console.log(`readiness summary: ${rel(outputPath)}`);
+  console.log(`readiness todo: ${rel(markdownOutputPath)}`);
+  console.log(JSON.stringify(output, null, 2));
+}
+
+async function resolveEvidence(evidence) {
+  const resolved = {};
+  for (const [key, value] of Object.entries(evidence)) {
+    if (typeof value !== "string") {
+      resolved[key] = value;
+      continue;
+    }
+    const absolute = path.resolve(repoRoot, value);
+    if (!existsSync(absolute) || !value.endsWith("manifest.json")) {
+      resolved[key] = value;
+      continue;
+    }
+    const manifest = await readJson(absolute);
+    resolved[key] = summarizeManifest(value, manifest);
+  }
+  return resolved;
+}
+
+function summarizeManifest(file, manifest) {
+  const base = {
+    manifest: file,
+    kind: manifest.kind,
+    ok: manifest.ok ?? manifest.passed,
+  };
+  if (manifest.kind === "eventloopos.macos_permission_status") {
+    return {
+      ...base,
+      checks: manifest.checks,
+      failures: manifest.failures,
+      aerospace_process_list: manifest.details?.aerospace_process_list,
+      aerospace_version: manifest.details?.aerospace_version,
+    };
+  }
+  if (manifest.kind === "eventloopos.macos_install_proof") {
+    return {
+      ...base,
+      mode: manifest.mode,
+      unsigned_dev_ok: manifest.unsigned_dev_ok,
+      signed: manifest.signed,
+      notarized: manifest.notarized,
+      checks: manifest.checks,
+      blockers: manifest.blockers,
+    };
+  }
+  if (manifest.kind === "eventloopos.codex_status_proof") {
+    return {
+      ...base,
+      codex_version: manifest.codex_version,
+      model: manifest.model,
+      model_provider: manifest.model_provider,
+      auth_mode: manifest.auth_mode,
+      failures: manifest.failures,
+    };
+  }
+  if (manifest.kind === "eventloopos.product_readiness_artifact_audit") {
+    return {
+      ...base,
+      audited_count: manifest.audited_count,
+      failure_count: Array.isArray(manifest.failures) ? manifest.failures.length : 0,
+      failures: (manifest.failures ?? []).map((failure) => ({
+        evidence_key: failure.evidence_key,
+        kind: failure.kind,
+        scenario: failure.scenario,
+        manifest: failure.manifest,
+        reason: failure.reason,
+        failed_checks: failure.failed_checks,
+        failed_count_keys: failure.failed_count_keys,
+      })),
+    };
+  }
+  if (manifest.kind === "eventloopos.lab_connectivity_proof") {
+    return {
+      ...base,
+      controller_tailscale: manifest.controller_tailscale,
+      failed_assertions: (manifest.assertions ?? []).filter((assertion) => !assertion.ok).map((assertion) => ({
+        name: assertion.name,
+        fix: assertion.details?.fix,
+      })),
+    };
+  }
+  if (manifest.kind === "eventloopos.lab_dogfood_status") {
+    return {
+      ...base,
+      url: manifest.url,
+      queue_app_required: manifest.queue_app_required,
+      checks: manifest.checks,
+      failed_checks: manifest.failed_checks,
+      artifacts: manifest.artifacts,
+    };
+  }
+  if (manifest.kind === "eventloopos.lab_mac_wait_online") {
+    return {
+      ...base,
+      wait_mode: manifest.wait_mode,
+      attempts: manifest.attempts,
+      checks: manifest.checks,
+      controller_tailscale: manifest.controller_tailscale,
+      fixes: manifest.fixes,
+    };
+  }
+  if (manifest.kind === "eventloopos.agent_proof") {
+    return {
+      ...base,
+      expected_command_count: manifest.expected_command_count,
+      completed_command_count: manifest.completed_command_count,
+      failed_commands: (manifest.commands ?? [])
+        .filter((command) => command.status !== "passed")
+        .map((command) => ({
+          name: command.name,
+          status: command.status,
+          exit_code: command.exit_code,
+          stdout_path: command.stdout_path,
+          stderr_path: command.stderr_path,
+        })),
+    };
+  }
+  if (manifest.kind === "eventloopos.macos_aerospace_repair") {
+    return {
+      ...base,
+      action: manifest.action,
+      checks: manifest.checks,
+      fixes: manifest.fixes,
+      fix_commands: manifest.fix_commands,
+    };
+  }
+  return base;
+}
+
+function manifestFreshness(manifest, referenceIso, maxAgeSeconds) {
+  const referenceMs = Date.parse(referenceIso ?? "");
+  const manifestMs = Date.parse(manifest.finished_at ?? manifest.generated_at ?? manifest.started_at ?? "");
+  const valid = Number.isFinite(referenceMs) && Number.isFinite(manifestMs) && Number.isFinite(maxAgeSeconds) && maxAgeSeconds >= 0;
+  if (!valid) {
+    return {
+      current: false,
+      reason: "missing or invalid timestamp",
+      max_age_seconds: maxAgeSeconds,
+      reference_at: referenceIso,
+      manifest_at: manifest.finished_at ?? manifest.generated_at ?? manifest.started_at,
+    };
+  }
+  const ageAtReferenceSeconds = Math.max(0, (referenceMs - manifestMs) / 1000);
+  return {
+    current: ageAtReferenceSeconds <= maxAgeSeconds,
+    reason: ageAtReferenceSeconds <= maxAgeSeconds ? "within max age" : "stale",
+    max_age_seconds: maxAgeSeconds,
+    age_at_reference_seconds: ageAtReferenceSeconds,
+    age_at_product_start_seconds: ageAtReferenceSeconds,
+    reference_at: referenceIso,
+    manifest_at: new Date(manifestMs).toISOString(),
+  };
+}
+
+function recommendCommandGroups(product, labConnectivity, evidenceDetails, aerospaceRepair, labWait) {
+  const groups = {
+    local: [],
+    lab: [],
+    release: [],
+  };
+  const permissionEvidence = Object.values(evidenceDetails).find((item) => item?.kind === "eventloopos.macos_permission_status" && item.ok === false);
+  const permissionChecks = permissionEvidence?.checks ?? {};
+  const aerospaceVersionText = [
+    permissionEvidence?.aerospace_version?.cli_version_output,
+    permissionEvidence?.aerospace_version?.summary,
+  ].filter(Boolean).join("\n");
+  const aerospaceVersionMismatch = /client\/server versions don't match|versions don't match|corrupted installation|server restart is required after each update/i.test(aerospaceVersionText);
+  const latestRepairLaunchServicesFailed = product.mode === "local"
+    && aerospaceRepair?.ok === false
+    && aerospaceRepair?.checks?.launchservices_server_ready === false;
+  const setupPromptCommand = latestRepairLaunchServicesFailed
+    ? "pnpm setup:prompt # re-grant AeroSpace Accessibility, open AeroSpace normally, then run pnpm setup:status"
+    : "pnpm setup:prompt";
+  const shouldPromptForPrivacy = permissionEvidence && [
+    "screen_recording_usable",
+    "accessibility_system_events_usable",
+    "aerospace_server_ready",
+  ].some((key) => permissionChecks[key] === false);
+  if (shouldPromptForPrivacy) {
+    groups.local.push(setupPromptCommand);
+  }
+  if (product.mode === "local" && permissionChecks.aerospace_cli_available === false) {
+    groups.local.push("brew install --cask aerospace-dev && pnpm macos:aerospace-repair && pnpm setup:status");
+  }
+  const needsAerospaceServer = product.mode === "local"
+    && (permissionChecks.aerospace_server_ready === false || permissionChecks.aerospace_mutation_commands_ready === false);
+  if (needsAerospaceServer && latestRepairLaunchServicesFailed) {
+    if (!shouldPromptForPrivacy) {
+      groups.local.push(setupPromptCommand);
+    }
+  } else if (needsAerospaceServer) {
+    groups.local.push("pnpm macos:aerospace-repair:restart && pnpm setup:status");
+    if (aerospaceVersionMismatch) {
+      groups.local.push("pnpm macos:aerospace-repair:reinstall && pnpm setup:status # if restart still reports CLI/server mismatch");
+    }
+  }
+  if (labConnectivity && labConnectivity.ok === false) {
+    const localBootstrapCommand = labConnectivity.controller_tailscale?.suggested_local_bootstrap_command ?? labConnectivity.controller_tailscale?.suggested_local_recovery_command;
+    const labBootstrapCommand = localBootstrapCommand
+      ? `${localBootstrapCommand} # run on the lab Mac after local login`
+      : "pnpm lab:local-bootstrap # run on the lab Mac after local login";
+    groups.lab.push(labBootstrapCommand);
+    groups.lab.push("pnpm lab:wait-online:quick");
+    groups.lab.push("pnpm setup:lab-status");
+  }
+  if (labWait && labWait.passed === false) {
+    for (const command of labWaitCommands(labWait)) {
+      groups.lab.push(command);
+    }
+  }
+  if (product.mode === "local" && !permissionEvidence) {
+    groups.local.push("pnpm product:local:dogfood");
+  }
+  if (product.mode === "lab" && product.profile === "quick" && product.passed) {
+    groups.lab.push("pnpm product:lab-ready");
+  }
+  if (product.mode === "lab" && product.profile === "lab-ready" && product.passed) {
+    groups.lab.push("pnpm product:dogfood");
+  }
+  if (product.mode === "lab" && product.profile === "dogfood" && product.passed) {
+    groups.release.push("pnpm product:release:fast");
+    groups.release.push("PRODUCT_READINESS_RUNS=3 PRODUCT_READINESS_REBOOT=1 PRODUCT_READINESS_FRESH_CLONE=1 PRODUCT_READINESS_POSTGRES_MIGRATION_MISMATCH=1 pnpm product:readiness");
+  }
+  return Object.fromEntries(
+    Object.entries(groups).map(([key, commands]) => [key, [...new Set(commands)]])
+  );
+}
+
+function labWaitCommands(labWait) {
+  const controller = labWait.controller_tailscale ?? {};
+  const waitCommand = controller.suggested_controller_wait_command ?? "pnpm lab:wait-online:quick";
+  const statusCommand = controller.suggested_controller_status_command ?? "pnpm setup:lab-status";
+  const bootstrapCommand = controller.suggested_local_bootstrap_command
+    ? `${controller.suggested_local_bootstrap_command} # run on the lab Mac after local login`
+    : "LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap # run on the lab Mac after local login";
+  const localBootstrapNeeded = labNeedsLocalBootstrap(labWait);
+  return localBootstrapNeeded
+    ? [bootstrapCommand, waitCommand, statusCommand]
+    : [waitCommand, statusCommand, bootstrapCommand];
+}
+
+function flattenCommandGroups(groups) {
+  return [...new Set([
+    ...(groups.local ?? []),
+    ...(groups.lab ?? []),
+    ...(groups.release ?? []),
+  ])];
+}
+
+function choosePrimaryNextAction(product, groups, labWait) {
+  const localBootstrapNeeded = labNeedsLocalBootstrap(labWait);
+  const groupOrder = localBootstrapNeeded
+    ? ["lab", "local", "release"]
+    : product.mode === "lab"
+      ? ["lab", "release", "local"]
+      : ["local", "lab", "release"];
+  for (const group of groupOrder) {
+    const command = (groups[group] ?? [])[0];
+    if (!command) continue;
+    const target = commandRequiresOtherMachine(command) ? "lab" : "controller";
+    return {
+      command,
+      clean_command: cleanCommand(command),
+      command_group: group,
+      target,
+      autorun: target === "controller",
+      reason: primaryNextActionReason({ group, target, localBootstrapNeeded, product }),
+      run_hint: target === "lab"
+        ? `Run on lab Mac after local login: ${cleanCommand(command)}`
+        : `Run on controller: ${cleanCommand(command)}`,
+    };
+  }
+  return undefined;
+}
+
+function primaryNextActionReason({ group, target, localBootstrapNeeded, product }) {
+  if (localBootstrapNeeded && group === "lab" && target === "lab") {
+    return "lab is offline or invisible enough that lab-local bootstrap is the highest-signal next step";
+  }
+  if (group === "lab") {
+    return product.mode === "lab"
+      ? "lab readiness is the current product gate"
+      : "fresh lab wait evidence has a lab recovery/status command";
+  }
+  if (group === "local") {
+    return "local setup/status is the current product blocker";
+  }
+  return "release proof is the next product-readiness gate";
+}
+
+function labNeedsLocalBootstrap(labWait) {
+  if (!labWait || labWait.passed === true) return false;
+  if (labWait.checks?.lab_tailscale_visible === false
+    && labWait.checks?.ssh_reachable !== true
+    && labWait.checks?.vnc_reachable !== true) {
+    return true;
+  }
+  if (labWait.checks?.lab_tailscale_offline !== true) return false;
+  return Number(labWait.checks?.lab_offline_last_seen_seconds) > 10 * 60;
+}
+
+function commandRequiresOtherMachine(command) {
+  return /run on the lab mac|pnpm lab:local-bootstrap/i.test(String(command ?? ""));
+}
+
+function cleanCommand(command) {
+  if (!command) return undefined;
+  return String(command).replace(/\s+#\s+run on the lab mac after local login\s*$/i, "");
+}
+
+function runSelfTest() {
+  const labBootstrap = "LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap # run on the lab Mac after local login";
+  const staleLabAction = choosePrimaryNextAction(
+    { mode: "local", profile: "quick" },
+    {
+      local: ["pnpm setup:prompt"],
+      lab: [labBootstrap, "pnpm lab:wait-online:quick", "pnpm setup:lab-status"],
+      release: [],
+    },
+    {
+      passed: false,
+      checks: {
+        lab_tailscale_offline: true,
+        lab_offline_last_seen_seconds: 601,
+      },
+    },
+  );
+  assert.equal(staleLabAction.command, labBootstrap);
+  assert.equal(staleLabAction.clean_command, "LAB_CONTROLLER_TAILSCALE_IP=100.76.35.66 pnpm lab:local-bootstrap");
+  assert.equal(staleLabAction.command_group, "lab");
+  assert.equal(staleLabAction.target, "lab");
+  assert.equal(staleLabAction.autorun, false);
+  assert.equal(staleLabAction.reason, "lab is offline or invisible enough that lab-local bootstrap is the highest-signal next step");
+  assert.equal(reusableProductReadinessManifest({ release_options: { step_timeout_seconds: 0.001 } }, 60), false);
+  assert.equal(reusableProductReadinessManifest({ release_options: { step_timeout_seconds: 59 } }, 60), false);
+  assert.equal(reusableProductReadinessManifest({ release_options: { step_timeout_seconds: 60 } }, 60), true);
+  assert.equal(reusableProductReadinessManifest({ release_options: { step_timeout_seconds: 0 } }, 60), true);
+  assert.equal(reusableProductReadinessManifest({ release_options: {} }, 60), true);
+
+  const localAction = choosePrimaryNextAction(
+    { mode: "local", profile: "quick" },
+    {
+      local: ["pnpm setup:prompt"],
+      lab: [labBootstrap],
+      release: [],
+    },
+    {
+      passed: false,
+      checks: {
+        lab_tailscale_offline: true,
+        lab_offline_last_seen_seconds: 20,
+      },
+    },
+  );
+  assert.equal(localAction.command, "pnpm setup:prompt");
+  assert.equal(localAction.command_group, "local");
+  assert.equal(localAction.target, "controller");
+  assert.equal(localAction.autorun, true);
+
+  const invisibleLabAction = choosePrimaryNextAction(
+    { mode: "local", profile: "quick" },
+    {
+      local: ["pnpm setup:prompt"],
+      lab: [labBootstrap, "pnpm lab:wait-online:quick", "pnpm setup:lab-status"],
+      release: [],
+    },
+    {
+      passed: false,
+      checks: {
+        ssh_reachable: false,
+        vnc_reachable: false,
+        lab_tailscale_visible: false,
+      },
+    },
+  );
+  assert.equal(invisibleLabAction.command, labBootstrap);
+  assert.equal(invisibleLabAction.command_group, "lab");
+  assert.equal(invisibleLabAction.target, "lab");
+  assert.equal(invisibleLabAction.autorun, false);
+
+  const labGreenAction = choosePrimaryNextAction(
+    { mode: "lab", profile: "quick" },
+    {
+      local: ["pnpm setup:prompt"],
+      lab: ["pnpm product:lab-ready"],
+      release: [],
+    },
+    undefined,
+  );
+  assert.equal(labGreenAction.command, "pnpm product:lab-ready");
+  assert.equal(labGreenAction.command_group, "lab");
+  assert.equal(labGreenAction.target, "controller");
+
+  const labReadyAction = choosePrimaryNextAction(
+    { mode: "lab", profile: "lab-ready" },
+    {
+      local: [],
+      lab: ["pnpm product:dogfood"],
+      release: [],
+    },
+    undefined,
+  );
+  assert.equal(labReadyAction.command, "pnpm product:dogfood");
+  assert.equal(labReadyAction.command_group, "lab");
+  assert.equal(labReadyAction.target, "controller");
+
+  const dogfoodPassedGroups = recommendCommandGroups(
+    { mode: "lab", profile: "dogfood", passed: true },
+    undefined,
+    {},
+    undefined,
+    undefined,
+  );
+  assert.equal(dogfoodPassedGroups.release[0], "pnpm product:release:fast");
+  assert.equal(dogfoodPassedGroups.release[1], "PRODUCT_READINESS_RUNS=3 PRODUCT_READINESS_REBOOT=1 PRODUCT_READINESS_FRESH_CLONE=1 PRODUCT_READINESS_POSTGRES_MIGRATION_MISMATCH=1 pnpm product:readiness");
+  const dogfoodPassedAction = choosePrimaryNextAction(
+    { mode: "lab", profile: "dogfood", passed: true },
+    dogfoodPassedGroups,
+    undefined,
+  );
+  assert.equal(dogfoodPassedAction.command, "pnpm product:release:fast");
+  assert.equal(dogfoodPassedAction.command_group, "release");
+  assert.equal(dogfoodPassedAction.target, "controller");
+
+  const dogfoodSummary = summarizeManifest("artifacts/lab-runs/status/manifest.json", {
+    kind: "eventloopos.lab_dogfood_status",
+    ok: false,
+    url: "http://127.0.0.1:4480",
+    queue_app_required: true,
+    checks: {
+      health_ok: true,
+      queue_app_process_visible: false,
+    },
+    failed_checks: ["queue_app_process_visible"],
+    artifacts: {
+      health: "health.json",
+    },
+  });
+  assert.equal(dogfoodSummary.kind, "eventloopos.lab_dogfood_status");
+  assert.equal(dogfoodSummary.ok, false);
+  assert.equal(dogfoodSummary.url, "http://127.0.0.1:4480");
+  assert.equal(dogfoodSummary.checks.queue_app_process_visible, false);
+  assert.deepEqual(dogfoodSummary.failed_checks, ["queue_app_process_visible"]);
+  assert.equal(dogfoodSummary.artifacts.health, "health.json");
+
+  const artifactContract = {
+    required_artifacts_passed: false,
+    required_artifact_status_count: 2,
+    snapshots: {
+      snapshot_after: [{
+        ok: false,
+        kind: "eventloopos.lab_snapshot",
+        snapshot_dir: "snapshot-after",
+        failed_checks: ["health_ok", "process_list_nonempty"],
+      }],
+    },
+    status_artifacts_passed: false,
+    status_artifact_status_count: 1,
+    status_artifacts: {
+      dogfood_status_before: [{
+        ok: false,
+        manifest: "dogfood-status/manifest.json",
+        kind: "eventloopos.lab_dogfood_status",
+        failed_checks: ["status_checks_green"],
+      }],
+    },
+    scenario_artifacts_passed: true,
+    scenario_artifact_status_count: 1,
+    scenario_artifacts: {
+      queue_followup_runs: [{ ok: true, manifest: "queue/manifest.json" }],
+    },
+    fault_artifacts: {
+      codex_app_server_down_fault_runs: [{
+        ok: false,
+        manifest: "fault/manifest.json",
+        kind: "eventloopos.lab_fault_proof",
+        artifact_contract: {
+          kind: "eventloopos.lab_fault_proof",
+          scenario: "codex-app-server-down",
+          missing: ["captures/after-fault/screen.png"],
+          failed_checks: ["screenshot_nonempty"],
+        },
+      }],
+    },
+    single_artifacts_passed: false,
+    single_artifact_status_count: 1,
+    single_artifacts: {
+      orphan_proof: [{
+        ok: false,
+        manifest: "orphan/manifest.json",
+        kind: "eventloopos.lab_orphan_proof",
+        failed_checks: ["assertions_green"],
+      }],
+    },
+  };
+  const failures = artifactContractStatusFailures(artifactContract);
+  assert.equal(failures.length, 4);
+  assert.equal(failures[0].key, "snapshot_after");
+  assert.equal(failures[0].status.snapshot_dir, "snapshot-after");
+  assert.equal(failures[1].key, "dogfood_status_before");
+  assert.equal(failures[2].key, "codex_app_server_down_fault_runs");
+  assert.equal(failures[2].status.artifact_contract.scenario, "codex-app-server-down");
+  assert.equal(failures[3].key, "orphan_proof");
+
+  const markdown = renderMarkdownSummary({
+    generated_at: "2026-06-02T00:00:00.000Z",
+    product_manifest: "artifacts/product-readiness/example/manifest.json",
+    mode: "lab",
+    profile: "release",
+    requested_runs: 3,
+    requested_fault_runs: 1,
+    required_release_runs: 3,
+    capture_video_seconds: 3,
+    release_options: {},
+    release_required_artifact_counts: { queue_followup_runs: 3, codex_app_server_down_fault_runs: 1 },
+    release_repeat_artifact_counts: {},
+    release_repeat_artifact_failures: {},
+    release_repeat_artifacts_passed: false,
+    artifact_audit: {
+      manifest: "artifacts/product-readiness-artifact-audit/example/manifest.json",
+      ok: false,
+      failure_count: 2,
+      failures: [{ evidence_key: "failed_lab_connectivity_status", failed_checks: ["manifest_green"] }],
+    },
+    artifact_contract: artifactContract,
+    artifact_contract_failures: failures,
+    passed: false,
+    profile_gate_passed: false,
+    profile_gate_reasons: [{ requirement: "dogfood requires green queue artifacts", evidence: "queue_followup_runs 0/1" }],
+    release_ready: false,
+    release_ready_reasons: [],
+    requirement_coverage_status_counts: {},
+    primary_next_action: undefined,
+    next_commands: [],
+    next_command_groups: {},
+    blockers: [],
+    failed_steps: [],
+    requirement_gaps: [],
+  });
+  assert.match(markdown, /Snapshot artifact status count: `1`/);
+  assert.match(markdown, /Fault runs: `1`/);
+  assert.match(markdown, /Release required artifact counts: .*queue_followup_runs=3/);
+  assert.match(markdown, /Release required artifact counts: .*codex_app_server_down_fault_runs=1/);
+  assert.match(markdown, /Artifact audit: `false`/);
+  assert.match(markdown, /Artifact audit failures: `2`/);
+  assert.match(markdown, /Dogfood status artifact contract passed: `false`/);
+  assert.match(markdown, /Required artifact contract passed: `false`/);
+  assert.match(markdown, /Fault\/connectivity artifact status count: `1`/);
+  assert.match(markdown, /Single artifact contract passed: `false`/);
+  assert.match(markdown, /Profile gate passed: `false`/);
+  assert.match(markdown, /Profile Gate Reasons/);
+  assert.match(markdown, /## Artifact Contract Failures/);
+  assert.match(markdown, /codex_app_server_down_fault_runs/);
+  assert.match(markdown, /snapshot_after/);
+  assert.match(markdown, /dogfood_status_before/);
+  assert.match(markdown, /orphan_proof/);
+  assert.match(markdown, /captures\/after-fault\/screen\.png/);
+}
+
+function reusableProductReadinessManifest(manifest, minTimeoutSeconds) {
+  const timeout = manifest?.release_options?.step_timeout_seconds;
+  if (timeout === undefined || timeout === null) return true;
+  const numeric = Number(timeout);
+  if (!Number.isFinite(numeric)) return false;
+  return numeric === 0 || numeric >= minTimeoutSeconds;
+}
+
+async function latestManifestByKind(root, kind, pattern = /manifest\.json$/, predicate = () => true) {
+  if (!existsSync(root)) {
+    return undefined;
+  }
+  const files = await walk(root);
+  const manifests = [];
+  for (const file of files.filter((candidate) => pattern.test(rel(candidate)))) {
+    try {
+      const manifest = await readJson(file);
+      if (manifest.kind === kind && predicate(manifest)) {
+        manifests.push(file);
+      }
+    } catch {
+      // Ignore malformed artifacts; summary should use the newest valid manifest.
+    }
+  }
+  if (manifests.length === 0) {
+    return undefined;
+  }
+  manifests.sort();
+  return manifests.at(-1);
+}
+
+async function walk(root) {
+  const entries = await readdir(root, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const absolute = path.join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await walk(absolute));
+    } else {
+      files.push(absolute);
+    }
+  }
+  return files;
+}
+
+async function readJson(file) {
+  return JSON.parse(await readFile(file, "utf8"));
+}
+
+async function mkdirp(dir) {
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(dir, { recursive: true });
+}
+
+function rel(file) {
+  return path.relative(repoRoot, file);
+}
+
+function utcStamp() {
+  return new Date().toISOString().replaceAll("-", "").replaceAll(":", "").replace(".", "-");
+}
+
+function countBy(items, key) {
+  return items.reduce((counts, item) => {
+    const value = item[key] ?? "unknown";
+    counts[value] = (counts[value] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
+function renderMarkdownSummary(summary) {
+  const lines = [];
+  lines.push("# eventloopOS Readiness TODO");
+  lines.push("");
+  lines.push(`Generated: ${summary.generated_at}`);
+  lines.push(`Product manifest: \`${summary.product_manifest}\``);
+  if (summary.lab_connectivity_manifest) {
+    lines.push(`Lab connectivity manifest: \`${summary.lab_connectivity_manifest}\``);
+  }
+  if (summary.lab_wait_manifest) {
+    lines.push(`Lab wait manifest: \`${summary.lab_wait_manifest}\``);
+  }
+  lines.push("");
+  lines.push("## Status");
+  lines.push("");
+  lines.push(`- Mode: \`${summary.mode}\``);
+  lines.push(`- Profile: \`${summary.profile}\``);
+  if (summary.requested_runs !== undefined) {
+    lines.push(`- Runs: \`${summary.requested_runs}/${summary.required_release_runs ?? "?"}\``);
+  }
+  if (summary.requested_fault_runs !== undefined) {
+    lines.push(`- Fault runs: \`${summary.requested_fault_runs}\``);
+  }
+  if (summary.capture_video_seconds !== undefined) {
+    lines.push(`- Capture video seconds: \`${summary.capture_video_seconds}\``);
+  }
+  if (summary.release_options) {
+    lines.push(`- Release options: ${formatChecks(summary.release_options)}`);
+  }
+  if (summary.release_repeat_artifact_counts) {
+    lines.push(`- Release repeat artifacts passed: \`${summary.release_repeat_artifacts_passed}\``);
+    if (summary.release_required_artifact_counts) {
+      lines.push(`- Release required artifact counts: ${formatChecks(summary.release_required_artifact_counts)}`);
+    }
+    lines.push(`- Release repeat artifact counts: ${formatChecks(summary.release_repeat_artifact_counts)}`);
+    if (summary.release_repeat_artifact_failures && Object.keys(summary.release_repeat_artifact_failures).length > 0) {
+      lines.push(`- Release repeat artifact failures: \`${JSON.stringify(summary.release_repeat_artifact_failures)}\``);
+    }
+  }
+  if (summary.artifact_audit) {
+    lines.push(`- Artifact audit: \`${summary.artifact_audit.ok}\` (${summary.artifact_audit.manifest})`);
+    lines.push(`- Artifact audit failures: \`${summary.artifact_audit.failure_count ?? 0}\``);
+    for (const failure of (summary.artifact_audit.failures ?? []).slice(0, 5)) {
+      const checks = Array.isArray(failure.failed_checks) && failure.failed_checks.length > 0
+        ? ` checks=${failure.failed_checks.join(",")}`
+        : "";
+      lines.push(`- Artifact audit failure: \`${failure.evidence_key ?? "unknown"}\`${checks}`);
+    }
+  }
+  if (summary.artifact_contract) {
+    if (summary.artifact_contract.snapshots) {
+      lines.push(`- Snapshot artifact status count: \`${Object.values(summary.artifact_contract.snapshots).flat().length}\``);
+    }
+    if (summary.artifact_contract.status_artifacts) {
+      lines.push(`- Dogfood status artifact contract passed: \`${summary.artifact_contract.status_artifacts_passed}\``);
+      lines.push(`- Dogfood status artifact count: \`${summary.artifact_contract.status_artifact_status_count ?? 0}\``);
+    }
+    if (summary.artifact_contract.required_artifacts_passed !== undefined) {
+      lines.push(`- Required artifact contract passed: \`${summary.artifact_contract.required_artifacts_passed}\``);
+      lines.push(`- Required artifact status count: \`${summary.artifact_contract.required_artifact_status_count ?? 0}\``);
+    }
+    lines.push(`- Scenario artifact contract passed: \`${summary.artifact_contract.scenario_artifacts_passed}\``);
+    lines.push(`- Scenario artifact status count: \`${summary.artifact_contract.scenario_artifact_status_count ?? 0}\``);
+    if (summary.artifact_contract.fault_artifacts) {
+      lines.push(`- Fault/connectivity artifact status count: \`${Object.values(summary.artifact_contract.fault_artifacts).flat().length}\``);
+    }
+    if (summary.artifact_contract.single_artifacts) {
+      lines.push(`- Single artifact contract passed: \`${summary.artifact_contract.single_artifacts_passed}\``);
+      lines.push(`- Single artifact status count: \`${summary.artifact_contract.single_artifact_status_count ?? 0}\``);
+    }
+  }
+  lines.push(`- Passed: \`${summary.passed}\``);
+  if (summary.profile_gate_passed !== undefined) {
+    lines.push(`- Profile gate passed: \`${summary.profile_gate_passed}\``);
+  }
+  lines.push(`- Release ready: \`${summary.release_ready}\``);
+  lines.push(`- Coverage counts: ${formatCounts(summary.requirement_coverage_status_counts)}`);
+  lines.push("");
+  if (summary.primary_next_action) {
+    lines.push("## Primary Next Action");
+    lines.push("");
+    lines.push(`- Command: \`${summary.primary_next_action.command}\``);
+    lines.push(`- Clean command: \`${summary.primary_next_action.clean_command}\``);
+    lines.push(`- Target: \`${summary.primary_next_action.target}\``);
+    lines.push(`- Autorun from controller: \`${summary.primary_next_action.autorun}\``);
+    lines.push(`- Reason: ${summary.primary_next_action.reason}`);
+    lines.push(`- Run hint: ${summary.primary_next_action.run_hint}`);
+    lines.push("");
+  }
+  if (summary.release_ready_reasons.length > 0) {
+    lines.push("## Release Ready Reasons");
+    lines.push("");
+    for (const reason of summary.release_ready_reasons) {
+      lines.push(`- ${reason.requirement}: ${reason.evidence}`);
+    }
+    lines.push("");
+  }
+  if ((summary.profile_gate_reasons ?? []).length > 0) {
+    lines.push("## Profile Gate Reasons");
+    lines.push("");
+    for (const reason of summary.profile_gate_reasons) {
+      lines.push(`- ${reason.requirement}: ${reason.evidence}`);
+    }
+    lines.push("");
+  }
+  if (summary.next_commands.length > 0) {
+    lines.push("## Next Commands");
+    lines.push("");
+    for (const [groupName, commands] of Object.entries(summary.next_command_groups ?? {})) {
+      if (commands.length === 0) continue;
+      lines.push(`### ${titleCase(groupName)}`);
+      lines.push("");
+      for (const command of commands) {
+        lines.push(`- \`${command}\``);
+      }
+      lines.push("");
+    }
+  }
+  if (summary.blockers.length > 0) {
+    lines.push("## Blockers");
+    lines.push("");
+    for (const blocker of summary.blockers) {
+      lines.push(`- ${blocker.requirement}`);
+      lines.push(`  - Evidence: \`${blocker.evidence}\``);
+    }
+    lines.push("");
+  }
+  if (summary.failed_steps.length > 0) {
+    lines.push("## Failed Steps");
+    lines.push("");
+    for (const step of summary.failed_steps) {
+      lines.push(`- ${step.name} (exit ${step.exit_code})`);
+      lines.push(`  - stdout: \`${step.stdout_path}\``);
+      lines.push(`  - stderr: \`${step.stderr_path}\``);
+    }
+    lines.push("");
+  }
+  if (summary.macos_permission_status) {
+    lines.push("## macOS Permission Status");
+    lines.push("");
+    lines.push(`- Manifest: \`${summary.macos_permission_status.manifest}\``);
+    lines.push(`- Permission status passed: \`${summary.macos_permission_status.ok}\``);
+    if (summary.macos_permission_status.checks && Object.keys(summary.macos_permission_status.checks).length > 0) {
+      lines.push(`- Checks: ${formatChecks(summary.macos_permission_status.checks)}`);
+    }
+    if (summary.macos_permission_status.aerospace_process_list !== undefined) {
+      lines.push(`- AeroSpace process list: \`${summary.macos_permission_status.aerospace_process_list || "(empty)"}\``);
+    }
+    for (const failure of summary.macos_permission_status.failures ?? []) {
+      lines.push(`- ${failure.requirement}`);
+      if (failure.fix) {
+        lines.push(`  - fix: ${failure.fix}`);
+      }
+    }
+    lines.push("");
+  }
+  if (summary.aerospace_repair) {
+    lines.push("## AeroSpace Repair");
+    lines.push("");
+    lines.push(`- Manifest: \`${summary.aerospace_repair.manifest}\``);
+    lines.push(`- Current for product run: \`${summary.aerospace_repair.current_for_product_run}\``);
+    if (summary.aerospace_repair.freshness) {
+      lines.push(`- Freshness: ${summary.aerospace_repair.freshness.reason} (${formatFreshness(summary.aerospace_repair.freshness)})`);
+    }
+    lines.push(`- Repair passed: \`${summary.aerospace_repair.ok}\``);
+    lines.push(`- Action: \`${summary.aerospace_repair.action ?? "unknown"}\``);
+    if (summary.aerospace_repair.checks && Object.keys(summary.aerospace_repair.checks).length > 0) {
+      lines.push(`- Checks: ${formatChecks(summary.aerospace_repair.checks)}`);
+    }
+    for (const fix of summary.aerospace_repair.fixes ?? []) {
+      lines.push(`- Fix: ${fix}`);
+    }
+    for (const command of summary.aerospace_repair.fix_commands ?? []) {
+      lines.push(`- Fix command: \`${command}\``);
+    }
+    lines.push("");
+  }
+  const artifactContractFailures = summary.artifact_contract_failures ?? artifactContractStatusFailures(summary.artifact_contract);
+  if (artifactContractFailures.length > 0) {
+    lines.push("## Artifact Contract Failures");
+    lines.push("");
+    for (const failure of artifactContractFailures) {
+      lines.push(`- ${failure.key}: \`${failure.status.manifest ?? "(missing manifest)"}\``);
+      if (failure.status.reason) {
+        lines.push(`  - reason: ${failure.status.reason}`);
+      }
+      const contract = failure.status.artifact_contract ?? failure.status;
+      if (contract?.kind) {
+        lines.push(`  - kind: \`${contract.kind}\``);
+      }
+      if (contract?.scenario) {
+        lines.push(`  - scenario: \`${contract.scenario}\``);
+      }
+      if (contract?.missing?.length > 0) {
+        lines.push(`  - missing: ${contract.missing.map((item) => `\`${item}\``).join(", ")}`);
+      }
+      if (contract?.failed_checks?.length > 0) {
+        lines.push(`  - failed checks: ${contract.failed_checks.map((item) => `\`${item}\``).join(", ")}`);
+      }
+    }
+    lines.push("");
+  }
+  if (summary.lab_connectivity?.failed_assertions?.length > 0) {
+    lines.push("## Lab Connectivity");
+    lines.push("");
+    for (const assertion of summary.lab_connectivity.failed_assertions) {
+      lines.push(`- ${assertion.name}`);
+      if (assertion.stderr) {
+        lines.push(`  - stderr: ${assertion.stderr}`);
+      }
+      if (assertion.fix) {
+        lines.push(`  - fix: ${assertion.fix}`);
+      }
+    }
+    lines.push("");
+  }
+  if (summary.lab_wait) {
+    lines.push("## Lab Wait");
+    lines.push("");
+    lines.push(`- Manifest: \`${summary.lab_wait.manifest}\``);
+    lines.push(`- Current for product run: \`${summary.lab_wait.current_for_product_run}\``);
+    if (summary.lab_wait.freshness) {
+      lines.push(`- Freshness: ${summary.lab_wait.freshness.reason} (${formatFreshness(summary.lab_wait.freshness)})`);
+    }
+    lines.push(`- Wait passed: \`${summary.lab_wait.ok}\``);
+    lines.push(`- Wait mode: \`${summary.lab_wait.wait_mode ?? "unknown"}\``);
+    if (summary.lab_wait.checks && Object.keys(summary.lab_wait.checks).length > 0) {
+      lines.push(`- Checks: ${formatChecks(summary.lab_wait.checks)}`);
+    }
+    for (const fix of summary.lab_wait.fixes ?? []) {
+      lines.push(`- Fix: ${fix}`);
+    }
+    lines.push("");
+  }
+  if (summary.requirement_gaps.length > 0) {
+    lines.push("## Requirement Gaps");
+    lines.push("");
+    const grouped = groupBy(summary.requirement_gaps, "status");
+    for (const status of ["blocked", "missing", "pending", "not_run"]) {
+      const gaps = grouped[status] ?? [];
+      if (gaps.length === 0) continue;
+      lines.push(`### ${status}`);
+      lines.push("");
+      for (const gap of gaps) {
+        lines.push(`- ${gap.id}: ${gap.requirement}`);
+        if (gap.note) {
+          lines.push(`  - note: ${gap.note}`);
+        }
+        if ((gap.evidence ?? []).length > 0) {
+          lines.push(`  - evidence: ${gap.evidence.map((item) => `\`${item}\``).join(", ")}`);
+        }
+      }
+      lines.push("");
+    }
+  }
+  lines.push("## Definition Of Ready");
+  lines.push("");
+  lines.push("- Lab release profile passes.");
+  lines.push("- Critical proofs pass at least 3 times.");
+  lines.push("- No manifest blockers remain.");
+  lines.push("- Every `requirement_coverage` item is `passed`.");
+  lines.push("- Reboot, fresh setup, no-orphan, and fault matrix evidence exists.");
+  lines.push("");
+  return `${lines.join("\n")}\n`;
+}
+
+function formatCounts(counts) {
+  const ordered = ["passed", "blocked", "missing", "pending", "not_run", "unknown"];
+  return ordered
+    .filter((key) => counts?.[key])
+    .map((key) => `${key}=${counts[key]}`)
+    .join(", ") || "none";
+}
+
+function formatChecks(checks) {
+  return Object.entries(checks)
+    .map(([key, value]) => `${key}=${value}`)
+    .join(", ");
+}
+
+function formatFreshness(freshness) {
+  const pieces = [];
+  if (freshness.age_at_reference_seconds !== undefined) {
+    pieces.push(`age=${Math.round(freshness.age_at_reference_seconds)}s`);
+  } else if (freshness.age_at_product_start_seconds !== undefined) {
+    pieces.push(`age=${Math.round(freshness.age_at_product_start_seconds)}s`);
+  }
+  if (freshness.max_age_seconds !== undefined) {
+    pieces.push(`max=${freshness.max_age_seconds}s`);
+  }
+  if (freshness.manifest_at) {
+    pieces.push(`manifest=${freshness.manifest_at}`);
+  }
+  return pieces.join(", ") || "no timestamp detail";
+}
+
+function artifactContractStatusFailures(artifactContract) {
+  if (!artifactContract) return [];
+  const groups = {
+    ...(artifactContract.snapshots ?? {}),
+    ...(artifactContract.status_artifacts ?? {}),
+    ...(artifactContract.scenario_artifacts ?? {}),
+    ...(artifactContract.fault_artifacts ?? {}),
+    ...(artifactContract.single_artifacts ?? {}),
+  };
+  return Object.entries(groups)
+    .flatMap(([key, statuses]) => (statuses ?? [])
+      .filter((status) => status.ok !== true)
+      .map((status) => ({ key, status })));
+}
+
+function groupBy(items, key) {
+  return items.reduce((groups, item) => {
+    const value = item[key] ?? "unknown";
+    groups[value] ??= [];
+    groups[value].push(item);
+    return groups;
+  }, {});
+}
+
+function titleCase(value) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function truthy(value) {
+  return ["1", "true", "yes", "on"].includes(String(value ?? "").toLowerCase());
+}

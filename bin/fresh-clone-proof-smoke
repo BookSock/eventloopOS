@@ -19,6 +19,12 @@ const manifest = {
   duration_ms: undefined,
   artifact_dir: artifactDir,
   temp_dir: undefined,
+  isolated_home: undefined,
+  fresh_account_simulation: {
+    isolated_home: false,
+    isolated_cache: false,
+    copied_untracked_files_respect_gitignore: true,
+  },
   steps: [],
   passed: false,
 };
@@ -29,7 +35,31 @@ writeManifest();
 try {
   const tempRoot = await mkdtemp(join(tmpdir(), "eventloopos-fresh-clone-"));
   const cloneDir = join(tempRoot, "eventloopOS");
+  const homeDir = join(tempRoot, "home");
+  const cacheDir = join(homeDir, ".cache");
+  const npmCacheDir = join(cacheDir, "npm");
+  const corepackHome = join(cacheDir, "corepack");
+  const pnpmHome = join(homeDir, ".local", "share", "pnpm");
+  for (const dir of [cloneDir, homeDir, cacheDir, npmCacheDir, corepackHome, pnpmHome]) {
+    mkdirSync(dir, { recursive: true });
+  }
+  const freshEnv = {
+    ...process.env,
+    HOME: homeDir,
+    XDG_CACHE_HOME: cacheDir,
+    npm_config_cache: npmCacheDir,
+    COREPACK_HOME: corepackHome,
+    PNPM_HOME: pnpmHome,
+    EVENTLOOPOS_FRESH_CLONE_SIMULATED_USER: "1",
+    PATH: `${pnpmHome}:${process.env.PATH ?? ""}`,
+  };
   manifest.temp_dir = cloneDir;
+  manifest.isolated_home = homeDir;
+  manifest.fresh_account_simulation = {
+    isolated_home: true,
+    isolated_cache: true,
+    copied_untracked_files_respect_gitignore: true,
+  };
   writeManifest();
 
   await step("copy tracked and shareable untracked files", async () => {
@@ -37,20 +67,25 @@ try {
     await spawnChecked("rsync", ["-a", "--from0", "--files-from=-", "./", `${cloneDir}/`], repoRoot, files.stdoutBuffer);
     return {
       clone_dir: cloneDir,
+      isolated_home: homeDir,
       copied_bytes: files.stdoutBuffer.length,
     };
   });
 
   await step("install dependencies from lockfile", async () => {
-    await spawnChecked("pnpm", ["install", "--frozen-lockfile"], cloneDir);
+    await spawnChecked("pnpm", ["install", "--frozen-lockfile"], cloneDir, undefined, freshEnv);
+    return {
+      home: homeDir,
+      cache: cacheDir,
+    };
   });
 
   await step("run fresh-clone preflight doctor", async () => {
-    await spawnChecked("pnpm", ["run", "dev:doctor:preflight"], cloneDir);
+    await spawnChecked("pnpm", ["run", "dev:doctor:preflight"], cloneDir, undefined, freshEnv);
   });
 
   await step("typecheck fresh clone", async () => {
-    await spawnChecked("pnpm", ["typecheck"], cloneDir);
+    await spawnChecked("pnpm", ["typecheck"], cloneDir, undefined, freshEnv);
   });
 
   manifest.passed = true;
@@ -100,10 +135,11 @@ async function step(name, run, options = {}) {
   }
 }
 
-async function spawnChecked(command, args, cwd, stdin) {
+async function spawnChecked(command, args, cwd, stdin, env = process.env) {
   return await new Promise((resolveSpawn, rejectSpawn) => {
     const child = spawn(command, args, {
       cwd,
+      env,
       stdio: [stdin ? "pipe" : "ignore", "inherit", "inherit"],
     });
     if (stdin) {

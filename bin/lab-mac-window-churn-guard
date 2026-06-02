@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-window-churn-guard [status]
+
+Read-only guard for the remote Mac lab desktop. Samples AeroSpace and optional
+Accessibility window bounds, then fails if window state churn suggests a layout
+loop. It does not open, close, move, or focus windows.
+
+Environment:
+  LAB_MAC_HOST              default: 100.71.111.25
+  LAB_MAC_USER              default: claw
+  LAB_MAC_KEY               default: ~/.ssh/eventloop_lab_mac
+  LAB_WINDOW_CHURN_SAMPLES  default: 10
+  LAB_WINDOW_CHURN_INTERVAL default: 0.5 seconds
+  LAB_WINDOW_CHURN_MAX_CHANGES default: 8
+  LAB_WINDOW_CHURN_COLLECT_BOUNDS default: 1
+EOF
+}
+
+action="${1:-status}"
+case "$action" in
+  status) ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown action: $action" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+samples="${LAB_WINDOW_CHURN_SAMPLES:-10}"
+interval="${LAB_WINDOW_CHURN_INTERVAL:-0.5}"
+max_changes="${LAB_WINDOW_CHURN_MAX_CHANGES:-8}"
+collect_bounds="${LAB_WINDOW_CHURN_COLLECT_BOUNDS:-1}"
+remote="${lab_user}@${lab_host}"
+remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
+
+if ! [[ "$samples" =~ ^[0-9]+$ ]] || [[ "$samples" -lt 2 ]]; then
+  echo "LAB_WINDOW_CHURN_SAMPLES must be an integer >= 2; got: $samples" >&2
+  exit 2
+fi
+if ! [[ "$max_changes" =~ ^[0-9]+$ ]]; then
+  echo "LAB_WINDOW_CHURN_MAX_CHANGES must be an integer; got: $max_changes" >&2
+  exit 2
+fi
+
+ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 "$remote" \
+  "bash -s -- '$remote_repo' '$samples' '$interval' '$max_changes' '$collect_bounds'" <<'REMOTE'
+set -euo pipefail
+
+repo="$1"
+samples="$2"
+interval="$3"
+max_changes="$4"
+collect_bounds="$5"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+cd "$repo"
+run="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-window-churn-guard"
+mkdir -p "$run/samples"
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/started-at.txt"
+printf "%s\n" "$samples" >"$run/sample-count.txt"
+printf "%s\n" "$interval" >"$run/sample-interval.txt"
+printf "%s\n" "$max_changes" >"$run/max-changes.txt"
+printf "%s\n" "$collect_bounds" >"$run/collect-bounds.txt"
+
+for index in $(seq 1 "$samples"); do
+  prefix="$run/samples/sample-$index"
+  date -u +%Y-%m-%dT%H:%M:%S.%3NZ >"$prefix.timestamp"
+  if command -v aerospace >/dev/null 2>&1; then
+    timeout 4 aerospace list-windows --all --json --format "%{window-id}%{app-name}%{window-title}%{window-layout}%{workspace}" >"$prefix.aerospace.json" 2>"$prefix.aerospace.err" || printf "[]\n" >"$prefix.aerospace.json"
+  else
+    printf "[]\n" >"$prefix.aerospace.json"
+    printf "aerospace missing\n" >"$prefix.aerospace.err"
+  fi
+  if [[ "$collect_bounds" == "1" ]]; then
+    timeout 4 osascript >"$prefix.bounds.json" 2>"$prefix.bounds.err" <<'APPLESCRIPT' || printf "[]\n" >"$prefix.bounds.json"
+use framework "Foundation"
+use scripting additions
+
+set rows to current application's NSMutableArray's array()
+tell application "System Events"
+  repeat with proc in application processes
+    try
+      set procName to name of proc as string
+      set winIndex to 0
+      repeat with candidateWindow in windows of proc
+        set winIndex to winIndex + 1
+        try
+          set winTitle to name of candidateWindow as string
+        on error
+          set winTitle to ""
+        end try
+        try
+          set winPosition to position of candidateWindow
+          set winSize to size of candidateWindow
+          set row to current application's NSMutableDictionary's dictionary()
+          (row's setObject:procName forKey:"app")
+          (row's setObject:winTitle forKey:"title")
+          (row's setObject:winIndex forKey:"index")
+          (row's setObject:{item 1 of winPosition, item 2 of winPosition} forKey:"position")
+          (row's setObject:{item 1 of winSize, item 2 of winSize} forKey:"size")
+          (rows's addObject:row)
+        end try
+      end repeat
+    end try
+  end repeat
+end tell
+set jsonData to current application's NSJSONSerialization's dataWithJSONObject:rows options:0 |error|:(missing value)
+set jsonText to current application's NSString's alloc()'s initWithData:jsonData encoding:(current application's NSUTF8StringEncoding)
+return jsonText as text
+APPLESCRIPT
+  else
+    printf "[]\n" >"$prefix.bounds.json"
+    printf "bounds collection disabled\n" >"$prefix.bounds.err"
+  fi
+  if [[ "$index" -lt "$samples" ]]; then
+    sleep "$interval"
+  fi
+done
+
+date -u +%Y-%m-%dT%H:%M:%SZ >"$run/finished-at.txt"
+RUN="$run" MAX_CHANGES="$max_changes" node <<'NODE' >"$run/manifest.json"
+const fs = require("node:fs");
+const path = require("node:path");
+
+const run = process.env.RUN;
+const maxChanges = Number(process.env.MAX_CHANGES ?? "8");
+const sampleDir = path.join(run, "samples");
+const files = fs.readdirSync(sampleDir);
+const sampleIds = [...new Set(files.map((file) => file.match(/^sample-(\d+)\./)?.[1]).filter(Boolean))]
+  .map(Number)
+  .sort((a, b) => a - b);
+
+const read = (name) => {
+  try { return fs.readFileSync(path.join(run, name), "utf8"); } catch { return ""; }
+};
+const readSampleJson = (id, suffix) => {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(path.join(sampleDir, `sample-${id}.${suffix}.json`), "utf8"));
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+};
+const normalizeTitle = (value) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 160);
+const aerospaceSignature = (win) => JSON.stringify({
+  app: win["app-name"] ?? win.app ?? "",
+  title: normalizeTitle(win["window-title"] ?? win.title ?? ""),
+  workspace: win.workspace ?? "",
+  layout: win["window-layout"] ?? win.layout ?? "",
+});
+const boundsKey = (win) => `${win.app ?? ""}#${win.index ?? ""}#${normalizeTitle(win.title ?? "")}`;
+const boundsSignature = (win) => JSON.stringify({
+  position: Array.isArray(win.position) ? win.position.map(Number) : [],
+  size: Array.isArray(win.size) ? win.size.map(Number) : [],
+});
+const countChanges = (samples, keyFn, sigFn) => {
+  const changesByKey = new Map();
+  const samplesSeenByKey = new Map();
+  const previousByKey = new Map();
+  for (const sample of samples) {
+    const seen = new Set();
+    for (const win of sample) {
+      const key = keyFn(win);
+      if (!key) continue;
+      const sig = sigFn(win);
+      seen.add(key);
+      samplesSeenByKey.set(key, (samplesSeenByKey.get(key) ?? 0) + 1);
+      if (previousByKey.has(key) && previousByKey.get(key) !== sig) {
+        changesByKey.set(key, (changesByKey.get(key) ?? 0) + 1);
+      }
+      previousByKey.set(key, sig);
+    }
+    for (const key of [...previousByKey.keys()]) {
+      if (!seen.has(key)) previousByKey.delete(key);
+    }
+  }
+  return [...changesByKey.entries()]
+    .map(([key, changes]) => ({ key, changes, samples_seen: samplesSeenByKey.get(key) ?? 0 }))
+    .sort((a, b) => b.changes - a.changes || a.key.localeCompare(b.key));
+};
+
+const aerospaceSamples = sampleIds.map((id) => readSampleJson(id, "aerospace"));
+const boundsSamples = sampleIds.map((id) => readSampleJson(id, "bounds"));
+const aerospaceChanges = countChanges(
+  aerospaceSamples,
+  (win) => String(win["window-id"] ?? win.id ?? ""),
+  aerospaceSignature,
+);
+const boundsChanges = countChanges(boundsSamples, boundsKey, boundsSignature);
+const totalAerospaceChanges = aerospaceChanges.reduce((sum, item) => sum + item.changes, 0);
+const totalBoundsChanges = boundsChanges.reduce((sum, item) => sum + item.changes, 0);
+const maxSingleWindowChanges = Math.max(0, ...aerospaceChanges.map((item) => item.changes), ...boundsChanges.map((item) => item.changes));
+const checks = {
+  enough_samples: sampleIds.length >= 2,
+  aerospace_samples_parse: aerospaceSamples.every(Array.isArray),
+  bounds_samples_parse: boundsSamples.every(Array.isArray),
+  max_single_window_changes_ok: maxSingleWindowChanges <= maxChanges,
+  total_bounds_changes_ok: totalBoundsChanges <= maxChanges * 2,
+};
+const failedChecks = Object.entries(checks).filter(([, ok]) => ok !== true).map(([key]) => key);
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.lab_window_churn_guard",
+  started_at: read("started-at.txt").trim(),
+  finished_at: read("finished-at.txt").trim(),
+  artifact_dir: run,
+  ok: failedChecks.length === 0,
+  passed: failedChecks.length === 0,
+  max_allowed_changes_per_window: maxChanges,
+  sample_count: sampleIds.length,
+  interval_seconds: Number(read("sample-interval.txt").trim()),
+  collect_bounds: read("collect-bounds.txt").trim() === "1",
+  checks,
+  failed_checks: failedChecks,
+  totals: {
+    aerospace_changes: totalAerospaceChanges,
+    bounds_changes: totalBoundsChanges,
+    max_single_window_changes: maxSingleWindowChanges,
+  },
+  top_aerospace_changes: aerospaceChanges.slice(0, 10),
+  top_bounds_changes: boundsChanges.slice(0, 10),
+  artifacts: {
+    samples: "samples/",
+  },
+};
+console.log(JSON.stringify(manifest, null, 2));
+NODE
+
+echo "$run"
+cat "$run/manifest.json"
+REMOTE
