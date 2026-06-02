@@ -340,6 +340,40 @@ try {
   assert.equal(fastFaultMatrixReleaseProduct.release_repeat_artifacts_passed, true);
   assert.equal(coverage(fastFaultMatrixReleaseProduct, "flake_confidence_3x").status, "passed");
 
+  const failedRebootAfterGreenEvidenceProduct = updateProduct({
+    profile: "release",
+    requested_runs: 1,
+    requested_fault_runs: 1,
+    blockers: [{ requirement: "Step failed: lab reboot proof", evidence: "reboot-proof/manifest.json" }],
+    steps: [{ name: "lab reboot proof", status: "failed", exit_code: 1 }],
+    evidence: {
+      queue_followup_runs: [{ local_manifest: greenQueueFollowupWithVideo }],
+      queue_decision_runs: [{ local_manifest: greenQueueFollowup }],
+      codex_recovery_runs: [{ local_manifest: greenQueueFollowup }],
+      completion_workspace_runs: [{ local_manifest: greenFault }],
+      codex_app_server_down_fault_runs: oneFaultRun,
+      orchestrator_crash_restart_fault_runs: oneFaultRun,
+      duplicate_idempotency_fault_runs: oneFaultRun,
+      postgres_unavailable_fault_runs: oneFaultRun,
+      postgres_migration_mismatch_fault_runs: oneFaultRun,
+      aerospace_unavailable_fault_runs: oneFaultRun,
+      aerospace_permission_missing_fault_runs: oneFaultRun,
+      ghostty_cleanup_failure_fault_runs: oneFaultRun,
+      screen_capture_denied_fault_runs: oneFaultRun,
+      queue_app_accessibility_denied_fault_runs: oneFaultRun,
+      aerospace_restore_server_down_fault_runs: oneFaultRun,
+      tailscale_vnc_disconnected_fault_runs: oneFaultRun,
+    },
+  });
+  assert.equal(failedRebootAfterGreenEvidenceProduct.passed, false);
+  assert.equal(coverage(failedRebootAfterGreenEvidenceProduct, "real_codex_task_start_bind").status, "passed");
+  assert.equal(coverage(failedRebootAfterGreenEvidenceProduct, "approve_defer_ignore_followups").status, "passed");
+  assert.equal(coverage(failedRebootAfterGreenEvidenceProduct, "resume_after_interruption_restart").status, "passed");
+  assert.equal(coverage(failedRebootAfterGreenEvidenceProduct, "workspace_save_restore").status, "passed");
+  assert.equal(coverage(failedRebootAfterGreenEvidenceProduct, "fault_codex_app_server_down").status, "passed");
+  assert.equal(coverage(failedRebootAfterGreenEvidenceProduct, "fault_stale_codex_thread").status, "passed");
+  assert.equal(coverage(failedRebootAfterGreenEvidenceProduct, "reboot_relaunch_remote").status, "blocked");
+
   const missingChecksDogfoodStatusProduct = updateProduct({
     profile: "dogfood",
     evidence: {
