@@ -74,7 +74,30 @@ write_manifest() {
   STATUS="$status" RUN_ID="$run_id" RUN_DIR="$run_dir" STARTED_AT="$started_at" FINISHED_AT="$finished_at" \
   REBOOT_REQUESTED="$reboot_requested" SSH_WENT_DOWN="$ssh_went_down" SSH_CAME_BACK="$ssh_came_back" \
   BOOT_TIME_CHANGED="$boot_time_changed" DOGFOOD_RESTARTED="$dogfood_restarted" POST_REBOOT_SCENARIO_OK="$post_reboot_scenario_ok" \
-  REMOTE_SCENARIO_RUN="$remote_scenario_run" node <<'NODE' >"$manifest"
+  REMOTE_SCENARIO_RUN="$remote_scenario_run" LAB_HOST="$lab_host" CONTROLLER_TAILSCALE_IP="$(controller_tailnet_ip)" node <<'NODE' >"$manifest"
+const fs = require("node:fs");
+const path = require("node:path");
+
+const runDir = process.env.RUN_DIR;
+const read = (relative) => {
+  try {
+    return fs.readFileSync(path.join(runDir, relative), "utf8").trim();
+  } catch {
+    return "";
+  }
+};
+const labHost = process.env.LAB_HOST ?? "";
+const controllerTailscale = read("controller-tailscale-last.out");
+const controllerTailscaleError = read("controller-tailscale-last.err");
+const controllerStatusLines = controllerTailscale.split(/\n/).filter((line) => {
+  return line.includes(labHost) || /eventloop-lab-mac/i.test(line);
+});
+const labStatusLine = controllerStatusLines.find((line) => line.includes(labHost) || /eventloop-lab-mac/i.test(line)) ?? "";
+const labTailscaleVisible = labStatusLine.length > 0;
+const labTailscaleOffline = /offline|last seen/i.test(labStatusLine);
+const labOfflineLastSeenSeconds = parseLastSeenSeconds(labStatusLine);
+const controllerTailnetIp = process.env.CONTROLLER_TAILSCALE_IP || "100.76.35.66";
+const localBootstrapCommand = `LAB_CONTROLLER_TAILSCALE_IP=${controllerTailnetIp} pnpm lab:local-bootstrap`;
 const manifest = {
   schema_version: 1,
   kind: "eventloopos.lab_mac_reboot_proof",
@@ -96,28 +119,74 @@ const manifest = {
   evidence: {
     before_state: `${process.env.RUN_DIR}/before-state.txt`,
     after_state: `${process.env.RUN_DIR}/after-state.txt`,
+    controller_tailscale_last: `${process.env.RUN_DIR}/controller-tailscale-last.out`,
+    controller_tailscale_last_error: `${process.env.RUN_DIR}/controller-tailscale-last.err`,
     post_reboot_status: `${process.env.RUN_DIR}/post-reboot-status.log`,
     post_reboot_snapshot: `${process.env.RUN_DIR}/post-reboot-snapshot`,
     post_reboot_queue_followup: process.env.REMOTE_SCENARIO_RUN
       ? `${process.env.RUN_DIR}/post-reboot-queue-followup`
       : undefined,
   },
+  controller_tailscale: {
+    controller_tailnet_ip: controllerTailnetIp,
+    lab_status_line: labStatusLine,
+    lab_tailscale_visible: labTailscaleVisible,
+    lab_tailscale_offline: labTailscaleOffline,
+    lab_offline_last_seen_seconds: labOfflineLastSeenSeconds,
+    stderr: controllerTailscaleError,
+    suggested_lab_command: localBootstrapCommand,
+    suggested_wait_command: "pnpm lab:wait-online:quick",
+    suggested_status_command: "pnpm setup:lab-status",
+  },
   fixes: [],
 };
 if (!manifest.checks.ssh_came_back) {
-  manifest.fixes.push("Verify Remote Login, Tailscale startup, Screen Sharing, and auto-login; then run `pnpm product:quick` before retrying `LAB_MAC_REBOOT=1 bin/lab-mac-reboot-proof`.");
+  manifest.fixes.push(`SSH did not return after reboot. On the lab Mac console, log into the lab user, confirm Tailscale is connected, confirm Remote Login and Screen Sharing are enabled, then run \`${localBootstrapCommand}\` from the eventloopOS checkout.`);
+  manifest.fixes.push("From the controller, rerun `pnpm lab:wait-online:quick`; once reachable, run `pnpm product:dogfood` before retrying reboot proof.");
 }
-if (!manifest.checks.boot_time_changed) {
+if (!manifest.checks.boot_time_changed && !manifest.checks.ssh_went_down) {
   manifest.fixes.push("Verify the lab user can request restart from SSH via System Events, or rerun with LAB_MAC_LOGIN_PASSWORD so the proof can use sudo shutdown fallback.");
 }
-if (!manifest.checks.dogfood_restarted) {
+if (manifest.checks.ssh_came_back && !manifest.checks.dogfood_restarted) {
   manifest.fixes.push("Inspect post-reboot-status.log and latest dogfood-live artifact on lab Mac.");
 }
-if (!manifest.checks.post_reboot_queue_followup_ok) {
+if (manifest.checks.ssh_came_back && !manifest.checks.post_reboot_queue_followup_ok) {
   manifest.fixes.push("Inspect post-reboot queue followup manifest and app/orchestrator logs.");
 }
 console.log(JSON.stringify(manifest, null, 2));
+
+function parseLastSeenSeconds(line) {
+  const match = String(line ?? "").match(/last seen\s+(\d+)\s*([smhd])\s+ago/i);
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return undefined;
+  const unit = match[2].toLowerCase();
+  if (unit === "s") return value;
+  if (unit === "m") return value * 60;
+  if (unit === "h") return value * 60 * 60;
+  if (unit === "d") return value * 24 * 60 * 60;
+  return undefined;
+}
 NODE
+}
+
+controller_tailnet_ip() {
+  if command -v tailscale >/dev/null 2>&1; then
+    tailscale ip -4 2>/dev/null | head -n 1 || true
+  fi
+}
+
+collect_controller_transport_state() {
+  local label="$1"
+  mkdir -p "$run_dir"
+  if command -v tailscale >/dev/null 2>&1; then
+    tailscale status >"$run_dir/controller-tailscale-$label.out" 2>"$run_dir/controller-tailscale-$label.err" || true
+  else
+    echo "tailscale CLI missing on controller" >"$run_dir/controller-tailscale-$label.err"
+    : >"$run_dir/controller-tailscale-$label.out"
+  fi
+  cp "$run_dir/controller-tailscale-$label.out" "$run_dir/controller-tailscale-last.out" 2>/dev/null || true
+  cp "$run_dir/controller-tailscale-$label.err" "$run_dir/controller-tailscale-last.err" 2>/dev/null || true
 }
 
 collect_remote_state() {
@@ -209,7 +278,10 @@ wait_for_ssh_down() {
 
 wait_for_ssh_up() {
   local deadline=$((SECONDS + timeout_seconds))
+  local attempt=0
   while (( SECONDS < deadline )); do
+    attempt=$((attempt + 1))
+    collect_controller_transport_state "wait-up-$attempt"
     if ssh_probe; then
       return 0
     fi
@@ -235,6 +307,7 @@ remote_scenario_run=""
 
 echo "lab reboot proof run: $run_dir"
 
+collect_controller_transport_state before
 collect_remote_state before
 sync_run
 cp "$run_dir/before-state.txt" "$run_dir/before-state.local-copy.txt" 2>/dev/null || true
@@ -245,6 +318,7 @@ echo "reboot requested for $remote"
 
 if wait_for_ssh_down; then
   ssh_went_down=true
+  collect_controller_transport_state ssh-down
   echo "ssh went down"
 else
   echo "ssh did not go down within 90s after GUI restart request" >&2
@@ -264,9 +338,11 @@ fi
 
 if wait_for_ssh_up; then
   ssh_came_back=true
+  collect_controller_transport_state ssh-up
   echo "ssh came back"
 else
   echo "ssh did not come back within ${timeout_seconds}s" >&2
+  collect_controller_transport_state failed
   sync_run
   write_manifest failed
   jq '{passed, checks, evidence, fixes}' "$manifest"
