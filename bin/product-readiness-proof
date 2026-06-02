@@ -1950,6 +1950,26 @@ fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 NODE
 }
 
+append_run_evidence() {
+  local key="$1"
+  local source_field="$2"
+  local source_value="$3"
+  local local_manifest="$4"
+  EVIDENCE_KEY="$key" SOURCE_FIELD="$source_field" SOURCE_VALUE="$source_value" LOCAL_MANIFEST="$local_manifest" MANIFEST="$manifest" node <<'NODE'
+const fs = require("node:fs");
+const manifestPath = process.env.MANIFEST;
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+const evidence = manifest.evidence[process.env.EVIDENCE_KEY];
+const runs = Array.isArray(evidence) ? evidence : [];
+runs.push({
+  [process.env.SOURCE_FIELD]: process.env.SOURCE_VALUE,
+  local_manifest: process.env.LOCAL_MANIFEST,
+});
+manifest.evidence[process.env.EVIDENCE_KEY] = runs;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
 add_blocker() {
   local requirement="$1"
   local evidence="$2"
@@ -2562,6 +2582,7 @@ run_lab() {
     if [[ -n "$queue_run" ]]; then
       queue_runs+=("$queue_run")
       sync_remote_artifact "$queue_run" "queue-followup-$i"
+      append_run_evidence "queue_followup_runs" "remote" "$queue_run" "$artifact_dir/queue-followup-$i/manifest.json"
     fi
 
     if [[ "$profile" != "release" ]]; then
@@ -2574,6 +2595,7 @@ run_lab() {
     if [[ -n "$decision_run" ]]; then
       decision_runs+=("$decision_run")
       sync_remote_artifact "$decision_run" "queue-decisions-$i"
+      append_run_evidence "queue_decision_runs" "remote" "$decision_run" "$artifact_dir/queue-decisions-$i/manifest.json"
     fi
 
     run_step "lab codex recovery run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 LAB_MAC_CAPTURE_VIDEO_SECONDS="$capture_video_seconds" bin/lab-mac-scenario codex-recovery
@@ -2582,6 +2604,7 @@ run_lab() {
     if [[ -n "$recovery_run" ]]; then
       recovery_runs+=("$recovery_run")
       sync_remote_artifact "$recovery_run" "codex-recovery-$i"
+      append_run_evidence "codex_recovery_runs" "remote" "$recovery_run" "$artifact_dir/codex-recovery-$i/manifest.json"
     fi
 
     run_step "lab codex completion workspace run $i" bin/lab-mac-completion-workspace-proof
@@ -2590,6 +2613,7 @@ run_lab() {
     if [[ -n "$workspace_run" ]]; then
       workspace_runs+=("$workspace_run")
       sync_remote_artifact "$workspace_run" "completion-workspace-$i"
+      append_run_evidence "completion_workspace_runs" "remote" "$workspace_run" "$artifact_dir/completion-workspace-$i/manifest.json"
     fi
 
     if [[ "$i" -gt "$fault_runs" ]]; then
@@ -2602,6 +2626,7 @@ run_lab() {
     if [[ -n "$fault_run" ]]; then
       codex_app_server_fault_runs+=("$fault_run")
       sync_remote_artifact "$fault_run" "fault-codex-app-server-down-$i"
+      append_run_evidence "codex_app_server_down_fault_runs" "remote" "$fault_run" "$artifact_dir/fault-codex-app-server-down-$i/manifest.json"
     fi
 
     run_step "lab orchestrator crash restart fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof orchestrator-crash-restart
@@ -2610,6 +2635,7 @@ run_lab() {
     if [[ -n "$restart_fault_run" ]]; then
       restart_fault_runs+=("$restart_fault_run")
       sync_remote_artifact "$restart_fault_run" "fault-orchestrator-crash-restart-$i"
+      append_run_evidence "orchestrator_crash_restart_fault_runs" "remote" "$restart_fault_run" "$artifact_dir/fault-orchestrator-crash-restart-$i/manifest.json"
     fi
 
     run_step "lab duplicate idempotency fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof duplicate-idempotency
@@ -2618,6 +2644,7 @@ run_lab() {
     if [[ -n "$duplicate_fault_run" ]]; then
       duplicate_fault_runs+=("$duplicate_fault_run")
       sync_remote_artifact "$duplicate_fault_run" "fault-duplicate-idempotency-$i"
+      append_run_evidence "duplicate_idempotency_fault_runs" "remote" "$duplicate_fault_run" "$artifact_dir/fault-duplicate-idempotency-$i/manifest.json"
     fi
 
     run_step "lab postgres unavailable fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof postgres-unavailable
@@ -2626,6 +2653,7 @@ run_lab() {
     if [[ -n "$postgres_fault_run" ]]; then
       postgres_fault_runs+=("$postgres_fault_run")
       sync_remote_artifact "$postgres_fault_run" "fault-postgres-unavailable-$i"
+      append_run_evidence "postgres_unavailable_fault_runs" "remote" "$postgres_fault_run" "$artifact_dir/fault-postgres-unavailable-$i/manifest.json"
     fi
 
     if [[ "$include_postgres_migration_mismatch" == "1" ]]; then
@@ -2635,6 +2663,7 @@ run_lab() {
       if [[ -n "$postgres_migration_mismatch_fault_run" ]]; then
         postgres_migration_mismatch_fault_runs+=("$postgres_migration_mismatch_fault_run")
         sync_remote_artifact "$postgres_migration_mismatch_fault_run" "fault-postgres-migration-mismatch-$i"
+        append_run_evidence "postgres_migration_mismatch_fault_runs" "remote" "$postgres_migration_mismatch_fault_run" "$artifact_dir/fault-postgres-migration-mismatch-$i/manifest.json"
       fi
     fi
 
@@ -2644,6 +2673,7 @@ run_lab() {
     if [[ -n "$aerospace_fault_run" ]]; then
       aerospace_fault_runs+=("$aerospace_fault_run")
       sync_remote_artifact "$aerospace_fault_run" "fault-aerospace-unavailable-$i"
+      append_run_evidence "aerospace_unavailable_fault_runs" "remote" "$aerospace_fault_run" "$artifact_dir/fault-aerospace-unavailable-$i/manifest.json"
     fi
 
     run_step "lab aerospace permission missing fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof aerospace-permission-missing
@@ -2652,6 +2682,7 @@ run_lab() {
     if [[ -n "$aerospace_permission_fault_run" ]]; then
       aerospace_permission_fault_runs+=("$aerospace_permission_fault_run")
       sync_remote_artifact "$aerospace_permission_fault_run" "fault-aerospace-permission-missing-$i"
+      append_run_evidence "aerospace_permission_missing_fault_runs" "remote" "$aerospace_permission_fault_run" "$artifact_dir/fault-aerospace-permission-missing-$i/manifest.json"
     fi
 
     run_step "lab ghostty cleanup failure fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof ghostty-cleanup-failure
@@ -2660,6 +2691,7 @@ run_lab() {
     if [[ -n "$ghostty_cleanup_fault_run" ]]; then
       ghostty_cleanup_fault_runs+=("$ghostty_cleanup_fault_run")
       sync_remote_artifact "$ghostty_cleanup_fault_run" "fault-ghostty-cleanup-failure-$i"
+      append_run_evidence "ghostty_cleanup_failure_fault_runs" "remote" "$ghostty_cleanup_fault_run" "$artifact_dir/fault-ghostty-cleanup-failure-$i/manifest.json"
     fi
 
     run_step "lab screen capture denied fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof screen-capture-denied
@@ -2668,6 +2700,7 @@ run_lab() {
     if [[ -n "$screen_capture_fault_run" ]]; then
       screen_capture_fault_runs+=("$screen_capture_fault_run")
       sync_remote_artifact "$screen_capture_fault_run" "fault-screen-capture-denied-$i"
+      append_run_evidence "screen_capture_denied_fault_runs" "remote" "$screen_capture_fault_run" "$artifact_dir/fault-screen-capture-denied-$i/manifest.json"
     fi
 
     run_step "lab queue app accessibility denied fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof queue-app-accessibility-denied
@@ -2676,6 +2709,7 @@ run_lab() {
     if [[ -n "$queue_app_accessibility_fault_run" ]]; then
       queue_app_accessibility_fault_runs+=("$queue_app_accessibility_fault_run")
       sync_remote_artifact "$queue_app_accessibility_fault_run" "fault-queue-app-accessibility-denied-$i"
+      append_run_evidence "queue_app_accessibility_denied_fault_runs" "remote" "$queue_app_accessibility_fault_run" "$artifact_dir/fault-queue-app-accessibility-denied-$i/manifest.json"
     fi
 
     run_step "lab aerospace restore server down fault run $i" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-fault-proof aerospace-restore-server-down
@@ -2684,6 +2718,7 @@ run_lab() {
     if [[ -n "$aerospace_restore_fault_run" ]]; then
       aerospace_restore_fault_runs+=("$aerospace_restore_fault_run")
       sync_remote_artifact "$aerospace_restore_fault_run" "fault-aerospace-restore-server-down-$i"
+      append_run_evidence "aerospace_restore_server_down_fault_runs" "remote" "$aerospace_restore_fault_run" "$artifact_dir/fault-aerospace-restore-server-down-$i/manifest.json"
     fi
 
     run_step "lab tailscale vnc disconnected fault run $i" bin/lab-mac-connectivity-proof fault
@@ -2692,6 +2727,7 @@ run_lab() {
     if [[ -n "$connectivity_fault_run" ]]; then
       connectivity_fault_runs+=("$connectivity_fault_run")
       copy_local_artifact "$connectivity_fault_run" "fault-tailscale-vnc-disconnected-$i"
+      append_run_evidence "tailscale_vnc_disconnected_fault_runs" "local" "$connectivity_fault_run" "$artifact_dir/fault-tailscale-vnc-disconnected-$i/manifest.json"
     fi
     done
   fi
