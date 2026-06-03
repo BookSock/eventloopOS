@@ -9,8 +9,11 @@ import { chromium } from "playwright";
 
 const extensionDir = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
 const defaultAllowedOrigins = ["file://*", "http://localhost:*", "http://127.0.0.1:*"];
+const skipBrowserE2E = process.env.EVENTLOOPOS_SKIP_BROWSER_E2E === "1";
 
-test("MV3 extension captures and restores browser page context in Chromium", async () => {
+test("MV3 extension captures and restores browser page context in Chromium", {
+  skip: skipBrowserE2E ? "browser install is skipped in fast Linux CI" : false
+}, async () => {
   const server = await startFixtureServer();
   const userDataDir = await mkdtemp(path.join(tmpdir(), "eventloopos-browser-e2e-"));
   const secondUserDataDir = await mkdtemp(path.join(tmpdir(), "eventloopos-browser-e2e-profile-"));
