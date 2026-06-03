@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 public protocol QueueClient: Sendable {
     func fetchQueue() async throws -> [ReviewPacket]

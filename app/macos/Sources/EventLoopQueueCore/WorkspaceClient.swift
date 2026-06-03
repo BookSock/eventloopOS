@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 public protocol WorkspaceClient: Sendable {
     func status() async throws -> WorkspaceStatusEnvelope
