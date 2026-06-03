@@ -19,4 +19,5 @@ jobs:
           cache: pnpm
       - run: sudo apt-get update && sudo apt-get install -y zsh
       - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @eventloopos/browser-extension exec playwright install --with-deps chromium
       - run: pnpm run ci
