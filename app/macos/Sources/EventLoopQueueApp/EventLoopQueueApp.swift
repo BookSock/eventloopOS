@@ -279,14 +279,19 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "eventloopOS Queue"
-        window.identifier = NSUserInterfaceItemIdentifier("eventloopos-queue-harness-window")
+        Self.configureHarnessWindow(window)
         window.contentViewController = NSHostingController(rootView: QueueWindowView(viewModel: viewModel))
         window.center()
         window.makeKeyAndOrderFront(nil)
         harnessWindow = window
         NSApp.activate(ignoringOtherApps: true)
         return true
+    }
+
+    static func configureHarnessWindow(_ window: NSWindow) {
+        window.title = "eventloopOS Queue"
+        window.identifier = NSUserInterfaceItemIdentifier("eventloopos-queue-harness-window")
+        window.level = .floating
     }
 
     @discardableResult

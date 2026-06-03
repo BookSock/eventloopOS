@@ -25,6 +25,35 @@ title="${SCREEN_SHARING_TITLE:-}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 output="${1:-artifacts/screen-sharing-captures/$stamp-screen-sharing.png}"
 
+raise_exit=0
+osascript - "$owner" "$title" <<'APPLESCRIPT' >/dev/null 2>&1 || raise_exit=$?
+on run argv
+  set ownerNeedle to item 1 of argv
+  set titleNeedle to ""
+  if (count of argv) > 1 then set titleNeedle to item 2 of argv
+
+  tell application "System Events"
+    repeat with candidateProcess in application processes
+      set candidateName to name of candidateProcess
+      if candidateName contains ownerNeedle then
+        tell candidateProcess
+          set frontmost to true
+          repeat with candidateWindow in windows
+            set candidateTitle to name of candidateWindow
+            if titleNeedle is "" or candidateTitle contains titleNeedle or candidateName contains titleNeedle then
+              perform action "AXRaise" of candidateWindow
+              exit repeat
+            end if
+          end repeat
+        end tell
+        exit repeat
+      end if
+    end repeat
+  end tell
+end run
+APPLESCRIPT
+sleep 0.2
+
 window_id="$(
   swift - "$owner" "$title" <<'SWIFT'
 import CoreGraphics
@@ -71,6 +100,7 @@ cat >"$manifest" <<EOF
   "window_id": "$window_id",
   "owner_filter": "$owner",
   "title_filter": "$title",
+  "raise_exit": $raise_exit,
   "output": "$output",
   "captured_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }

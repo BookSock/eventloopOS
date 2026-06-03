@@ -65,4 +65,19 @@ final class QueueAppDelegateTests: XCTestCase {
 
         XCTAssertFalse(delegate.focusExistingQueueWindow())
     }
+
+    func testHarnessWindowIsConfiguredAsFloatingQueueSurface() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+
+        QueueAppDelegate.configureHarnessWindow(window)
+
+        XCTAssertEqual(window.title, "eventloopOS Queue")
+        XCTAssertEqual(window.identifier?.rawValue, "eventloopos-queue-harness-window")
+        XCTAssertEqual(window.level, .floating)
+    }
 }
