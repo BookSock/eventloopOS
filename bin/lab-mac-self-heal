@@ -12,7 +12,8 @@ exact fixes.
 
 Environment:
   LAB_CONTROLLER_TAILSCALE_IP optional controller 100.x IP or MagicDNS name
-  LAB_SELF_HEAL_START_INTERVAL default: 300 seconds
+  LAB_SELF_HEAL_START_INTERVAL default: 20 seconds
+  LAB_SELF_HEAL_BOOT_DELAY_SECONDS default: 10; wait once per boot before first check
   LAB_SELF_HEAL_NO_LAUNCHCTL   default: 0; write plist without loading it
   LAB_SELF_HEAL_SKIP_OPEN      default: 0; do not open Tailscale/AeroSpace
   LAB_SELF_HEAL_AEROSPACE_MODE default: auto; auto|launchservices|custom|skip
@@ -55,7 +56,7 @@ terminal_aerospace_plist="$agent_dir/$terminal_aerospace_label.plist"
 log_dir="$HOME/Library/Logs/eventloopOS"
 state_dir="$HOME/.eventloopos/lab-self-heal"
 proof_lock_dir="artifacts/.locks/product-readiness-lab.lock"
-start_interval="${LAB_SELF_HEAL_START_INTERVAL:-300}"
+start_interval="${LAB_SELF_HEAL_START_INTERVAL:-20}"
 controller_tailnet_ip="${LAB_CONTROLLER_TAILSCALE_IP:-}"
 aerospace_mode="${LAB_SELF_HEAL_AEROSPACE_MODE:-auto}"
 custom_aerospace_runner="$HOME/.eventloop-lab/bin/run-aerospace.command"
@@ -223,6 +224,38 @@ tailscale_cli() {
 tailscale_has_tailnet_ip() {
   local cli="$1"
   TAILSCALE_BE_CLI=1 "$cli" ip -4 2>/dev/null | grep -E '^100\.' >/dev/null 2>&1
+}
+
+current_boot_key() {
+  local key
+  key="$(sysctl -n kern.boottime 2>/dev/null | sed -E 's/.*sec = ([0-9]+).*/\1/' || true)"
+  if [[ -n "$key" && "$key" != *"{"* ]]; then
+    printf "%s\n" "$key"
+    return
+  fi
+  date +%s
+}
+
+maybe_wait_for_boot_network() {
+  local delay="${LAB_SELF_HEAL_BOOT_DELAY_SECONDS:-10}"
+  if ! [[ "$delay" =~ ^[0-9]+$ ]]; then
+    delay=10
+  fi
+  if [[ "$delay" == "0" ]]; then
+    echo "boot_delay_seconds=0"
+    return
+  fi
+  local boot_key marker last_key
+  boot_key="$(current_boot_key)"
+  marker="$state_dir/last-boot-delay-key"
+  last_key="$(cat "$marker" 2>/dev/null || true)"
+  if [[ "$last_key" == "$boot_key" ]]; then
+    echo "boot_delay_skipped=1 boot_key=$boot_key"
+    return
+  fi
+  echo "boot_delay_seconds=$delay boot_key=$boot_key"
+  sleep "$delay"
+  printf "%s\n" "$boot_key" >"$marker"
 }
 
 ensure_tailscale_running() {
@@ -408,6 +441,9 @@ run_once() {
     echo "controller=$controller_tailnet_ip"
     echo "proof_lock_dir=$proof_lock_dir"
     echo "proof_lock_active=$proof_active"
+    echo
+    echo "== boot network wait =="
+    maybe_wait_for_boot_network
     echo
     echo "== keep awake =="
     if [[ "${LAB_SELF_HEAL_SKIP_CAFFEINATE:-0}" == "1" ]]; then
