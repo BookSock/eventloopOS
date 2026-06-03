@@ -53,6 +53,9 @@ Verify:
 bin/human-demo-result-verify artifacts/human-demo-results/<result>.md --lab-status
 ```
 
+The verifier writes `artifacts/human-demo-verifications/*/manifest.json`; use
+that manifest as the final machine-readable closeout evidence.
+
 ## Current Blockers
 
 - Human dogfood is not yet recorded.

@@ -11,13 +11,15 @@ process.chdir(repoRoot);
 const args = process.argv.slice(2);
 const jsonOnly = args.includes("--json");
 const includeLabStatus = args.includes("--lab-status");
-const positionalArgs = args.filter((arg) => !arg.startsWith("--"));
+const outputArg = valueAfter("--output");
+const positionalArgs = positionalArguments();
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/human-demo-result-verify [artifacts/human-demo-results/...md] [--json] [--lab-status]
+  console.log(`Usage: bin/human-demo-result-verify [artifacts/human-demo-results/...md] [--json] [--lab-status] [--output path]
 
 Verify a filled human demo result artifact. Use --lab-status after Jason's
 hands-on pass to also prove the Mac Studio dogfood stack is still healthy.
+Writes a verification manifest by default.
 `);
   process.exit(0);
 }
@@ -46,10 +48,14 @@ const failedChecks = [
   ...verification.failed_checks,
   ...(labStatus && labStatus.ok !== true ? ["lab_status_ok"] : []),
 ];
+const artifactDir = defaultArtifactDir();
+const manifestPath = outputArg ?? path.join(artifactDir, "manifest.json");
 const output = {
   schema_version: 1,
   kind: "eventloopos.human_demo_result_verify",
   verified_at: new Date().toISOString(),
+  artifact_dir: path.dirname(manifestPath),
+  verification_manifest_path: manifestPath,
   result_path: path.relative(repoRoot, absoluteResultPath),
   ok: failedChecks.length === 0,
   passed: failedChecks.length === 0,
@@ -63,11 +69,13 @@ const output = {
   ship_block_decision: verification.ship_block_decision,
   lab_status: labStatus,
 };
+writeJsonManifest(manifestPath, output);
 
 if (jsonOnly) {
   console.log(JSON.stringify(output, null, 2));
 } else {
   console.log(`human demo result: ${output.result_path}`);
+  console.log(`verification manifest: ${output.verification_manifest_path}`);
   console.log(`verified: ${output.ok ? "yes" : "no"}`);
   if (output.failed_checks.length > 0) console.log(`failed checks: ${output.failed_checks.join(", ")}`);
   console.log(JSON.stringify(output, null, 2));
@@ -84,6 +92,45 @@ function latestResultPath() {
     .sort();
   const latest = candidates.at(-1);
   return latest ? path.relative(repoRoot, latest) : undefined;
+}
+
+function valueAfter(flag) {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) {
+    console.error(`Missing value for ${flag}`);
+    process.exit(2);
+  }
+  return value;
+}
+
+function positionalArguments() {
+  const result = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--output") {
+      index += 1;
+      continue;
+    }
+    if (arg.startsWith("--")) continue;
+    result.push(arg);
+  }
+  return result;
+}
+
+function defaultArtifactDir() {
+  return path.join("artifacts", "human-demo-verifications", `${utcStamp()}-human-demo-result-verify`);
+}
+
+function writeJsonManifest(relativePath, value) {
+  const absolutePath = path.resolve(repoRoot, relativePath);
+  fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+  fs.writeFileSync(absolutePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function utcStamp() {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
 
 function verifyResultText(text) {

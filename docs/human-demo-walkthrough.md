@@ -140,6 +140,10 @@ health:
 bin/human-demo-result-verify artifacts/human-demo-results/<result>.md --lab-status
 ```
 
+The verifier writes `artifacts/human-demo-verifications/*/manifest.json`. Keep
+that manifest path with the filled result artifact as the final human gate
+evidence.
+
 ## Current TODO
 
 Human dogfood is still the remaining subjective proof. Automated Mac Studio proof passes, but Jason should run the walkthrough with real keyboard/mouse, record UX friction, and pass `bin/human-demo-result-verify --lab-status` before calling the goal complete. See `docs/human-demo-completion-audit.md` for the requirement-by-requirement evidence map.
