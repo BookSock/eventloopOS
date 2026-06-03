@@ -101,16 +101,20 @@ Report any of these as product issues:
 Generate a prefilled template from the latest successful demo artifact, then fill in pass/fail and friction:
 
 ```sh
-bin/human-demo-result-template
+bin/human-demo-result-template --write
 ```
 
-It fills the latest manifest and screenshot paths. The output shape is:
+It writes `artifacts/human-demo-results/*-human-demo-result.md` with the latest
+proof manifest, proof screenshot, readiness manifest, and readiness screenshot
+paths. Fill the generated file after the hands-on pass. The output shape is:
 
 ```text
 Human demo date:
 Mac:
 Proof manifest:
 Screenshot:
+Readiness manifest:
+Readiness screenshot:
 
 Pass/fail:
 - Starting state on demo-customer with Queue visible:

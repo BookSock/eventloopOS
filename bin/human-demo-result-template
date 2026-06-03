@@ -6,7 +6,7 @@ const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "
 const args = process.argv.slice(2);
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/human-demo-result-template [--manifest artifacts/lab-runs/.../manifest.json] [--json]
+  console.log(`Usage: bin/human-demo-result-template [--manifest artifacts/lab-runs/.../manifest.json] [--json] [--write|--output path]
 
 Print a prefilled human dogfood result template from the latest Mac Studio
 human-demo artifact.
@@ -26,18 +26,24 @@ if (args.includes("--self-test")) {
   const rendered = renderTemplate({
     manifestPath: "artifacts/lab-runs/20260603-132623-human-demo/manifest.json",
     screenshotPath: "artifacts/lab-runs/20260603-132623-human-demo/screen-sharing.png",
+    readyManifestPath: "artifacts/lab-runs/20260603T205150Z-human-demo-ready/manifest.json",
+    readyScreenshotPath: "artifacts/lab-runs/20260603T205150Z-human-demo-ready/screen-sharing.png",
     manifest,
   });
   assertIncludes(rendered, "Human demo date: 2026-06-03");
   assertIncludes(rendered, "Proof manifest: artifacts/lab-runs/20260603-132623-human-demo/manifest.json");
   assertIncludes(rendered, "Screenshot: artifacts/lab-runs/20260603-132623-human-demo/screen-sharing.png");
+  assertIncludes(rendered, "Readiness manifest: artifacts/lab-runs/20260603T205150Z-human-demo-ready/manifest.json");
+  assertIncludes(rendered, "Readiness screenshot: artifacts/lab-runs/20260603T205150Z-human-demo-ready/screen-sharing.png");
   assertIncludes(rendered, "Automated proof: ok=true, queue_count=2, ambient_autosave=true");
   console.log("human-demo-result-template self-test passed");
   process.exit(0);
 }
 
 const json = args.includes("--json");
+const write = args.includes("--write");
 const manifestArg = valueAfter("--manifest");
+const outputArg = valueAfter("--output");
 const manifestPath = manifestArg ?? latestManifestPath();
 if (!manifestPath) {
   console.error("No human-demo manifest found under artifacts/lab-runs. Run bin/lab-mac-human-demo-setup first.");
@@ -48,22 +54,39 @@ const absoluteManifestPath = path.resolve(repoRoot, manifestPath);
 const manifest = readJson(absoluteManifestPath);
 const relativeManifestPath = path.relative(repoRoot, absoluteManifestPath);
 const screenshotPath = findScreenshotPath(path.dirname(absoluteManifestPath));
+const readyManifestPath = latestReadyManifestPath();
+const ready = readyManifestPath ? readJson(path.resolve(repoRoot, readyManifestPath)) : undefined;
+const readyScreenshotPath = ready?.screen_sharing_capture?.output ?? "";
+const outputPath = outputArg ?? (write ? defaultOutputPath(manifest) : "");
+const template = renderTemplate({
+  manifestPath: relativeManifestPath,
+  screenshotPath,
+  readyManifestPath,
+  readyScreenshotPath,
+  manifest,
+});
+if (outputPath) {
+  const absoluteOutputPath = path.resolve(repoRoot, outputPath);
+  fs.mkdirSync(path.dirname(absoluteOutputPath), { recursive: true });
+  fs.writeFileSync(absoluteOutputPath, template, "utf8");
+}
 const result = {
   manifest_path: relativeManifestPath,
   screenshot_path: screenshotPath,
+  readiness_manifest_path: readyManifestPath,
+  readiness_screenshot_path: readyScreenshotPath,
+  output_path: outputPath,
   ok: manifest.ok === true,
   queue_count: manifest.proofs?.demo_queue?.count ?? null,
   ambient_autosave_ok: manifest.proofs?.ambient_autosave?.ok === true,
   generated_at: manifest.generated_at ?? null,
-  template: renderTemplate({
-    manifestPath: relativeManifestPath,
-    screenshotPath,
-    manifest,
-  }),
+  template,
 };
 
 if (json) {
   console.log(JSON.stringify(result, null, 2));
+} else if (outputPath) {
+  console.log(outputPath);
 } else {
   console.log(result.template);
 }
@@ -91,6 +114,23 @@ function latestManifestPath() {
   return latest ? path.relative(repoRoot, latest) : undefined;
 }
 
+function latestReadyManifestPath() {
+  const labRuns = path.join(repoRoot, "artifacts", "lab-runs");
+  if (!fs.existsSync(labRuns)) return undefined;
+  const candidates = fs.readdirSync(labRuns, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith("-human-demo-ready"))
+    .map((entry) => path.join(labRuns, entry.name, "manifest.json"))
+    .filter((candidate) => fs.existsSync(candidate))
+    .sort();
+  const latest = candidates.at(-1);
+  return latest ? path.relative(repoRoot, latest) : undefined;
+}
+
+function defaultOutputPath(manifest) {
+  const stamp = (manifest.generated_at ?? new Date().toISOString()).replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  return path.join("artifacts", "human-demo-results", `${stamp}-human-demo-result.md`);
+}
+
 function readJson(filePath) {
   try {
     return JSON.parse(fs.readFileSync(filePath, "utf8"));
@@ -109,7 +149,7 @@ function findScreenshotPath(runDir) {
   return "";
 }
 
-function renderTemplate({ manifestPath, screenshotPath, manifest }) {
+function renderTemplate({ manifestPath, screenshotPath, readyManifestPath, readyScreenshotPath, manifest }) {
   const date = manifest.generated_at ? manifest.generated_at.slice(0, 10) : "";
   const queueCount = manifest.proofs?.demo_queue?.count ?? "";
   const ambientOk = manifest.proofs?.ambient_autosave?.ok === true ? "true" : "false";
@@ -117,6 +157,8 @@ function renderTemplate({ manifestPath, screenshotPath, manifest }) {
 Mac: Mac Studio
 Proof manifest: ${manifestPath}
 Screenshot: ${screenshotPath}
+Readiness manifest: ${readyManifestPath ?? ""}
+Readiness screenshot: ${readyScreenshotPath ?? ""}
 Automated proof: ok=${manifest.ok === true}, queue_count=${queueCount}, ambient_autosave=${ambientOk}
 
 Pass/fail:

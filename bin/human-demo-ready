@@ -181,7 +181,7 @@ function renderReadyMarkdown(manifest) {
 - Fresh Screen Sharing capture: ${screenshot?.output ?? "skipped"}
 - Failed checks: ${manifest.failed_checks.length === 0 ? "none" : manifest.failed_checks.join(", ")}
 
-Next: use \`docs/human-demo-walkthrough.md\` and fill \`bin/human-demo-result-template\` after Jason finishes hands-on pass.
+Next: use \`docs/human-demo-walkthrough.md\`, then run \`bin/human-demo-result-template --write\` and fill the generated result after Jason finishes hands-on pass.
 `;
 }
 

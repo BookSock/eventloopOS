@@ -8,7 +8,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 
 - Latest automated human demo: `artifacts/lab-runs/20260603-132623-human-demo/manifest.json`
 - Latest demo screenshot: `artifacts/lab-runs/20260603-132623-human-demo/screen-sharing.png`
-- Current result template: `bin/human-demo-result-template`
+- Current result template/artifact writer: `bin/human-demo-result-template --write`
 - Walkthrough: `docs/human-demo-walkthrough.md`
 - Mac Studio status check: `bin/lab-mac-dogfood status`
 
@@ -36,10 +36,10 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 Run:
 
 ```sh
-bin/human-demo-result-template
+bin/human-demo-result-template --write
 ```
 
-Fill the pass/fail checklist after the hands-on walkthrough. Goal can close only if:
+Fill the generated `artifacts/human-demo-results/*-human-demo-result.md` checklist after the hands-on walkthrough. Goal can close only if:
 
 - all pass/fail items are marked pass, or any failures are explicitly accepted as non-blocking,
 - friction list has no production-blocking issue,
