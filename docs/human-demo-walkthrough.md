@@ -60,6 +60,7 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 3. Confirm Customer Chrome and the shared TextEdit come forward on `demo-customer`.
 4. Move the shared TextEdit window with `Ctrl-Option-Right`, or drag it manually.
 5. Wait 2 to 3 seconds. Ambient autosave should remember the moved position without pressing Done/Defer/Advance.
+   The Queue footer should keep showing a compact `feedback=...` status so the demo is not silent while actions complete.
 6. Click `Review Demo Metrics Review` in Queue.
 7. Press `Ctrl-Option-R`.
 8. Confirm the same TextEdit window moves to the metrics position and Metrics Chrome appears.
@@ -82,6 +83,7 @@ Report any of these as product issues:
 - Queue is hard to find or blocks work,
 - Rectangle-style hotkeys feel surprising or conflict with another common app,
 - Manual Mode return restores the wrong workspace or loses a user-opened window unexpectedly.
+- Queue footer feedback stays stale or does not acknowledge restore/manual actions.
 
 ## Current TODO
 

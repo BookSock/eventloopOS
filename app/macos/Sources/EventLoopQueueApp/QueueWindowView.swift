@@ -10,6 +10,19 @@ struct QueueWindowView: View {
         QueueWindowSidebarSummary(packets: viewModel.packets, state: viewModel.state)
     }
 
+    private var queueSummary: QueueMenuSummary {
+        QueueMenuSummary(
+            packets: viewModel.packets,
+            selectedPacket: viewModel.selectedPacket,
+            queueState: viewModel.state,
+            mode: viewModel.mode,
+            contextRestoreState: viewModel.contextRestoreState,
+            workspaceRestoreState: viewModel.workspaceRestoreState,
+            manualWorkspaceCaptureState: viewModel.manualWorkspaceCaptureState,
+            recommendedActionBlockReason: viewModel.selectedRecommendedActionBlockReason
+        )
+    }
+
     private var auxiliarySheetBinding: Binding<QueueAuxiliarySheet?> {
         Binding {
             viewModel.auxiliarySheet
@@ -85,13 +98,66 @@ struct QueueWindowView: View {
             stateLabel = "failed"
         }
 
-        return [
+        var parts = [
             "eventloopOS harness status",
+            "feedback=\(harnessFeedbackText)",
             "state=\(stateLabel)",
             "queue_count=\(viewModel.packets.count)",
             "selected_task=\(viewModel.selectedTaskId ?? "none")",
             "task_sessions=\(viewModel.taskSessions.count)",
-        ].joined(separator: " | ")
+        ]
+        if let restoreLabel = queueSummary.restoreLabel {
+            parts.append("context=\(restoreLabel)")
+        }
+        if let workspaceRestoreLabel = queueSummary.workspaceRestoreLabel {
+            parts.append("workspace=\(workspaceRestoreLabel)")
+        }
+        if let manualWorkspaceLabel = queueSummary.manualWorkspaceLabel {
+            parts.append("manual=\(manualWorkspaceLabel)")
+        }
+        return parts.joined(separator: " | ")
+    }
+
+    private var harnessFeedbackText: String {
+        if let toast = viewModel.advanceToast {
+            return advanceStatusText(for: toast)
+        }
+        if let workspaceRestoreLabel = queueSummary.workspaceRestoreLabel {
+            return workspaceRestoreLabel
+        }
+        if let manualWorkspaceLabel = queueSummary.manualWorkspaceLabel {
+            return manualWorkspaceLabel
+        }
+        if let restoreLabel = queueSummary.restoreLabel {
+            return restoreLabel
+        }
+        if let blockReason = queueSummary.recommendedActionBlockReason {
+            return blockReason
+        }
+        return "ready"
+    }
+
+    private func advanceStatusText(for toast: AdvanceToast) -> String {
+        switch toast {
+        case .manualModeActive:
+            return "Manual Mode active"
+        case .noForegroundCodex:
+            return "No ready paper or foreground Codex"
+        case .queueEmpty:
+            return "Queue empty"
+        case let .actionComplete(message):
+            return message
+        case let .deferredUntil(dueAt):
+            return "Deferred until \(dueAt.formatted(date: .omitted, time: .shortened))"
+        case .enteredLimbo:
+            return "Moved to limbo workspace"
+        case let .taskCreated(taskId):
+            return "Task created: \(taskId)"
+        case let .switchedToPaper(packetId):
+            return "Showing paper: \(packetId)"
+        case let .returnedToTask(taskId):
+            return "Returned to task: \(taskId)"
+        }
     }
 
     var body: some View {
