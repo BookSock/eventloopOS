@@ -62,33 +62,41 @@ const customerSnapshot = buildSnapshot(windows, "customer");
 await restore(customerSnapshot, "initial-customer-layout");
 await sleep(1_200);
 snapshot = await capture();
+const customerProof = assertRestoredSnapshot(snapshot, customerSnapshot, "initial customer restore");
 windows = resolveDemoWindows(snapshot);
 
 await approveTask(paperCustomer, [windows.customerChrome.id]);
 await putTaskLayout(paperCustomer.taskId, customerSnapshot);
+await saveTaskWorkspaceSnapshot(paperCustomer.taskId, customerSnapshot);
 await queuePaper(paperCustomer, "Customer asks whether eventloopOS is ready for hands-on Mac dogfood.");
 
 const metricsSnapshot = buildSnapshot(windows, "metrics");
 await restore(metricsSnapshot, "initial-metrics-layout");
 await sleep(1_200);
 snapshot = await capture();
+const metricsProof = assertRestoredSnapshot(snapshot, metricsSnapshot, "initial metrics restore");
 windows = resolveDemoWindows(snapshot);
 
 await approveTask(paperMetrics, [windows.metricsChrome.id]);
 await putTaskLayout(paperMetrics.taskId, metricsSnapshot);
+await saveTaskWorkspaceSnapshot(paperMetrics.taskId, metricsSnapshot);
 await queuePaper(paperMetrics, "Review ambient save and shared-window position behavior across papers.");
 
-const queue = await listQueue();
-const demoItems = queue.items.filter((item) => item.task_id === paperCustomer.taskId || item.task_id === paperMetrics.taskId);
-for (const item of demoItems) {
+const initialQueue = await listQueue();
+for (const item of demoQueueItems(initialQueue.items)) {
   const score = item.task_id === paperCustomer.taskId ? paperCustomer.priority : paperMetrics.priority;
   await setQueuePriority(item.id, score);
 }
+const queue = await listQueue();
+const demoItems = demoQueueItems(queue.items);
+const queueProof = assertDemoQueueItems(demoItems);
 
 await setCurrentTask(paperCustomer.taskId);
 await restore(customerSnapshot, "ready-customer-layout");
 await sleep(1_200);
-positionQueueWindow();
+const readySnapshot = await capture();
+const readyCustomerProof = assertRestoredSnapshot(readySnapshot, customerSnapshot, "ready customer restore");
+const queueWindow = positionQueueWindow();
 await sleep(600);
 const finalSnapshot = await capture();
 const finalWindows = resolveDemoWindows(finalSnapshot);
@@ -119,6 +127,13 @@ const manifest = {
       expected_shared_frame: metricsSnapshot.windows.find((window) => window.id === finalWindows.sharedText.id)?.frame,
     },
   ],
+  proofs: {
+    customer_restore: customerProof,
+    metrics_restore: metricsProof,
+    ready_customer_restore: readyCustomerProof,
+    demo_queue: queueProof,
+    queue_window: queueWindow,
+  },
   hotkeys: {
     eventloopos_restore_paper: "Ctrl-Option-R",
     eventloopos_master_command: "Ctrl-Option-K",
@@ -285,7 +300,7 @@ end tell
 
 function positionQueueWindow() {
   try {
-    execFileSync("osascript", ["-e", `
+    const stdout = execFileSync("osascript", ["-e", `
 tell application "System Events"
   repeat with processName in {"eventloopOS Queue", "EventLoopQueueApp"}
     if exists process processName then
@@ -295,15 +310,24 @@ tell application "System Events"
           set position of window 1 to {660, 500}
           set size of window 1 to {760, 430}
           perform action "AXRaise" of window 1
+          return processName & "|" & (position of window 1 as string) & "|" & (size of window 1 as string)
         end if
       end tell
       exit repeat
     end if
   end repeat
 end tell
-`], { stdio: "ignore" });
+return "missing||"
+`], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const [processName, positionText, sizeText] = String(stdout).trim().split("|");
+    return {
+      ok: processName !== "missing",
+      process: processName,
+      position: parseAppleScriptPair(positionText),
+      size: parseAppleScriptPair(sizeText),
+    };
   } catch {
-    // Queue app visibility is a demo polish step; setup can still proceed.
+    return { ok: false, error: "queue_window_position_failed" };
   }
 }
 
@@ -376,6 +400,87 @@ function buildSnapshot(windows, mode) {
       snapshotWindow(windows.sharedText, workspace, sharedFrame),
     ],
   };
+}
+
+function assertRestoredSnapshot(actualSnapshot, expectedSnapshot, label) {
+  if (actualSnapshot.activeWorkspace !== expectedSnapshot.activeWorkspace) {
+    throw new Error(`${label}: active workspace expected ${expectedSnapshot.activeWorkspace}, got ${actualSnapshot.activeWorkspace}`);
+  }
+  const actualById = new Map(actualSnapshot.windows.map((window) => [window.id, window]));
+  const windows = [];
+  for (const expected of expectedSnapshot.windows) {
+    const actual = actualById.get(expected.id);
+    if (!actual) throw new Error(`${label}: missing window ${expected.id} (${expected.title})`);
+    if (actual.workspace !== expected.workspace) {
+      throw new Error(`${label}: window ${expected.id} workspace expected ${expected.workspace}, got ${actual.workspace}`);
+    }
+    if (actual.layout !== "floating") {
+      throw new Error(`${label}: window ${expected.id} layout expected floating, got ${actual.layout}`);
+    }
+    assertNearFrame(actual.frame, expected.frame, `${label}: window ${expected.id}`);
+    windows.push({
+      id: actual.id,
+      app: actual.app,
+      title: actual.title,
+      workspace: actual.workspace,
+      layout: actual.layout,
+      frame: actual.frame,
+    });
+  }
+  return {
+    ok: true,
+    label,
+    active_workspace: actualSnapshot.activeWorkspace,
+    expected_active_workspace: expectedSnapshot.activeWorkspace,
+    shared_window_id: expectedSnapshot.focusedWindowId,
+    windows,
+  };
+}
+
+function assertNearFrame(actual, expected, label) {
+  if (!actual || !expected) throw new Error(`${label}: missing frame`);
+  for (const key of ["x", "y", "width", "height"]) {
+    const delta = Math.abs(Number(actual[key]) - Number(expected[key]));
+    if (!Number.isFinite(delta) || delta > 8) {
+      throw new Error(`${label}: frame ${key} expected ${expected[key]}, got ${actual[key]}`);
+    }
+  }
+}
+
+function assertDemoQueueItems(items) {
+  const taskIds = new Set(items.map((item) => item.task_id));
+  for (const taskId of [paperCustomer.taskId, paperMetrics.taskId]) {
+    if (!taskIds.has(taskId)) throw new Error(`demo queue missing ${taskId}`);
+  }
+  return {
+    ok: true,
+    count: items.length,
+    items: items.map((item) => {
+      const workspaceResource = item.review_packet?.context?.find((entry) => entry.kind === "workspace_snapshot" && entry.snapshot);
+      if (!workspaceResource) throw new Error(`demo queue ${item.task_id} missing workspace_snapshot context`);
+      const windowIds = workspaceResource.snapshot.windows?.map((window) => window.id) ?? [];
+      if (windowIds.length < 2) {
+        throw new Error(`demo queue ${item.task_id} workspace snapshot expected >=2 windows, got ${windowIds.length}`);
+      }
+      const sharedWindowId = workspaceResource.snapshot.focusedWindowId;
+      if (typeof sharedWindowId !== "number" || !windowIds.includes(sharedWindowId)) {
+        throw new Error(`demo queue ${item.task_id} workspace snapshot missing focused shared window`);
+      }
+      return {
+        id: item.id,
+        task_id: item.task_id,
+        title: item.review_packet?.title,
+        priority_score: item.priority_score,
+        workspace_active: workspaceResource.snapshot.activeWorkspace,
+        workspace_window_ids: windowIds,
+        shared_window_id: sharedWindowId,
+      };
+    }),
+  };
+}
+
+function demoQueueItems(items) {
+  return items.filter((item) => item.task_id === paperCustomer.taskId || item.task_id === paperMetrics.taskId);
 }
 
 function snapshotWindow(window, workspace, frame) {
@@ -478,6 +583,20 @@ async function putTaskLayout(taskId, snapshot) {
   return body;
 }
 
+async function saveTaskWorkspaceSnapshot(taskId, snapshot) {
+  const response = await fetch(`${orchestratorUrl}/tasks/${encodeURIComponent(taskId)}/workspace-snapshot`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      workspace_snapshot: snapshot,
+      actor_id: "human_demo_setup",
+    }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`save workspace snapshot ${taskId} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
+
 async function listQueue() {
   const response = await fetch(`${orchestratorUrl}/queue?state=ready`);
   const body = await response.json();
@@ -551,6 +670,11 @@ function escapeHtml(value) {
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;");
+}
+
+function parseAppleScriptPair(value) {
+  const parts = String(value ?? "").split(",").map((part) => Number(part.trim())).filter(Number.isFinite);
+  return parts.length === 2 ? { x: parts[0], y: parts[1] } : undefined;
 }
 
 function sleep(ms) {
