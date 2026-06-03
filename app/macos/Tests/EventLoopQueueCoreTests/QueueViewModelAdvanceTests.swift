@@ -253,4 +253,54 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         XCTAssertEqual(client.createTaskRequests.count, 0)
         XCTAssertEqual(client.setCurrentTaskRequests, [])
     }
+
+    func testAdvanceFromLimboWithQueuedPaperPullsNextPaper() async {
+        let paperWorkspace = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 101, app: "Google Chrome", title: "Demo", workspace: "demo-launch")],
+            activeWorkspace: "demo-launch",
+            focusedWindowId: 101
+        )
+        let paper = ReviewPacket(
+            id: "pkt_demo",
+            reviewPacketId: "rpkt_demo",
+            taskId: "task_demo",
+            title: "Demo paper",
+            summary: "switch me",
+            source: "manual",
+            priority: 500,
+            recommendedAction: "review",
+            createdAt: Date(timeIntervalSince1970: 1),
+            workspaceSnapshot: paperWorkspace
+        )
+        let client = FakeQueueClient(packets: [paper])
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: WorkspaceSnapshot(
+                windows: [],
+                activeWorkspace: "1",
+                focusedWindowId: nil
+            ),
+            planEnvelope: WorkspaceRestorePlanEnvelope(
+                plan: WorkspaceRestorePlan(
+                    commands: [WorkspaceCommand(command: "aerospace", args: ["workspace", "demo-launch"])],
+                    skipped: []
+                ),
+                executeSupported: true
+            )
+        )
+        let aero = FakeAeroSpaceWorkspaceClient(focused: "1")
+        let resolver = FakeCodexForegroundResolver(.none)
+        let viewModel = QueueViewModel(
+            client: client,
+            workspaceClient: workspaceClient,
+            aeroSpaceClient: aero,
+            codexForegroundResolver: resolver
+        )
+
+        await viewModel.advance()
+
+        XCTAssertEqual(viewModel.selectedPacketID, "pkt_demo")
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [paperWorkspace])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(client.createTaskRequests.count, 0)
+    }
 }

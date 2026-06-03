@@ -649,6 +649,10 @@ public final class QueueViewModel: ObservableObject {
         case .toastManualModeActive:
             advanceToast = .manualModeActive
         case .toastNoForegroundCodex:
+            if !snapshot.queue.isEmpty {
+                await pullNextPaper()
+                return
+            }
             advanceToast = .noForegroundCodex
         case let .createTaskFromForeground(anchor, workspaceId):
             await runCreateTaskFromForeground(anchor: anchor, workspaceId: workspaceId)
