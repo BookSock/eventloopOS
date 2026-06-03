@@ -575,6 +575,7 @@ public final class QueueViewModel: ObservableObject {
         let allTasks = (try? await client.listTasks()) ?? []
         let queue = (try? await client.fetchQueue()) ?? []
         let foreground = await codexForegroundResolver.resolveForeground()
+        packets = queue
 
         var relevantTaskIds = Set<String>()
         if let currentTaskId = currentTaskState.task?.taskId {
@@ -715,7 +716,7 @@ public final class QueueViewModel: ObservableObject {
         do {
             let captured = try await workspaceClient.capture()
             _ = try await client.updateTaskLayout(taskId: currentTaskId, layout: captured)
-            try await aeroSpaceClient.switchTo(workspace: workspaceId)
+            try await restorePaperWorkspaceOrSwitch(packetId: packetId, fallbackWorkspaceId: workspaceId)
             if clearCurrentTask {
                 _ = try await client.setCurrentTask(taskId: nil)
                 currentTask = nil
@@ -741,7 +742,7 @@ public final class QueueViewModel: ObservableObject {
         do {
             let captured = try await workspaceClient.capture()
             _ = try await client.complete(packetId: packetId, workspaceSnapshot: captured)
-            try await aeroSpaceClient.switchTo(workspace: workspaceId)
+            try await restorePaperWorkspaceOrSwitch(packetId: nextSelectionPacketId, fallbackWorkspaceId: workspaceId)
             if let returnToTaskId {
                 _ = try await client.setCurrentTask(taskId: returnToTaskId)
             } else if clearCurrentTask {
@@ -756,6 +757,21 @@ public final class QueueViewModel: ObservableObject {
         } catch {
             state = .failed(error.localizedDescription)
         }
+    }
+
+    private func restorePaperWorkspaceOrSwitch(packetId: String?, fallbackWorkspaceId: String) async throws {
+        if let packetId,
+           let snapshot = packets.first(where: { $0.id == packetId })?.workspaceSnapshot {
+            let response = try await workspaceClient.restore(
+                snapshot: snapshot,
+                currentWindows: nil,
+                idempotencyKey: "mac_advance_restore_\(packetId)_\(UUID().uuidString)"
+            )
+            workspaceRestoreState = .executed(response.receipt)
+            return
+        }
+
+        try await aeroSpaceClient.switchTo(workspace: fallbackWorkspaceId)
     }
 
     public func doneAndNext() async {

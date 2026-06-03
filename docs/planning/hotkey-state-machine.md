@@ -35,15 +35,22 @@ Restoring a task = AeroSpace switches to its workspace context. The task-anchor 
 
 The task-anchor is *the* thing that gives the task its identity and its idle-paper trigger. Multiple Codex sessions per task is fine — each can produce papers independently when idle. The task-anchor is just the one we know is always present.
 
-## Three hotkeys, kept
+## Hotkeys
 
 | Hotkey | Name | What it does |
 |---|---|---|
-| `⌘⌥⇧J` | **Advance** | The state-machine. See below. This is the one the user is hitting all the time. |
-| `⌘⌥⇧K` | Master command | Sheet for explicit verbal/text commands (rerank, broadcast, fan-out, route-to-master). Unchanged from today. |
-| `⌘⌥⇧M` | Manual mode toggle | Server-side queue pause + restore. Unchanged from B7. |
+| `⌃⌥J` / `⌘⌥⇧J` | **Advance** | The state-machine. See below. This is the one the user is hitting all the time. |
+| `⌃⌥E` | Done / Next | Superhuman-style archive/done. Marks the paper done and advances. |
+| `⌃⌥Return` | Send to Agent | Runs the selected recommended action, then advances. |
+| `⌃⌥H` | Defer 1 Hour | Superhuman-style remind-later hold. |
+| `⌃⌥R` | Restore Workspace | Reapplies the selected paper's saved layout and focus. |
+| `⌃⌥K` / `⌘⌥⇧K` | Master command | Sheet for explicit verbal/text commands (rerank, broadcast, fan-out, route-to-master). |
+| `⌃⌥M` / `⌘⌥⇧M` | Manual mode toggle | Server-side queue pause + restore. |
+| `⌃⌥⇧M` | Return Here | Exit manual mode without moving current windows. |
 
 The "advance" hotkey replaces today's `Pull next paper` hotkey with a richer state machine.
+
+The `⌃⌥` aliases keep the same letter shapes as common Superhuman flows while avoiding ordinary app shortcuts. Legacy `⌘⌥⇧` chords remain registered for existing muscle memory.
 
 ## Advance state machine (desktop-aware)
 

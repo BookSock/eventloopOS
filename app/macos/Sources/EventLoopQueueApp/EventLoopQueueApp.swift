@@ -32,10 +32,34 @@ struct EventLoopQueueApp: App {
         )
         _viewModel = StateObject(wrappedValue: viewModel)
         globalHotKeyController = GlobalHotKeyController(
-            pullNextPaper: {
-                NSApp.activate(ignoringOtherApps: true)
+            advance: {
                 Task {
                     await viewModel.advance()
+                }
+            },
+            doneNext: {
+                Task {
+                    await viewModel.doneAndNext()
+                }
+            },
+            executeRecommendedAction: {
+                Task {
+                    await viewModel.executeRecommendedActionAndNext()
+                }
+            },
+            deferOneHour: {
+                Task {
+                    await viewModel.deferSelectedPacketForOneHour()
+                }
+            },
+            restoreWorkspace: {
+                Task {
+                    await viewModel.confirmSelectedWorkspaceRestore()
+                }
+            },
+            returnHere: {
+                Task {
+                    await viewModel.returnToEventLoopModeKeepingCurrentLayout()
                 }
             },
             toggleManualMode: {
