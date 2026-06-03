@@ -24,6 +24,7 @@ Environment:
   LAB_DOGFOOD_QUEUE_APP     default: 1
   LAB_DOGFOOD_MCP_POLL      default: 0
   LAB_DOGFOOD_MCP_SOURCES   default: off
+  LAB_DOGFOOD_WORKSPACE_EXECUTE default: enabled
   LAB_DOGFOOD_READY_TIMEOUT_SECONDS default: 90
   LAB_DOGFOOD_READY_POLL_SECONDS    default: 5
   LAB_MAC_VNC_USER          default: LAB_MAC_USER
@@ -58,6 +59,7 @@ database_url="${LAB_DOGFOOD_DATABASE_URL:-}"
 queue_app="${LAB_DOGFOOD_QUEUE_APP:-1}"
 mcp_poll="${LAB_DOGFOOD_MCP_POLL:-0}"
 mcp_sources="${LAB_DOGFOOD_MCP_SOURCES:-off}"
+workspace_execute="${LAB_DOGFOOD_WORKSPACE_EXECUTE:-enabled}"
 ready_timeout_seconds="${LAB_DOGFOOD_READY_TIMEOUT_SECONDS:-90}"
 ready_poll_seconds="${LAB_DOGFOOD_READY_POLL_SECONDS:-5}"
 vnc_user="${LAB_MAC_VNC_USER:-$lab_user}"
@@ -83,6 +85,7 @@ export EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW="${EVENTLOOPOS_QUEUE_APP_HARNESS_WIN
 export EVENTLOOPOS_DOGFOOD_SHARED_CODEX_APP_SERVER=0
 export EVENTLOOPOS_DOGFOOD_MCP_POLL="$mcp_poll"
 export ORCHESTRATOR_MCP_SOURCES="$mcp_sources"
+export ORCHESTRATOR_WORKSPACE_EXECUTE="$workspace_execute"
 EOF
   if [[ -n "$database_url" ]]; then
     cat <<EOF
