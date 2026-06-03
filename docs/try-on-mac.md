@@ -26,6 +26,32 @@ bin/macos-aerospace-profile install
 
 The profile backs up `~/.aerospace.toml`, enables `experimental-force-floating-windows = true`, forces detected windows to floating layout, and adds Rectangle-inspired snap hotkeys. Rectangle's default `Ctrl-Option-Return` maximize chord conflicts with eventloopOS Send to Agent, so the profile uses `Ctrl-Option-Shift-Return` for maximize and leaves eventloopOS paper-loop chords untouched.
 
+If a Mac already uses different Rectangle chords, customize the generated AeroSpace profile during install with environment variables. The installer rejects chords that shadow eventloopOS paper-loop hotkeys such as `Ctrl-Option-Return`, `Ctrl-Option-J`, `Ctrl-Option-K`, `Ctrl-Option-R`, and `Ctrl-Option-M`.
+
+```sh
+EVENTLOOPOS_AEROSPACE_HOTKEY_MAXIMIZE=ctrl-alt-cmd-enter \
+EVENTLOOPOS_AEROSPACE_HOTKEY_BOTTOM_LEFT=ctrl-alt-cmd-j \
+EVENTLOOPOS_AEROSPACE_HOTKEY_BOTTOM_RIGHT=ctrl-alt-cmd-k \
+bin/macos-aerospace-profile install
+```
+
+Supported override variables:
+
+```text
+EVENTLOOPOS_AEROSPACE_HOTKEY_LEFT_HALF
+EVENTLOOPOS_AEROSPACE_HOTKEY_RIGHT_HALF
+EVENTLOOPOS_AEROSPACE_HOTKEY_TOP_HALF
+EVENTLOOPOS_AEROSPACE_HOTKEY_BOTTOM_HALF
+EVENTLOOPOS_AEROSPACE_HOTKEY_CENTER
+EVENTLOOPOS_AEROSPACE_HOTKEY_MAXIMIZE
+EVENTLOOPOS_AEROSPACE_HOTKEY_TOP_LEFT
+EVENTLOOPOS_AEROSPACE_HOTKEY_TOP_RIGHT
+EVENTLOOPOS_AEROSPACE_HOTKEY_BOTTOM_LEFT
+EVENTLOOPOS_AEROSPACE_HOTKEY_BOTTOM_RIGHT
+EVENTLOOPOS_AEROSPACE_HOTKEY_PREV_DISPLAY
+EVENTLOOPOS_AEROSPACE_HOTKEY_NEXT_DISPLAY
+```
+
 ## Install
 
 ```sh
