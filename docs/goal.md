@@ -32,3 +32,5 @@ Ship and prove macOS workspace UX for a real human dogfood session.
 - Mac Studio is ready for Jason to sit down at keyboard/mouse and run a guided demo.
 - Demo walkthrough explains what to press, what should happen, and what problems to report.
 - Remaining blockers/TODOs are explicit and separated from shipped/proven behavior.
+
+See `docs/human-demo-completion-audit.md` for the current evidence map and the remaining human gate.

@@ -120,4 +120,4 @@ Ship/block decision:
 
 ## Current TODO
 
-Human dogfood is still the remaining subjective proof. Automated Mac Studio proof passes, but Jason should run the walkthrough with real keyboard/mouse and record UX friction before calling the goal complete.
+Human dogfood is still the remaining subjective proof. Automated Mac Studio proof passes, but Jason should run the walkthrough with real keyboard/mouse and record UX friction before calling the goal complete. See `docs/human-demo-completion-audit.md` for the requirement-by-requirement evidence map.
