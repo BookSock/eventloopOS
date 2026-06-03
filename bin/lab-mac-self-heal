@@ -461,7 +461,11 @@ run_once() {
     elif [[ "${LAB_SELF_HEAL_SKIP_OPEN:-0}" == "1" ]]; then
       echo "skipped opening Tailscale/AeroSpace"
     else
-      open -gj -a Tailscale >/dev/null 2>&1 || true
+      if pgrep -fl "/Tailscale.app/Contents/MacOS/Tailscale" >/dev/null 2>&1; then
+        echo "Tailscale already running"
+      else
+        open -gj -a Tailscale >/dev/null 2>&1 || true
+      fi
       if [[ "$aerospace_mode" == "skip" ]]; then
         echo "skipped opening AeroSpace by LAB_SELF_HEAL_AEROSPACE_MODE=skip"
       elif [[ "$aerospace_mode" == "custom" || ( "$aerospace_mode" == "auto" && -x "$custom_aerospace_runner" ) ]]; then
@@ -476,7 +480,11 @@ run_once() {
           kill "$release_pid" >/dev/null 2>&1 || true
         done < <(pgrep -f "/AeroSpace/.release/AeroSpace.app/Contents/MacOS/AeroSpace|/Applications/AeroSpace.app/Contents/MacOS/AeroSpace" || true)
       else
-        open -gj -a AeroSpace >/dev/null 2>&1 || true
+        if pgrep -fl "/AeroSpace.app/Contents/MacOS/AeroSpace|/AeroSpace/.debug/AeroSpaceApp|run-aerospace.command" >/dev/null 2>&1; then
+          echo "AeroSpace already running"
+        else
+          open -gj -a AeroSpace >/dev/null 2>&1 || true
+        fi
       fi
       sleep 3
     fi
