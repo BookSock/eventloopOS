@@ -22,6 +22,16 @@ The setup script:
 - proves ambient autosave updates future queue context after the shared window moves,
 - captures a local Screen Sharing window-only screenshot.
 
+Before handing the keyboard to Jason, run a non-destructive readiness check:
+
+```sh
+bin/human-demo-ready
+```
+
+This does not restart or reseed the demo. It checks the current lab dogfood stack,
+verifies the latest human-demo proof artifact, captures only the local Screen
+Sharing window, and writes `artifacts/lab-runs/*-human-demo-ready/READY.md`.
+
 Latest known-good proof:
 
 - Manifest: `artifacts/lab-runs/20260603-132623-human-demo/manifest.json`

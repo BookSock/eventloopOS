@@ -1,0 +1,206 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+process.chdir(repoRoot);
+
+const args = process.argv.slice(2);
+const skipScreenshot = args.includes("--skip-screenshot");
+const jsonOnly = args.includes("--json");
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--json]
+
+Check current Mac Studio human-demo readiness without resetting demo state.
+
+Environment:
+  LAB_DOGFOOD_PROFILE  default: lab-human-demo
+  LAB_DOGFOOD_URL      default: http://127.0.0.1:4480
+  SCREEN_SHARING_TITLE default: Zeus
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  console.log("human-demo-ready self-test passed");
+  process.exit(0);
+}
+
+const runDir = path.join("artifacts", "lab-runs", `${utcStamp()}-human-demo-ready`);
+mkdirSync(path.join(repoRoot, runDir, "steps"), { recursive: true });
+
+const startedAt = new Date().toISOString();
+const env = {
+  ...process.env,
+  LAB_DOGFOOD_PROFILE: process.env.LAB_DOGFOOD_PROFILE ?? "lab-human-demo",
+  LAB_DOGFOOD_URL: process.env.LAB_DOGFOOD_URL ?? "http://127.0.0.1:4480",
+  SCREEN_SHARING_TITLE: process.env.SCREEN_SHARING_TITLE ?? "Zeus",
+};
+
+const steps = [];
+const dogfood = runStep("dogfood status", "bin/lab-mac-dogfood", ["status"], env);
+const dogfoodManifest = extractJsonObject(dogfood.stdout);
+const template = runStep("human demo result template", "node", ["bin/human-demo-result-template", "--json"], env);
+const templateJson = extractJsonObject(template.stdout);
+
+let screenshot;
+if (!skipScreenshot) {
+  screenshot = runStep("screen sharing capture", "bin/local-screen-sharing-capture", [path.join(runDir, "screen-sharing.png")], env);
+}
+
+const checks = {
+  dogfood_status_ok: dogfood.status === 0 && dogfoodManifest?.ok === true,
+  latest_human_demo_proof_ok: template.status === 0 && templateJson?.ok === true,
+  latest_human_demo_queue_has_two_papers: Number(templateJson?.queue_count ?? 0) >= 2,
+  ambient_autosave_proof_ok: templateJson?.ambient_autosave_ok === true,
+  screen_sharing_capture_ok: skipScreenshot || screenshot?.status === 0,
+};
+const failedChecks = Object.entries(checks).filter(([, ok]) => ok !== true).map(([key]) => key);
+const finishedAt = new Date().toISOString();
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.human_demo_ready",
+  started_at: startedAt,
+  finished_at: finishedAt,
+  duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
+  artifact_dir: runDir,
+  ok: failedChecks.length === 0,
+  passed: failedChecks.length === 0,
+  profile: env.LAB_DOGFOOD_PROFILE,
+  url: env.LAB_DOGFOOD_URL,
+  checks,
+  failed_checks: failedChecks,
+  dogfood_status: dogfoodManifest ? {
+    artifact_dir: dogfoodManifest.artifact_dir,
+    ok: dogfoodManifest.ok === true,
+    failed_checks: dogfoodManifest.failed_checks ?? [],
+    checks: dogfoodManifest.checks ?? {},
+  } : undefined,
+  latest_human_demo: templateJson ? {
+    manifest_path: templateJson.manifest_path,
+    screenshot_path: templateJson.screenshot_path,
+    ok: templateJson.ok === true,
+    queue_count: templateJson.queue_count,
+    ambient_autosave_ok: templateJson.ambient_autosave_ok === true,
+    generated_at: templateJson.generated_at,
+  } : undefined,
+  screen_sharing_capture: screenshot ? {
+    ok: screenshot.status === 0,
+    output: path.join(runDir, "screen-sharing.png"),
+    exit_code: screenshot.status,
+  } : {
+    skipped: true,
+  },
+  steps,
+};
+
+const manifestPath = path.join(runDir, "manifest.json");
+const readyPath = path.join(runDir, "READY.md");
+writeFileSync(path.join(repoRoot, manifestPath), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+writeFileSync(path.join(repoRoot, readyPath), renderReadyMarkdown(manifest), "utf8");
+
+const output = {
+  manifest: manifestPath,
+  ready: readyPath,
+  ok: manifest.ok,
+  failed_checks: failedChecks,
+  latest_human_demo: manifest.latest_human_demo,
+  screen_sharing_capture: manifest.screen_sharing_capture,
+};
+
+if (jsonOnly) {
+  console.log(JSON.stringify(output));
+} else {
+  console.log(`human demo ready manifest: ${manifestPath}`);
+  console.log(`human demo ready note: ${readyPath}`);
+  console.log(JSON.stringify(output, null, 2));
+}
+
+process.exit(manifest.ok ? 0 : 1);
+
+function runStep(name, command, commandArgs, envOverride) {
+  const result = spawnSync(command, commandArgs, {
+    cwd: repoRoot,
+    env: envOverride,
+    encoding: "utf8",
+    shell: false,
+  });
+  const safeName = name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
+  const stdoutPath = path.join(runDir, "steps", `${safeName}.stdout`);
+  const stderrPath = path.join(runDir, "steps", `${safeName}.stderr`);
+  writeFileSync(path.join(repoRoot, stdoutPath), result.stdout ?? "", "utf8");
+  writeFileSync(path.join(repoRoot, stderrPath), result.stderr ?? "", "utf8");
+  const step = {
+    name,
+    command: [command, ...commandArgs],
+    status: result.status ?? 1,
+    signal: result.signal,
+    stdout_path: stdoutPath,
+    stderr_path: stderrPath,
+  };
+  steps.push(step);
+  return {
+    ...step,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? "",
+  };
+}
+
+function extractJsonObject(value) {
+  if (!value.trim()) return undefined;
+  const starts = [];
+  for (let index = value.indexOf("{"); index !== -1; index = value.indexOf("{", index + 1)) {
+    starts.push(index);
+  }
+  for (const start of starts) {
+    const candidate = value.slice(start).trim();
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // Try next JSON-looking segment.
+    }
+  }
+  return undefined;
+}
+
+function renderReadyMarkdown(manifest) {
+  const latest = manifest.latest_human_demo;
+  const screenshot = manifest.screen_sharing_capture;
+  return `# eventloopOS Human Demo Ready
+
+- Ready: ${manifest.ok ? "yes" : "no"}
+- Profile: ${manifest.profile}
+- URL: ${manifest.url}
+- Latest proof: ${latest?.manifest_path ?? ""}
+- Latest proof screenshot: ${latest?.screenshot_path ?? ""}
+- Fresh Screen Sharing capture: ${screenshot?.output ?? "skipped"}
+- Failed checks: ${manifest.failed_checks.length === 0 ? "none" : manifest.failed_checks.join(", ")}
+
+Next: use \`docs/human-demo-walkthrough.md\` and fill \`bin/human-demo-result-template\` after Jason finishes hands-on pass.
+`;
+}
+
+function utcStamp() {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function runSelfTest() {
+  const noisyJson = `prefix\n{\"ok\":true,\"queue_count\":2,\"ambient_autosave_ok\":true}`;
+  assert.deepEqual(extractJsonObject(noisyJson), { ok: true, queue_count: 2, ambient_autosave_ok: true });
+  assert.equal(extractJsonObject("no json"), undefined);
+  const markdown = renderReadyMarkdown({
+    ok: true,
+    profile: "lab-human-demo",
+    url: "http://127.0.0.1:4480",
+    failed_checks: [],
+    latest_human_demo: { manifest_path: "artifacts/lab-runs/demo/manifest.json", screenshot_path: "artifacts/lab-runs/demo/screen-sharing.png" },
+    screen_sharing_capture: { output: "artifacts/lab-runs/ready/screen-sharing.png" },
+  });
+  assert.match(markdown, /Ready: yes/);
+  assert.match(markdown, /artifacts\/lab-runs\/demo\/manifest\.json/);
+}
