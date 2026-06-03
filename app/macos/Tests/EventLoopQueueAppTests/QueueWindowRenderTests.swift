@@ -152,7 +152,13 @@ final class QueueWindowRenderTests: XCTestCase {
     }
 
     private func render<Content: View>(_ view: Content, width: CGFloat, height: CGFloat) throws -> CGImage {
-        let hostingView = NSHostingView(rootView: view)
+        let hostingView = NSHostingView(rootView:
+            ZStack {
+                Color(nsColor: .windowBackgroundColor)
+                view
+            }
+            .environment(\.colorScheme, .light)
+        )
         hostingView.frame = CGRect(x: 0, y: 0, width: width, height: height)
         hostingView.layoutSubtreeIfNeeded()
         guard let bitmap = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds) else {

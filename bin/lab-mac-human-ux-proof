@@ -89,10 +89,30 @@ const commandByName = new Map(commands.map((command) => [command.name, command])
 const commandPassed = (name) => commandByName.get(name)?.status === "passed";
 const proofPassed = proof?.passed === true && process.env.PROOF_EXIT === "0";
 const orphanPassed = orphan?.ok === true && process.env.ORPHAN_EXIT === "0";
+const screenshotNames = [
+  "queue-window-loaded-lineage.png",
+  "queue-window-long-packet.png",
+  "queue-window-selected-packet.png",
+  "queue-window-task-identity.png",
+];
+const screenshotArtifacts = screenshotNames.map((name) => {
+  const relative = path.join("queue-window-screenshots", name);
+  const fullPath = path.join(runDir, relative);
+  let size = 0;
+  try {
+    size = fs.statSync(fullPath).size;
+  } catch {
+    size = 0;
+  }
+  return { path: relative, size_bytes: size, ok: size > 1000 };
+});
+const screenshotsPassed = screenshotArtifacts.every((artifact) => artifact.ok);
 const checks = {
   one_paper_render: commandPassed("Queue one-paper render tests"),
+  queue_screenshots: screenshotsPassed,
   workspace_task_switch: commandPassed("Paper task workspace switch proof"),
   task_workspace_memory: commandPassed("Task paper workspace memory proof"),
+  manual_mode_return: commandPassed("Manual mode return proof"),
   codex_waiting_auto_paper: commandPassed("Codex waiting auto-paper proof"),
   send_back_target_and_action: commandPassed("Live Queue send-back handoff proof"),
   final_no_orphans: orphanPassed,
@@ -100,13 +120,18 @@ const checks = {
 const scenarioCoverage = [
   {
     id: "current_paper_review",
-    passed: checks.one_paper_render && checks.send_back_target_and_action,
-    evidence: ["Queue one-paper render tests", "Live Queue send-back handoff proof"],
+    passed: checks.one_paper_render && checks.queue_screenshots && checks.send_back_target_and_action,
+    evidence: ["Queue one-paper render tests", "queue-window-screenshots/*.png", "Live Queue send-back handoff proof"],
   },
   {
     id: "paper_task_workspace_switching",
     passed: checks.workspace_task_switch && checks.task_workspace_memory,
     evidence: ["Paper task workspace switch proof", "Task paper workspace memory proof"],
+  },
+  {
+    id: "manual_mode_return",
+    passed: checks.manual_mode_return,
+    evidence: ["Manual mode return proof"],
   },
   {
     id: "codex_waiting_user_input_queue",
@@ -126,6 +151,10 @@ const failures = [
       requirement: command.name,
       evidence: command.stderr_path || command.stdout_path || command.id,
     })),
+  ...(screenshotsPassed ? [] : [{
+    requirement: "queue screenshots",
+    evidence: "queue-window-screenshots/*.png",
+  }]),
   ...(orphanPassed ? [] : [{
     requirement: "final no-orphan proof",
     evidence: "final-orphan-proof/manifest.json",
@@ -144,6 +173,7 @@ const manifest = {
   failures,
   artifacts: {
     proof_agent: `${runDir}/proof-agent-manifest.json`,
+    queue_screenshots: screenshotArtifacts,
     final_orphan_proof: `${runDir}/final-orphan-proof/manifest.json`,
   },
 };
@@ -188,6 +218,11 @@ export EVENTLOOPOS_PROOF_COMMANDS='[
     "args": ["proof:live:task-workspace-memory"]
   },
   {
+    "name": "Manual mode return proof",
+    "cmd": "bash",
+    "args": ["-lc", "cd app/macos && swift test --filter QueueViewModelTests/testToggleEnteringManualModeDoesNotCaptureUntilReturn && swift test --filter QueueViewModelTests/testToggleIntoManualModeRestoresSavedManualWorkspace && swift test --filter QueueViewModelTests/testRestoreManualWorkspaceUsesSavedSnapshotAndKeepsManualMode && swift test --filter QueueViewModelTests/testReturnToEventLoopKeepingCurrentLayoutDoesNotRestoreWorkspace && cd ../.. && pnpm --filter @eventloopos/orchestrator run build && (cd app/orchestrator && node --test dist/test/manual_mode_round_trip.test.js)"]
+  },
+  {
     "name": "Codex waiting auto-paper proof",
     "cmd": "bash",
     "args": ["-lc", "pnpm --filter @eventloopos/orchestrator run build && node app/orchestrator/bin/p5-auto-paper-codex-idle-smoke"]
@@ -203,6 +238,7 @@ REMOTE
 proof_exit=$?
 set -e
 sync_remote_run
+sync_remote_artifact "artifacts/screenshots" "queue-window-screenshots"
 
 echo "human UX proof final cleanup"
 set +e
