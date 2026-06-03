@@ -88,7 +88,13 @@ Report any of these as product issues:
 
 ## Result Template
 
-Copy this into the issue, commit note, or chat after the hands-on walkthrough:
+Generate a prefilled template from the latest successful demo artifact, then fill in pass/fail and friction:
+
+```sh
+bin/human-demo-result-template
+```
+
+It fills the latest manifest and screenshot paths. The output shape is:
 
 ```text
 Human demo date:

@@ -1,0 +1,143 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+import path from "node:path";
+
+const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/human-demo-result-template [--manifest artifacts/lab-runs/.../manifest.json] [--json]
+
+Print a prefilled human dogfood result template from the latest Mac Studio
+human-demo artifact.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  const manifest = {
+    ok: true,
+    generated_at: "2026-06-03T20:27:42.336Z",
+    proofs: {
+      demo_queue: { count: 2 },
+      ambient_autosave: { ok: true },
+    },
+  };
+  const rendered = renderTemplate({
+    manifestPath: "artifacts/lab-runs/20260603-132623-human-demo/manifest.json",
+    screenshotPath: "artifacts/lab-runs/20260603-132623-human-demo/screen-sharing.png",
+    manifest,
+  });
+  assertIncludes(rendered, "Human demo date: 2026-06-03");
+  assertIncludes(rendered, "Proof manifest: artifacts/lab-runs/20260603-132623-human-demo/manifest.json");
+  assertIncludes(rendered, "Screenshot: artifacts/lab-runs/20260603-132623-human-demo/screen-sharing.png");
+  assertIncludes(rendered, "Automated proof: ok=true, queue_count=2, ambient_autosave=true");
+  console.log("human-demo-result-template self-test passed");
+  process.exit(0);
+}
+
+const json = args.includes("--json");
+const manifestArg = valueAfter("--manifest");
+const manifestPath = manifestArg ?? latestManifestPath();
+if (!manifestPath) {
+  console.error("No human-demo manifest found under artifacts/lab-runs. Run bin/lab-mac-human-demo-setup first.");
+  process.exit(1);
+}
+
+const absoluteManifestPath = path.resolve(repoRoot, manifestPath);
+const manifest = readJson(absoluteManifestPath);
+const relativeManifestPath = path.relative(repoRoot, absoluteManifestPath);
+const screenshotPath = findScreenshotPath(path.dirname(absoluteManifestPath));
+const result = {
+  manifest_path: relativeManifestPath,
+  screenshot_path: screenshotPath,
+  ok: manifest.ok === true,
+  queue_count: manifest.proofs?.demo_queue?.count ?? null,
+  ambient_autosave_ok: manifest.proofs?.ambient_autosave?.ok === true,
+  generated_at: manifest.generated_at ?? null,
+  template: renderTemplate({
+    manifestPath: relativeManifestPath,
+    screenshotPath,
+    manifest,
+  }),
+};
+
+if (json) {
+  console.log(JSON.stringify(result, null, 2));
+} else {
+  console.log(result.template);
+}
+
+function valueAfter(flag) {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) {
+    console.error(`Missing value for ${flag}`);
+    process.exit(2);
+  }
+  return value;
+}
+
+function latestManifestPath() {
+  const labRuns = path.join(repoRoot, "artifacts", "lab-runs");
+  if (!fs.existsSync(labRuns)) return undefined;
+  const candidates = fs.readdirSync(labRuns, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith("-human-demo"))
+    .map((entry) => path.join(labRuns, entry.name, "manifest.json"))
+    .filter((candidate) => fs.existsSync(candidate))
+    .sort();
+  const latest = candidates.at(-1);
+  return latest ? path.relative(repoRoot, latest) : undefined;
+}
+
+function readJson(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    console.error(`Could not read JSON manifest: ${filePath}`);
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
+}
+
+function findScreenshotPath(runDir) {
+  for (const name of ["screen-sharing.png", "screen-sharing.jpg"]) {
+    const candidate = path.join(runDir, name);
+    if (fs.existsSync(candidate)) return path.relative(repoRoot, candidate);
+  }
+  return "";
+}
+
+function renderTemplate({ manifestPath, screenshotPath, manifest }) {
+  const date = manifest.generated_at ? manifest.generated_at.slice(0, 10) : "";
+  const queueCount = manifest.proofs?.demo_queue?.count ?? "";
+  const ambientOk = manifest.proofs?.ambient_autosave?.ok === true ? "true" : "false";
+  return `Human demo date: ${date}
+Mac: Mac Studio
+Proof manifest: ${manifestPath}
+Screenshot: ${screenshotPath}
+Automated proof: ok=${manifest.ok === true}, queue_count=${queueCount}, ambient_autosave=${ambientOk}
+
+Pass/fail:
+- Starting state on demo-customer with Queue visible:
+- Ctrl-Option-R restores Customer paper:
+- Moving shared TextEdit is remembered after 2-3 seconds:
+- Metrics paper brings same TextEdit to metrics position:
+- Customer paper brings same TextEdit back to customer position:
+- Rectangle hotkeys feel usable:
+- Manual Mode entry/return works:
+- Queue footer feedback is visible and current:
+
+Friction:
+- 
+
+Ship/block decision:
+`;
+}
+
+function assertIncludes(value, expected) {
+  if (!value.includes(expected)) {
+    throw new Error(`expected output to include ${expected}`);
+  }
+}
