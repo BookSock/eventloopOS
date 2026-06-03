@@ -1,0 +1,67 @@
+#!/usr/bin/env node
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import os from "node:os";
+import path from "node:path";
+
+const action = process.argv[2] ?? "install";
+const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const source = path.join(repoRoot, "config/aerospace/eventloopos-floating.toml");
+const target = process.env.AEROSPACE_CONFIG_PATH ?? path.join(os.homedir(), ".aerospace.toml");
+
+if (action === "--self-test") {
+  const profile = readFileSync(source, "utf8");
+  assertProfile(profile);
+  console.log("macos-aerospace-profile self-test passed");
+  process.exit(0);
+}
+
+if (!["install", "status"].includes(action)) {
+  console.error("Usage: bin/macos-aerospace-profile [install|status|--self-test]");
+  process.exit(2);
+}
+
+const sourceProfile = readFileSync(source, "utf8");
+assertProfile(sourceProfile);
+
+if (action === "status") {
+  if (!existsSync(target)) {
+    console.log(`missing: ${target}`);
+    process.exit(1);
+  }
+  const current = readFileSync(target, "utf8");
+  assertProfile(current);
+  console.log(`eventloopOS AeroSpace floating profile installed: ${target}`);
+  process.exit(0);
+}
+
+mkdirSync(path.dirname(target), { recursive: true });
+if (existsSync(target)) {
+  const backup = `${target}.eventloopos-backup-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+  copyFileSync(target, backup);
+  console.log(`backed up existing AeroSpace config: ${backup}`);
+}
+copyFileSync(source, target);
+console.log(`installed eventloopOS AeroSpace floating profile: ${target}`);
+
+try {
+  execFileSync("aerospace", ["reload-config"], { stdio: "inherit" });
+  console.log("reloaded AeroSpace config");
+} catch (error) {
+  console.error("AeroSpace reload failed; launch AeroSpace and run: aerospace reload-config");
+  if (error && typeof error === "object" && "status" in error) process.exitCode = Number(error.status) || 1;
+}
+
+function assertProfile(profile) {
+  if (!/^experimental-force-floating-windows\s*=\s*true$/m.test(profile)) {
+    throw new Error("profile must enable experimental-force-floating-windows");
+  }
+  if (!/\bctrl-alt-left\s*=/.test(profile) || !/\bctrl-alt-right\s*=/.test(profile)) {
+    throw new Error("profile must include Rectangle-style half-screen bindings");
+  }
+  for (const reserved of ["ctrl-alt-j", "ctrl-alt-e", "ctrl-alt-enter", "ctrl-alt-h", "ctrl-alt-r", "ctrl-alt-k", "ctrl-alt-m"]) {
+    if (new RegExp(`^${reserved}\\s*=`, "m").test(profile)) {
+      throw new Error(`profile shadows eventloopOS hotkey: ${reserved}`);
+    }
+  }
+}

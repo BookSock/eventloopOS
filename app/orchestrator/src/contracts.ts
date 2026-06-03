@@ -42,6 +42,16 @@ export type WorkspaceWindow = {
   app: string;
   title: string;
   workspace: string;
+  monitorId?: number;
+  pid?: number;
+  appBundleId?: string;
+  layout?: "h_tiles" | "v_tiles" | "h_accordion" | "v_accordion" | "tiles" | "accordion" | "floating";
+  frame?: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
 };
 
 export type Action = {

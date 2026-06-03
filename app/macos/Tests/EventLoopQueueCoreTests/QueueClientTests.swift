@@ -450,7 +450,19 @@ final class QueueClientTests: XCTestCase {
         let result = try await client.saveTaskWorkspaceSnapshot(
             taskId: "task_blog_feedback",
             workspaceSnapshot: WorkspaceSnapshot(
-                windows: [WorkspaceWindow(id: 91, app: "Ghostty", title: "Blog", workspace: "eventloop-blog")],
+                windows: [
+                    WorkspaceWindow(
+                        id: 91,
+                        app: "Ghostty",
+                        title: "Blog",
+                        workspace: "eventloop-blog",
+                        monitorId: 1,
+                        pid: 4321,
+                        appBundleId: "com.mitchellh.ghostty",
+                        layout: "floating",
+                        frame: WorkspaceWindowFrame(x: 40, y: 50, width: 800, height: 500)
+                    )
+                ],
                 activeWorkspace: "eventloop-blog",
                 focusedWindowId: 91
             ),
@@ -460,6 +472,17 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(recorder.requests.count, 1)
         let workspaceSnapshot = try XCTUnwrap(capturedBody?["workspace_snapshot"] as? [String: Any])
         XCTAssertEqual(workspaceSnapshot["activeWorkspace"] as? String, "eventloop-blog")
+        let windows = try XCTUnwrap(workspaceSnapshot["windows"] as? [[String: Any]])
+        let window = try XCTUnwrap(windows.first)
+        XCTAssertEqual(window["monitorId"] as? Int, 1)
+        XCTAssertEqual(window["pid"] as? Int, 4321)
+        XCTAssertEqual(window["appBundleId"] as? String, "com.mitchellh.ghostty")
+        XCTAssertEqual(window["layout"] as? String, "floating")
+        let frame = try XCTUnwrap(window["frame"] as? [String: Any])
+        XCTAssertEqual(frame["x"] as? Int, 40)
+        XCTAssertEqual(frame["y"] as? Int, 50)
+        XCTAssertEqual(frame["width"] as? Int, 800)
+        XCTAssertEqual(frame["height"] as? Int, 500)
         XCTAssertTrue(result.ok)
         XCTAssertEqual(result.requestId, "req_save_workspace")
     }
@@ -1054,7 +1077,17 @@ final class QueueClientTests: XCTestCase {
               "snapshot": {
                 "backend": "aerospace",
                 "windows": [
-                  { "id": 9, "app": "Ghostty", "title": "codex", "workspace": "eventloop-blog" }
+                  {
+                    "id": 9,
+                    "app": "Ghostty",
+                    "title": "codex",
+                    "workspace": "eventloop-blog",
+                    "monitorId": 2,
+                    "pid": 1234,
+                    "appBundleId": "com.mitchellh.ghostty",
+                    "layout": "floating",
+                    "frame": { "x": 80, "y": 60, "width": 720, "height": 480 }
+                  }
                 ],
                 "activeWorkspace": "eventloop-blog"
               }
@@ -1067,6 +1100,11 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(recorder.requests.count, 1)
         XCTAssertEqual(snapshot.windows.map(\.id), [9])
         XCTAssertEqual(snapshot.activeWorkspace, "eventloop-blog")
+        XCTAssertEqual(snapshot.windows.first?.monitorId, 2)
+        XCTAssertEqual(snapshot.windows.first?.pid, 1234)
+        XCTAssertEqual(snapshot.windows.first?.appBundleId, "com.mitchellh.ghostty")
+        XCTAssertEqual(snapshot.windows.first?.layout, "floating")
+        XCTAssertEqual(snapshot.windows.first?.frame, WorkspaceWindowFrame(x: 80, y: 60, width: 720, height: 480))
     }
 
     func testContextRestorePlanEnvelopeDecodesBrowserExtensionMessage() throws {

@@ -18,6 +18,14 @@ This is the friend-onboarding path for a fresh clone. It avoids Jason-specific c
 
 Jason's current dogfood path uses a personal AeroSpace fork with `experimental-native-spaces` and `experimental-force-floating-windows`. Stock AeroSpace is enough for basic workspace capture/restore, but the fork gives the closest version of the intended product behavior.
 
+Install the eventloopOS AeroSpace profile before dogfooding workspace restore:
+
+```sh
+bin/macos-aerospace-profile install
+```
+
+The profile backs up `~/.aerospace.toml`, enables `experimental-force-floating-windows = true`, forces detected windows to floating layout, and adds Rectangle-inspired snap hotkeys. Rectangle's default `Ctrl-Option-Return` maximize chord conflicts with eventloopOS Send to Agent, so the profile uses `Ctrl-Option-Shift-Return` for maximize and leaves eventloopOS paper-loop chords untouched.
+
 ## Install
 
 ```sh

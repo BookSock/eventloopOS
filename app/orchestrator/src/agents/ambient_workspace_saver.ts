@@ -26,6 +26,7 @@ export type WindowWorkspaceObservationWriter = (input: {
   appBundle?: string;
   titlePrefix?: string;
 }) => Promise<unknown> | unknown;
+export type FollowsWindowIdReader = () => Promise<Iterable<string | number>> | Iterable<string | number>;
 
 export type AmbientWorkspaceSaverDeps = {
   workspace: Pick<WorkspaceController, "capture">;
@@ -33,6 +34,7 @@ export type AmbientWorkspaceSaverDeps = {
   updateTaskLayout: TaskLayoutWriter;
   isManualModeActive: ManualModeReader;
   recordWindowObservation?: WindowWorkspaceObservationWriter;
+  getFollowsWindowIds?: FollowsWindowIdReader;
   observability?: Observability;
   pollIntervalMs?: number;
   debounceMs?: number;
@@ -94,8 +96,9 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
         return { decision: "skipped_unbounded" };
       }
 
-      const snapshot = await deps.workspace.capture();
-      await recordWindowObservations(deps, snapshot, currentTaskId, tickNow);
+      const rawSnapshot = await deps.workspace.capture();
+      await recordWindowObservations(deps, rawSnapshot, currentTaskId, tickNow);
+      const snapshot = filterSnapshotForTaskSave(rawSnapshot, await readFollowsWindowIds(deps));
       const fingerprint = snapshotFingerprint(snapshot);
       const lastFingerprint = lastSavedSnapshotByTask.get(currentTaskId);
 
@@ -251,7 +254,20 @@ async function recordWindowObservations(
 
 export function snapshotFingerprint(snapshot: WorkspaceSnapshot): string {
   const windows = snapshot.windows
-    .map((window) => `${window.id}|${window.app}|${window.title}|${window.workspace}|${window.monitorId ?? ""}`)
+    .map((window) =>
+      [
+        window.id,
+        window.app,
+        window.title,
+        window.workspace,
+        window.monitorId ?? "",
+        window.layout ?? "",
+        window.frame?.x ?? "",
+        window.frame?.y ?? "",
+        window.frame?.width ?? "",
+        window.frame?.height ?? "",
+      ].join("|"),
+    )
     .sort()
     .join("\n");
   return [
@@ -260,6 +276,29 @@ export function snapshotFingerprint(snapshot: WorkspaceSnapshot): string {
     `focused_window_id=${snapshot.focusedWindowId ?? ""}`,
     `windows=${windows}`,
   ].join("\n");
+}
+
+export function filterSnapshotForTaskSave(snapshot: WorkspaceSnapshot, followsWindowIds: ReadonlySet<string> = new Set()): WorkspaceSnapshot {
+  if (!snapshot.activeWorkspace) return snapshot;
+  const windows = snapshot.windows.filter(
+    (window) => window.workspace === snapshot.activeWorkspace || followsWindowIds.has(String(window.id)),
+  );
+  const focusedWindowId =
+    snapshot.focusedWindowId !== undefined && windows.some((window) => window.id === snapshot.focusedWindowId)
+      ? snapshot.focusedWindowId
+      : undefined;
+
+  return {
+    ...snapshot,
+    windows,
+    focusedWindowId,
+  };
+}
+
+async function readFollowsWindowIds(deps: AmbientWorkspaceSaverDeps): Promise<ReadonlySet<string>> {
+  if (!deps.getFollowsWindowIds) return new Set();
+  const ids = await deps.getFollowsWindowIds();
+  return new Set(Array.from(ids, (id) => String(id)));
 }
 
 // Adapter that lets the orchestrator wire its (Phase-2-pending) store-level
@@ -285,6 +324,7 @@ export function createAmbientWorkspaceSaverFromRuntime(
       capturedAt: Date;
       actorId?: string;
     }) => Promise<unknown>;
+    listFollowsWindows?: (input: { now: Date; ttlMs: number; minWorkspaceCount: number }) => Promise<Array<{ window_id: string }>>;
   };
 
   const getCurrentTaskState: CurrentTaskStateReader = async () => {
@@ -326,6 +366,15 @@ export function createAmbientWorkspaceSaverFromRuntime(
     typeof (runtime.store as unknown as { recordWindowWorkspaceObservation?: unknown }).recordWindowWorkspaceObservation === "function"
       ? (input) => runtime.store.recordWindowWorkspaceObservation(input)
       : undefined;
+  const getFollowsWindowIds: FollowsWindowIdReader | undefined =
+    typeof store.listFollowsWindows === "function"
+      ? async () => {
+          const ttlMs = Number(process.env.EVENTLOOPOS_FOLLOWS_TTL_MS ?? 24 * 60 * 60 * 1_000);
+          const minWorkspaceCount = Number(process.env.EVENTLOOPOS_FOLLOWS_THRESHOLD ?? 3);
+          const follows = await store.listFollowsWindows!({ now: runtime.now(), ttlMs, minWorkspaceCount });
+          return follows.map((follow) => follow.window_id);
+        }
+      : undefined;
 
   return createAmbientWorkspaceSaver({
     workspace,
@@ -333,6 +382,7 @@ export function createAmbientWorkspaceSaverFromRuntime(
     updateTaskLayout,
     isManualModeActive,
     recordWindowObservation,
+    getFollowsWindowIds,
     observability: runtime.observability,
     pollIntervalMs: overrides.pollIntervalMs,
     debounceMs: overrides.debounceMs,

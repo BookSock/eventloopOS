@@ -78,12 +78,58 @@ public struct WorkspaceWindow: Codable, Equatable, Sendable {
     public let app: String
     public let title: String
     public let workspace: String
+    public let monitorId: Int?
+    public let pid: Int?
+    public let appBundleId: String?
+    public let layout: String?
+    public let frame: WorkspaceWindowFrame?
 
-    public init(id: Int, app: String, title: String, workspace: String) {
+    public init(
+        id: Int,
+        app: String,
+        title: String,
+        workspace: String,
+        monitorId: Int? = nil,
+        pid: Int? = nil,
+        appBundleId: String? = nil,
+        layout: String? = nil,
+        frame: WorkspaceWindowFrame? = nil
+    ) {
         self.id = id
         self.app = app
         self.title = title
         self.workspace = workspace
+        self.monitorId = monitorId
+        self.pid = pid
+        self.appBundleId = appBundleId
+        self.layout = layout
+        self.frame = frame
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case app
+        case title
+        case workspace
+        case monitorId
+        case pid
+        case appBundleId
+        case layout
+        case frame
+    }
+}
+
+public struct WorkspaceWindowFrame: Codable, Equatable, Sendable {
+    public let x: Int
+    public let y: Int
+    public let width: Int
+    public let height: Int
+
+    public init(x: Int, y: Int, width: Int, height: Int) {
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
     }
 }
 

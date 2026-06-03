@@ -23,6 +23,7 @@ describe("workspace controller", () => {
       if (args[0] === "list-windows" && args.includes("--focused")) {
         return { stdout: JSON.stringify([{ "window-id": 9, workspace: "eventloop-blog" }]) };
       }
+      if (command === "osascript") return { stdout: "" };
       return {
         stdout: JSON.stringify([
           { "window-id": 9, "app-name": "Ghostty", "window-title": "codex", workspace: "eventloop-blog" },
@@ -33,7 +34,10 @@ describe("workspace controller", () => {
     const controller = new AerospaceWorkspaceController(exec);
     const snapshot = await controller.capture();
 
-    assert.deepEqual(calls, [captureWorkspacePlan(), captureFocusedWorkspacePlan(), captureFocusedWindowPlan()]);
+    assert.equal(calls.length, 4);
+    assert.deepEqual(calls.slice(0, 3), [captureWorkspacePlan(), captureFocusedWorkspacePlan(), captureFocusedWindowPlan()]);
+    assert.equal(calls[3]?.command, "osascript");
+    assert.equal(calls[3]?.args[0], "-e");
     assert.deepEqual(snapshot, {
       backend: "aerospace",
       activeWorkspace: "eventloop-blog",
@@ -47,6 +51,8 @@ describe("workspace controller", () => {
           monitorId: undefined,
           pid: undefined,
           appBundleId: undefined,
+          layout: undefined,
+          frame: undefined,
         },
       ],
     });

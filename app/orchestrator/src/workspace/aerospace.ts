@@ -5,13 +5,18 @@ export type ExecResult = {
 
 export type ExecFunction = (command: string, args: string[]) => Promise<ExecResult>;
 
-export type AerospaceCommand = {
-  command: "aerospace";
-  args: string[];
-};
+export type AerospaceCommand =
+  | {
+      command: "aerospace";
+      args: string[];
+    }
+  | {
+      command: "osascript";
+      args: string[];
+    };
 
 export const AEROSPACE_WINDOW_CAPTURE_FORMAT =
-  "%{window-id}%{app-name}%{app-bundle-id}%{window-title}%{workspace}%{monitor-id}%{app-pid}";
+  "%{window-id}%{app-name}%{app-bundle-id}%{window-title}%{workspace}%{monitor-id}%{app-pid}%{window-layout}";
 
 export type WorkspaceCapabilityStatus =
   | {
@@ -36,6 +41,15 @@ export type AerospaceWindow = {
   monitorId?: number;
   pid?: number;
   appBundleId?: string;
+  layout?: AerospaceLayout;
+  frame?: WindowFrame;
+};
+
+export type WindowFrame = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 };
 
 export type WorkspaceSnapshot = {
@@ -85,10 +99,11 @@ export class AerospaceWorkspaceAdapter {
     const result = await this.exec("aerospace", captureWorkspacePlan().args);
     const activeWorkspace = await this.captureFocusedWorkspace().catch(() => undefined);
     const focusedWindowId = await this.captureFocusedWindowId().catch(() => undefined);
+    const frames = await this.captureWindowFrames().catch(() => []);
 
     return {
       backend: this.backend,
-      windows: parseAerospaceWindows(result.stdout),
+      windows: attachWindowFrames(parseAerospaceWindows(result.stdout), frames),
       activeWorkspace,
       focusedWindowId,
     };
@@ -118,6 +133,11 @@ export class AerospaceWorkspaceAdapter {
     const result = await this.exec("aerospace", captureFocusedWindowPlan().args);
     const focused = parseAerospaceWindows(result.stdout)[0];
     return focused?.id;
+  }
+
+  private async captureWindowFrames(): Promise<MacOSWindowFrameObservation[]> {
+    const result = await this.exec("osascript", ["-e", captureWindowFramesAppleScript()]);
+    return parseWindowFrameObservations(result.stdout);
   }
 }
 
@@ -192,9 +212,21 @@ export function layoutWindowPlan(windowId: number, layout: AerospaceLayout): Aer
   };
 }
 
+export function restoreWindowFramePlan(window: AerospaceWindow): AerospaceCommand | undefined {
+  if (!window.frame || !hasWindowIdentityForFrameRestore(window)) {
+    return undefined;
+  }
+  assertSafeFrame(window.frame);
+  return {
+    command: "osascript",
+    args: ["-e", restoreWindowFrameAppleScript(window)],
+  };
+}
+
 export function restoreWorkspacePlan(snapshot: WorkspaceSnapshot, currentWindows: AerospaceWindow[]): RestorePlan {
   const currentWindowsById = new Map(currentWindows.map((window) => [window.id, window]));
   const commands: AerospaceCommand[] = [];
+  const frameCommands: AerospaceCommand[] = [];
   const skipped: RestoreSkip[] = [];
 
   for (const window of snapshot.windows) {
@@ -217,11 +249,20 @@ export function restoreWorkspacePlan(snapshot: WorkspaceSnapshot, currentWindows
     }
 
     commands.push(moveToWorkspacePlan(window.id, window.workspace));
+    if (window.layout !== undefined && window.layout !== current.layout) {
+      commands.push(layoutWindowPlan(window.id, window.layout));
+    } else if (window.frame !== undefined && current.layout !== "floating") {
+      commands.push(layoutWindowPlan(window.id, "floating"));
+    }
+    const framePlan = restoreWindowFramePlan(window);
+    if (framePlan) frameCommands.push(framePlan);
   }
 
   if (snapshot.activeWorkspace !== undefined) {
     commands.push(focusWorkspacePlan(snapshot.activeWorkspace));
   }
+
+  commands.push(...frameCommands);
 
   if (snapshot.focusedWindowId !== undefined && currentWindowsById.has(snapshot.focusedWindowId)) {
     commands.push(focusWindowPlan(snapshot.focusedWindowId));
@@ -263,7 +304,60 @@ function parseWindow(item: unknown, index: number): AerospaceWindow {
     monitorId: readOptionalNumber(record, ["monitor-id", "monitor_id"]),
     pid: readOptionalNumber(record, ["app-pid", "app_pid", "pid"]),
     appBundleId: readOptionalString(record, ["app-bundle-id", "app_bundle_id"]),
+    layout: readOptionalLayout(record, ["window-layout", "window_layout", "layout"]),
+    frame: readOptionalFrame(record),
   };
+}
+
+export type MacOSWindowFrameObservation = {
+  app: string;
+  title: string;
+  appBundleId?: string;
+  frame: WindowFrame;
+};
+
+export function attachWindowFrames(
+  windows: AerospaceWindow[],
+  observations: MacOSWindowFrameObservation[],
+): AerospaceWindow[] {
+  const available = [...observations];
+  return windows.map((window) => {
+    const index = available.findIndex((candidate) => windowFrameObservationMatches(window, candidate));
+    if (index < 0) return window;
+    const [match] = available.splice(index, 1);
+    return match ? { ...window, frame: match.frame } : window;
+  });
+}
+
+export function parseWindowFrameObservations(stdout: string): MacOSWindowFrameObservation[] {
+  const rows: MacOSWindowFrameObservation[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const [app, appBundleId, title, x, y, width, height] = line.split("\t");
+    const frame = {
+      x: Number(x),
+      y: Number(y),
+      width: Number(width),
+      height: Number(height),
+    };
+    if (
+      !app ||
+      !title ||
+      !Number.isInteger(frame.x) ||
+      !Number.isInteger(frame.y) ||
+      !Number.isInteger(frame.width) ||
+      !Number.isInteger(frame.height)
+    ) {
+      continue;
+    }
+    rows.push({
+      app,
+      title,
+      appBundleId: appBundleId || undefined,
+      frame,
+    });
+  }
+  return rows;
 }
 
 function parseJson(json: string): unknown {
@@ -310,6 +404,28 @@ function readOptionalString(record: Record<string, unknown>, keys: string[]): st
   return typeof value === "string" ? value : undefined;
 }
 
+function readOptionalLayout(record: Record<string, unknown>, keys: string[]): AerospaceLayout | undefined {
+  const value = readOptionalString(record, keys);
+  if (value === undefined) return undefined;
+  assertSafeLayout(value);
+  return value;
+}
+
+function readOptionalFrame(record: Record<string, unknown>): WindowFrame | undefined {
+  const raw = readByKeys(record, ["frame", "bounds"]);
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const frame = raw as Record<string, unknown>;
+  const x = readOptionalNumber(frame, ["x", "X"]);
+  const y = readOptionalNumber(frame, ["y", "Y"]);
+  const width = readOptionalNumber(frame, ["width", "Width", "w"]);
+  const height = readOptionalNumber(frame, ["height", "Height", "h"]);
+  if (x === undefined || y === undefined || width === undefined || height === undefined) return undefined;
+  const parsed = { x, y, width, height };
+  assertSafeFrame(parsed);
+  return parsed;
+}
+
 function readByKeys(record: Record<string, unknown>, keys: string[]): unknown {
   for (const key of keys) {
     if (Object.hasOwn(record, key)) {
@@ -338,6 +454,20 @@ function assertSafeMonitorId(monitorId: number): void {
   }
 }
 
+function assertSafeFrame(frame: WindowFrame): void {
+  for (const [key, value] of Object.entries(frame)) {
+    if (!Number.isInteger(value)) {
+      throw new Error(`unsafe window frame ${key}: ${value}`);
+    }
+  }
+  if (frame.width <= 0 || frame.height <= 0) {
+    throw new Error(`unsafe window frame size: ${frame.width}x${frame.height}`);
+  }
+  if (frame.width > 20_000 || frame.height > 20_000 || Math.abs(frame.x) > 50_000 || Math.abs(frame.y) > 50_000) {
+    throw new Error(`unsafe window frame: ${JSON.stringify(frame)}`);
+  }
+}
+
 function countDistinctMonitors(windows: AerospaceWindow[]): number {
   const monitors = new Set<number>();
   for (const window of windows) {
@@ -349,8 +479,11 @@ function countDistinctMonitors(windows: AerospaceWindow[]): number {
 }
 
 function assertSafeAerospaceCommand(command: AerospaceCommand): void {
-  if (command.command !== "aerospace") {
-    throw new Error(`unsafe aerospace command: ${command.command}`);
+  if (command.command === "osascript") {
+    if (command.args.length !== 2 || command.args[0] !== "-e" || !command.args[1].includes("-- eventloopOS generated frame restore")) {
+      throw new Error("unsafe osascript restore command");
+    }
+    return;
   }
 
   const [subcommand, ...rest] = command.args;
@@ -379,6 +512,78 @@ function assertSafeAerospaceCommand(command: AerospaceCommand): void {
   }
 
   throw new Error(`unsafe aerospace args: ${command.args.join(" ")}`);
+}
+
+function captureWindowFramesAppleScript(): string {
+  return `
+set outputRows to {}
+tell application "System Events"
+  repeat with candidateProcess in (application processes whose visible is true)
+    try
+      set appName to name of candidateProcess as text
+      set bundleId to bundle identifier of candidateProcess as text
+      repeat with candidateWindow in windows of candidateProcess
+        try
+          set windowName to name of candidateWindow as text
+          if windowName is not "" then
+            set windowPosition to position of candidateWindow
+            set windowSize to size of candidateWindow
+            set end of outputRows to appName & tab & bundleId & tab & windowName & tab & (item 1 of windowPosition as text) & tab & (item 2 of windowPosition as text) & tab & (item 1 of windowSize as text) & tab & (item 2 of windowSize as text)
+          end if
+        end try
+      end repeat
+    end try
+  end repeat
+end tell
+set AppleScript's text item delimiters to linefeed
+return outputRows as text
+`.trim();
+}
+
+function restoreWindowFrameAppleScript(window: AerospaceWindow): string {
+  const frame = window.frame;
+  if (!frame) throw new Error("window frame is required");
+  const appMatcher = window.appBundleId
+    ? `bundle identifier of candidateProcess as text is ${appleScriptString(window.appBundleId)}`
+    : `name of candidateProcess as text is ${appleScriptString(window.app)}`;
+
+  return `
+-- eventloopOS generated frame restore
+tell application "System Events"
+  repeat with candidateProcess in (application processes whose visible is true)
+    try
+      if ${appMatcher} then
+        repeat with candidateWindow in windows of candidateProcess
+          try
+            if name of candidateWindow as text is ${appleScriptString(window.title)} then
+              set position of candidateWindow to {${frame.x}, ${frame.y}}
+              set size of candidateWindow to {${frame.width}, ${frame.height}}
+              return "ok"
+            end if
+          end try
+        end repeat
+      end if
+    end try
+  end repeat
+end tell
+return "not_found"
+`.trim();
+}
+
+function appleScriptString(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function hasWindowIdentityForFrameRestore(window: AerospaceWindow): boolean {
+  return window.title.length > 0 && (window.app.length > 0 || (window.appBundleId?.length ?? 0) > 0);
+}
+
+function windowFrameObservationMatches(window: AerospaceWindow, observation: MacOSWindowFrameObservation): boolean {
+  if (window.title !== observation.title) return false;
+  if (window.appBundleId && observation.appBundleId) {
+    return window.appBundleId === observation.appBundleId;
+  }
+  return window.app === observation.app;
 }
 
 function assertSafeLayout(layout: string): asserts layout is AerospaceLayout {

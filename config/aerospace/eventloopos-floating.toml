@@ -1,0 +1,74 @@
+# eventloopOS AeroSpace profile for non-tiling macOS dogfood.
+#
+# Install:
+#   cp config/aerospace/eventloopos-floating.toml ~/.aerospace.toml
+#   aerospace reload-config
+#
+# This profile keeps AeroSpace useful for workspaces/focus but makes windows
+# float by default. Rectangle-style snap bindings call the repo helper so users
+# keep familiar muscle memory while eventloopOS can save exact geometry.
+
+enable-normalization-flatten-containers = false
+enable-normalization-opposite-orientation-for-nested-containers = false
+automatically-unhide-macos-hidden-apps = true
+experimental-force-floating-windows = true
+accordion-padding = 24
+default-root-container-layout = "tiles"
+default-root-container-orientation = "auto"
+on-focused-monitor-changed = ["move-mouse monitor-lazy-center"]
+after-startup-command = []
+exec-on-workspace-change = []
+
+[key-mapping]
+preset = "qwerty"
+
+[gaps]
+inner.horizontal = 0
+inner.vertical = 0
+outer.left = 0
+outer.bottom = 0
+outer.top = 0
+outer.right = 0
+
+[mode.main.binding]
+# Floating layout fallback for older builds or manual recovery.
+ctrl-alt-f = "layout floating"
+
+# Rectangle-compatible core snaps.
+ctrl-alt-left = 'exec-and-forget "$HOME/dev/2026/eventloopOS/bin/macos-window-snap" left-half'
+ctrl-alt-right = 'exec-and-forget "$HOME/dev/2026/eventloopOS/bin/macos-window-snap" right-half'
+ctrl-alt-up = 'exec-and-forget "$HOME/dev/2026/eventloopOS/bin/macos-window-snap" top-half'
+ctrl-alt-down = 'exec-and-forget "$HOME/dev/2026/eventloopOS/bin/macos-window-snap" bottom-half'
+ctrl-alt-c = 'exec-and-forget "$HOME/dev/2026/eventloopOS/bin/macos-window-snap" center'
+
+# Rectangle default maximize is Ctrl-Option-Return, but eventloopOS owns that
+# chord for Send to Agent. Use Shift to keep both actions reliable.
+ctrl-alt-shift-enter = 'exec-and-forget "$HOME/dev/2026/eventloopOS/bin/macos-window-snap" maximize'
+
+# Rectangle defaults use Ctrl-Option-U/I/J/K for corners. J and K conflict with
+# eventloopOS Advance/Master Command, so bottom corners use Shift variants.
+ctrl-alt-u = 'exec-and-forget "$HOME/dev/2026/eventloopOS/bin/macos-window-snap" top-left'
+ctrl-alt-i = 'exec-and-forget "$HOME/dev/2026/eventloopOS/bin/macos-window-snap" top-right'
+ctrl-alt-shift-j = 'exec-and-forget "$HOME/dev/2026/eventloopOS/bin/macos-window-snap" bottom-left'
+ctrl-alt-shift-k = 'exec-and-forget "$HOME/dev/2026/eventloopOS/bin/macos-window-snap" bottom-right'
+
+# Rectangle display movement muscle memory, implemented with AeroSpace monitor
+# movement because display geometry varies by machine.
+ctrl-alt-cmd-left = "move-node-to-monitor --focus-follows-window prev"
+ctrl-alt-cmd-right = "move-node-to-monitor --focus-follows-window next"
+
+# Basic AeroSpace workspace controls that do not shadow eventloopOS hotkeys.
+ctrl-alt-1 = "workspace 1"
+ctrl-alt-2 = "workspace 2"
+ctrl-alt-3 = "workspace 3"
+ctrl-alt-4 = "workspace 4"
+ctrl-alt-5 = "workspace 5"
+ctrl-alt-6 = "workspace 6"
+ctrl-alt-7 = "workspace 7"
+ctrl-alt-8 = "workspace 8"
+ctrl-alt-9 = "workspace 9"
+ctrl-alt-tab = "workspace-back-and-forth"
+ctrl-alt-shift-tab = "move-node-to-workspace --focus-follows-window prev"
+
+[[on-window-detected]]
+run = "layout floating"

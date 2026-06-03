@@ -1,0 +1,133 @@
+#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4480";
+const stamp = new Date().toISOString().replace(/[-:.]/g, "").slice(0, 15);
+const title = process.env.EVENTLOOPOS_GEOMETRY_PROOF_TITLE ?? `eventloopOS Geometry Shared Window Proof ${stamp}.txt`;
+const run = path.join(
+  "artifacts",
+  "lab-runs",
+  `${stamp}-geometry-proof`,
+);
+fs.mkdirSync(run, { recursive: true });
+
+const proofFile = path.join(os.homedir(), "Desktop", title);
+fs.writeFileSync(
+  proofFile,
+  "eventloopOS geometry proof window\nSame real TextEdit window restores to two paper positions.\n",
+);
+execFileSync("open", ["-a", "TextEdit", proofFile]);
+await sleep(1_500);
+
+let initial = await capture();
+let target = findTarget(initial);
+if (!target) throw new Error("target TextEdit window not captured");
+try {
+  execFileSync("aerospace", ["layout", "--window-id", String(target.id), "floating"]);
+} catch {
+  // The eventloopOS AeroSpace fork can report already-floating windows as
+  // non-tiling. Restore still proves floating geometry below.
+}
+
+const baseWindow = {
+  id: target.id,
+  app: target.app,
+  appBundleId: target.appBundleId,
+  title: target.title,
+  monitorId: target.monitorId,
+  layout: "floating",
+};
+const paperAFrame = { x: 60, y: 80, width: 560, height: 360 };
+const paperBFrame = { x: 900, y: 140, width: 680, height: 520 };
+const paperA = {
+  backend: "aerospace",
+  activeWorkspace: "eventloop-proof-a",
+  focusedWindowId: target.id,
+  windows: [{ ...baseWindow, workspace: "eventloop-proof-a", frame: paperAFrame }],
+};
+const paperB = {
+  backend: "aerospace",
+  activeWorkspace: "eventloop-proof-b",
+  focusedWindowId: target.id,
+  windows: [{ ...baseWindow, workspace: "eventloop-proof-b", frame: paperBFrame }],
+};
+
+const receiptA = await restore(paperA);
+const afterA = findTarget(await capture());
+assertWindow(afterA, "eventloop-proof-a", paperAFrame, "paperA");
+
+const receiptB = await restore(paperB);
+const afterB = findTarget(await capture());
+assertWindow(afterB, "eventloop-proof-b", paperBFrame, "paperB");
+
+const receiptA2 = await restore(paperA);
+const afterA2 = findTarget(await capture());
+assertWindow(afterA2, "eventloop-proof-a", paperAFrame, "paperA2");
+
+const manifest = {
+  ok: true,
+  run,
+  target_id: target.id,
+  title,
+  paperAFrame,
+  paperBFrame,
+  afterA,
+  afterB,
+  afterA2,
+  receiptA,
+  receiptB,
+  receiptA2,
+};
+fs.writeFileSync(path.join(run, "manifest.json"), JSON.stringify(manifest, null, 2));
+console.log(JSON.stringify({ ok: true, run, target_id: target.id, paperA: afterA2.frame, paperB: afterB.frame }, null, 2));
+
+async function capture() {
+  const response = await fetch(`${orchestratorUrl}/workspace/capture`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  if (!response.ok) throw new Error(`capture HTTP ${response.status}: ${await response.text()}`);
+  return (await response.json()).snapshot;
+}
+
+async function restore(snapshot) {
+  const current = await capture();
+  const response = await fetch(`${orchestratorUrl}/workspace/restore`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": `geometry-${snapshot.activeWorkspace}-${Date.now()}`,
+    },
+    body: JSON.stringify({ confirm_execute: true, snapshot, current_windows: current.windows }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`restore HTTP ${response.status}: ${JSON.stringify(body)}`);
+  await sleep(1_400);
+  return body;
+}
+
+function findTarget(snapshot) {
+  return snapshot.windows.find((window) => window.app === "TextEdit" && window.title === title);
+}
+
+function assertWindow(window, workspace, frame, label) {
+  if (!window) throw new Error(`${label}: target window missing`);
+  if (window.workspace !== workspace) throw new Error(`${label}: expected workspace ${workspace}, got ${window.workspace}`);
+  assertNear(window.frame, frame, label);
+}
+
+function assertNear(actual, expected, label) {
+  for (const key of ["x", "y", "width", "height"]) {
+    if (Math.abs((actual?.[key] ?? -999_999) - expected[key]) > 6) {
+      throw new Error(`${label} frame ${key}: expected ${expected[key]}, got ${actual?.[key]}`);
+    }
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}

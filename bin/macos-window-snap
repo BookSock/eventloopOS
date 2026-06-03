@@ -1,0 +1,116 @@
+#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
+
+const actions = new Set([
+  "left-half",
+  "right-half",
+  "top-half",
+  "bottom-half",
+  "maximize",
+  "center",
+  "top-left",
+  "top-right",
+  "bottom-left",
+  "bottom-right",
+]);
+
+const action = process.argv[2];
+
+if (action === "--self-test") {
+  for (const candidate of actions) {
+    const frame = frameFor(candidate, { x: 0, y: 0, width: 1440, height: 900 });
+    if (frame.width <= 0 || frame.height <= 0) {
+      throw new Error(`invalid frame for ${candidate}: ${JSON.stringify(frame)}`);
+    }
+  }
+  console.log("macos-window-snap self-test passed");
+  process.exit(0);
+}
+
+if (!action || !actions.has(action)) {
+  console.error(`Usage: bin/macos-window-snap ${[...actions].join("|")}`);
+  process.exit(2);
+}
+
+const desktop = readPrimaryDesktopFrame();
+const frame = frameFor(action, desktop);
+setFrontWindowFrame(frame);
+
+function readPrimaryDesktopFrame() {
+  const output = execFileSync("osascript", ["-e", 'tell application "Finder" to get bounds of window of desktop'], {
+    encoding: "utf8",
+  }).trim();
+  const values = output.split(/\s*,\s*/).map((value) => Number.parseInt(value, 10));
+  if (values.length !== 4 || values.some((value) => !Number.isFinite(value))) {
+    throw new Error(`could not read desktop bounds: ${output}`);
+  }
+  const [left, top, right, bottom] = values;
+  if (right <= left || bottom <= top) {
+    throw new Error(`invalid desktop bounds: ${output}`);
+  }
+  return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function frameFor(candidate, desktop) {
+  const halfWidth = Math.floor(desktop.width / 2);
+  const halfHeight = Math.floor(desktop.height / 2);
+  const centerWidth = Math.floor(desktop.width * 0.72);
+  const centerHeight = Math.floor(desktop.height * 0.72);
+
+  switch (candidate) {
+    case "left-half":
+      return { x: desktop.x, y: desktop.y, width: halfWidth, height: desktop.height };
+    case "right-half":
+      return { x: desktop.x + halfWidth, y: desktop.y, width: desktop.width - halfWidth, height: desktop.height };
+    case "top-half":
+      return { x: desktop.x, y: desktop.y, width: desktop.width, height: halfHeight };
+    case "bottom-half":
+      return { x: desktop.x, y: desktop.y + halfHeight, width: desktop.width, height: desktop.height - halfHeight };
+    case "maximize":
+      return desktop;
+    case "center":
+      return {
+        x: desktop.x + Math.floor((desktop.width - centerWidth) / 2),
+        y: desktop.y + Math.floor((desktop.height - centerHeight) / 2),
+        width: centerWidth,
+        height: centerHeight,
+      };
+    case "top-left":
+      return { x: desktop.x, y: desktop.y, width: halfWidth, height: halfHeight };
+    case "top-right":
+      return { x: desktop.x + halfWidth, y: desktop.y, width: desktop.width - halfWidth, height: halfHeight };
+    case "bottom-left":
+      return { x: desktop.x, y: desktop.y + halfHeight, width: halfWidth, height: desktop.height - halfHeight };
+    case "bottom-right":
+      return {
+        x: desktop.x + halfWidth,
+        y: desktop.y + halfHeight,
+        width: desktop.width - halfWidth,
+        height: desktop.height - halfHeight,
+      };
+    default:
+      throw new Error(`unsupported snap action: ${candidate}`);
+  }
+}
+
+function setFrontWindowFrame(frame) {
+  execFileSync("osascript", ["-e", setFrontWindowFrameAppleScript(frame)], { stdio: "inherit" });
+}
+
+function setFrontWindowFrameAppleScript(frame) {
+  return `
+tell application "System Events"
+  set frontApp to first application process whose frontmost is true
+  repeat with candidateWindow in windows of frontApp
+    try
+      if subrole of candidateWindow as text is "AXStandardWindow" then
+        set position of candidateWindow to {${frame.x}, ${frame.y}}
+        set size of candidateWindow to {${frame.width}, ${frame.height}}
+        return "ok"
+      end if
+    end try
+  end repeat
+end tell
+return "not_found"
+`.trim();
+}

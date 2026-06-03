@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/local-screen-sharing-capture [output.png]
+
+Capture only the local macOS Screen Sharing window, not the whole desktop.
+
+Environment:
+  SCREEN_SHARING_OWNER   default: Screen Sharing
+  SCREEN_SHARING_TITLE   optional title substring, e.g. Zeus
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+esac
+
+owner="${SCREEN_SHARING_OWNER:-Screen Sharing}"
+title="${SCREEN_SHARING_TITLE:-}"
+stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+output="${1:-artifacts/screen-sharing-captures/$stamp-screen-sharing.png}"
+
+window_id="$(
+  swift - "$owner" "$title" <<'SWIFT'
+import CoreGraphics
+import Foundation
+
+let ownerNeedle = CommandLine.arguments.count > 1 ? CommandLine.arguments[1].lowercased() : "screen sharing"
+let titleNeedle = CommandLine.arguments.count > 2 ? CommandLine.arguments[2].lowercased() : ""
+let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
+
+guard let windows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] else {
+  exit(1)
+}
+
+for window in windows {
+  let owner = (window[kCGWindowOwnerName as String] as? String ?? "")
+  let title = (window[kCGWindowName as String] as? String ?? "")
+  let layer = window[kCGWindowLayer as String] as? Int ?? -1
+  guard layer == 0 else { continue }
+  let ownerMatch = owner.lowercased().contains(ownerNeedle)
+  let titleMatch = titleNeedle.isEmpty || title.lowercased().contains(titleNeedle) || owner.lowercased().contains(titleNeedle)
+  guard ownerMatch && titleMatch else { continue }
+  if let id = window[kCGWindowNumber as String] as? UInt32 {
+    print(id)
+    exit(0)
+  }
+}
+
+exit(2)
+SWIFT
+)"
+
+if [[ -z "$window_id" ]]; then
+  echo "Screen Sharing window not found; open Screen Sharing and ensure it is not minimized." >&2
+  exit 1
+fi
+
+mkdir -p "$(dirname "$output")"
+screencapture -x -l "$window_id" "$output"
+
+manifest="${output%.png}.json"
+cat >"$manifest" <<EOF
+{
+  "capture_mode": "local_screen_sharing_window",
+  "window_id": "$window_id",
+  "owner_filter": "$owner",
+  "title_filter": "$title",
+  "output": "$output",
+  "captured_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+EOF
+
+echo "$output"

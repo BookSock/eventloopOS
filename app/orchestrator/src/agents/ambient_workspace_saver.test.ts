@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   createAmbientWorkspaceSaver,
+  filterSnapshotForTaskSave,
   snapshotFingerprint,
   type CurrentTaskState,
 } from "./ambient_workspace_saver.js";
@@ -308,6 +309,57 @@ describe("ambient_workspace_saver", () => {
       ],
     });
     assert.notEqual(a, titleChanged, "title change must change fingerprint");
+
+    const moved = snapshotFingerprint({
+      backend: "aerospace",
+      windows: [
+        {
+          id: 1,
+          app: "App1",
+          title: "Title 1",
+          workspace: "main",
+          layout: "floating",
+          frame: { x: 40, y: 50, width: 600, height: 400 },
+        },
+        { id: 2, app: "App2", title: "Title 2", workspace: "main" },
+      ],
+    });
+    assert.notEqual(a, moved, "layout/frame changes must change fingerprint");
+  });
+
+  it("filters saved task snapshots to active workspace plus follows windows", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 1,
+      windows: [
+        { id: 1, app: "TextEdit", title: "Reply", workspace: "paper-a" },
+        { id: 2, app: "Music", title: "Personal", workspace: "personal" },
+        { id: 3, app: "Slack", title: "Team", workspace: "paper-b" },
+      ],
+    };
+
+    assert.deepEqual(filterSnapshotForTaskSave(snapshot, new Set(["3"])).windows.map((window) => window.id), [1, 3]);
+
+    const workspace = makeFakeWorkspace(snapshot);
+    const writes: Array<{ taskId: string; snapshot: WorkspaceSnapshot }> = [];
+    let nowMs = Date.parse("2026-05-10T15:00:00.000Z");
+    const saver = createAmbientWorkspaceSaver({
+      workspace,
+      getCurrentTaskState: async () => ({ currentTaskId: "task_paper_a" }),
+      updateTaskLayout: async (taskId, nextSnapshot) => {
+        writes.push({ taskId, snapshot: nextSnapshot });
+      },
+      isManualModeActive: () => false,
+      getFollowsWindowIds: () => ["3"],
+      debounceMs: 3_000,
+      now: () => new Date(nowMs),
+    });
+
+    assert.equal((await saver.tick()).decision, "debounced");
+    nowMs += 5_000;
+    assert.equal((await saver.tick()).decision, "committed");
+    assert.deepEqual(writes[0]?.snapshot.windows.map((window) => window.id), [1, 3]);
   });
 
   it("recovers from updateTaskLayout error and emits an error event", async () => {
