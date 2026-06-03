@@ -99,6 +99,16 @@ pnpm product:lab-ready
 pnpm product:dogfood
 ```
 
+For the hands-on Mac Studio UX demo, run:
+
+```sh
+bin/lab-mac-human-demo-setup
+```
+
+Then follow `docs/human-demo-walkthrough.md`. That walkthrough covers the
+two-paper shared-window demo, ambient autosave check, Rectangle-style hotkeys,
+Manual Mode return, and the proof artifacts to inspect.
+
 Use release proof only when product behavior is stable enough that the long run
 is worth it:
 
