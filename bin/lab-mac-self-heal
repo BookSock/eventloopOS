@@ -17,6 +17,7 @@ Environment:
   LAB_SELF_HEAL_SKIP_OPEN      default: 0; do not open Tailscale/AeroSpace
   LAB_SELF_HEAL_AEROSPACE_MODE default: auto; auto|launchservices|custom|skip
   LAB_SELF_HEAL_SKIP_CAFFEINATE default: 0; do not start caffeinate
+  LAB_SELF_HEAL_SKIP_TAILSCALE_UP default: 0; do not run tailscale up when disconnected
   LAB_SELF_HEAL_PROOF_LOCK_TTL_SECONDS default: 7200; proof lock age treated active
   LAB_SELF_HEAL_RECOVERY_COMMAND optional bash command for harness tests
 EOF
@@ -207,6 +208,63 @@ try {
 NODE
 }
 
+tailscale_cli() {
+  if command -v tailscale >/dev/null 2>&1; then
+    command -v tailscale
+    return 0
+  fi
+  if [[ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]]; then
+    printf "%s\n" /Applications/Tailscale.app/Contents/MacOS/Tailscale
+    return 0
+  fi
+  return 1
+}
+
+tailscale_has_tailnet_ip() {
+  local cli="$1"
+  TAILSCALE_BE_CLI=1 "$cli" ip -4 2>/dev/null | grep -E '^100\.' >/dev/null 2>&1
+}
+
+ensure_tailscale_running() {
+  local run="$1"
+  local cli
+  if ! cli="$(tailscale_cli)"; then
+    echo "tailscale_cli_missing=1" | tee "$run/tailscale-autoconnect.out"
+    : >"$run/tailscale-autoconnect.err"
+    return 0
+  fi
+  {
+    echo "tailscale_cli=$cli"
+    echo "before_ips=$(TAILSCALE_BE_CLI=1 "$cli" ip -4 2>/dev/null | tr '\n' ' ')"
+    TAILSCALE_BE_CLI=1 "$cli" status --json 2>/dev/null | node -e '
+let input = "";
+process.stdin.on("data", (chunk) => input += chunk);
+process.stdin.on("end", () => {
+  try {
+    const status = JSON.parse(input);
+    console.log(`before_backend_state=${status.BackendState ?? ""}`);
+    console.log(`before_self_active=${status.Self?.Active ?? ""}`);
+  } catch {
+    console.log("before_status_json_unavailable=1");
+  }
+});
+' || true
+  } >"$run/tailscale-autoconnect.out" 2>"$run/tailscale-autoconnect.err"
+  if tailscale_has_tailnet_ip "$cli"; then
+    echo "tailscale_up_needed=0" >>"$run/tailscale-autoconnect.out"
+    return 0
+  fi
+  echo "tailscale_up_needed=1" >>"$run/tailscale-autoconnect.out"
+  if [[ "${LAB_SELF_HEAL_SKIP_TAILSCALE_UP:-0}" == "1" ]]; then
+    echo "tailscale_up_skipped=1" >>"$run/tailscale-autoconnect.out"
+    return 0
+  fi
+  open -gj -a Tailscale >/dev/null 2>&1 || true
+  sleep 2
+  TAILSCALE_BE_CLI=1 "$cli" up --timeout=20s >>"$run/tailscale-autoconnect.out" 2>>"$run/tailscale-autoconnect.err" || true
+  echo "after_ips=$(TAILSCALE_BE_CLI=1 "$cli" ip -4 2>/dev/null | tr '\n' ' ')" >>"$run/tailscale-autoconnect.out"
+}
+
 install_agent() {
   mkdir -p "$agent_dir" "$log_dir" "$state_dir"
   local quoted_repo
@@ -386,6 +444,11 @@ run_once() {
       fi
       sleep 3
     fi
+    echo
+    echo "== tailscale autoconnect =="
+    ensure_tailscale_running "$run"
+    cat "$run/tailscale-autoconnect.out" 2>/dev/null || true
+    cat "$run/tailscale-autoconnect.err" 2>/dev/null || true
     echo
     echo "== heartbeat =="
     write_heartbeat "$run"
