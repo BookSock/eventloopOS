@@ -1,0 +1,562 @@
+#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4480";
+const stamp = new Date().toISOString().replace(/[-:.]/g, "").slice(0, 15);
+const run = process.env.EVENTLOOPOS_HUMAN_DEMO_RUN ?? path.join("artifacts", "lab-runs", `${stamp}-human-demo-setup`);
+const demoDir = path.join(os.homedir(), "Desktop", "eventloopOS-human-demo");
+const dryRun = process.argv.includes("--self-test");
+const queueOnly = process.argv.includes("--queue-only");
+
+const paperCustomer = {
+  taskId: "task_demo_customer",
+  title: "Demo Customer Reply",
+  workspace: "demo-customer",
+  chromeTitle: "eventloopOS Human Demo Customer Thread",
+  chromeFile: path.join(demoDir, "eventloopOS Demo Customer Thread.html"),
+  textTitle: "eventloopOS Human Demo Shared Notes.txt",
+  priority: 1500,
+};
+const paperMetrics = {
+  taskId: "task_demo_metrics",
+  title: "Demo Metrics Review",
+  workspace: "demo-metrics",
+  chromeTitle: "eventloopOS Human Demo Metrics Review",
+  chromeFile: path.join(demoDir, "eventloopOS Demo Metrics Review.html"),
+  textTitle: "eventloopOS Human Demo Shared Notes.txt",
+  priority: 1450,
+};
+
+if (dryRun) {
+  assertSnapshotShape(buildSnapshot({
+    customerChrome: sampleWindow(100, "Google Chrome", paperCustomer.chromeTitle),
+    metricsChrome: sampleWindow(101, "Google Chrome", paperMetrics.chromeTitle),
+    sharedText: sampleWindow(102, "TextEdit", paperCustomer.textTitle),
+  }, "customer"));
+  assertSnapshotShape(buildSnapshot({
+    customerChrome: sampleWindow(100, "Google Chrome", paperCustomer.chromeTitle),
+    metricsChrome: sampleWindow(101, "Google Chrome", paperMetrics.chromeTitle),
+    sharedText: sampleWindow(102, "TextEdit", paperCustomer.textTitle),
+  }, "metrics"));
+  console.log(JSON.stringify({ ok: true, self_test: true }));
+  process.exit(0);
+}
+
+fs.mkdirSync(run, { recursive: true });
+fs.mkdirSync(demoDir, { recursive: true });
+writeDemoFiles();
+
+if (!queueOnly) {
+  closePreviousDemoWindows();
+  openDemoWindows();
+}
+
+await waitForOrchestrator();
+let snapshot = await waitForWindows();
+let windows = resolveDemoWindows(snapshot);
+
+const customerSnapshot = buildSnapshot(windows, "customer");
+await restore(customerSnapshot, "initial-customer-layout");
+await sleep(1_200);
+snapshot = await capture();
+windows = resolveDemoWindows(snapshot);
+
+await approveTask(paperCustomer, [windows.customerChrome.id]);
+await putTaskLayout(paperCustomer.taskId, customerSnapshot);
+await queuePaper(paperCustomer, "Customer asks whether eventloopOS is ready for hands-on Mac dogfood.");
+
+const metricsSnapshot = buildSnapshot(windows, "metrics");
+await restore(metricsSnapshot, "initial-metrics-layout");
+await sleep(1_200);
+snapshot = await capture();
+windows = resolveDemoWindows(snapshot);
+
+await approveTask(paperMetrics, [windows.metricsChrome.id]);
+await putTaskLayout(paperMetrics.taskId, metricsSnapshot);
+await queuePaper(paperMetrics, "Review ambient save and shared-window position behavior across papers.");
+
+const queue = await listQueue();
+const demoItems = queue.items.filter((item) => item.task_id === paperCustomer.taskId || item.task_id === paperMetrics.taskId);
+for (const item of demoItems) {
+  const score = item.task_id === paperCustomer.taskId ? paperCustomer.priority : paperMetrics.priority;
+  await setQueuePriority(item.id, score);
+}
+
+await setCurrentTask(paperCustomer.taskId);
+await restore(customerSnapshot, "ready-customer-layout");
+await sleep(1_200);
+positionQueueWindow();
+await sleep(600);
+const finalSnapshot = await capture();
+const finalWindows = resolveDemoWindows(finalSnapshot);
+
+const manifest = {
+  ok: true,
+  kind: "eventloopos.human_demo_setup",
+  generated_at: new Date().toISOString(),
+  run,
+  orchestrator_url: orchestratorUrl,
+  demo_dir: demoDir,
+  start_workspace: paperCustomer.workspace,
+  papers: [
+    {
+      task_id: paperCustomer.taskId,
+      queue_title: paperCustomer.title,
+      workspace: paperCustomer.workspace,
+      chrome_window_id: finalWindows.customerChrome.id,
+      shared_window_id: finalWindows.sharedText.id,
+      expected_shared_frame: customerSnapshot.windows.find((window) => window.id === finalWindows.sharedText.id)?.frame,
+    },
+    {
+      task_id: paperMetrics.taskId,
+      queue_title: paperMetrics.title,
+      workspace: paperMetrics.workspace,
+      chrome_window_id: finalWindows.metricsChrome.id,
+      shared_window_id: finalWindows.sharedText.id,
+      expected_shared_frame: metricsSnapshot.windows.find((window) => window.id === finalWindows.sharedText.id)?.frame,
+    },
+  ],
+  hotkeys: {
+    eventloopos_restore_paper: "Ctrl-Option-R",
+    eventloopos_master_command: "Ctrl-Option-K",
+    eventloopos_manual_mode: "Ctrl-Option-M",
+    eventloopos_return_from_manual: "Ctrl-Option-Shift-M",
+    rectangle_left_half: "Ctrl-Option-Left",
+    rectangle_right_half: "Ctrl-Option-Right",
+    rectangle_top_half: "Ctrl-Option-Up",
+    rectangle_bottom_half: "Ctrl-Option-Down",
+    rectangle_center: "Ctrl-Option-C",
+    rectangle_maximize: "Ctrl-Option-Shift-Return",
+  },
+  walkthrough: [
+    "Start on demo-customer. Press Ctrl-Option-R; Customer Chrome and shared TextEdit should come forward.",
+    "Move shared TextEdit with Ctrl-Option-Right or drag it. Wait 2-3 seconds for ambient autosave.",
+    "Select Demo Metrics Review in queue and press Ctrl-Option-R. Same TextEdit window should move to metrics position with Metrics Chrome.",
+    "Select Demo Customer Reply and press Ctrl-Option-R. Same TextEdit window should return to customer position.",
+    "Try Rectangle-style hotkeys on shared TextEdit: Ctrl-Option-Left/Right/Up/Down/C and Ctrl-Option-Shift-Return.",
+    "Press Ctrl-Option-M, move/open a dummy app, then Ctrl-Option-Shift-M. eventloopOS should restore saved paper context.",
+  ],
+  final_windows: {
+    customerChrome: compactWindow(finalWindows.customerChrome),
+    metricsChrome: compactWindow(finalWindows.metricsChrome),
+    sharedText: compactWindow(finalWindows.sharedText),
+  },
+};
+fs.writeFileSync(path.join(run, "manifest.json"), JSON.stringify(manifest, null, 2));
+console.log(JSON.stringify(manifest, null, 2));
+
+function writeDemoFiles() {
+  const sharedFile = path.join(demoDir, paperCustomer.textTitle);
+  fs.writeFileSync(sharedFile, [
+    "eventloopOS Human Demo Shared Notes",
+    "",
+    "Same real TextEdit window belongs to both papers.",
+    "Move this window, wait for autosave, then restore each paper.",
+    "",
+    "Expected:",
+    "- Customer paper: shared note lives on right side.",
+    "- Metrics paper: same shared note moves lower/left.",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(paperCustomer.chromeFile, demoHtml({
+    eyebrow: "Customer paper",
+    title: paperCustomer.chromeTitle,
+    prompt: "Can I use this on my Mac today?",
+    note: "Answer with honest dogfood status. Watch whether restore/focus feels smooth.",
+    accent: "#1f7a4d",
+  }));
+  fs.writeFileSync(paperMetrics.chromeFile, demoHtml({
+    eyebrow: "Metrics paper",
+    title: paperMetrics.chromeTitle,
+    prompt: "Are ambient saves and shared windows reliable?",
+    note: "Check whether one shared TextEdit window keeps separate per-paper positions.",
+    accent: "#9a3412",
+  }));
+}
+
+function demoHtml({ eyebrow, title, prompt, note, accent }) {
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>${escapeHtml(title)}</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif; margin: 0; color: #172033; background: #f8fafc; }
+    main { max-width: 900px; margin: 80px auto; padding: 0 36px; }
+    .bar { height: 8px; background: ${accent}; border-radius: 4px; margin-bottom: 28px; }
+    .eyebrow { text-transform: uppercase; letter-spacing: .08em; color: #64748b; font-size: 13px; font-weight: 700; }
+    h1 { font-size: 38px; margin: 8px 0 28px; }
+    section { border: 1px solid #d8e0ea; border-radius: 8px; padding: 24px; background: #fff; margin: 16px 0; }
+    h2 { font-size: 22px; margin: 0 0 12px; }
+    p { font-size: 17px; line-height: 1.45; margin: 0; color: #475569; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="bar"></div>
+    <div class="eyebrow">eventloopOS Human Demo</div>
+    <h1>${escapeHtml(title)}</h1>
+    <section><h2>${escapeHtml(prompt)}</h2><p>${escapeHtml(note)}</p></section>
+    <section><h2>Hotkeys</h2><p>Use Ctrl-Option-R to restore paper, then Rectangle-style Ctrl-Option arrows to move focused window.</p></section>
+  </main>
+</body>
+</html>
+`;
+}
+
+function closePreviousDemoWindows() {
+  try {
+    const stdout = execFileSync("aerospace", [
+      "list-windows",
+      "--all",
+      "--json",
+      "--format",
+      "%{window-id}%{app-name}%{window-title}%{workspace}",
+    ], { encoding: "utf8" });
+    const windows = JSON.parse(stdout);
+    for (const window of windows) {
+      const app = String(window["app-name"] ?? "");
+      const title = String(window["window-title"] ?? "");
+      const id = String(window["window-id"] ?? "");
+      const isDemo = title.includes("eventloopOS Demo") || title.includes("eventloopOS Human Demo");
+      const isCloseableApp = app === "TextEdit" || app === "Google Chrome";
+      if (id && isDemo && isCloseableApp) {
+        execFileSync("aerospace", ["close", "--window-id", id], { stdio: "ignore" });
+      }
+    }
+    sleepSync(800);
+  } catch {
+    // Fall through to Accessibility cleanup below.
+  }
+
+  execFileSync("osascript", ["-e", `
+tell application "Google Chrome"
+  repeat with windowIndex from (count of windows) to 1 by -1
+    try
+      set candidateWindow to window windowIndex
+      set shouldClose to false
+      repeat with candidateTab in tabs of candidateWindow
+        set tabTitle to title of candidateTab as string
+        set tabUrl to URL of candidateTab as string
+        if tabTitle contains "eventloopOS Demo" or tabTitle contains "eventloopOS Human Demo" or tabUrl contains "/eventloopOS-demo-papers/" or tabUrl contains "/eventloopOS-human-demo/" then
+          set shouldClose to true
+        end if
+      end repeat
+      if shouldClose then close candidateWindow
+    end try
+  end repeat
+end tell
+
+tell application "System Events"
+  repeat with processName in {"TextEdit"}
+    if exists process processName then
+      tell process processName
+        repeat with candidateWindow in windows
+          try
+            set windowName to name of candidateWindow as string
+            if windowName contains "eventloopOS Human Demo" or windowName contains "eventloopOS Demo" then
+              perform action "AXClose" of candidateWindow
+            end if
+          end try
+        end repeat
+      end tell
+    end if
+  end repeat
+end tell
+`], { stdio: "ignore" });
+}
+
+function openDemoWindows() {
+  const sharedFile = path.join(demoDir, paperCustomer.textTitle);
+  execFileSync("open", ["-a", "TextEdit", sharedFile]);
+  execFileSync("osascript", ["-e", `
+tell application "Google Chrome"
+  activate
+  set customerWindow to make new window
+  set URL of active tab of customerWindow to "${pathToFileUrl(paperCustomer.chromeFile)}"
+  set metricsWindow to make new window
+  set URL of active tab of metricsWindow to "${pathToFileUrl(paperMetrics.chromeFile)}"
+end tell
+`]);
+}
+
+function positionQueueWindow() {
+  try {
+    execFileSync("osascript", ["-e", `
+tell application "System Events"
+  repeat with processName in {"eventloopOS Queue", "EventLoopQueueApp"}
+    if exists process processName then
+      tell process processName
+        set frontmost to true
+        if (count of windows) > 0 then
+          set position of window 1 to {660, 500}
+          set size of window 1 to {760, 430}
+          perform action "AXRaise" of window 1
+        end if
+      end tell
+      exit repeat
+    end if
+  end repeat
+end tell
+`], { stdio: "ignore" });
+  } catch {
+    // Queue app visibility is a demo polish step; setup can still proceed.
+  }
+}
+
+async function waitForOrchestrator() {
+  for (let attempt = 1; attempt <= 30; attempt += 1) {
+    try {
+      const response = await fetch(`${orchestratorUrl}/health`);
+      if (response.ok) return;
+    } catch {
+      // Poll until dogfood server is ready.
+    }
+    await sleep(1_000);
+  }
+  throw new Error(`orchestrator did not become ready at ${orchestratorUrl}`);
+}
+
+async function waitForWindows() {
+  let lastSnapshot;
+  for (let attempt = 1; attempt <= 30; attempt += 1) {
+    lastSnapshot = await capture();
+    try {
+      resolveDemoWindows(lastSnapshot);
+      return lastSnapshot;
+    } catch {
+      await sleep(1_000);
+    }
+  }
+  throw new Error(`demo windows were not captured: ${JSON.stringify(lastSnapshot?.windows?.map(compactWindow) ?? [])}`);
+}
+
+async function capture() {
+  const response = await fetch(`${orchestratorUrl}/workspace/capture`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  if (!response.ok) throw new Error(`capture HTTP ${response.status}: ${await response.text()}`);
+  return (await response.json()).snapshot;
+}
+
+function resolveDemoWindows(snapshot) {
+  const customerChrome = findWindow(snapshot, "Google Chrome", paperCustomer.chromeTitle);
+  const metricsChrome = findWindow(snapshot, "Google Chrome", paperMetrics.chromeTitle);
+  const sharedText = findWindow(snapshot, "TextEdit", "eventloopOS Human Demo Shared Notes");
+  if (!customerChrome || !metricsChrome || !sharedText) {
+    throw new Error(`missing demo windows: ${JSON.stringify(snapshot.windows.map(compactWindow))}`);
+  }
+  return { customerChrome, metricsChrome, sharedText };
+}
+
+function findWindow(snapshot, app, titlePart) {
+  return snapshot.windows.find((window) => window.app === app && window.title.includes(titlePart));
+}
+
+function buildSnapshot(windows, mode) {
+  const workspace = mode === "customer" ? paperCustomer.workspace : paperMetrics.workspace;
+  const chrome = mode === "customer" ? windows.customerChrome : windows.metricsChrome;
+  const chromeFrame = mode === "customer"
+    ? { x: 40, y: 60, width: 980, height: 720 }
+    : { x: 760, y: 70, width: 980, height: 690 };
+  const sharedFrame = mode === "customer"
+    ? { x: 1060, y: 120, width: 760, height: 520 }
+    : { x: 80, y: 210, width: 680, height: 560 };
+  return {
+    backend: "aerospace",
+    activeWorkspace: workspace,
+    focusedWindowId: windows.sharedText.id,
+    windows: [
+      snapshotWindow(chrome, workspace, chromeFrame),
+      snapshotWindow(windows.sharedText, workspace, sharedFrame),
+    ],
+  };
+}
+
+function snapshotWindow(window, workspace, frame) {
+  return {
+    id: window.id,
+    app: window.app,
+    appBundleId: window.appBundleId,
+    title: window.title,
+    workspace,
+    monitorId: window.monitorId,
+    layout: "floating",
+    frame,
+  };
+}
+
+async function restore(snapshot, label) {
+  const current = await capture();
+  const response = await fetch(`${orchestratorUrl}/workspace/restore`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": `human-demo-${label}-${Date.now()}`,
+    },
+    body: JSON.stringify({ confirm_execute: true, snapshot, current_windows: current.windows }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`restore ${label} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
+
+async function approveTask(paper, windowIds) {
+  const response = await fetch(`${orchestratorUrl}/onboarding/approvals`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      task_id: paper.taskId,
+      window_ids: windowIds,
+      queue_paper: false,
+      actor_id: "human_demo_setup",
+    }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`approve ${paper.taskId} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
+
+async function queuePaper(paper, summary) {
+  const now = new Date().toISOString();
+  const slug = paper.taskId.replace(/^task_/, "");
+  const response = await fetch(`${orchestratorUrl}/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      event: {
+        id: `evt_human_demo_${slug}_${stamp}`,
+        source: "human_demo",
+        source_id: `human-demo:${slug}:${stamp}`,
+        idempotency_key: `human-demo:${slug}:${stamp}`,
+        occurred_at: now,
+        received_at: now,
+        actor: { id: "human_demo_setup", type: "system" },
+        task_hint: slug.replaceAll("_", " "),
+        type: "manual.review_requested",
+        title: paper.title,
+        summary,
+        raw_ref: {
+          id: `raw_human_demo_${slug}_${stamp}`,
+          uri: `eventloopos-demo://${slug}/${stamp}`,
+          media_type: "text/plain",
+        },
+        links: [],
+        resources: [{
+          id: `ctx_human_demo_${slug}_${stamp}`,
+          kind: "manual_note",
+          title: `${paper.title} instructions`,
+          source: "human_demo",
+          captured_at: now,
+          restore_confidence: "medium",
+          details: {
+            task_id: paper.taskId,
+            workspace: paper.workspace,
+          },
+        }],
+      },
+    }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`queue paper ${paper.taskId} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
+
+async function putTaskLayout(taskId, snapshot) {
+  const response = await fetch(`${orchestratorUrl}/tasks/${encodeURIComponent(taskId)}/layout`, {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(snapshot),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`put layout ${taskId} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
+
+async function listQueue() {
+  const response = await fetch(`${orchestratorUrl}/queue?state=ready`);
+  const body = await response.json();
+  if (!response.ok) throw new Error(`queue HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
+
+async function setQueuePriority(queueItemId, score) {
+  const response = await fetch(`${orchestratorUrl}/queue/${encodeURIComponent(queueItemId)}/priority`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ score, reason: "human_demo_setup", actor_id: "human_demo_setup" }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`priority ${queueItemId} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
+
+async function setCurrentTask(taskId) {
+  const response = await fetch(`${orchestratorUrl}/tasks/current`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ task_id: taskId }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`current task ${taskId} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
+
+function assertSnapshotShape(snapshot) {
+  if (snapshot.backend !== "aerospace") throw new Error("snapshot backend must be aerospace");
+  if (!snapshot.activeWorkspace) throw new Error("snapshot activeWorkspace missing");
+  for (const window of snapshot.windows) {
+    if (typeof window.id !== "number") throw new Error("window id must be number");
+    if (!window.frame || typeof window.frame.x !== "number") throw new Error("window frame missing");
+    if (window.layout !== "floating") throw new Error("window layout must be floating");
+  }
+}
+
+function sampleWindow(id, app, title) {
+  return {
+    id,
+    app,
+    appBundleId: app === "TextEdit" ? "com.apple.TextEdit" : "com.google.Chrome",
+    title,
+    workspace: "1",
+    monitorId: 1,
+    layout: "floating",
+    frame: { x: 1, y: 1, width: 100, height: 100 },
+  };
+}
+
+function compactWindow(window) {
+  return {
+    id: window.id,
+    app: window.app,
+    title: window.title,
+    workspace: window.workspace,
+    layout: window.layout,
+    frame: window.frame,
+  };
+}
+
+function pathToFileUrl(filePath) {
+  return `file://${filePath.split(path.sep).map(encodeURIComponent).join("/")}`;
+}
+
+function escapeHtml(value) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}

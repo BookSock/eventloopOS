@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-human-demo-setup [--skip-screenshot]
+
+Prepare Mac Studio for a hands-on eventloopOS human UX walkthrough.
+
+Environment:
+  LAB_MAC_HOST           default: 100.71.111.25
+  LAB_MAC_USER           default: claw
+  LAB_MAC_KEY            default: ~/.ssh/eventloop_lab_mac
+  LAB_MAC_EVENTLOOP_PATH default: ~/dev/2026/eventloopOS
+  LAB_DOGFOOD_PROFILE    default: lab-human-demo
+  LAB_DOGFOOD_URL        default: http://127.0.0.1:4480
+  SCREEN_SHARING_TITLE   default: Zeus
+EOF
+}
+
+skip_screenshot=0
+case "${1:-}" in
+  "")
+    ;;
+  --skip-screenshot)
+    skip_screenshot=1
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "unknown argument: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+eventloop_path="${LAB_MAC_EVENTLOOP_PATH:-~/dev/2026/eventloopOS}"
+profile="${LAB_DOGFOOD_PROFILE:-lab-human-demo}"
+url="${LAB_DOGFOOD_URL:-http://127.0.0.1:4480}"
+remote="${lab_user}@${lab_host}"
+run_dir="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-human-demo"
+manifest="$run_dir/manifest.json"
+
+case "$eventloop_path" in
+  "~"/*) remote_repo="/Users/$lab_user/${eventloop_path#"~/"}" ;;
+  "~") remote_repo="/Users/$lab_user" ;;
+  *) remote_repo="$eventloop_path" ;;
+esac
+
+ssh_opts=(-i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8)
+
+ssh_remote() {
+  ssh "${ssh_opts[@]}" "$remote" "$@"
+}
+
+sync_remote_artifact() {
+  local remote_path="$1"
+  local local_path="$2"
+  mkdir -p "$(dirname "$local_path")"
+  rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" \
+    "$remote:$remote_repo/$remote_path" "$local_path" >/dev/null
+}
+
+mkdir -p "$run_dir"
+printf "%s\n" "$remote" >"$run_dir/remote.txt"
+printf "%s\n" "$remote_repo" >"$run_dir/remote-repo.txt"
+
+echo "human demo sync: $remote:$remote_repo"
+bin/lab-mac-sync
+
+echo "human demo profile install"
+ssh_remote "bash -lc 'set -euo pipefail; export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\$PATH\"; cd \"$remote_repo\"; node bin/macos-aerospace-profile install; aerospace reload-config || true'"
+
+echo "human demo dogfood restart"
+LAB_DOGFOOD_PROFILE="$profile" LAB_DOGFOOD_URL="$url" bin/lab-mac-dogfood stop >/dev/null 2>&1 || true
+LAB_DOGFOOD_PROFILE="$profile" LAB_DOGFOOD_URL="$url" bin/lab-mac-dogfood cleanup >/dev/null 2>&1 || true
+LAB_DOGFOOD_PROFILE="$profile" LAB_DOGFOOD_URL="$url" LAB_DOGFOOD_AMBIENT_SAVE=1 LAB_DOGFOOD_FOLLOWS_WINDOWS=1 bin/lab-mac-dogfood start
+LAB_DOGFOOD_PROFILE="$profile" LAB_DOGFOOD_URL="$url" bin/lab-mac-dogfood wait-ready
+
+remote_run="$run_dir/remote-demo-setup"
+echo "human demo remote setup"
+ssh_remote "bash -lc 'set -euo pipefail; export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\$PATH\"; cd \"$remote_repo\"; EVENTLOOPOS_ORCHESTRATOR_URL=\"$url\" EVENTLOOPOS_HUMAN_DEMO_RUN=\"$remote_run\" node bin/macos-human-demo-setup'" | tee "$run_dir/setup.stdout.json"
+
+sync_remote_artifact "$remote_run/manifest.json" "$manifest"
+
+if [[ "$skip_screenshot" == "0" ]]; then
+  echo "human demo local Screen Sharing capture"
+  set +e
+  SCREEN_SHARING_TITLE="${SCREEN_SHARING_TITLE:-Zeus}" bin/local-screen-sharing-capture "$run_dir/screen-sharing.png" >"$run_dir/screen-sharing.out" 2>"$run_dir/screen-sharing.err"
+  screenshot_exit=$?
+  set -e
+  printf "%s\n" "$screenshot_exit" >"$run_dir/screen-sharing.exit"
+fi
+
+cat "$manifest"
