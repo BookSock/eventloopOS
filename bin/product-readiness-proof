@@ -46,7 +46,8 @@ Environment for lab mode:
                             legacy alias for PRODUCT_READINESS_INSTALL_ARTIFACT
   PRODUCT_READINESS_CAPTURE_VIDEO_SECONDS
                             default: 0 for quick/lab-ready, 3 for dogfood/release
-  PRODUCT_READINESS_STOP    default: 0; set to 1 to stop dogfood stack at end
+  PRODUCT_READINESS_STOP    default: 0; set to 1 to stop dogfood stack at end;
+                            dogfood/release always stop before no-orphan proof
   PRODUCT_READINESS_STEP_TIMEOUT_SECONDS
                             default: 600 quick, 900 lab-ready, 1800 dogfood, 3600 release;
                             set 0 to disable per-step timeout
@@ -2788,7 +2789,7 @@ run_lab() {
       sync_remote_artifact "$after_snapshot" "snapshot-after"
       add_evidence "snapshot_after" "\"$artifact_dir/snapshot-after\""
     fi
-    if [[ "$stop_stack" == "1" ]]; then
+    if [[ "$stopped_stack_before_orphan" != "1" ]]; then
       run_step "stop lab dogfood stack" bin/lab-mac-dogfood stop
       stopped_stack_before_orphan="1"
     fi
