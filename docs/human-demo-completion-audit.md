@@ -9,6 +9,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 - Latest automated human demo: `artifacts/lab-runs/20260603-132623-human-demo/manifest.json`
 - Latest demo screenshot: `artifacts/lab-runs/20260603-132623-human-demo/screen-sharing.png`
 - Current result template/artifact writer: `bin/human-demo-result-template --write`
+- Current result verifier: `bin/human-demo-result-verify --lab-status`
 - Walkthrough: `docs/human-demo-walkthrough.md`
 - Mac Studio status check: `bin/lab-mac-dogfood status`
 
@@ -29,7 +30,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 | Local Screen Sharing window-only capture | `bin/local-screen-sharing-capture`; capture manifests use `capture_mode=local_screen_sharing_window`; screenshots show only Screen Sharing window | Proven |
 | Repeatable human demo setup | `bin/lab-mac-human-demo-setup`; latest manifest `ok=true`, queue count 2 | Proven |
 | Visible feedback during demo | Queue footer `feedback=...`; `QueueHarnessStatusTextTests`; latest screenshot shows `feedback=ready` | Proven |
-| Human keyboard/mouse UX | Jason must run `docs/human-demo-walkthrough.md` and fill `bin/human-demo-result-template` output | Pending |
+| Human keyboard/mouse UX | Jason must run `docs/human-demo-walkthrough.md`, fill `bin/human-demo-result-template --write` output, and pass `bin/human-demo-result-verify --lab-status` | Pending |
 
 ## Human Gate
 
@@ -45,6 +46,12 @@ Fill the generated `artifacts/human-demo-results/*-human-demo-result.md` checkli
 - friction list has no production-blocking issue,
 - ship/block decision says ship/accept,
 - lab status remains green after walkthrough.
+
+Verify:
+
+```sh
+bin/human-demo-result-verify artifacts/human-demo-results/<result>.md --lab-status
+```
 
 ## Current Blockers
 

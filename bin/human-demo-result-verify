@@ -1,0 +1,244 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+process.chdir(repoRoot);
+
+const args = process.argv.slice(2);
+const jsonOnly = args.includes("--json");
+const includeLabStatus = args.includes("--lab-status");
+const positionalArgs = args.filter((arg) => !arg.startsWith("--"));
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/human-demo-result-verify [artifacts/human-demo-results/...md] [--json] [--lab-status]
+
+Verify a filled human demo result artifact. Use --lab-status after Jason's
+hands-on pass to also prove the Mac Studio dogfood stack is still healthy.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  console.log("human-demo-result-verify self-test passed");
+  process.exit(0);
+}
+
+const resultPath = positionalArgs[0] ?? latestResultPath();
+if (!resultPath) {
+  console.error("No human demo result found. Run `bin/human-demo-result-template --write`, fill it, then retry.");
+  process.exit(1);
+}
+
+const absoluteResultPath = path.resolve(repoRoot, resultPath);
+const text = fs.readFileSync(absoluteResultPath, "utf8");
+const verification = verifyResultText(text);
+let labStatus;
+if (includeLabStatus) {
+  labStatus = runLabStatus();
+}
+
+const failedChecks = [
+  ...verification.failed_checks,
+  ...(labStatus && labStatus.ok !== true ? ["lab_status_ok"] : []),
+];
+const output = {
+  schema_version: 1,
+  kind: "eventloopos.human_demo_result_verify",
+  verified_at: new Date().toISOString(),
+  result_path: path.relative(repoRoot, absoluteResultPath),
+  ok: failedChecks.length === 0,
+  passed: failedChecks.length === 0,
+  failed_checks: failedChecks,
+  checks: {
+    ...verification.checks,
+    ...(labStatus ? { lab_status_ok: labStatus.ok === true } : {}),
+  },
+  pass_fail: verification.pass_fail,
+  friction: verification.friction,
+  ship_block_decision: verification.ship_block_decision,
+  lab_status: labStatus,
+};
+
+if (jsonOnly) {
+  console.log(JSON.stringify(output, null, 2));
+} else {
+  console.log(`human demo result: ${output.result_path}`);
+  console.log(`verified: ${output.ok ? "yes" : "no"}`);
+  if (output.failed_checks.length > 0) console.log(`failed checks: ${output.failed_checks.join(", ")}`);
+  console.log(JSON.stringify(output, null, 2));
+}
+
+process.exit(output.ok ? 0 : 1);
+
+function latestResultPath() {
+  const dir = path.join(repoRoot, "artifacts", "human-demo-results");
+  if (!fs.existsSync(dir)) return undefined;
+  const candidates = fs.readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith("-human-demo-result.md"))
+    .map((entry) => path.join(dir, entry.name))
+    .sort();
+  const latest = candidates.at(-1);
+  return latest ? path.relative(repoRoot, latest) : undefined;
+}
+
+function verifyResultText(text) {
+  const lines = text.split(/\r?\n/);
+  const passFail = parsePassFail(lines);
+  const friction = sectionText(lines, "Friction:", "Ship/block decision:").trim();
+  const decision = fieldOrSectionText(lines, "Ship/block decision:", undefined).trim();
+  const expectedLabels = [
+    "Starting state on demo-customer with Queue visible",
+    "Ctrl-Option-R restores Customer paper",
+    "Moving shared TextEdit is remembered after 2-3 seconds",
+    "Metrics paper brings same TextEdit to metrics position",
+    "Customer paper brings same TextEdit back to customer position",
+    "Rectangle hotkeys feel usable",
+    "Manual Mode entry/return works",
+    "Queue footer feedback is visible and current",
+  ];
+  const missingLabels = expectedLabels.filter((label) => !Object.hasOwn(passFail, label));
+  const blankLabels = expectedLabels.filter((label) => Object.hasOwn(passFail, label) && passFail[label].trim() === "");
+  const blockingLabels = expectedLabels.filter((label) => Object.hasOwn(passFail, label) && passFail[label].trim() !== "" && !isAcceptablePassFail(passFail[label]));
+  const checks = {
+    all_expected_pass_fail_items_present: missingLabels.length === 0,
+    all_pass_fail_items_filled: blankLabels.length === 0,
+    pass_fail_items_passed_or_accepted: blockingLabels.length === 0,
+    friction_has_no_blocker: frictionHasNoBlocker(friction),
+    ship_block_decision_accepts: decisionAccepts(decision),
+  };
+  const failedChecks = Object.entries(checks).filter(([, ok]) => ok !== true).map(([key]) => key);
+  return {
+    checks,
+    failed_checks: failedChecks,
+    pass_fail: {
+      items: passFail,
+      missing_labels: missingLabels,
+      blank_labels: blankLabels,
+      blocking_labels: blockingLabels,
+    },
+    friction,
+    ship_block_decision: decision,
+  };
+}
+
+function parsePassFail(lines) {
+  const text = sectionText(lines, "Pass/fail:", "Friction:");
+  const items = {};
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*-\s*(.+?):\s*(.*)$/);
+    if (!match) continue;
+    items[match[1].trim()] = match[2].trim();
+  }
+  return items;
+}
+
+function sectionText(lines, startMarker, endMarker) {
+  const start = lines.findIndex((line) => line.trim() === startMarker);
+  if (start === -1) return "";
+  const afterStart = start + 1;
+  const end = endMarker
+    ? lines.findIndex((line, index) => index > start && line.trim() === endMarker)
+    : lines.length;
+  return lines.slice(afterStart, end === -1 ? lines.length : end).join("\n");
+}
+
+function fieldOrSectionText(lines, startMarker, endMarker) {
+  const start = lines.findIndex((line) => line.trim() === startMarker || line.trim().startsWith(startMarker));
+  if (start === -1) return "";
+  const trimmed = lines[start].trim();
+  const inline = trimmed.slice(startMarker.length).trim();
+  if (inline) return inline;
+  const afterStart = start + 1;
+  const end = endMarker
+    ? lines.findIndex((line, index) => index > start && line.trim() === endMarker)
+    : lines.length;
+  return lines.slice(afterStart, end === -1 ? lines.length : end).join("\n");
+}
+
+function isAcceptablePassFail(value) {
+  const normalized = normalize(value);
+  if (/\b(pass|passed|ok|yes|works|good|accept|accepted)\b/.test(normalized)) return true;
+  const mentionsFailure = /\b(fail|failed|no|broken|miss|missed|wrong)\b/.test(normalized);
+  const accepted = /\b(non-blocking|not blocking|accepted|accept|known)\b/.test(normalized);
+  return mentionsFailure && accepted;
+}
+
+function frictionHasNoBlocker(value) {
+  const normalized = normalize(value);
+  if (normalized === "" || /^-\s*$/.test(value.trim())) return false;
+  if (/\b(no friction|none|no blockers|no blocker|non-blocking only|no production blocker|no production-blocking)\b/.test(normalized)) return true;
+  const mentionsBlocker = /\b(blocker|blocking|ship block|production blocker|production-blocking)\b/.test(normalized);
+  const defused = /\b(no blocker|no blockers|not blocking|non-blocking|accepted)\b/.test(normalized);
+  return !mentionsBlocker || defused;
+}
+
+function decisionAccepts(value) {
+  const normalized = normalize(value);
+  if (!/\b(ship|accept|accepted|go|proceed)\b/.test(normalized)) return false;
+  const blocks = /\b(block|blocked|do not ship|dont ship|don't ship)\b/.test(normalized);
+  const defused = /\b(non-blocking|not blocking|accepted)\b/.test(normalized);
+  return !blocks || defused;
+}
+
+function normalize(value) {
+  return value.toLowerCase().replace(/[._]/g, "-").trim();
+}
+
+function runLabStatus() {
+  const result = spawnSync("bin/lab-mac-dogfood", ["status"], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      LAB_DOGFOOD_PROFILE: process.env.LAB_DOGFOOD_PROFILE ?? "lab-human-demo",
+      LAB_DOGFOOD_URL: process.env.LAB_DOGFOOD_URL ?? "http://127.0.0.1:4480",
+    },
+    encoding: "utf8",
+    shell: false,
+  });
+  return {
+    ok: result.status === 0,
+    exit_code: result.status ?? 1,
+    manifest_path: firstMatch(result.stdout, /dogfood status manifest: (.+?\/manifest\.json)/),
+  };
+}
+
+function firstMatch(value, pattern) {
+  return value.match(pattern)?.[1];
+}
+
+function runSelfTest() {
+  const filled = `Human demo date: 2026-06-03
+Mac: Mac Studio
+Proof manifest: artifacts/lab-runs/demo/manifest.json
+Screenshot: artifacts/lab-runs/demo/screen-sharing.png
+Readiness manifest: artifacts/lab-runs/ready/manifest.json
+Readiness screenshot: artifacts/lab-runs/ready/screen-sharing.png
+Automated proof: ok=true, queue_count=2, ambient_autosave=true
+
+Pass/fail:
+- Starting state on demo-customer with Queue visible: pass
+- Ctrl-Option-R restores Customer paper: pass
+- Moving shared TextEdit is remembered after 2-3 seconds: pass
+- Metrics paper brings same TextEdit to metrics position: pass
+- Customer paper brings same TextEdit back to customer position: pass
+- Rectangle hotkeys feel usable: pass
+- Manual Mode entry/return works: pass
+- Queue footer feedback is visible and current: pass
+
+Friction:
+- none
+
+Ship/block decision: ship
+`;
+  const ok = verifyResultText(filled);
+  assert.equal(ok.failed_checks.length, 0);
+  const blank = filled.replace("ship", "").replace("pass", "");
+  const bad = verifyResultText(blank);
+  assert.ok(bad.failed_checks.includes("all_pass_fail_items_filled"));
+  assert.ok(bad.failed_checks.includes("ship_block_decision_accepts"));
+}

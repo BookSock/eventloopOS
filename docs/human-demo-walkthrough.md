@@ -132,6 +132,14 @@ Friction:
 Ship/block decision:
 ```
 
+Use `pass` for passing checklist items. If something fails but is accepted, write
+`fail - accepted non-blocking: ...`. Then verify the filled result and live lab
+health:
+
+```sh
+bin/human-demo-result-verify artifacts/human-demo-results/<result>.md --lab-status
+```
+
 ## Current TODO
 
-Human dogfood is still the remaining subjective proof. Automated Mac Studio proof passes, but Jason should run the walkthrough with real keyboard/mouse and record UX friction before calling the goal complete. See `docs/human-demo-completion-audit.md` for the requirement-by-requirement evidence map.
+Human dogfood is still the remaining subjective proof. Automated Mac Studio proof passes, but Jason should run the walkthrough with real keyboard/mouse, record UX friction, and pass `bin/human-demo-result-verify --lab-status` before calling the goal complete. See `docs/human-demo-completion-audit.md` for the requirement-by-requirement evidence map.
