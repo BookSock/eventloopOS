@@ -24,10 +24,11 @@ The setup script:
 
 Latest known-good proof:
 
-- Manifest: `artifacts/lab-runs/20260603-125813-human-demo/manifest.json`
-- Screenshot: `artifacts/lab-runs/20260603-125813-human-demo/screen-sharing.png`
+- Manifest: `artifacts/lab-runs/20260603-132623-human-demo/manifest.json`
+- Screenshot: `artifacts/lab-runs/20260603-132623-human-demo/screen-sharing.png`
 - Queue proof: 2 current-run papers.
 - Ambient proof: customer paper context saved only the shared TextEdit window and customer Chrome after the move.
+- Visual feedback proof: Queue footer shows compact `feedback=...` status in the Screen Sharing capture.
 
 ## Starting State
 
@@ -84,6 +85,32 @@ Report any of these as product issues:
 - Rectangle-style hotkeys feel surprising or conflict with another common app,
 - Manual Mode return restores the wrong workspace or loses a user-opened window unexpectedly.
 - Queue footer feedback stays stale or does not acknowledge restore/manual actions.
+
+## Result Template
+
+Copy this into the issue, commit note, or chat after the hands-on walkthrough:
+
+```text
+Human demo date:
+Mac:
+Proof manifest:
+Screenshot:
+
+Pass/fail:
+- Starting state on demo-customer with Queue visible:
+- Ctrl-Option-R restores Customer paper:
+- Moving shared TextEdit is remembered after 2-3 seconds:
+- Metrics paper brings same TextEdit to metrics position:
+- Customer paper brings same TextEdit back to customer position:
+- Rectangle hotkeys feel usable:
+- Manual Mode entry/return works:
+- Queue footer feedback is visible and current:
+
+Friction:
+- 
+
+Ship/block decision:
+```
 
 ## Current TODO
 
