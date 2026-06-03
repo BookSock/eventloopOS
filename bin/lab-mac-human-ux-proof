@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-human-ux-proof
+
+Run human UX workflow proofs on the remote Mac lab. This command intentionally
+runs GUI/AeroSpace work only on the lab Mac, never on the controller.
+
+Environment:
+  LAB_MAC_HOST           default: 100.71.111.25
+  LAB_MAC_USER           default: claw
+  LAB_MAC_KEY            default: ~/.ssh/eventloop_lab_mac
+  LAB_MAC_EVENTLOOP_PATH default: ~/dev/2026/eventloopOS
+EOF
+}
+
+case "${1:-}" in
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  "")
+    ;;
+  *)
+    echo "unknown argument: $1" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$repo_root"
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+eventloop_path="${LAB_MAC_EVENTLOOP_PATH:-~/dev/2026/eventloopOS}"
+remote="${lab_user}@${lab_host}"
+run_dir="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-human-ux-proof"
+manifest="$run_dir/manifest.json"
+
+case "$eventloop_path" in
+  "~"/*) remote_repo="/Users/$lab_user/${eventloop_path#"~/"}" ;;
+  "~") remote_repo="/Users/$lab_user" ;;
+  *) remote_repo="$eventloop_path" ;;
+esac
+
+ssh_opts=(-i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8)
+
+ssh_remote() {
+  ssh "${ssh_opts[@]}" "$remote" "$@"
+}
+
+sync_remote_run() {
+  mkdir -p "$run_dir"
+  rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" \
+    "$remote:$remote_repo/$run_dir/" "$run_dir/" >/dev/null 2>&1 || true
+}
+
+sync_remote_artifact() {
+  local remote_path="$1"
+  local local_name="$2"
+  mkdir -p "$run_dir/$local_name"
+  rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" \
+    "$remote:$remote_repo/$remote_path/" "$run_dir/$local_name/" >/dev/null 2>&1 || true
+}
+
+write_manifest() {
+  local proof_exit="$1"
+  local orphan_exit="$2"
+  PROOF_EXIT="$proof_exit" ORPHAN_EXIT="$orphan_exit" RUN_DIR="$run_dir" REMOTE="$remote" REMOTE_REPO="$remote_repo" node <<'NODE' >"$manifest"
+const fs = require("node:fs");
+const path = require("node:path");
+
+const runDir = process.env.RUN_DIR;
+const readJson = (relative) => {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(runDir, relative), "utf8"));
+  } catch {
+    return undefined;
+  }
+};
+const proof = readJson("proof-agent-manifest.json");
+const orphan = readJson("final-orphan-proof/manifest.json");
+const commands = Array.isArray(proof?.commands) ? proof.commands : [];
+const commandByName = new Map(commands.map((command) => [command.name, command]));
+const commandPassed = (name) => commandByName.get(name)?.status === "passed";
+const proofPassed = proof?.passed === true && process.env.PROOF_EXIT === "0";
+const orphanPassed = orphan?.ok === true && process.env.ORPHAN_EXIT === "0";
+const checks = {
+  one_paper_render: commandPassed("Queue one-paper render tests"),
+  workspace_task_switch: commandPassed("Paper task workspace switch proof"),
+  task_workspace_memory: commandPassed("Task paper workspace memory proof"),
+  codex_waiting_auto_paper: commandPassed("Codex waiting auto-paper proof"),
+  send_back_target_and_action: commandPassed("Live Queue send-back handoff proof"),
+  final_no_orphans: orphanPassed,
+};
+const scenarioCoverage = [
+  {
+    id: "current_paper_review",
+    passed: checks.one_paper_render && checks.send_back_target_and_action,
+    evidence: ["Queue one-paper render tests", "Live Queue send-back handoff proof"],
+  },
+  {
+    id: "paper_task_workspace_switching",
+    passed: checks.workspace_task_switch && checks.task_workspace_memory,
+    evidence: ["Paper task workspace switch proof", "Task paper workspace memory proof"],
+  },
+  {
+    id: "codex_waiting_user_input_queue",
+    passed: checks.codex_waiting_auto_paper,
+    evidence: ["Codex waiting auto-paper proof"],
+  },
+  {
+    id: "final_cleanup",
+    passed: checks.final_no_orphans,
+    evidence: ["final-orphan-proof/manifest.json"],
+  },
+];
+const failures = [
+  ...commands
+    .filter((command) => command.status !== "passed")
+    .map((command) => ({
+      requirement: command.name,
+      evidence: command.stderr_path || command.stdout_path || command.id,
+    })),
+  ...(orphanPassed ? [] : [{
+    requirement: "final no-orphan proof",
+    evidence: "final-orphan-proof/manifest.json",
+  }]),
+];
+const manifest = {
+  schema_version: 1,
+  kind: "eventloopos.human_ux_lab_proof",
+  generated_at: new Date().toISOString(),
+  run: runDir,
+  remote: process.env.REMOTE,
+  remote_repo: process.env.REMOTE_REPO,
+  passed: proofPassed && orphanPassed && scenarioCoverage.every((scenario) => scenario.passed),
+  checks,
+  scenario_coverage: scenarioCoverage,
+  failures,
+  artifacts: {
+    proof_agent: `${runDir}/proof-agent-manifest.json`,
+    final_orphan_proof: `${runDir}/final-orphan-proof/manifest.json`,
+  },
+};
+console.log(JSON.stringify(manifest, null, 2));
+NODE
+}
+
+mkdir -p "$run_dir"
+printf "%s\n" "$remote" >"$run_dir/remote.txt"
+printf "%s\n" "$remote_repo" >"$run_dir/remote-repo.txt"
+
+echo "human UX proof sync: $remote:$remote_repo"
+bin/lab-mac-sync
+
+echo "human UX proof pre-clean"
+bin/lab-mac-dogfood stop >/dev/null 2>&1 || true
+bin/lab-mac-dogfood cleanup >/dev/null 2>&1 || true
+
+set +e
+ssh_remote "bash -s -- '$remote_repo' '$run_dir'" <<'REMOTE'
+set -euo pipefail
+remote_repo="$1"
+run_dir="$2"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+cd "$remote_repo"
+mkdir -p "$run_dir"
+export EVENTLOOPOS_PROOF_COMMAND_TIMEOUT_MS="${EVENTLOOPOS_HUMAN_UX_COMMAND_TIMEOUT_MS:-1200000}"
+export EVENTLOOPOS_PROOF_COMMANDS='[
+  {
+    "name": "Queue one-paper render tests",
+    "cmd": "bash",
+    "args": ["-lc", "cd app/macos && swift test --filter QueueWindowRenderTests"]
+  },
+  {
+    "name": "Paper task workspace switch proof",
+    "cmd": "pnpm",
+    "args": ["proof:live:workspace-switch"]
+  },
+  {
+    "name": "Task paper workspace memory proof",
+    "cmd": "pnpm",
+    "args": ["proof:live:task-workspace-memory"]
+  },
+  {
+    "name": "Codex waiting auto-paper proof",
+    "cmd": "bash",
+    "args": ["-lc", "pnpm --filter @eventloopos/orchestrator run build && node app/orchestrator/bin/p5-auto-paper-codex-idle-smoke"]
+  },
+  {
+    "name": "Live Queue send-back handoff proof",
+    "cmd": "bash",
+    "args": ["-lc", "EVENTLOOPOS_ENABLE_MACOS_LIVE_HANDOFF_SMOKE=1 pnpm test:e2e:macos-live-handoff"]
+  }
+]'
+bin/proof-agent --manifest "$run_dir/proof-agent-manifest.json"
+REMOTE
+proof_exit=$?
+set -e
+sync_remote_run
+
+echo "human UX proof final cleanup"
+set +e
+bin/lab-mac-dogfood stop >"$run_dir/final-stop.out" 2>"$run_dir/final-stop.err"
+stop_exit=$?
+bin/lab-mac-dogfood cleanup >"$run_dir/final-cleanup.out" 2>"$run_dir/final-cleanup.err"
+cleanup_exit=$?
+orphan_output="$(bin/lab-mac-orphan-proof 2>"$run_dir/final-orphan.stderr.log")"
+orphan_exit=$?
+printf "%s\n" "$orphan_output" >"$run_dir/final-orphan.stdout.log"
+set -e
+
+orphan_run="$(printf "%s\n" "$orphan_output" | awk '/^artifacts\/lab-runs\/.*lab-orphan-proof$/ { value=$0 } END { print value }')"
+if [[ -n "$orphan_run" ]]; then
+  sync_remote_artifact "$orphan_run" "final-orphan-proof"
+fi
+printf "%s\n" "$stop_exit" >"$run_dir/final-stop.exit"
+printf "%s\n" "$cleanup_exit" >"$run_dir/final-cleanup.exit"
+
+write_manifest "$proof_exit" "$orphan_exit"
+cat "$manifest"
+
+jq -e '.passed == true' "$manifest" >/dev/null

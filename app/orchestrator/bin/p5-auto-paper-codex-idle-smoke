@@ -18,24 +18,41 @@ const { AutoPaperCodexIdleWatcher } = await import(distWatcher);
 
 const NOW = new Date("2026-05-10T14:00:00.000Z");
 const codexHome = await mkdtemp(join(tmpdir(), "p5-auto-paper-smoke-"));
-const threadId = "thread_p5_smoke_idle2h";
-const taskId = "task_p5_smoke";
+const seedFixturePath = resolve(orchestratorRoot, "fixtures/empty-review-packets.json");
+const idleThreadId = "thread_p5_smoke_idle2h";
+const currentThreadId = "thread_p5_smoke_current";
+const staleThreadId = "thread_p5_smoke_stale";
+const idleTaskId = "task_p5_smoke";
+const currentTaskId = "task_p5_current";
+const staleTaskId = "task_p5_stale";
 
 let server;
 let passed = false;
 
 try {
-  const dayPath = join(codexHome, "sessions", "2026", "05", "10");
-  await mkdir(dayPath, { recursive: true });
-  const rolloutPath = join(dayPath, `rollout-2026-05-10T11-50-00-${threadId}.jsonl`);
-  const lines = [
-    JSON.stringify({ timestamp: "2026-05-10T11:50:00.000Z", type: "session_meta", payload: {} }),
-    JSON.stringify({ timestamp: "2026-05-10T11:55:00.000Z", type: "user_input", payload: { text: "kickoff" } }),
-    JSON.stringify({ timestamp: "2026-05-10T12:00:00.000Z", type: "event_msg", payload: { type: "agent_message" } }),
-  ];
-  await writeFile(rolloutPath, lines.join("\n") + "\n");
+  const idleRolloutPath = await writeRollout({
+    threadId: idleThreadId,
+    sessionStartedAt: "2026-05-10T11:50:00.000Z",
+    userAt: "2026-05-10T11:55:00.000Z",
+    lastEventAt: "2026-05-10T12:00:00.000Z",
+    recentText: "needs user decision on API shape",
+  });
+  const currentRolloutPath = await writeRollout({
+    threadId: currentThreadId,
+    sessionStartedAt: "2026-05-10T11:45:00.000Z",
+    userAt: "2026-05-10T11:50:00.000Z",
+    lastEventAt: "2026-05-10T12:10:00.000Z",
+    recentText: "current task still foreground",
+  });
+  const staleRolloutPath = await writeRollout({
+    threadId: staleThreadId,
+    sessionStartedAt: "2026-05-08T10:00:00.000Z",
+    userAt: "2026-05-08T11:00:00.000Z",
+    lastEventAt: "2026-05-08T12:00:00.000Z",
+    recentText: "old dead thread should become dormant",
+  });
 
-  const seeded = await createSeededStore("fixtures/empty-review-packets.json");
+  const seeded = await createSeededStore(seedFixturePath);
   const store = createInMemoryGatewayStore(seeded);
 
   server = createGatewayServer({
@@ -53,19 +70,26 @@ try {
   });
 
   const tasks = [
-    { id: taskId, primary_anchor_kind: "codex_thread", primary_anchor_id: threadId },
+    { id: idleTaskId, primary_anchor_kind: "codex_thread", primary_anchor_id: idleThreadId },
+    { id: currentTaskId, primary_anchor_kind: "codex_thread", primary_anchor_id: currentThreadId },
+    { id: staleTaskId, primary_anchor_kind: "codex_thread", primary_anchor_id: staleThreadId },
   ];
   const emitted = [];
+  const dormant = [];
   const watcher = new AutoPaperCodexIdleWatcher({
     registry: {
       async listTasks() { return tasks; },
       async recordTaskPaperEmitted(id, at) { emitted.push({ id, at: at.toISOString() }); },
+      async markTaskDormant(id, at) { dormant.push({ id, at: at.toISOString() }); },
     },
     ingestor: {
       ingestEventAsReviewPacket: (event, n) => store.ingestEventAsReviewPacket(event, n),
     },
     manualMode: {
       getManualModeState: () => store.getManualModeState(),
+    },
+    activeTask: {
+      getCurrentTaskState: async () => ({ current_task_id: currentTaskId }),
     },
     codexHome,
     now: () => NOW,
@@ -76,31 +100,51 @@ try {
 
   const result = await watcher.tick();
   assertEqual(result.paused, false, "not paused");
-  assertEqual(result.considered, 1, "considered 1 task");
+  assertEqual(result.considered, 3, "considered 3 tasks");
   assertEqual(result.emitted.length, 1, "emitted 1 paper");
-  assertEqual(result.emitted[0].task_id, taskId, "emitted correct task_id");
+  assertEqual(result.emitted[0].task_id, idleTaskId, "emitted correct task_id");
   assertEqual(emitted.length, 1, "registry record called once");
+  assertEqual(emitted[0].id, idleTaskId, "registry record task id");
+  assertEqual(dormant.length, 1, "registry dormant called once");
+  assertEqual(dormant[0].id, staleTaskId, "dormant task id");
+  assertSkipped(result, currentTaskId, "task_currently_active");
+  assertSkipped(result, staleTaskId, "marked_dormant");
 
   const queueAfter = await fetch(`${baseUrl}/queue`).then((r) => r.json());
   assertEqual(queueAfter.items.length, beforeCount + 1, "queue grew by 1");
-  const item = queueAfter.items.find((i) => i.task_id === taskId);
+  const item = queueAfter.items.find((i) => i.task_id === idleTaskId);
   if (!item) throw new Error("expected queue item with task_id present");
   if (!/Codex thread idle/i.test(item.review_packet.title)) {
     throw new Error(`expected paper title to mention idle, got: ${item.review_packet.title}`);
   }
+  if (!/needs user decision/i.test(item.review_packet.summary ?? "")) {
+    throw new Error(`expected paper summary to include useful recent context, got: ${item.review_packet.summary}`);
+  }
+  if (queueAfter.items.some((i) => i.task_id === currentTaskId || i.task_id === staleTaskId)) {
+    throw new Error("expected no queue items for current focused task or stale dormant task");
+  }
 
-  // Second tick: throttled.
+  // Second tick: same idle window remains throttled, current task stays suppressed,
+  // stale thread remains recoverable through the dormant marker rather than queue spam.
   const second = await watcher.tick();
   assertEqual(second.emitted.length, 0, "second tick emits nothing");
+  assertSkipped(second, idleTaskId, "already_emitted_for_window");
+  assertSkipped(second, currentTaskId, "task_currently_active");
+  assertSkipped(second, staleTaskId, "marked_dormant");
 
   passed = true;
   console.log("PASS p5 auto-paper codex idle smoke");
   console.log(`  codexHome:         ${codexHome}`);
-  console.log(`  rolloutPath:       ${rolloutPath}`);
+  console.log(`  idleRolloutPath:   ${idleRolloutPath}`);
+  console.log(`  currentRolloutPath:${currentRolloutPath}`);
+  console.log(`  staleRolloutPath:  ${staleRolloutPath}`);
   console.log(`  emitted task_id:   ${result.emitted[0].task_id}`);
   console.log(`  idle_seconds:      ${result.emitted[0].idle_seconds}`);
+  console.log(`  suppressed task:   ${currentTaskId}`);
+  console.log(`  dormant task:      ${staleTaskId}`);
   console.log(`  queue item id:     ${item.id}`);
   console.log(`  paper title:       ${item.review_packet.title}`);
+  console.log(`  paper summary:     ${item.review_packet.summary}`);
 } catch (error) {
   passed = false;
   console.error("FAIL p5 auto-paper codex idle smoke");
@@ -114,8 +158,30 @@ try {
   if (!passed && process.exitCode === 0) process.exitCode = 1;
 }
 
+async function writeRollout(input) {
+  const day = input.lastEventAt.slice(0, 10).replaceAll("-", "/");
+  const [year, month, dayOfMonth] = day.split("/");
+  const dayPath = join(codexHome, "sessions", year, month, dayOfMonth);
+  await mkdir(dayPath, { recursive: true });
+  const rolloutPath = join(dayPath, `rollout-${input.sessionStartedAt.replace(/[:.]/g, "-")}-${input.threadId}.jsonl`);
+  const lines = [
+    JSON.stringify({ timestamp: input.sessionStartedAt, type: "session_meta", payload: { id: input.threadId } }),
+    JSON.stringify({ timestamp: input.userAt, type: "user_input", payload: { text: "kickoff" } }),
+    JSON.stringify({ timestamp: input.lastEventAt, type: "event_msg", payload: { type: "agent_message", message: input.recentText } }),
+  ];
+  await writeFile(rolloutPath, lines.join("\n") + "\n");
+  return rolloutPath;
+}
+
 function assertEqual(actual, expected, label) {
   if (actual !== expected) {
     throw new Error(`assertion failed [${label}]: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+  }
+}
+
+function assertSkipped(result, taskId, reason) {
+  const skipped = result.skipped.find((entry) => entry.task_id === taskId && entry.reason === reason);
+  if (!skipped) {
+    throw new Error(`expected skipped ${taskId} with reason ${reason}, got ${JSON.stringify(result.skipped)}`);
   }
 }

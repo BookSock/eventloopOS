@@ -529,6 +529,14 @@ async function postJson(path, body, headers = {}) {
 }
 
 async function cleanupSmokeWindows() {
+  for (const window of manifest.task_windows) {
+    if (!Number.isInteger(window?.id)) continue;
+    try {
+      await execFilePromise("aerospace", ["close", "--window-id", String(window.id)], { timeoutMs: 5_000 });
+    } catch {
+      // Already closed or AeroSpace cannot see it anymore.
+    }
+  }
   for (const title of smokeTitles) {
     try {
       await execFilePromise("osascript", [
@@ -537,6 +545,24 @@ async function cleanupSmokeWindows() {
       ], { timeoutMs: 5_000 });
     } catch {
       // Already closed.
+    }
+    try {
+      await execFilePromise("osascript", [
+        "-e",
+        `tell application "System Events"
+  if exists process "TextEdit" then
+    tell process "TextEdit"
+      repeat with candidateWindow in windows
+        try
+          if (name of candidateWindow as string) contains "${escapeAppleScriptString(title)}" then perform action "AXClose" of candidateWindow
+        end try
+      end repeat
+    end tell
+  end if
+end tell`,
+      ], { timeoutMs: 5_000 });
+    } catch {
+      // Already closed or accessibility unavailable.
     }
   }
   if (smokeDir) {

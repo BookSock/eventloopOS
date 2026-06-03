@@ -26,6 +26,7 @@ pnpm product:quick    # setup/status/connectivity only, no real Codex or GUI sce
 pnpm product:lab-ready # starts/checks dogfood stack and captures status/snapshot, no queue task
 pnpm product:local:quick # local install/Codex/permission preflight, no lab
 pnpm product:dogfood  # one real Codex queue followup plus screenshots
+pnpm product:ux       # human UX lab proof: one-paper UI, task workspace switching, idle Codex queueing, cleanup
 pnpm product:local:dogfood # local preflight plus proof:live
 pnpm product:release  # full release matrix; same as product:readiness
 pnpm product:release:fast # 3x user flows, 1x isolated fault matrix for iteration
@@ -68,6 +69,9 @@ The command writes `artifacts/product-readiness/<run-id>/manifest.json` with:
 - queue defer/ignore decision proof artifacts,
 - stale Codex recovery proof artifacts,
 - Codex completion + Ghostty + AeroSpace workspace proof artifacts,
+- human UX lab proof artifacts (`pnpm product:ux`) covering one-paper render,
+  task workspace switching/memory, Codex idle auto-paper queueing with active
+  task suppression, live send-back handoff, and final no-orphan cleanup,
 - Codex app-server down fault-injection proof artifacts,
 - orchestrator crash/restart fault-injection proof artifacts,
 - duplicate idempotency fault-injection proof artifacts,

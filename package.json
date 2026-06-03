@@ -77,6 +77,7 @@
     "product:quick:repeat": "node bin/proof-repeat --runs ${PRODUCT_READINESS_REPEAT_RUNS:-20} --timeout-seconds ${PRODUCT_READINESS_REPEAT_TIMEOUT_SECONDS:-600} --name product-quick -- pnpm product:quick",
     "product:lab-ready": "PRODUCT_READINESS_PROFILE=lab-ready bin/product-readiness-proof lab",
     "product:dogfood": "PRODUCT_READINESS_PROFILE=dogfood bin/product-readiness-proof lab",
+    "product:ux": "bin/lab-mac-human-ux-proof",
     "product:local:dogfood": "bin/product-readiness-proof local dogfood",
     "product:dogfood:repeat": "node bin/proof-repeat --runs ${PRODUCT_READINESS_REPEAT_RUNS:-20} --timeout-seconds ${PRODUCT_READINESS_REPEAT_TIMEOUT_SECONDS:-1800} --name product-dogfood -- pnpm product:dogfood",
     "product:dogfood:repeat:fail-fast": "node bin/proof-repeat --stop-on-fail --runs ${PRODUCT_READINESS_REPEAT_RUNS:-20} --timeout-seconds ${PRODUCT_READINESS_REPEAT_TIMEOUT_SECONDS:-1800} --name product-dogfood -- pnpm product:dogfood",

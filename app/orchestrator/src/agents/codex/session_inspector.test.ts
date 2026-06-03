@@ -20,7 +20,11 @@ describe("inspectCodexSession", () => {
     const lines = [
       JSON.stringify({ timestamp: "2026-05-06T17:30:00.000Z", type: "session_meta", payload: {} }),
       JSON.stringify({ timestamp: "2026-05-06T17:31:00.000Z", type: "user_input", payload: { text: "hello agent" } }),
-      JSON.stringify({ timestamp: "2026-05-06T17:32:00.000Z", type: "event_msg", payload: { type: "agent_message" } }),
+      JSON.stringify({
+        timestamp: "2026-05-06T17:32:00.000Z",
+        type: "event_msg",
+        payload: { type: "agent_message", message: "needs user decision on API shape" },
+      }),
     ];
     await writeFile(rolloutPath, lines.join("\n") + "\n");
 
@@ -34,7 +38,7 @@ describe("inspectCodexSession", () => {
       assert.equal(result.last_event_at, "2026-05-06T17:32:00.000Z");
       assert.equal(result.idle_seconds, 600);
       assert.deepEqual(result.recent_event_types, ["event_msg", "user_input", "session_meta"]);
-      assert.equal(result.recent_summary, "event_msg/agent_message");
+      assert.equal(result.recent_summary, "event_msg/agent_message: needs user decision on API shape");
     } finally {
       await rm(codexHome, { recursive: true, force: true });
     }

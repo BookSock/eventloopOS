@@ -124,6 +124,12 @@ function summarizeLine(parsed: Record<string, unknown>): string | undefined {
   const payload = parsed.payload as Record<string, unknown> | undefined;
   if (!type) return undefined;
   if (type === "event_msg" && payload && typeof payload.type === "string") {
+    const text = typeof payload.message === "string"
+      ? payload.message
+      : typeof payload.text === "string"
+        ? payload.text
+        : undefined;
+    if (text) return `event_msg/${payload.type}: ${text.slice(0, 80)}`;
     return `event_msg/${payload.type}`;
   }
   if (type === "session_meta") {

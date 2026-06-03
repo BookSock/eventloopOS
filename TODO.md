@@ -67,5 +67,11 @@ Spec at `docs/planning/hotkey-state-machine.md` (iteration 4, locked). All imple
 - [x] **D2** — Friendly Codex OAuth refresh error; orchestrator stays alive.
 - [x] **D3** — Send-to-Agent disabled UX: clearer text + inline `Bind Session` menu.
 - [x] **D4** — `SingleInstanceGuard`: new process foregrounds the existing one and exits.
+- [x] **D5. Human UX lab proof gate.** ✅ Shipped 2026-06-03:
+  `pnpm product:ux` proves one-paper Queue UI render, task/paper workspace
+  switching and memory, Codex idle auto-paper queueing with active-task
+  suppression and stale-thread dormancy, live send-back handoff, and final
+  no-orphan cleanup. Latest green manifest:
+  `artifacts/lab-runs/20260602-193643-human-ux-proof/manifest.json`.
 
 Final test counts (2026-05-10): orchestrator 585/585, browser-extension 75/75, mac-swift 197/197.
