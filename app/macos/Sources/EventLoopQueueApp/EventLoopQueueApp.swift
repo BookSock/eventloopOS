@@ -78,7 +78,7 @@ struct EventLoopQueueApp: App {
 
     var body: some Scene {
         MenuBarExtra("eventloopOS Queue", systemImage: "list.bullet.rectangle") {
-            QueueMenuView(viewModel: viewModel, windowID: Self.queueWindowID)
+            QueueMenuView(viewModel: viewModel, openQueueWindow: openQueueWindow)
         }
 
         WindowGroup("eventloopOS Queue", id: Self.queueWindowID) {
@@ -185,14 +185,14 @@ struct EventLoopQueueApp: App {
                 Divider()
 
                 Button("Master Command") {
-                    openWindow(id: Self.queueWindowID)
+                    openQueueWindow()
                     viewModel.presentMasterCommand()
                 }
                 .keyboardShortcut("k", modifiers: [.command, .option, .shift])
                 .accessibilityIdentifier("queue-command-master-command")
 
                 Button("Scan Desk") {
-                    openWindow(id: Self.queueWindowID)
+                    openQueueWindow()
                     viewModel.presentOnboarding()
                     Task {
                         await viewModel.scanOnboarding()
@@ -201,6 +201,13 @@ struct EventLoopQueueApp: App {
                 .accessibilityIdentifier("queue-command-scan-desk")
             }
         }
+    }
+
+    private func openQueueWindow() {
+        if appDelegate.focusExistingQueueWindow() {
+            return
+        }
+        openWindow(id: Self.queueWindowID)
     }
 }
 
@@ -281,12 +288,37 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         return true
     }
+
+    @discardableResult
+    func focusExistingQueueWindow() -> Bool {
+        if let harnessWindow {
+            focus(window: harnessWindow)
+            return true
+        }
+
+        guard let app = NSApp,
+              let window = app.windows.first(where: { window in
+            window.identifier?.rawValue == "eventloopos-queue-harness-window" ||
+                window.title == "eventloopOS Queue"
+        }) else {
+            return false
+        }
+        focus(window: window)
+        return true
+    }
+
+    private func focus(window: NSWindow) {
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.makeKeyAndOrderFront(nil)
+        NSApp?.activate(ignoringOtherApps: true)
+    }
 }
 
 private struct QueueMenuView: View {
     @ObservedObject var viewModel: QueueViewModel
-    let windowID: String
-    @Environment(\.openWindow) private var openWindow
+    let openQueueWindow: () -> Void
 
     private var summary: QueueMenuSummary {
         QueueMenuSummary(
@@ -335,7 +367,7 @@ private struct QueueMenuView: View {
             Divider()
 
             Button("Open Queue") {
-                openWindow(id: windowID)
+                openQueueWindow()
             }
             .keyboardShortcut("o", modifiers: [.command])
             .accessibilityIdentifier("queue-menu-open-window")
@@ -348,14 +380,14 @@ private struct QueueMenuView: View {
             .accessibilityIdentifier("queue-menu-refresh")
 
             Button("Master Command") {
-                openWindow(id: windowID)
+                openQueueWindow()
                 viewModel.presentMasterCommand()
             }
             .keyboardShortcut("k", modifiers: [.command, .option, .shift])
             .accessibilityIdentifier("queue-menu-master-command")
 
             Button("Scan Desk") {
-                openWindow(id: windowID)
+                openQueueWindow()
                 viewModel.presentOnboarding()
                 Task {
                     await viewModel.scanOnboarding()
@@ -469,7 +501,7 @@ private struct QueueMenuView: View {
             await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: .eventLoopQueueMasterCommandRequested)) { _ in
-            openWindow(id: windowID)
+            openQueueWindow()
             viewModel.presentMasterCommand()
         }
     }

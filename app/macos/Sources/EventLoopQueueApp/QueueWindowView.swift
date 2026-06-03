@@ -323,6 +323,7 @@ struct QueueWindowView: View {
                         await viewModel.refreshContextRestoreRequest()
                     }
                 }
+                AdvanceToastBanner(toast: viewModel.advanceToast, queueCount: viewModel.packets.count)
             }
                 .padding(12)
         }
@@ -495,6 +496,86 @@ struct QueueWindowView: View {
             viewModel.stopAutomaticQueueRefresh()
             viewModel.stopAutomaticLeaseRenewal()
             viewModel.stopAutomaticContextRestoreRefresh()
+        }
+    }
+}
+
+private struct AdvanceToastBanner: View {
+    let toast: AdvanceToast?
+    let queueCount: Int
+
+    var body: some View {
+        if let toast {
+            Label {
+                Text(message(for: toast))
+            } icon: {
+                Image(systemName: icon(for: toast))
+            }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(foreground(for: toast))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(.thinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+            .accessibilityIdentifier("queue-advance-toast")
+        }
+    }
+
+    private func message(for toast: AdvanceToast) -> String {
+        switch toast {
+        case .manualModeActive:
+            return "Manual Mode active. Return to Event Loop before advancing."
+        case .noForegroundCodex:
+            return "No ready paper or foreground Codex session."
+        case .queueEmpty:
+            return "No ready papers. Queue empty."
+        case let .actionComplete(message):
+            return message
+        case let .deferredUntil(dueAt):
+            let dueText = dueAt.formatted(date: .omitted, time: .shortened)
+            return queueCount == 0
+                ? "Deferred until \(dueText). Queue empty."
+                : "Deferred until \(dueText). Next paper ready."
+        case .enteredLimbo:
+            return "No ready papers. Moved to limbo workspace."
+        case let .taskCreated(taskId):
+            return "Task created: \(taskId)"
+        case let .switchedToPaper(packetId):
+            return "Showing next paper: \(packetId)"
+        case let .returnedToTask(taskId):
+            return "Returned to task: \(taskId)"
+        }
+    }
+
+    private func icon(for toast: AdvanceToast) -> String {
+        switch toast {
+        case .manualModeActive:
+            return "pause.circle.fill"
+        case .noForegroundCodex, .queueEmpty:
+            return "tray"
+        case .actionComplete:
+            return "checkmark.circle.fill"
+        case .deferredUntil:
+            return "clock.fill"
+        case .enteredLimbo:
+            return "arrow.down.right.circle.fill"
+        case .taskCreated:
+            return "plus.circle.fill"
+        case .switchedToPaper:
+            return "doc.text.magnifyingglass"
+        case .returnedToTask:
+            return "arrow.uturn.backward.circle.fill"
+        }
+    }
+
+    private func foreground(for toast: AdvanceToast) -> Color {
+        switch toast {
+        case .manualModeActive:
+            return .orange
+        case .noForegroundCodex, .queueEmpty, .enteredLimbo:
+            return .secondary
+        case .actionComplete, .deferredUntil, .taskCreated, .switchedToPaper, .returnedToTask:
+            return .green
         }
     }
 }

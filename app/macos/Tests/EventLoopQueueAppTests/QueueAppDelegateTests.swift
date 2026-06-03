@@ -59,4 +59,10 @@ final class QueueAppDelegateTests: XCTestCase {
             environment: [:]
         ))
     }
+
+    func testFocusExistingQueueWindowReturnsFalseWhenNoQueueWindowExists() {
+        let delegate = QueueAppDelegate()
+
+        XCTAssertFalse(delegate.focusExistingQueueWindow())
+    }
 }

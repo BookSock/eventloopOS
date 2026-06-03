@@ -71,6 +71,9 @@ public enum TerminalSendConfirmScope: Equatable, Sendable {
 public enum AdvanceToast: Equatable, Sendable {
     case manualModeActive
     case noForegroundCodex
+    case queueEmpty
+    case actionComplete(String)
+    case deferredUntil(Date)
     case enteredLimbo
     case taskCreated(taskId: String)
     case switchedToPaper(packetId: String)
@@ -553,6 +556,11 @@ public final class QueueViewModel: ObservableObject {
             packets = try await client.fetchQueue()
             selectedPacketID = leasedPacket?.id ?? packets.first?.id
             state = .loaded
+            if selectedPacketID == nil, packets.isEmpty {
+                advanceToast = .queueEmpty
+            } else if let packetId = selectedPacketID {
+                advanceToast = .switchedToPaper(packetId: packetId)
+            }
         } catch {
             state = .failed(error.localizedDescription)
             return
@@ -801,7 +809,7 @@ public final class QueueViewModel: ObservableObject {
         state = .loading
         do {
             _ = try await client.complete(packetId: packetId, workspaceSnapshot: workspaceSnapshot)
-            try await loadNextAfterQueueAction()
+            try await loadNextAfterQueueAction(emptyToast: .actionComplete("Done. Queue empty."))
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -816,7 +824,7 @@ public final class QueueViewModel: ObservableObject {
         state = .loading
         do {
             _ = try await client.deferPacket(packetId: packetId, until: dueAt, workspaceSnapshot: workspaceSnapshot)
-            try await loadNextAfterQueueAction()
+            try await loadNextAfterQueueAction(emptyToast: .deferredUntil(dueAt))
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -835,7 +843,7 @@ public final class QueueViewModel: ObservableObject {
         state = .loading
         do {
             _ = try await client.ignorePacket(packetId: packetId, workspaceSnapshot: workspaceSnapshot)
-            try await loadNextAfterQueueAction()
+            try await loadNextAfterQueueAction(emptyToast: .actionComplete("Ignored. Queue empty."))
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -911,17 +919,22 @@ public final class QueueViewModel: ObservableObject {
         state = .loading
         do {
             _ = try await client.executeRecommendedAction(packetId: packetId, workspaceSnapshot: workspaceSnapshot)
-            try await loadNextAfterQueueAction()
+            try await loadNextAfterQueueAction(emptyToast: .actionComplete("Sent to agent. Queue empty."))
         } catch {
             state = .failed(error.localizedDescription)
         }
     }
 
-    private func loadNextAfterQueueAction() async throws {
+    private func loadNextAfterQueueAction(emptyToast: AdvanceToast) async throws {
         let leasedPacket = try await client.next(after: nil)
         packets = try await client.fetchQueue()
         selectedPacketID = leasedPacket?.id ?? packets.first?.id
         state = .loaded
+        if let selectedPacketID {
+            advanceToast = .switchedToPaper(packetId: selectedPacketID)
+        } else if packets.isEmpty {
+            advanceToast = emptyToast
+        }
         await loadTaskSessionsForSelectedPacketIfNeeded()
         await prepareSelectedWorkspaceRestore()
         await requestSelectedBrowserContextRestoresIfNeeded()

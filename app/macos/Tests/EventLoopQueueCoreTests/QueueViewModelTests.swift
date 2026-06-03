@@ -51,6 +51,18 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(workspaceClient.restorePlanSnapshots, [SeededQueue.blogFeedbackWorkspace])
     }
 
+    func testPullNextPaperShowsEmptyQueueToast() async {
+        let client = FakeQueueClient(packets: [])
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.pullNextPaper()
+
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.packets, [])
+        XCTAssertNil(viewModel.selectedPacketID)
+        XCTAssertEqual(viewModel.advanceToast, .queueEmpty)
+    }
+
     func testPullNextPaperRequestsBrowserContextRestore() async {
         let browserContext = ReviewContextResource(
             id: "browser_tab_77",
@@ -373,6 +385,22 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state, .loaded)
         XCTAssertEqual(viewModel.packets.map(\.id), ["packet-ci-failed", "packet-external-send"])
         XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+        XCTAssertEqual(viewModel.advanceToast, .switchedToPaper(packetId: "packet-ci-failed"))
+    }
+
+    func testDeferSelectedPacketShowsEmptyQueueToastWhenNoNextPaper() async {
+        let client = FakeQueueClient(packets: [SeededQueue.packets[0]])
+        let viewModel = QueueViewModel(client: client)
+        let dueAt = Date(timeIntervalSince1970: 1_778_074_500)
+        await viewModel.pullNextPaper()
+
+        await viewModel.deferSelectedPacket(until: dueAt)
+
+        XCTAssertEqual(client.deferredPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.packets, [])
+        XCTAssertNil(viewModel.selectedPacketID)
+        XCTAssertEqual(viewModel.advanceToast, .deferredUntil(dueAt))
     }
 
     func testDoneAndNextRestoresNextTaskWorkspace() async {
