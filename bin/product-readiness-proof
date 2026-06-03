@@ -2805,7 +2805,7 @@ run_lab() {
   if [[ "$profile" != "release" ]]; then
     :
   elif [[ "$include_reboot" == "1" ]]; then
-    run_step "lab reboot proof" env LAB_MAC_REBOOT=1 LAB_MAC_REBOOT_REQUIRE_SUDO=1 LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-reboot-proof
+    run_step "lab reboot proof" env LAB_MAC_REBOOT=1 LAB_MAC_REBOOT_REQUIRE_SUDO="${LAB_MAC_REBOOT_REQUIRE_SUDO:-0}" LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-reboot-proof
     local reboot_run
     reboot_run="$(latest_lab_run_from_log "$artifact_dir/steps/lab-reboot-proof.stdout.log")"
     if [[ -n "$reboot_run" ]]; then
@@ -2856,6 +2856,18 @@ NODE
       add_evidence "macos_install" "\"$artifact_dir/macos-install/manifest.json\""
     else
       add_blocker "Release-ready install requires signed/notarized or unsigned-dev app proof" "lab install proof did not print an artifacts/install run path"
+    fi
+  fi
+
+  if [[ "$profile" == "release" ]]; then
+    run_step "final stop lab dogfood stack" bin/lab-mac-dogfood stop
+    run_step "final lab cleanup windows" env LAB_DOGFOOD_REAL_CODEX=1 LAB_DOGFOOD_POSTGRES=0 bin/lab-mac-dogfood cleanup
+    run_step "final lab no orphan windows processes" bin/lab-mac-orphan-proof
+    local final_orphan_run
+    final_orphan_run="$(latest_lab_run_from_log "$artifact_dir/steps/final-lab-no-orphan-windows-processes.stdout.log")"
+    if [[ -n "$final_orphan_run" ]]; then
+      sync_remote_artifact "$final_orphan_run" "orphan-proof"
+      add_evidence "orphan_proof" "\"$artifact_dir/orphan-proof/manifest.json\""
     fi
   fi
 
