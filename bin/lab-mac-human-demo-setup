@@ -82,6 +82,7 @@ ssh_remote "bash -lc 'set -euo pipefail; export PATH=\"/opt/homebrew/bin:/opt/ho
 echo "human demo dogfood restart"
 LAB_DOGFOOD_PROFILE="$profile" LAB_DOGFOOD_URL="$url" bin/lab-mac-dogfood stop >/dev/null 2>&1 || true
 LAB_DOGFOOD_PROFILE="$profile" LAB_DOGFOOD_URL="$url" bin/lab-mac-dogfood cleanup >/dev/null 2>&1 || true
+ssh_remote "bash -lc 'set -euo pipefail; cd \"$remote_repo\"; rm -f \".eventloopos/$profile/gateway-store.json\"'"
 LAB_DOGFOOD_PROFILE="$profile" LAB_DOGFOOD_URL="$url" LAB_DOGFOOD_AMBIENT_SAVE=1 LAB_DOGFOOD_FOLLOWS_WINDOWS=1 bin/lab-mac-dogfood start
 LAB_DOGFOOD_PROFILE="$profile" LAB_DOGFOOD_URL="$url" bin/lab-mac-dogfood wait-ready
 

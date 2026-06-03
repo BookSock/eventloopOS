@@ -7,6 +7,17 @@ import { normalizeTitlePrefix } from "../store.js";
 
 export const DEFAULT_AMBIENT_SAVE_POLL_MS = 5_000;
 export const DEFAULT_AMBIENT_SAVE_DEBOUNCE_MS = 3_000;
+const TASK_SNAPSHOT_APP_BLOCKLIST = new Set([
+  "aerospace",
+  "eventloopos queue",
+  "eventloopqueueapp",
+  "tailscale",
+]);
+const TASK_SNAPSHOT_BUNDLE_BLOCKLIST = new Set([
+  "com.eventloopos.queue",
+  "com.nikitavoloboev.aerospace",
+  "io.tailscale.ipn.macos",
+]);
 
 export type CurrentTaskState = {
   currentTaskId: string | null;
@@ -281,7 +292,9 @@ export function snapshotFingerprint(snapshot: WorkspaceSnapshot): string {
 export function filterSnapshotForTaskSave(snapshot: WorkspaceSnapshot, followsWindowIds: ReadonlySet<string> = new Set()): WorkspaceSnapshot {
   if (!snapshot.activeWorkspace) return snapshot;
   const windows = snapshot.windows.filter(
-    (window) => window.workspace === snapshot.activeWorkspace || followsWindowIds.has(String(window.id)),
+    (window) =>
+      isTaskSnapshotEligibleWindow(window)
+      && (window.workspace === snapshot.activeWorkspace || followsWindowIds.has(String(window.id))),
   );
   const focusedWindowId =
     snapshot.focusedWindowId !== undefined && windows.some((window) => window.id === snapshot.focusedWindowId)
@@ -293,6 +306,12 @@ export function filterSnapshotForTaskSave(snapshot: WorkspaceSnapshot, followsWi
     windows,
     focusedWindowId,
   };
+}
+
+function isTaskSnapshotEligibleWindow(window: WorkspaceSnapshot["windows"][number]): boolean {
+  const app = window.app.trim().toLowerCase();
+  const bundle = typeof window.appBundleId === "string" ? window.appBundleId.trim().toLowerCase() : "";
+  return !TASK_SNAPSHOT_APP_BLOCKLIST.has(app) && !TASK_SNAPSHOT_BUNDLE_BLOCKLIST.has(bundle);
 }
 
 async function readFollowsWindowIds(deps: AmbientWorkspaceSaverDeps): Promise<ReadonlySet<string>> {
@@ -316,8 +335,11 @@ export function createAmbientWorkspaceSaverFromRuntime(
   const workspace = runtime.workspace;
 
   const store = runtime.store as unknown as {
-    getCurrentTaskState?: () => Promise<CurrentTaskState> | CurrentTaskState;
-    updateTaskLayout?: (taskId: string, snapshot: WorkspaceSnapshot) => Promise<unknown> | unknown;
+    getCurrentTaskState?: () =>
+      | Promise<CurrentTaskState | { current_task_id?: string | null }>
+      | CurrentTaskState
+      | { current_task_id?: string | null };
+    updateTaskLayout?: (taskId: string, snapshot: WorkspaceSnapshot, now: Date) => Promise<unknown> | unknown;
     saveTaskWorkspaceSnapshot?: (input: {
       taskId: string;
       snapshot: WorkspaceSnapshot;
@@ -332,29 +354,35 @@ export function createAmbientWorkspaceSaverFromRuntime(
     // call it directly. Until then, treat absence as "no current task" so the
     // saver is a no-op and only emits the unbounded skip event.
     if (typeof store.getCurrentTaskState === "function") {
-      return await store.getCurrentTaskState();
+      const state = await store.getCurrentTaskState();
+      const currentTaskId =
+        "currentTaskId" in state
+          ? state.currentTaskId
+          : "current_task_id" in state
+            ? state.current_task_id
+            : null;
+      return {
+        currentTaskId: currentTaskId ?? null,
+      };
     }
     return { currentTaskId: null };
   };
 
   const updateTaskLayout: TaskLayoutWriter = async (taskId, snapshot) => {
-    // TODO(phase-2-integration): switch to `store.updateTaskLayout` once it
-    // exists. Until then, fall back to the underlying
-    // `saveTaskWorkspaceSnapshot` primitive that already persists per-task
-    // layouts — that is the storage cell Phase 2's PUT /tasks/:id/layout will
-    // wrap.
+    let updated: unknown;
     if (typeof store.updateTaskLayout === "function") {
-      return await store.updateTaskLayout(taskId, snapshot);
+      updated = await store.updateTaskLayout(taskId, snapshot, runtime.now());
     }
     if (typeof store.saveTaskWorkspaceSnapshot === "function") {
-      return await store.saveTaskWorkspaceSnapshot({
+      const saved = await store.saveTaskWorkspaceSnapshot({
         taskId,
         snapshot,
         capturedAt: runtime.now(),
         actorId: "ambient-workspace-saver",
       });
+      return saved;
     }
-    return undefined;
+    return updated;
   };
 
   const isManualModeActive: ManualModeReader = async () => {

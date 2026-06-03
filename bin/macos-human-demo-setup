@@ -55,6 +55,9 @@ if (!queueOnly) {
 }
 
 await waitForOrchestrator();
+await setCurrentTask(null);
+await excludeDemoPaperChromeFromFollows();
+await ignoreExistingDemoQueueItems();
 let snapshot = await waitForWindows();
 let windows = resolveDemoWindows(snapshot);
 
@@ -92,10 +95,18 @@ const demoItems = demoQueueItems(queue.items);
 const queueProof = assertDemoQueueItems(demoItems);
 
 await setCurrentTask(paperCustomer.taskId);
-await restore(customerSnapshot, "ready-customer-layout");
+const readySnapshotTarget = buildReadySnapshot(customerSnapshot, metricsSnapshot, windows);
+await restore(readySnapshotTarget, "ready-customer-layout");
 await sleep(1_200);
 const readySnapshot = await capture();
 const readyCustomerProof = assertRestoredSnapshot(readySnapshot, customerSnapshot, "ready customer restore");
+const ambientAutosaveProof = await proveAmbientAutosave(paperCustomer, customerSnapshot);
+await restore(readySnapshotTarget, "ready-customer-layout-after-ambient-proof");
+await sleep(1_200);
+await putTaskLayout(paperCustomer.taskId, customerSnapshot);
+await saveTaskWorkspaceSnapshot(paperCustomer.taskId, customerSnapshot);
+const finalReadySnapshot = await capture();
+const finalReadyCustomerProof = assertRestoredSnapshot(finalReadySnapshot, customerSnapshot, "final ready customer restore");
 const queueWindow = positionQueueWindow();
 await sleep(600);
 const finalSnapshot = await capture();
@@ -131,6 +142,8 @@ const manifest = {
     customer_restore: customerProof,
     metrics_restore: metricsProof,
     ready_customer_restore: readyCustomerProof,
+    ambient_autosave: ambientAutosaveProof,
+    final_ready_customer_restore: finalReadyCustomerProof,
     demo_queue: queueProof,
     queue_window: queueWindow,
   },
@@ -307,8 +320,8 @@ tell application "System Events"
       tell process processName
         set frontmost to true
         if (count of windows) > 0 then
-          set position of window 1 to {660, 500}
-          set size of window 1 to {760, 430}
+          set position of window 1 to {1080, 730}
+          set size of window 1 to {760, 330}
           perform action "AXRaise" of window 1
           return processName & "|" & (position of window 1 as string) & "|" & (size of window 1 as string)
         end if
@@ -402,6 +415,18 @@ function buildSnapshot(windows, mode) {
   };
 }
 
+function buildReadySnapshot(customerSnapshot, metricsSnapshot, windows) {
+  const metricsChrome = metricsSnapshot.windows.find((window) => window.id === windows.metricsChrome.id);
+  if (!metricsChrome) throw new Error("ready snapshot requires metrics Chrome");
+  return {
+    ...customerSnapshot,
+    windows: [
+      ...customerSnapshot.windows,
+      metricsChrome,
+    ],
+  };
+}
+
 function assertRestoredSnapshot(actualSnapshot, expectedSnapshot, label) {
   if (actualSnapshot.activeWorkspace !== expectedSnapshot.activeWorkspace) {
     throw new Error(`${label}: active workspace expected ${expectedSnapshot.activeWorkspace}, got ${actualSnapshot.activeWorkspace}`);
@@ -448,6 +473,7 @@ function assertNearFrame(actual, expected, label) {
 }
 
 function assertDemoQueueItems(items) {
+  if (items.length !== 2) throw new Error(`demo queue expected exactly 2 current-run items, got ${items.length}`);
   const taskIds = new Set(items.map((item) => item.task_id));
   for (const taskId of [paperCustomer.taskId, paperMetrics.taskId]) {
     if (!taskIds.has(taskId)) throw new Error(`demo queue missing ${taskId}`);
@@ -458,9 +484,13 @@ function assertDemoQueueItems(items) {
     items: items.map((item) => {
       const workspaceResource = item.review_packet?.context?.find((entry) => entry.kind === "workspace_snapshot" && entry.snapshot);
       if (!workspaceResource) throw new Error(`demo queue ${item.task_id} missing workspace_snapshot context`);
+      const expectedWorkspace = item.task_id === paperCustomer.taskId ? paperCustomer.workspace : paperMetrics.workspace;
+      if (workspaceResource.snapshot.activeWorkspace !== expectedWorkspace) {
+        throw new Error(`demo queue ${item.task_id} expected workspace ${expectedWorkspace}, got ${workspaceResource.snapshot.activeWorkspace}`);
+      }
       const windowIds = workspaceResource.snapshot.windows?.map((window) => window.id) ?? [];
-      if (windowIds.length < 2) {
-        throw new Error(`demo queue ${item.task_id} workspace snapshot expected >=2 windows, got ${windowIds.length}`);
+      if (windowIds.length !== 2) {
+        throw new Error(`demo queue ${item.task_id} workspace snapshot expected 2 windows, got ${windowIds.length}`);
       }
       const sharedWindowId = workspaceResource.snapshot.focusedWindowId;
       if (typeof sharedWindowId !== "number" || !windowIds.includes(sharedWindowId)) {
@@ -480,7 +510,101 @@ function assertDemoQueueItems(items) {
 }
 
 function demoQueueItems(items) {
+  return allDemoQueueItems(items).filter((item) => String(item.id ?? "").includes(stamp.toLowerCase()));
+}
+
+function allDemoQueueItems(items) {
   return items.filter((item) => item.task_id === paperCustomer.taskId || item.task_id === paperMetrics.taskId);
+}
+
+async function ignoreExistingDemoQueueItems() {
+  const queue = await listQueue();
+  const staleItems = allDemoQueueItems(queue.items);
+  for (const item of staleItems) {
+    await ignoreQueueItem(item.id);
+  }
+}
+
+async function excludeDemoPaperChromeFromFollows() {
+  await excludeFollowsWindow({ titleSubstring: paperCustomer.chromeTitle });
+  await excludeFollowsWindow({ titleSubstring: paperMetrics.chromeTitle });
+}
+
+async function proveAmbientAutosave(paper, baselineSnapshot) {
+  const sharedWindowId = baselineSnapshot.focusedWindowId;
+  if (typeof sharedWindowId !== "number") throw new Error("ambient autosave proof requires focused shared window id");
+  const movedFrame = { x: 820, y: 260, width: 620, height: 430 };
+  const movedSnapshot = {
+    ...baselineSnapshot,
+    windows: baselineSnapshot.windows.map((window) =>
+      window.id === sharedWindowId ? { ...window, frame: movedFrame } : window,
+    ),
+  };
+
+  await restore(movedSnapshot, "ambient-autosave-move");
+  await sleep(1_200);
+  const layoutProof = await waitForTaskLayoutFrame(paper.taskId, sharedWindowId, movedFrame);
+  const probe = await queueAmbientProbePaper(paper);
+  const probeItem = probe.queue_item;
+  if (!probeItem?.id) throw new Error("ambient probe did not create queue item");
+  const probeProof = assertQueueItemWorkspaceFrame(probeItem, sharedWindowId, movedFrame);
+  if (probeProof.window_ids.length !== baselineSnapshot.windows.length) {
+    throw new Error(`ambient probe expected ${baselineSnapshot.windows.length} windows, got ${probeProof.window_ids.length}`);
+  }
+  await ignoreQueueItem(probeItem.id);
+  return {
+    ok: true,
+    task_id: paper.taskId,
+    shared_window_id: sharedWindowId,
+    moved_frame: movedFrame,
+    task_layout: layoutProof,
+    probe_queue_context: probeProof,
+  };
+}
+
+async function waitForTaskLayoutFrame(taskId, windowId, expectedFrame) {
+  let last;
+  for (let attempt = 1; attempt <= 16; attempt += 1) {
+    const response = await fetch(`${orchestratorUrl}/tasks/${encodeURIComponent(taskId)}`);
+    const body = await response.json();
+    if (!response.ok) throw new Error(`get task ${taskId} HTTP ${response.status}: ${JSON.stringify(body)}`);
+    const snapshot = body.layout?.layout;
+    const window = snapshot?.windows?.find((candidate) => candidate.id === windowId);
+    last = window?.frame;
+    if (window?.frame && frameNear(window.frame, expectedFrame)) {
+      return {
+        ok: true,
+        attempts: attempt,
+        active_workspace: snapshot.activeWorkspace,
+        frame: window.frame,
+      };
+    }
+    await sleep(1_000);
+  }
+  throw new Error(`ambient autosave did not update task layout for ${taskId} window ${windowId}; last frame ${JSON.stringify(last)}`);
+}
+
+function assertQueueItemWorkspaceFrame(item, windowId, expectedFrame) {
+  const workspaceResource = item.review_packet?.context?.find((entry) => entry.kind === "workspace_snapshot" && entry.snapshot);
+  if (!workspaceResource) throw new Error(`ambient probe ${item.id} missing workspace snapshot context`);
+  const window = workspaceResource.snapshot.windows?.find((candidate) => candidate.id === windowId);
+  if (!window) throw new Error(`ambient probe ${item.id} missing shared window ${windowId}`);
+  assertNearFrame(window.frame, expectedFrame, `ambient probe ${item.id}: shared window ${windowId}`);
+  return {
+    ok: true,
+    queue_item_id: item.id,
+    active_workspace: workspaceResource.snapshot.activeWorkspace,
+    frame: window.frame,
+    window_ids: workspaceResource.snapshot.windows.map((candidate) => candidate.id),
+  };
+}
+
+function frameNear(actual, expected) {
+  if (!actual || !expected) return false;
+  return ["x", "y", "width", "height"].every((key) => {
+    const delta = Math.abs(Number(actual[key]) - Number(expected[key]));
+    return Number.isFinite(delta) && delta <= 8;
+  });
 }
 
 function snapshotWindow(window, workspace, frame) {
@@ -572,6 +696,51 @@ async function queuePaper(paper, summary) {
   return body;
 }
 
+async function queueAmbientProbePaper(paper) {
+  const now = new Date().toISOString();
+  const slug = paper.taskId.replace(/^task_/, "");
+  const response = await fetch(`${orchestratorUrl}/events`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      event: {
+        id: `evt_human_demo_ambient_probe_${slug}_${stamp}`,
+        source: "human_demo_probe",
+        source_id: `human-demo:ambient-probe:${slug}:${stamp}`,
+        idempotency_key: `human-demo:ambient-probe:${slug}:${stamp}`,
+        occurred_at: now,
+        received_at: now,
+        actor: { id: "human_demo_setup", type: "system" },
+        task_hint: slug.replaceAll("_", " "),
+        type: "manual.review_requested",
+        title: "Ambient Autosave Probe",
+        summary: "Hidden probe used by setup to verify ambient autosave appears in future paper workspace context.",
+        raw_ref: {
+          id: `raw_human_demo_ambient_probe_${slug}_${stamp}`,
+          uri: `eventloopos-demo://ambient-probe/${slug}/${stamp}`,
+          media_type: "text/plain",
+        },
+        links: [],
+        resources: [{
+          id: `ctx_human_demo_ambient_probe_${slug}_${stamp}`,
+          kind: "manual_note",
+          title: "Ambient autosave probe",
+          source: "human_demo_probe",
+          captured_at: now,
+          restore_confidence: "low",
+          details: {
+            task_id: paper.taskId,
+            workspace: paper.workspace,
+          },
+        }],
+      },
+    }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`ambient probe ${paper.taskId} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
+
 async function putTaskLayout(taskId, snapshot) {
   const response = await fetch(`${orchestratorUrl}/tasks/${encodeURIComponent(taskId)}/layout`, {
     method: "PUT",
@@ -612,6 +781,28 @@ async function setQueuePriority(queueItemId, score) {
   });
   const body = await response.json();
   if (!response.ok) throw new Error(`priority ${queueItemId} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
+
+async function ignoreQueueItem(queueItemId) {
+  const response = await fetch(`${orchestratorUrl}/queue/${encodeURIComponent(queueItemId)}/ignore`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action: "ignore", actor_id: "human_demo_setup" }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`ignore queue item ${queueItemId} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
+
+async function excludeFollowsWindow({ appBundle, titleSubstring }) {
+  const response = await fetch(`${orchestratorUrl}/follows-windows/exclude`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ app_bundle: appBundle, title_substring: titleSubstring }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`exclude follows window HTTP ${response.status}: ${JSON.stringify(body)}`);
   return body;
 }
 

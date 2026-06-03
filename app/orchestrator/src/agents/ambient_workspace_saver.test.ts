@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   createAmbientWorkspaceSaver,
+  createAmbientWorkspaceSaverFromRuntime,
   filterSnapshotForTaskSave,
   snapshotFingerprint,
   type CurrentTaskState,
 } from "./ambient_workspace_saver.js";
 import type { WorkspaceSnapshot } from "../workspace/aerospace.js";
+import type { Runtime } from "../runtime.js";
 
 type FakeWorkspace = {
   capture: () => WorkspaceSnapshot;
@@ -336,10 +338,13 @@ describe("ambient_workspace_saver", () => {
         { id: 1, app: "TextEdit", title: "Reply", workspace: "paper-a" },
         { id: 2, app: "Music", title: "Personal", workspace: "personal" },
         { id: 3, app: "Slack", title: "Team", workspace: "paper-b" },
+        { id: 4, app: "eventloopOS Queue", title: "eventloopOS Queue", workspace: "paper-a" },
+        { id: 5, app: "Tailscale", title: "Tailscale", workspace: "paper-b" },
       ],
     };
 
     assert.deepEqual(filterSnapshotForTaskSave(snapshot, new Set(["3"])).windows.map((window) => window.id), [1, 3]);
+    assert.deepEqual(filterSnapshotForTaskSave(snapshot, new Set(["3", "5"])).windows.map((window) => window.id), [1, 3]);
 
     const workspace = makeFakeWorkspace(snapshot);
     const writes: Array<{ taskId: string; snapshot: WorkspaceSnapshot }> = [];
@@ -444,5 +449,45 @@ describe("ambient_workspace_saver", () => {
     assert.equal(ghostty?.isTaskWorkspace, false, "window on a non-active workspace must not be marked is_task_workspace");
     assert.equal(ghostty?.appBundle, "Ghostty", "falls back to display name when bundle id absent");
     assert.equal(ghostty?.titlePrefix, "codex");
+  });
+
+  it("runtime adapter commits both task layout and task workspace snapshot", async () => {
+    const snapshot = makeSnapshot([1], { activeWorkspace: "paper-a" });
+    const workspace = makeFakeWorkspace(snapshot);
+    const obs = makeFakeObservability();
+    const layoutWrites: Array<{ taskId: string; snapshot: WorkspaceSnapshot; now: Date }> = [];
+    const taskSnapshotWrites: Array<{ taskId: string; snapshot: WorkspaceSnapshot; actorId?: string }> = [];
+    let nowMs = Date.parse("2026-05-10T15:00:00.000Z");
+    const runtime = {
+      workspace,
+      observability: obs.recorder,
+      now: () => new Date(nowMs),
+      store: {
+        getCurrentTaskState: async () => ({ current_task_id: "task_alpha" }),
+        updateTaskLayout: async (taskId: string, nextSnapshot: WorkspaceSnapshot, now: Date) => {
+          assert.ok(now instanceof Date, "runtime adapter must pass the store timestamp");
+          layoutWrites.push({ taskId, snapshot: nextSnapshot, now });
+          return { task_id: taskId };
+        },
+        saveTaskWorkspaceSnapshot: async (input: { taskId: string; snapshot: WorkspaceSnapshot; actorId?: string }) => {
+          taskSnapshotWrites.push({ taskId: input.taskId, snapshot: input.snapshot, actorId: input.actorId });
+          return { task_id: input.taskId, snapshot: input.snapshot };
+        },
+        getManualModeState: async () => ({ active: false }),
+      },
+    } as unknown as Runtime;
+    const saver = createAmbientWorkspaceSaverFromRuntime(runtime, { debounceMs: 3_000 });
+
+    assert.ok(saver, "runtime adapter should create saver when workspace is configured");
+    assert.equal((await saver.tick()).decision, "debounced");
+    nowMs += 5_000;
+    assert.equal((await saver.tick()).decision, "committed");
+    assert.equal(layoutWrites.length, 1);
+    assert.equal(taskSnapshotWrites.length, 1);
+    assert.equal(layoutWrites[0].taskId, "task_alpha");
+    assert.equal(layoutWrites[0].now.toISOString(), new Date(nowMs).toISOString());
+    assert.equal(taskSnapshotWrites[0].taskId, "task_alpha");
+    assert.equal(taskSnapshotWrites[0].actorId, "ambient-workspace-saver");
+    assert.deepEqual(taskSnapshotWrites[0].snapshot, layoutWrites[0].snapshot);
   });
 });

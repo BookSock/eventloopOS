@@ -48,6 +48,7 @@ if (!config.ok) {
 }
 
 const gatewayRuntime = await createGatewayRuntime();
+const observability = gatewayRuntime.observability ?? createInMemoryObservability();
 const taskSessionRuntime = createTaskSessionRuntime(gatewayRuntime.persistTerminalRefs ? gatewayRuntime.store : undefined);
 const taskSessions = taskSessionRuntime?.controller;
 const mcpSources = await createMcpSourceRegistry();
@@ -63,7 +64,7 @@ const server = createGatewayServer({
   mcpSources,
   workspace,
   workspaceExecuteEnabled: config.value.workspaceExecute === "enabled",
-  observability: gatewayRuntime.observability,
+  observability,
   terminalSendExecutor,
   terminalSendEnabled: terminalSendEnabledFromEnv(process.env),
   codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
@@ -96,7 +97,6 @@ if (autoBindIntervalMs && autoBindIntervalMs > 0) {
 
 let ambientWorkspaceSaver: AmbientWorkspaceSaver | undefined;
 if (process.env.EVENTLOOPOS_AMBIENT_WORKSPACE_SAVE === "1" && workspace) {
-  const observability = gatewayRuntime.observability ?? createInMemoryObservability();
   const runtime = createRuntime({
     store: gatewayRuntime.store,
     workspace,
@@ -140,7 +140,6 @@ if (autoPromoteIntervalMs && autoPromoteIntervalMs > 0) {
 
 let followsWindowOrchestrator: FollowsWindowOrchestrator | undefined;
 if (process.env.EVENTLOOPOS_FOLLOWS_WINDOWS === "1" && workspace) {
-  const observability = gatewayRuntime.observability ?? createInMemoryObservability();
   const runtime = createRuntime({
     store: gatewayRuntime.store,
     workspace,
@@ -179,7 +178,6 @@ if (process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED === "1") {
   const tickMs = parsePositiveInteger(process.env.EVENTLOOPOS_AUTO_PAPER_TICK_MS);
   const idleSeconds = parsePositiveInteger(process.env.EVENTLOOPOS_AUTO_PAPER_IDLE_SECONDS);
   const dormantHours = parsePositiveNumber(process.env.EVENTLOOPOS_AUTO_DORMANT_HOURS);
-  const observability = gatewayRuntime.observability ?? createInMemoryObservability();
   const registry = createAutoPaperTaskRegistry(gatewayRuntime.store);
   if (!registry) {
     console.warn(

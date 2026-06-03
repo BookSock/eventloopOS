@@ -51,8 +51,11 @@ export function withStorePersistence<T extends GatewayStore>(
   inMemoryStore: InMemoryStore,
   statePath: string,
 ): T {
+  let persistQueue = Promise.resolve();
   const persist = async () => {
-    await savePersistentInMemoryStore(statePath, inMemoryStore);
+    const next = persistQueue.then(() => savePersistentInMemoryStore(statePath, inMemoryStore));
+    persistQueue = next.catch(() => undefined);
+    await next;
   };
 
   return new Proxy(gatewayStore, {
@@ -74,7 +77,7 @@ export function withStorePersistence<T extends GatewayStore>(
 export async function savePersistentInMemoryStore(statePath: string, store: InMemoryStore): Promise<void> {
   const serialized = serializeStore(store);
   await mkdir(dirname(statePath), { recursive: true });
-  const tempPath = `${statePath}.${process.pid}.tmp`;
+  const tempPath = `${statePath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
   await writeFile(tempPath, `${JSON.stringify(serialized, null, 2)}\n`);
   await rename(tempPath, statePath);
 }

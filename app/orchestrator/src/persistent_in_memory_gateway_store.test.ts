@@ -35,6 +35,30 @@ describe("persistent in-memory gateway store", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("serializes concurrent persistence writes without temp-file collisions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "eventloopos-persistent-store-"));
+    const statePath = join(dir, "gateway-store.json");
+    try {
+      const baseStore = emptyStore();
+      const gateway = withStorePersistence(createInMemoryGatewayStore(baseStore), baseStore, statePath);
+
+      await Promise.all(Array.from({ length: 8 }, (_, index) =>
+        gateway.createTask({
+          taskId: `task_${index}`,
+          primaryAnchor: { kind: "codex_thread", id: `thread_${index}` },
+          capturedLayout: { backend: "aerospace", windows: [] },
+          now: new Date(`2026-06-01T17:00:0${index}Z`),
+        }),
+      ));
+
+      const reloadedStore = await loadOrCreatePersistentInMemoryStore(statePath, async () => emptyStore());
+      const reloadedGateway = createInMemoryGatewayStore(reloadedStore);
+      assert.equal((await reloadedGateway.listTasks()).length, 8);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 function emptyStore(): InMemoryStore {
