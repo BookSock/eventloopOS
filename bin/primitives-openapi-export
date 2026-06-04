@@ -160,7 +160,7 @@ function operationForRoute(input) {
     "x-eventloopos-route-file": input.routeFile,
   };
   const requestSchema = schemaRef(input.route.request_schema);
-  if (["post", "put", "patch"].includes(input.method)) {
+  if (["post", "put", "patch"].includes(input.method) && input.route.no_request_body !== true) {
     operation.requestBody = {
       required: input.route.request_body_required === true || (requestSchema ? input.route.request_body_required !== false : false),
       content: {
@@ -282,6 +282,13 @@ function runSelfTest() {
           response_schema: "CreateTaskResponse",
           parameters: [{ name: "dry_run", in: "query", schema: { type: "boolean" } }],
         },
+        {
+          method: "POST",
+          path: "/tasks/:id/retry",
+          route_file: "routes/tasks.ts",
+          no_request_body: true,
+          response_schema: "CreateTaskResponse",
+        },
       ],
       code: ["routes/tasks.ts"],
       proofs: ["routes/tasks.test.ts"],
@@ -325,6 +332,10 @@ function runSelfTest() {
   }
   if (postTasks.parameters?.[0]?.name !== "dry_run") {
     throw new Error("self-test did not wire query parameter");
+  }
+  const retryTask = checked.paths["/tasks/{id}/retry"]?.post;
+  if (!retryTask || retryTask.requestBody) {
+    throw new Error("self-test did not omit request body for no_request_body route");
   }
   fs.rmSync(root, { recursive: true, force: true });
   console.log("primitives-openapi-export self-test passed");

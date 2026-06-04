@@ -2507,7 +2507,7 @@
         { "method": "GET", "path": "/contexts/restore-requests/:id", "route_file": "app/orchestrator/src/routes/context_restore.ts", "response_schema": "ContextRestoreRequestResponse" },
         { "method": "POST", "path": "/contexts/restore-requests/:id/done", "route_file": "app/orchestrator/src/routes/context_restore.ts", "request_schema": "ContextRestoreFinishRequest", "response_schema": "ContextRestoreRequestResponse" },
         { "method": "POST", "path": "/contexts/restore-requests/:id/failed", "route_file": "app/orchestrator/src/routes/context_restore.ts", "request_schema": "ContextRestoreFinishRequest", "response_schema": "ContextRestoreRequestResponse" },
-        { "method": "POST", "path": "/contexts/restore-requests/:id/retry", "route_file": "app/orchestrator/src/routes/context_restore.ts", "response_schema": "ContextRestoreRequestResponse" }
+        { "method": "POST", "path": "/contexts/restore-requests/:id/retry", "route_file": "app/orchestrator/src/routes/context_restore.ts", "no_request_body": true, "response_schema": "ContextRestoreRequestResponse" }
       ],
       "code": ["app/orchestrator/src/routes/context_restore.ts", "app/orchestrator/src/store/context_restore_store.ts"],
       "proofs": ["docs/planning/17-deeplink-strategies.md"]
@@ -2565,8 +2565,8 @@
       "status": "dogfood",
       "summary": "Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows.",
       "http": [
-        { "method": "POST", "path": "/agents/codex/auto-bind", "route_file": "app/orchestrator/src/routes/agents.ts", "response_schema": "CodexAutoBindResponse" },
-        { "method": "POST", "path": "/agents/codex/resolve-foreground", "route_file": "app/orchestrator/src/routes/agents.ts", "response_schema": "CodexForegroundResolveResponse" },
+        { "method": "POST", "path": "/agents/codex/auto-bind", "route_file": "app/orchestrator/src/routes/agents.ts", "no_request_body": true, "response_schema": "CodexAutoBindResponse" },
+        { "method": "POST", "path": "/agents/codex/resolve-foreground", "route_file": "app/orchestrator/src/routes/agents.ts", "no_request_body": true, "response_schema": "CodexForegroundResolveResponse" },
         { "method": "GET", "path": "/agents/codex/inspect/:id", "route_file": "app/orchestrator/src/routes/agents.ts", "response_schema": "CodexSessionInspectionResponse" },
         { "method": "GET", "path": "/agents/claude/inspect/:id", "route_file": "app/orchestrator/src/routes/agents.ts", "response_schema": "ClaudeSessionInspectionResponse" }
       ],

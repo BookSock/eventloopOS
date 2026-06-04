@@ -182,6 +182,21 @@ function auditHttpRoute(route, prefix, repoRoot, schemaNames, errors) {
       }
     }
   }
+  if (route.no_request_body !== undefined && typeof route.no_request_body !== "boolean") {
+    errors.push(`${prefix}.no_request_body must be boolean when present`);
+  }
+  if (route.no_request_body === true && route.request_schema !== undefined) {
+    errors.push(`${prefix} must not define request_schema when no_request_body is true`);
+  }
+  if (route.no_request_body === true && route.request_body_required !== undefined) {
+    errors.push(`${prefix} must not define request_body_required when no_request_body is true`);
+  }
+  if (route.response_schema === undefined) {
+    errors.push(`${prefix}.response_schema is required`);
+  }
+  if (method && ["POST", "PUT", "PATCH"].includes(method.toUpperCase()) && route.request_schema === undefined && route.no_request_body !== true) {
+    errors.push(`${prefix}.request_schema is required for ${method.toUpperCase()} routes unless no_request_body is true`);
+  }
 }
 
 function auditSchemaRef(value, prefix, schemaNames, errors) {
@@ -331,16 +346,19 @@ function runSelfTest() {
       "export type ExampleRequest = {};",
       "export const ExampleResponseSchema = {};",
       "export type ExampleResponse = {};",
+      "export const TickResponseSchema = {};",
+      "export type TickResponse = {};",
       "export const ContractSchemas = {",
       "  ExampleRequest: ExampleRequestSchema,",
       "  ExampleResponse: ExampleResponseSchema,",
+      "  TickResponse: TickResponseSchema,",
       "};",
       "",
     ].join("\n"),
   );
   fs.writeFileSync(
     path.join(root, "app/orchestrator/src/routes/example.ts"),
-    'if (input.method === "POST" && input.pathname === "/example") {}\n',
+    'if (input.method === "POST" && input.pathname === "/example") {}\nif (input.method === "POST" && input.pathname === "/example/tick") {}\n',
   );
   fs.writeFileSync(
     path.join(root, "app/orchestrator/src/http/route_observability.ts"),
@@ -370,6 +388,12 @@ function runSelfTest() {
         request_schema: "ExampleRequest",
         response_schema: "ExampleResponse",
         parameters: [{ name: "task_id", in: "query", schema: { type: "string" } }],
+      }, {
+        method: "POST",
+        path: "/example/tick",
+        route_file: "app/orchestrator/src/routes/example.ts",
+        no_request_body: true,
+        response_schema: "TickResponse",
       }],
       code: ["code.ts"],
       proofs: ["proof.test.ts"],
@@ -379,6 +403,7 @@ function runSelfTest() {
     schemas: {
       ExampleRequest: { type: "object" },
       ExampleResponse: { type: "object" },
+      TickResponse: { type: "object" },
     },
   };
   const goodErrors = [];
@@ -420,6 +445,32 @@ function runSelfTest() {
   auditCatalog(badParameter, root, badParameterErrors);
   if (!badParameterErrors.some((error) => error.includes(".in must be query"))) {
     throw new Error(`bad parameter fixture did not fail as expected: ${badParameterErrors.join("; ")}`);
+  }
+
+  const missingRequest = {
+    ...good,
+    primitives: [{
+      ...good.primitives[0],
+      http: [{ ...good.primitives[0].http[0], request_schema: undefined }],
+    }],
+  };
+  const missingRequestErrors = [];
+  auditCatalog(missingRequest, root, missingRequestErrors);
+  if (!missingRequestErrors.some((error) => error.includes(".request_schema is required"))) {
+    throw new Error(`missing request schema fixture did not fail as expected: ${missingRequestErrors.join("; ")}`);
+  }
+
+  const missingResponse = {
+    ...good,
+    primitives: [{
+      ...good.primitives[0],
+      http: [{ ...good.primitives[0].http[0], response_schema: undefined }],
+    }],
+  };
+  const missingResponseErrors = [];
+  auditCatalog(missingResponse, root, missingResponseErrors);
+  if (!missingResponseErrors.some((error) => error.includes(".response_schema is required"))) {
+    throw new Error(`missing response schema fixture did not fail as expected: ${missingResponseErrors.join("; ")}`);
   }
 
   fs.writeFileSync(

@@ -257,16 +257,6 @@
       "post": {
         "description": "Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows.",
         "operationId": "agent_focus_binding_post_agents_codex_auto_bind",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
-              }
-            }
-          },
-          "required": false
-        },
         "responses": {
           "200": {
             "content": {
@@ -347,16 +337,6 @@
       "post": {
         "description": "Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows.",
         "operationId": "agent_focus_binding_post_agents_codex_resolve_foreground",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
-              }
-            }
-          },
-          "required": false
-        },
         "responses": {
           "200": {
             "content": {
@@ -762,16 +742,6 @@
             }
           }
         ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
-              }
-            }
-          },
-          "required": false
-        },
         "responses": {
           "200": {
             "content": {
