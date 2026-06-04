@@ -16,6 +16,16 @@ function makeDeps(overrides: Partial<{
   follows: FollowsWindowRecord[];
   snapshot: WorkspaceSnapshot;
   runError: Error | undefined;
+  claims: Array<{
+    claim_id: string;
+    task_id: string;
+    window_id?: string;
+    app_bundle?: string;
+    title_prefix?: string;
+    process_root_pid?: number;
+    created_at: string;
+  }>;
+  taskWorkspaces: Record<string, string | undefined>;
 }> = {}): {
   deps: FollowsWindowOrchestratorDeps;
   ranCommands: AerospaceCommand[];
@@ -55,6 +65,22 @@ function makeDeps(overrides: Partial<{
         prunedCalls.push(olderThan);
         return 0;
       },
+      async listTaskWindowClaims() {
+        return overrides.claims ?? [];
+      },
+      async getTask(taskId: string) {
+        const workspaceId = overrides.taskWorkspaces?.[taskId];
+        if (!workspaceId) return undefined;
+        return {
+          task_id: taskId,
+          primary_anchor_kind: "codex_thread",
+          primary_anchor_id: `${taskId}_thread`,
+          aerospace_workspace_id: workspaceId,
+          created_at: "2026-05-06T12:00:00.000Z",
+          updated_at: "2026-05-06T12:00:00.000Z",
+          auto_paper_idle_seconds: 300,
+        };
+      },
     },
     workspace: {
       async capture() {
@@ -67,6 +93,9 @@ function makeDeps(overrides: Partial<{
     async runAerospaceCommand(command) {
       if (overrides.runError) throw overrides.runError;
       ranCommands.push(command);
+    },
+    async getProcessAncestorPids(pid) {
+      return pid === 520 ? [510, 500, 1] : [1];
     },
     observability: {
       async incrementCounter() {},
@@ -150,6 +179,79 @@ describe("follows_window_orchestrator", () => {
     const second = await orch.tick();
     assert.equal(second.decision, "no_change");
     assert.equal(ranCommands.length, 1, "second tick on same workspace must not re-issue moves");
+  });
+
+  it("moves a foreign task-claimed window back to the owning task workspace", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "ws-a",
+      windows: [
+        { id: 100, app: "Ghostty", title: "paper A", workspace: "ws-a" },
+        { id: 200, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "Paper B Playwright", workspace: "ws-a" },
+      ],
+    };
+    const { deps, ranCommands, activities } = makeDeps({
+      focusedWorkspace: "ws-a",
+      follows: [],
+      snapshot,
+      claims: [
+        {
+          claim_id: "twc_b_chrome",
+          task_id: "task_b",
+          window_id: "200",
+          created_at: "2026-05-06T12:00:00.000Z",
+        },
+      ],
+      taskWorkspaces: { task_b: "ws-b" },
+    });
+
+    const orch = createFollowsWindowOrchestrator(deps);
+    const result = await orch.tick();
+
+    assert.equal(result.decision, "switch_handled");
+    if (result.decision !== "switch_handled") return;
+    assert.equal(result.foreignClaimedMoved, 1);
+    assert.equal(ranCommands.length, 1);
+    assert.deepEqual(ranCommands[0]?.args, ["move-node-to-workspace", "--window-id", "200", "ws-b"]);
+    assert.ok(activities.some((a) => a.type === "foreign_claimed_window_redirected"));
+  });
+
+  it("moves a process-root descendant window away even when focused workspace is unchanged", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "ws-a",
+      windows: [
+        { id: 100, app: "Ghostty", title: "paper A", workspace: "ws-a", pid: 100 },
+        { id: 300, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "Spawned Browser", workspace: "ws-a", pid: 520 },
+      ],
+    };
+    const { deps, ranCommands } = makeDeps({
+      focusedWorkspace: "ws-a",
+      follows: [],
+      snapshot,
+      claims: [
+        {
+          claim_id: "twc_b_root",
+          task_id: "task_b",
+          process_root_pid: 500,
+          created_at: "2026-05-06T12:00:00.000Z",
+        },
+      ],
+      taskWorkspaces: { task_b: "ws-b" },
+    });
+
+    const orch = createFollowsWindowOrchestrator(deps);
+    const first = await orch.tick();
+    assert.equal(first.decision, "switch_handled");
+    assert.equal(ranCommands.length, 1);
+    ranCommands.length = 0;
+
+    const second = await orch.tick();
+    assert.equal(second.decision, "no_change");
+    if (second.decision !== "no_change") return;
+    assert.equal(second.foreignClaimedMoved, 1);
+    assert.equal(ranCommands.length, 1);
+    assert.deepEqual(ranCommands[0]?.args, ["move-node-to-workspace", "--window-id", "300", "ws-b"]);
   });
 
   it("skips system windows in the blocklist", async () => {

@@ -144,4 +144,76 @@ describe("follows_window_orchestrator integration", () => {
     const activities = await observability.listActivity({ limit: 50 });
     assert.ok(activities.some((a) => a.type === "follows_window_moved"));
   });
+
+  it("moves inactive task agent-spawned windows back to their owning task workspace", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const observability = createInMemoryObservability();
+    const baseTime = new Date("2026-05-10T12:00:00.000Z");
+    const layout: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "ws-a",
+      windows: [],
+    };
+
+    const taskA = await store.createTask({
+      primaryAnchor: { kind: "ghostty_window", id: "win-task-a" },
+      capturedLayout: layout,
+      aerospaceWorkspaceId: "ws-a",
+      now: baseTime,
+    });
+    const taskB = await store.createTask({
+      primaryAnchor: { kind: "ghostty_window", id: "win-task-b" },
+      capturedLayout: layout,
+      aerospaceWorkspaceId: "ws-b",
+      now: baseTime,
+    });
+    await store.setCurrentTaskId(taskA.task.task_id, baseTime);
+    await store.claimTaskWindow({
+      taskId: taskB.task.task_id,
+      processRootPid: 500,
+      source: "agent_spawn_root",
+      now: baseTime,
+      ttlMs: 60_000,
+    });
+
+    const workspace = makeWorkspace({
+      backend: "aerospace",
+      activeWorkspace: "ws-a",
+      focusedWindowId: 300,
+      windows: [
+        { id: 100, app: "Ghostty", title: "Task A", workspace: "ws-a", pid: 100 },
+        { id: 300, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "Playwright", workspace: "ws-a", pid: 520 },
+      ],
+    });
+    const ranCommands: AerospaceCommand[] = [];
+    const orch = createFollowsWindowOrchestrator({
+      store,
+      workspace,
+      async getFocusedWorkspace() {
+        return "ws-a";
+      },
+      async runAerospaceCommand(command) {
+        ranCommands.push(command);
+      },
+      async getProcessAncestorPids(pid) {
+        return pid === 520 ? [510, 500, 1] : [1];
+      },
+      observability,
+      pollIntervalMs: 1_000,
+      ttlMs: 24 * 60 * 60 * 1_000,
+      pruneIntervalMs: 60 * 60 * 1_000,
+      now: () => baseTime,
+    });
+
+    const result = await orch.tick();
+
+    assert.equal(result.decision, "switch_handled");
+    if (result.decision !== "switch_handled") return;
+    assert.equal(result.foreignClaimedMoved, 1);
+    assert.deepEqual(ranCommands.map((command) => command.args), [
+      ["move-node-to-workspace", "--window-id", "300", "ws-b"],
+    ]);
+    const activities = await observability.listActivity({ limit: 50 });
+    assert.ok(activities.some((a) => a.type === "foreign_claimed_window_redirected"));
+  });
 });

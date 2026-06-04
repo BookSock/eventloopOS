@@ -4,6 +4,8 @@ import type { GatewayStore } from "../gateway_store.js";
 import type { WorkspaceController } from "../workspace/controller.js";
 import type { AerospaceCommand, WorkspaceSnapshot } from "../workspace/aerospace.js";
 import { moveToWorkspacePlan } from "../workspace/aerospace.js";
+import type { TaskWindowClaimRecord } from "../store.js";
+import { normalizeTitlePrefix } from "../store.js";
 
 export const DEFAULT_FOLLOWS_POLL_MS = 1_000;
 export const DEFAULT_FOLLOWS_TTL_HOURS = 24;
@@ -15,11 +17,17 @@ export type AerospaceCommandRunner = (command: AerospaceCommand) => Promise<unkn
 export type FollowsWindowOrchestratorDeps = {
   store: Pick<
     GatewayStore,
-    "listFollowsWindows" | "getCurrentTaskState" | "getManualModeState" | "pruneWindowWorkspaceObservations"
+    | "listFollowsWindows"
+    | "getCurrentTaskState"
+    | "getManualModeState"
+    | "pruneWindowWorkspaceObservations"
+    | "listTaskWindowClaims"
+    | "getTask"
   >;
   workspace: Pick<WorkspaceController, "capture">;
   getFocusedWorkspace: FocusedWorkspaceReader;
   runAerospaceCommand: AerospaceCommandRunner;
+  getProcessAncestorPids?: (pid: number) => Promise<Iterable<number>> | Iterable<number>;
   observability?: Observability;
   pollIntervalMs?: number;
   ttlMs?: number;
@@ -32,7 +40,7 @@ export type FollowsTickResult =
   | { decision: "skipped_manual_mode" }
   | { decision: "skipped_no_current_task" }
   | { decision: "skipped_no_focused_workspace" }
-  | { decision: "no_change"; focusedWorkspace: string }
+  | { decision: "no_change"; focusedWorkspace: string; foreignClaimedMoved?: number; foreignClaimedSkipped?: number }
   | {
       decision: "switch_handled";
       previousWorkspace?: string;
@@ -40,6 +48,8 @@ export type FollowsTickResult =
       moved: number;
       alreadyOnTarget: number;
       skipped: number;
+      foreignClaimedMoved?: number;
+      foreignClaimedSkipped?: number;
     }
   | { decision: "error"; error: string };
 
@@ -95,11 +105,33 @@ export function createFollowsWindowOrchestrator(deps: FollowsWindowOrchestratorD
       }
 
       const previousWorkspace = lastFocusedWorkspace;
+      const claims = await deps.store.listTaskWindowClaims({ now: tickNow });
       if (previousWorkspace === focused) {
+        const foreignClaimed = await redirectForeignClaimedWindows(deps, {
+          snapshot: undefined,
+          currentTaskId: taskState.current_task_id,
+          focusedWorkspace: focused,
+          claims,
+          tickNow,
+        });
         await maybePrune(tickNow);
-        return { decision: "no_change", focusedWorkspace: focused };
+        return {
+          decision: "no_change",
+          focusedWorkspace: focused,
+          foreignClaimedMoved: foreignClaimed.moved,
+          foreignClaimedSkipped: foreignClaimed.skipped,
+        };
       }
       lastFocusedWorkspace = focused;
+
+      const snapshot = await deps.workspace.capture();
+      const foreignClaimed = await redirectForeignClaimedWindows(deps, {
+        snapshot,
+        currentTaskId: taskState.current_task_id,
+        focusedWorkspace: focused,
+        claims,
+        tickNow,
+      });
 
       const follows = await deps.store.listFollowsWindows({ now: tickNow, ttlMs, minWorkspaceCount });
       if (follows.length === 0) {
@@ -111,10 +143,11 @@ export function createFollowsWindowOrchestrator(deps: FollowsWindowOrchestratorD
           moved: 0,
           alreadyOnTarget: 0,
           skipped: 0,
+          foreignClaimedMoved: foreignClaimed.moved,
+          foreignClaimedSkipped: foreignClaimed.skipped,
         };
       }
 
-      const snapshot = await deps.workspace.capture();
       const windowsById = new Map<string, WorkspaceSnapshot["windows"][number]>();
       for (const window of snapshot.windows) {
         windowsById.set(String(window.id), window);
@@ -126,6 +159,10 @@ export function createFollowsWindowOrchestrator(deps: FollowsWindowOrchestratorD
 
       for (const follow of follows) {
         const window = windowsById.get(follow.window_id);
+        if (foreignClaimed.movedWindowIds.has(follow.window_id)) {
+          skipped += 1;
+          continue;
+        }
         if (!window) {
           skipped += 1;
           await emit({
@@ -189,6 +226,8 @@ export function createFollowsWindowOrchestrator(deps: FollowsWindowOrchestratorD
         moved,
         alreadyOnTarget,
         skipped,
+        foreignClaimedMoved: foreignClaimed.moved,
+        foreignClaimedSkipped: foreignClaimed.skipped,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -264,6 +303,192 @@ export function createFollowsWindowOrchestrator(deps: FollowsWindowOrchestratorD
     stop,
     isRunning: () => timer !== undefined,
   };
+}
+
+async function redirectForeignClaimedWindows(
+  deps: FollowsWindowOrchestratorDeps,
+  input: {
+    snapshot?: WorkspaceSnapshot;
+    currentTaskId: string;
+    focusedWorkspace: string;
+    claims: readonly TaskWindowClaimRecord[];
+    tickNow: Date;
+  },
+): Promise<{ moved: number; skipped: number; movedWindowIds: Set<string> }> {
+  const foreignClaims = input.claims.filter((claim) => claim.task_id !== input.currentTaskId);
+  if (foreignClaims.length === 0) return { moved: 0, skipped: 0, movedWindowIds: new Set() };
+
+  const snapshot = input.snapshot ?? await deps.workspace.capture();
+  const movedWindowIds = new Set<string>();
+  const taskWorkspaceCache = new Map<string, string | undefined>();
+  let moved = 0;
+  let skipped = 0;
+
+  for (const window of snapshot.windows) {
+    if (window.workspace !== input.focusedWorkspace) continue;
+    if (SYSTEM_APPS_BLOCKLIST.has(window.app.toLowerCase())) continue;
+
+    const matchingTaskIds = await taskIdsMatchingWindowClaim(deps, window, input.claims);
+    if (matchingTaskIds.size === 0 || matchingTaskIds.has(input.currentTaskId)) continue;
+    if (matchingTaskIds.size > 1) {
+      skipped += 1;
+      await emitForeignRedirectActivity(deps, {
+        type: "foreign_claimed_window_redirect_skipped",
+        summary: `Foreign claimed window ${window.id} matched multiple tasks`,
+        tickNow: input.tickNow,
+        details: { window_id: String(window.id), reason: "ambiguous_task_claim", task_ids: [...matchingTaskIds] },
+      });
+      continue;
+    }
+
+    const [ownerTaskId] = matchingTaskIds;
+    if (!ownerTaskId) continue;
+    let ownerWorkspace = taskWorkspaceCache.get(ownerTaskId);
+    if (!taskWorkspaceCache.has(ownerTaskId)) {
+      ownerWorkspace = (await deps.store.getTask(ownerTaskId))?.aerospace_workspace_id;
+      taskWorkspaceCache.set(ownerTaskId, ownerWorkspace);
+    }
+    if (!ownerWorkspace || ownerWorkspace === input.focusedWorkspace) {
+      skipped += 1;
+      await emitForeignRedirectActivity(deps, {
+        type: "foreign_claimed_window_redirect_skipped",
+        summary: `Foreign claimed window ${window.id} has no different owner workspace`,
+        tickNow: input.tickNow,
+        details: {
+          window_id: String(window.id),
+          task_id: ownerTaskId,
+          from_workspace: input.focusedWorkspace,
+          to_workspace: ownerWorkspace,
+          reason: ownerWorkspace ? "already_on_owner_workspace" : "owner_workspace_unknown",
+        },
+      });
+      continue;
+    }
+
+    try {
+      const command = moveToWorkspacePlan(window.id, ownerWorkspace);
+      await deps.runAerospaceCommand(command);
+      moved += 1;
+      movedWindowIds.add(String(window.id));
+      await emitForeignRedirectActivity(deps, {
+        type: "foreign_claimed_window_redirected",
+        summary: `Foreign claimed window ${window.id} moved back to ${ownerWorkspace}`,
+        tickNow: input.tickNow,
+        details: {
+          window_id: String(window.id),
+          app: window.app,
+          task_id: ownerTaskId,
+          from_workspace: input.focusedWorkspace,
+          to_workspace: ownerWorkspace,
+        },
+      });
+    } catch (error) {
+      skipped += 1;
+      await emitForeignRedirectActivity(deps, {
+        type: "foreign_claimed_window_redirect_failed",
+        summary: `Foreign claimed window ${window.id} redirect failed`,
+        tickNow: input.tickNow,
+        status: "failed",
+        details: {
+          window_id: String(window.id),
+          task_id: ownerTaskId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  return { moved, skipped, movedWindowIds };
+}
+
+async function taskIdsMatchingWindowClaim(
+  deps: FollowsWindowOrchestratorDeps,
+  window: WorkspaceSnapshot["windows"][number],
+  claims: readonly TaskWindowClaimRecord[],
+): Promise<Set<string>> {
+  const matched = new Set<string>();
+  let ancestors: Set<number> | undefined;
+
+  for (const claim of claims) {
+    if (claim.window_id && String(window.id) === claim.window_id) {
+      matched.add(claim.task_id);
+      continue;
+    }
+    if (isPositiveInteger(claim.process_root_pid) && isPositiveInteger(window.pid)) {
+      if (!ancestors) {
+        const readAncestors = deps.getProcessAncestorPids ?? defaultReadProcessAncestorPids;
+        ancestors = new Set([window.pid, ...Array.from(await readAncestors(window.pid), (pid) => Number(pid)).filter(isPositiveInteger)]);
+      }
+      if (ancestors.has(claim.process_root_pid)) {
+        matched.add(claim.task_id);
+        continue;
+      }
+    }
+    if (claimMatchesWindowIdentity(window, claim)) matched.add(claim.task_id);
+  }
+
+  return matched;
+}
+
+function claimMatchesWindowIdentity(window: WorkspaceSnapshot["windows"][number], claim: TaskWindowClaimRecord): boolean {
+  const claimBundle = claim.app_bundle?.trim().toLowerCase();
+  const windowBundle = window.appBundleId?.trim().toLowerCase() || window.app.trim().toLowerCase();
+  const claimTitlePrefix = normalizeTitlePrefix(claim.title_prefix);
+  const windowTitlePrefix = normalizeTitlePrefix(window.title);
+  const bundleMatches = claimBundle ? claimBundle === windowBundle : true;
+  const titleMatches = claimTitlePrefix ? windowTitlePrefix?.startsWith(claimTitlePrefix) === true : true;
+  return Boolean((claimBundle || claimTitlePrefix) && bundleMatches && titleMatches);
+}
+
+async function emitForeignRedirectActivity(
+  deps: FollowsWindowOrchestratorDeps,
+  input: {
+    type: string;
+    summary: string;
+    tickNow: Date;
+    status?: "ok" | "failed";
+    details: Record<string, unknown>;
+  },
+): Promise<void> {
+  if (!deps.observability) return;
+  await deps.observability.recordActivity({
+    type: input.type,
+    occurred_at: input.tickNow.toISOString(),
+    actor: "system",
+    status: input.status ?? "ok",
+    summary: input.summary,
+    details: sanitizeActivityDetails(input.details),
+  });
+}
+
+async function defaultReadProcessAncestorPids(pid: number): Promise<number[]> {
+  const ancestors: number[] = [];
+  let current = pid;
+  for (let depth = 0; depth < 12; depth += 1) {
+    const parent = await readParentPid(current);
+    if (!parent || parent === current || ancestors.includes(parent)) break;
+    ancestors.push(parent);
+    current = parent;
+    if (current === 1) break;
+  }
+  return ancestors;
+}
+
+async function readParentPid(pid: number): Promise<number | undefined> {
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+    const result = await execFileAsync("ps", ["-o", "ppid=", "-p", String(pid)], { timeout: 1_000 });
+    const parsed = Number(result.stdout.trim());
+    return isPositiveInteger(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
 export type FollowsWindowOrchestratorRuntimeOptions = {
