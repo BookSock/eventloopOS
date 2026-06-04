@@ -54,6 +54,7 @@ export function routeNameForPath(method: string | undefined, pathname: string): 
     [/^\/tasks\/[^/]+\/layout$/, "task_layout"],
     [/^\/tasks\/[^/]+\/workspace-snapshot$/, "task_workspace_snapshot"],
     [/^\/task-window-claims$/, "task_window_claims"],
+    [/^\/follows-windows$/, "follows_windows"],
     [/^\/follows-windows\/exclude$/, "follows_windows_exclude"],
     [/^\/follows-windows\/exclusions$/, "follows_windows_exclusions"],
     [/^\/follows-windows\/exclusions\/[^/]+$/, "follows_windows_exclusion"],

@@ -924,6 +924,39 @@
         "created_at": { "type": "string", "format": "date-time" }
       }
     },
+    "FollowsWindowRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["window_id", "known_workspaces"],
+      "properties": {
+        "window_id": { "type": "string", "minLength": 1 },
+        "known_workspaces": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "app_bundle": { "type": "string", "minLength": 1 },
+        "title_prefix": { "type": "string", "minLength": 1 },
+        "slot_window_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "FollowsWindowsListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "windows", "count", "ttl_ms", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "windows": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/FollowsWindowRecord" }
+        },
+        "count": { "type": "integer", "minimum": 0 },
+        "ttl_ms": { "type": "integer", "minimum": 1 },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "FollowsWindowExclusionResponse": {
       "type": "object",
       "additionalProperties": false,
@@ -2314,6 +2347,24 @@
       "status": "dogfood",
       "summary": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded; redirect claimed foreign-task windows back home.",
       "http": [
+        {
+          "method": "GET",
+          "path": "/follows-windows",
+          "route_file": "app/orchestrator/src/routes/follows_windows.ts",
+          "query_parameters": [
+            {
+              "name": "ttl_ms",
+              "description": "Observation freshness window in milliseconds.",
+              "schema": { "type": "integer", "minimum": 1 }
+            },
+            {
+              "name": "min_workspace_count",
+              "description": "Minimum distinct workspace observations required for a window candidate.",
+              "schema": { "type": "integer", "minimum": 1 }
+            }
+          ],
+          "response_schema": "FollowsWindowsListResponse"
+        },
         {
           "method": "POST",
           "path": "/follows-windows/exclude",

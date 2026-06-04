@@ -863,6 +863,63 @@
         "x-eventloopos-status": "stable_enough"
       }
     },
+    "/follows-windows": {
+      "get": {
+        "description": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded; redirect claimed foreign-task windows back home.",
+        "operationId": "follows_windows_get_follows_windows",
+        "parameters": [
+          {
+            "description": "Observation freshness window in milliseconds.",
+            "in": "query",
+            "name": "ttl_ms",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Minimum distinct workspace observations required for a window candidate.",
+            "in": "query",
+            "name": "min_workspace_count",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FollowsWindowsListResponse"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Follows Windows GET /follows-windows",
+        "tags": [
+          "follows_windows"
+        ],
+        "x-eventloopos-primitive": "follows_windows",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/follows_windows.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
     "/follows-windows/exclude": {
       "post": {
         "description": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded; redirect claimed foreign-task windows back home.",
@@ -4819,6 +4876,77 @@
           "ok",
           "exclusions",
           "count",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "FollowsWindowRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "app_bundle": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "known_workspaces": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "slot_window_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title_prefix": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "window_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "window_id",
+          "known_workspaces"
+        ],
+        "type": "object"
+      },
+      "FollowsWindowsListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "ttl_ms": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/FollowsWindowRecord"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "windows",
+          "count",
+          "ttl_ms",
           "request_id"
         ],
         "type": "object"

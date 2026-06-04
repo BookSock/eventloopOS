@@ -18,7 +18,7 @@ Validate both with
 Generate a builder-facing coverage/readiness summary with
 `bin/primitives-readiness-report docs/primitives.catalog.json` or use
 `--json` for machine-readable audit output.
-Current catalog summary: 18 primitives, 79 HTTP routes, 8 CLI commands, 18
+Current catalog summary: 18 primitives, 80 HTTP routes, 8 CLI commands, 18
 self-tests, 73 proof refs.
 Strict readiness is expected to stay green: every cataloged primitive
 has a `self_tests` command, and the shared primitive operation-helper test
@@ -334,16 +334,23 @@ Code:
 - `app/macos/Sources/EventLoopQueueApp/FollowsRulesSheet.swift`
 - `bin/follows-window-rules`
 
-Exports current sticky-window exclusion rules over `GET /follows-windows/exclusions` so a demo, support script, or release proof can show why a shared app is no longer following every paper.
+Exports current sticky-window candidates over `GET /follows-windows` and
+exclusion rules over `GET /follows-windows/exclusions` so a demo, support
+script, release proof, or third-party UI can show which windows are considered
+shared and why a shared app is no longer following every paper.
 Use `bin/follows-window-rules export --file rules.json` and
 `bin/follows-window-rules import --file rules.json` for durable rule movement
 between dogfood profiles or machines.
 
 HTTP surface:
 
+- `GET /follows-windows`
 - `POST /follows-windows/exclude`
 - `GET /follows-windows/exclusions`
 - `DELETE /follows-windows/exclusions/:id`
+
+`GET /follows-windows` accepts `ttl_ms` and `min_workspace_count` query
+parameters for diagnostic and rule-editor threshold tuning.
 
 Shared contracts:
 
@@ -358,6 +365,8 @@ Important behavior:
 - moves follows windows to the newly focused task workspace
 - redirects claimed foreign-task windows away from the focused task workspace
   instead of treating them as user-following windows
+- exposes current follows candidates with known workspaces and stable
+  app-bundle/title-prefix slot metadata for UI/debug tooling
 - skips manual mode
 - supports exclusions for things that should not follow
 
@@ -365,6 +374,8 @@ Useful standalone uses:
 
 - pin a notes window or browser doc across several task workspaces
 - make "shared context" follow focus without manual dragging
+- build a custom follows-window rule editor or diagnostic dashboard against
+  the HTTP primitive without linking the Mac app
 
 macOS UI: Queue toolbar and command menu expose a follows-rules editor for
 adding, refreshing, and removing sticky-window exclusions. The checked CLI and

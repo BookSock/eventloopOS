@@ -510,6 +510,7 @@ describe("primitive catalog SDK boundary", () => {
       ["POST /agents/codex/auto-bind", readFixture(join(fixturesDir, "valid/codex_auto_bind_response.json")).data],
       ["GET /agents/codex/inspect/codex_thread_123", readFixture(join(fixturesDir, "valid/codex_session_inspection_response.json")).data],
       ["GET /agents/claude/inspect/claude_session_123", readFixture(join(fixturesDir, "valid/claude_session_inspection_response.json")).data],
+      ["GET /follows-windows?min_workspace_count=2", readFixture(join(fixturesDir, "valid/follows_windows_list_response.json")).data],
       ["DELETE /follows-windows/exclusions/fwex_demo", readFixture(join(fixturesDir, "valid/follows_window_exclusion_response.json")).data],
       ["POST /workspace/restore", readFixture(join(fixturesDir, "valid/workspace_restore_response.json")).data]
     ]);
@@ -552,6 +553,7 @@ describe("primitive catalog SDK boundary", () => {
     await expect(client.agents.codex.autoBind()).resolves.toMatchObject({ ok: true });
     await expect(client.agents.codex.inspect("codex_thread_123")).resolves.toHaveProperty("exists");
     await expect(client.agents.claude.inspect("claude_session_123")).resolves.toHaveProperty("exists");
+    await expect(client.followsWindows.list({ min_workspace_count: 2 })).resolves.toMatchObject({ count: 1 });
     await expect(client.followsWindows.deleteExclusion("fwex_demo")).resolves.toMatchObject({ ok: true });
     await expect(
       client.workspace.restore(readFixture(join(fixturesDir, "valid/workspace_restore_request.json")).data, "idem_workspace_restore")
@@ -567,13 +569,14 @@ describe("primitive catalog SDK boundary", () => {
       "POST /agents/codex/auto-bind",
       "GET /agents/codex/inspect/codex_thread_123",
       "GET /agents/claude/inspect/claude_session_123",
+      "GET /follows-windows?min_workspace_count=2",
       "DELETE /follows-windows/exclusions/fwex_demo",
       "POST /workspace/restore"
     ]);
     expect(calls[1]?.body).toMatchObject({ action: "done", actor_id: "human_demo" });
     expect(calls[4]?.body).toMatchObject({ text: expect.any(String) });
     expect(calls[6]?.body).toBeUndefined();
-    expect(calls[10]?.headers["idempotency-key"]).toBe("idem_workspace_restore");
+    expect(calls[11]?.headers["idempotency-key"]).toBe("idem_workspace_restore");
   });
 
   it("binds primitive operation helpers for every cataloged HTTP route", async () => {
@@ -665,6 +668,7 @@ describe("primitive catalog SDK boundary", () => {
     await ops.observability.health();
     await ops.observability.metrics();
     await ops.observability.activity();
+    await ops.followsWindows.list({ min_workspace_count: 2 });
     await ops.followsWindows.exclude(readFixture(join(fixturesDir, "valid/follows_window_exclusion_create_request.json")).data);
     await ops.followsWindows.listExclusions();
     await ops.followsWindows.deleteExclusion("fwex_demo");
@@ -686,6 +690,9 @@ describe("primitive catalog SDK boundary", () => {
     expect(calls.find((call) => call.path === "/mcp-sources/:id/poll")?.input).toMatchObject({
       pathParams: { id: "local-events" },
       body: {}
+    });
+    expect(calls.find((call) => call.path === "/follows-windows")?.input).toMatchObject({
+      query: { min_workspace_count: 2 }
     });
   });
 });

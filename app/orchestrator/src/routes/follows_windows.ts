@@ -5,11 +5,27 @@ import type { RouteResult } from "./types.js";
 export async function handleFollowsWindowsRoute(input: {
   method: string | undefined;
   pathname: string;
+  url?: URL;
   readJsonBody: JsonBodyReader;
   runtime: Runtime;
   now: Date;
   requestId: string;
 }): Promise<RouteResult | undefined> {
+  if (input.method === "GET" && input.pathname === "/follows-windows") {
+    const ttlMs = readPositiveInteger(input.url?.searchParams.get("ttl_ms")) ?? 24 * 60 * 60 * 1_000;
+    const minWorkspaceCount = readPositiveInteger(input.url?.searchParams.get("min_workspace_count"));
+    const windows = await input.runtime.store.listFollowsWindows({
+      now: input.now,
+      ttlMs,
+      minWorkspaceCount,
+    });
+    return {
+      ok: true,
+      status: 200,
+      body: { ok: true, windows, count: windows.length, ttl_ms: ttlMs, request_id: input.requestId },
+    };
+  }
+
   if (input.method === "GET" && input.pathname === "/follows-windows/exclusions") {
     const exclusions = await input.runtime.store.listFollowsWindowExclusions();
     return {
@@ -83,6 +99,12 @@ export async function handleFollowsWindowsRoute(input: {
 
 function readOptionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readPositiveInteger(value: string | null | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

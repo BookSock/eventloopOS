@@ -1,0 +1,10 @@
+{
+  "schema": "FollowsWindowRecord",
+  "data": {
+    "window_id": "win-slack-b",
+    "known_workspaces": ["ws-a", "ws-b", "ws-c"],
+    "app_bundle": "com.tinyspeck.slackmacgap",
+    "title_prefix": "Team Slack",
+    "slot_window_ids": ["win-slack-a", "win-slack-b"]
+  }
+}

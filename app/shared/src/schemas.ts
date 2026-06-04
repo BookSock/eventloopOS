@@ -880,6 +880,28 @@ export const FollowsWindowExclusionCreateRequestSchema = z
   });
 export type FollowsWindowExclusionCreateRequest = z.infer<typeof FollowsWindowExclusionCreateRequestSchema>;
 
+export const FollowsWindowRecordSchema = z
+  .object({
+    window_id: id,
+    known_workspaces: z.array(nonEmpty),
+    app_bundle: nonEmpty.optional(),
+    title_prefix: nonEmpty.optional(),
+    slot_window_ids: z.array(nonEmpty).optional()
+  })
+  .strict();
+export type FollowsWindowRecord = z.infer<typeof FollowsWindowRecordSchema>;
+
+export const FollowsWindowsListResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    windows: z.array(FollowsWindowRecordSchema),
+    count: z.number().int().nonnegative(),
+    ttl_ms: z.number().int().positive(),
+    request_id: id
+  })
+  .strict();
+export type FollowsWindowsListResponse = z.infer<typeof FollowsWindowsListResponseSchema>;
+
 export const FollowsWindowExclusionResponseSchema = z
   .object({
     ok: z.literal(true),
@@ -2311,6 +2333,8 @@ export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   CurrentTaskResponse: CurrentTaskResponseSchema,
   FollowsWindowExclusionRecord: FollowsWindowExclusionRecordSchema,
   FollowsWindowExclusionCreateRequest: FollowsWindowExclusionCreateRequestSchema,
+  FollowsWindowRecord: FollowsWindowRecordSchema,
+  FollowsWindowsListResponse: FollowsWindowsListResponseSchema,
   FollowsWindowExclusionResponse: FollowsWindowExclusionResponseSchema,
   FollowsWindowExclusionsListResponse: FollowsWindowExclusionsListResponseSchema,
   Event: EventSchema,

@@ -1,0 +1,18 @@
+{
+  "schema": "FollowsWindowsListResponse",
+  "data": {
+    "ok": true,
+    "windows": [
+      {
+        "window_id": "win-slack-b",
+        "known_workspaces": ["ws-a", "ws-b", "ws-c"],
+        "app_bundle": "com.tinyspeck.slackmacgap",
+        "title_prefix": "Team Slack",
+        "slot_window_ids": ["win-slack-a", "win-slack-b"]
+      }
+    ],
+    "count": 1,
+    "ttl_ms": 86400000,
+    "request_id": "req_follows_windows"
+  }
+}

@@ -26,6 +26,7 @@ import type {
   FollowsWindowExclusionCreateRequest,
   FollowsWindowExclusionResponse,
   FollowsWindowExclusionsListResponse,
+  FollowsWindowsListResponse,
   HealthResponse,
   ManualModeGetResponse,
   ManualModeSetRequest,
@@ -241,6 +242,11 @@ export type PrimitiveQueueLineageOptions = {
   limit?: number;
 };
 
+export type PrimitiveFollowsWindowsListOptions = {
+  ttl_ms?: number;
+  min_workspace_count?: number;
+};
+
 export type PrimitiveOperationsClient = {
   master: {
     fanOut(body: MasterFanOutRequest): Promise<MasterFanOutResponse>;
@@ -345,6 +351,7 @@ export type PrimitiveOperationsClient = {
     activity(): Promise<ActivityResponse>;
   };
   followsWindows: {
+    list(options?: PrimitiveFollowsWindowsListOptions): Promise<FollowsWindowsListResponse>;
     exclude(body: FollowsWindowExclusionCreateRequest): Promise<FollowsWindowExclusionResponse>;
     listExclusions(): Promise<FollowsWindowExclusionsListResponse>;
     deleteExclusion(id: string): Promise<FollowsWindowExclusionResponse>;
@@ -884,6 +891,9 @@ export function bindPrimitiveOperationsClient(client: PrimitiveHttpClient): Prim
       }
     },
     followsWindows: {
+      list(options: PrimitiveFollowsWindowsListOptions = {}) {
+        return client.request("GET", "/follows-windows", { query: options });
+      },
       exclude(body: FollowsWindowExclusionCreateRequest) {
         return client.request("POST", "/follows-windows/exclude", { body });
       },
