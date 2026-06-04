@@ -1,0 +1,7 @@
+{
+  "schema": "QueueRecommendedActionRequest",
+  "data": {
+    "actor_id": "mac_queue_app",
+    "idempotency_key": "queue_action_qit_feedback_001_act_done_001"
+  }
+}

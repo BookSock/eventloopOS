@@ -811,18 +811,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/EventIngestRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/EventIngestResponse"
                 }
               }
             },
@@ -867,7 +867,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/EventGetResponse"
                 }
               }
             },
@@ -1866,18 +1866,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/QueueRecommendedActionRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/QueueRecommendedActionResponse"
                 }
               }
             },
@@ -2135,6 +2135,16 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "maximum": 500,
+              "minimum": 1,
+              "type": "integer"
+            }
           }
         ],
         "responses": {
@@ -2142,7 +2152,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/QueueLineageResponse"
                 }
               }
             },
@@ -2367,7 +2377,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ReviewPacketGetResponse"
                 }
               }
             },
@@ -4526,6 +4536,150 @@
         ],
         "type": "object"
       },
+      "EventGetResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/Event"
+          },
+          "queue_item": {
+            "$ref": "#/components/schemas/QueueItemWithPacket"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "review_packet": {
+            "$ref": "#/components/schemas/ReviewPacket"
+          },
+          "route_decision": {
+            "$ref": "#/components/schemas/RouteDecision"
+          },
+          "task_message": {
+            "$ref": "#/components/schemas/TaskMessageApi"
+          },
+          "trigger_fires": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "event_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "queue_item_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "task_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "trigger_id": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "trigger_id",
+                "task_id",
+                "event_id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "event",
+          "route_decision",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "EventIngestRequest": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/Event"
+          },
+          {
+            "additionalProperties": true,
+            "properties": {
+              "event": {
+                "$ref": "#/components/schemas/Event"
+              }
+            },
+            "required": [
+              "event"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "EventIngestResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/Event"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "queue_item": {
+            "$ref": "#/components/schemas/QueueItemWithPacket"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "review_packet": {
+            "$ref": "#/components/schemas/ReviewPacket"
+          },
+          "route_decision": {
+            "$ref": "#/components/schemas/RouteDecision"
+          },
+          "task_message": {
+            "$ref": "#/components/schemas/TaskMessageApi"
+          },
+          "trigger_fires": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "event_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "queue_item_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "task_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "trigger_id": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "trigger_id",
+                "task_id",
+                "event_id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "event",
+          "route_decision",
+          "ok",
+          "request_id"
+        ],
+        "type": "object"
+      },
       "EvidenceRef": {
         "additionalProperties": false,
         "properties": {
@@ -5927,6 +6081,88 @@
         },
         "type": "object"
       },
+      "QueueLineage": {
+        "additionalProperties": false,
+        "properties": {
+          "activity": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityEvent"
+            },
+            "type": "array"
+          },
+          "counts": {
+            "additionalProperties": false,
+            "properties": {
+              "activity": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "events": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "task_messages": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "events",
+              "activity",
+              "task_messages"
+            ],
+            "type": "object"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/RouteEventResult"
+            },
+            "type": "array"
+          },
+          "queue_item": {
+            "$ref": "#/components/schemas/QueueItemWithPacket"
+          },
+          "related_event_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "task_messages": {
+            "items": {
+              "$ref": "#/components/schemas/TaskMessageApi"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "queue_item",
+          "related_event_ids",
+          "events",
+          "activity",
+          "task_messages",
+          "counts"
+        ],
+        "type": "object"
+      },
+      "QueueLineageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "lineage": {
+            "$ref": "#/components/schemas/QueueLineage"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "lineage",
+          "request_id"
+        ],
+        "type": "object"
+      },
       "QueueListResponse": {
         "additionalProperties": false,
         "properties": {
@@ -6028,6 +6264,62 @@
         "required": [
           "ok",
           "item",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "QueueRecommendedActionRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "actor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "idempotency_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspaceSnapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          },
+          "workspace_snapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          }
+        },
+        "type": "object"
+      },
+      "QueueRecommendedActionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "action_result": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "idempotent_replay": {
+            "type": "boolean"
+          },
+          "item": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QueueItemWithPacket"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "action_result",
           "request_id"
         ],
         "type": "object"
@@ -6287,6 +6579,23 @@
           "reason",
           "windowId",
           "workspace"
+        ],
+        "type": "object"
+      },
+      "ReviewPacketGetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "packet": {
+            "$ref": "#/components/schemas/ReviewPacket"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "packet",
+          "request_id"
         ],
         "type": "object"
       },

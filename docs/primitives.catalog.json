@@ -600,6 +600,33 @@
         "request_id": { "type": "string", "minLength": 1 }
       }
     },
+    "QueueRecommendedActionRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "actor_id": { "type": "string", "minLength": 1 },
+        "idempotency_key": { "type": "string", "minLength": 1 },
+        "workspace_snapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "workspaceSnapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" }
+      }
+    },
+    "QueueRecommendedActionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "action_result", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "action_result": { "type": "object", "additionalProperties": true },
+        "item": {
+          "oneOf": [
+            { "$ref": "#/components/schemas/QueueItemWithPacket" },
+            { "type": "null" }
+          ]
+        },
+        "idempotent_replay": { "type": "boolean" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "TaskRuntimeSession": {
       "type": "object",
       "additionalProperties": true,
@@ -1462,6 +1489,114 @@
         }
       }
     },
+    "EventIngestRequest": {
+      "anyOf": [
+        { "$ref": "#/components/schemas/Event" },
+        {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["event"],
+          "properties": {
+            "event": { "$ref": "#/components/schemas/Event" }
+          }
+        }
+      ]
+    },
+    "EventIngestResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["event", "route_decision", "ok", "request_id"],
+      "properties": {
+        "event": { "$ref": "#/components/schemas/Event" },
+        "route_decision": { "$ref": "#/components/schemas/RouteDecision" },
+        "review_packet": { "$ref": "#/components/schemas/ReviewPacket" },
+        "queue_item": { "$ref": "#/components/schemas/QueueItemWithPacket" },
+        "task_message": { "$ref": "#/components/schemas/TaskMessageApi" },
+        "trigger_fires": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["trigger_id", "task_id", "event_id"],
+            "properties": {
+              "trigger_id": { "type": "string", "minLength": 1 },
+              "task_id": { "type": "string", "minLength": 1 },
+              "queue_item_id": { "type": "string", "minLength": 1 },
+              "event_id": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "ok": { "type": "boolean", "const": true },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "EventGetResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["event", "route_decision", "request_id"],
+      "properties": {
+        "event": { "$ref": "#/components/schemas/Event" },
+        "route_decision": { "$ref": "#/components/schemas/RouteDecision" },
+        "review_packet": { "$ref": "#/components/schemas/ReviewPacket" },
+        "queue_item": { "$ref": "#/components/schemas/QueueItemWithPacket" },
+        "task_message": { "$ref": "#/components/schemas/TaskMessageApi" },
+        "trigger_fires": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["trigger_id", "task_id", "event_id"],
+            "properties": {
+              "trigger_id": { "type": "string", "minLength": 1 },
+              "task_id": { "type": "string", "minLength": 1 },
+              "queue_item_id": { "type": "string", "minLength": 1 },
+              "event_id": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ReviewPacketGetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["packet", "request_id"],
+      "properties": {
+        "packet": { "$ref": "#/components/schemas/ReviewPacket" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "QueueLineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["queue_item", "related_event_ids", "events", "activity", "task_messages", "counts"],
+      "properties": {
+        "queue_item": { "$ref": "#/components/schemas/QueueItemWithPacket" },
+        "related_event_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "events": { "type": "array", "items": { "$ref": "#/components/schemas/RouteEventResult" } },
+        "activity": { "type": "array", "items": { "$ref": "#/components/schemas/ActivityEvent" } },
+        "task_messages": { "type": "array", "items": { "$ref": "#/components/schemas/TaskMessageApi" } },
+        "counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["events", "activity", "task_messages"],
+          "properties": {
+            "events": { "type": "integer", "minimum": 0 },
+            "activity": { "type": "integer", "minimum": 0 },
+            "task_messages": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "QueueLineageResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lineage", "request_id"],
+      "properties": {
+        "lineage": { "$ref": "#/components/schemas/QueueLineage" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "McpPollAllAndRouteRequest": {
       "type": "object",
       "additionalProperties": true,
@@ -2011,9 +2146,9 @@
       "status": "stable_enough",
       "summary": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
       "http": [
-        { "method": "POST", "path": "/events", "route_file": "app/orchestrator/src/routes/events.ts" },
-        { "method": "GET", "path": "/events/:id", "route_file": "app/orchestrator/src/routes/events.ts" },
-        { "method": "GET", "path": "/review-packets/:id", "route_file": "app/orchestrator/src/routes/events.ts" },
+        { "method": "POST", "path": "/events", "route_file": "app/orchestrator/src/routes/events.ts", "request_schema": "EventIngestRequest", "response_schema": "EventIngestResponse" },
+        { "method": "GET", "path": "/events/:id", "route_file": "app/orchestrator/src/routes/events.ts", "response_schema": "EventGetResponse" },
+        { "method": "GET", "path": "/review-packets/:id", "route_file": "app/orchestrator/src/routes/events.ts", "response_schema": "ReviewPacketGetResponse" },
         {
           "method": "GET",
           "path": "/queue",
@@ -2062,8 +2197,8 @@
           "request_schema": "QueueIgnoreRequest",
           "response_schema": "QueueActionResponse"
         },
-        { "method": "POST", "path": "/queue/:id/actions/recommended", "route_file": "app/orchestrator/src/routes/queue.ts" },
-        { "method": "GET", "path": "/queue/:id/lineage", "route_file": "app/orchestrator/src/routes/queue.ts" },
+        { "method": "POST", "path": "/queue/:id/actions/recommended", "route_file": "app/orchestrator/src/routes/queue.ts", "request_schema": "QueueRecommendedActionRequest", "response_schema": "QueueRecommendedActionResponse" },
+        { "method": "GET", "path": "/queue/:id/lineage", "route_file": "app/orchestrator/src/routes/queue.ts", "response_schema": "QueueLineageResponse", "query_parameters": [{ "name": "limit", "schema": { "type": "integer", "minimum": 1, "maximum": 500 } }] },
         {
           "method": "POST",
           "path": "/queue/:id/priority",

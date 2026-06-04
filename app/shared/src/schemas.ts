@@ -1046,6 +1046,27 @@ export const QueuePriorityResponseSchema = z
   .strict();
 export type QueuePriorityResponse = z.infer<typeof QueuePriorityResponseSchema>;
 
+export const QueueRecommendedActionRequestSchema = z
+  .object({
+    actor_id: id.optional(),
+    idempotency_key: id.optional(),
+    workspace_snapshot: WorkspaceSnapshotSchema.optional(),
+    workspaceSnapshot: WorkspaceSnapshotSchema.optional()
+  })
+  .passthrough();
+export type QueueRecommendedActionRequest = z.infer<typeof QueueRecommendedActionRequestSchema>;
+
+export const QueueRecommendedActionResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    action_result: unknownRecord,
+    item: QueueItemWithPacketSchema.nullable().optional(),
+    idempotent_replay: z.boolean().optional(),
+    request_id: id
+  })
+  .strict();
+export type QueueRecommendedActionResponse = z.infer<typeof QueueRecommendedActionResponseSchema>;
+
 export const TaskSessionsListResponseSchema = z
   .object({
     sessions: z.array(TaskRuntimeSessionSchema),
@@ -1577,6 +1598,57 @@ export const RouteEventResultSchema = z
   .passthrough();
 export type RouteEventResult = z.infer<typeof RouteEventResultSchema>;
 
+export const EventIngestRequestSchema = z.union([
+  EventSchema,
+  z.object({ event: EventSchema }).passthrough()
+]);
+export type EventIngestRequest = z.infer<typeof EventIngestRequestSchema>;
+
+export const EventIngestResponseSchema = RouteEventResultSchema.extend({
+  ok: z.literal(true),
+  request_id: id
+}).passthrough();
+export type EventIngestResponse = z.infer<typeof EventIngestResponseSchema>;
+
+export const EventGetResponseSchema = RouteEventResultSchema.extend({
+  request_id: id
+}).passthrough();
+export type EventGetResponse = z.infer<typeof EventGetResponseSchema>;
+
+export const ReviewPacketGetResponseSchema = z
+  .object({
+    packet: ReviewPacketSchema,
+    request_id: id
+  })
+  .strict();
+export type ReviewPacketGetResponse = z.infer<typeof ReviewPacketGetResponseSchema>;
+
+export const QueueLineageSchema = z
+  .object({
+    queue_item: QueueItemWithPacketSchema,
+    related_event_ids: z.array(id),
+    events: z.array(RouteEventResultSchema),
+    activity: z.array(ActivityEventSchema),
+    task_messages: z.array(TaskMessageApiSchema),
+    counts: z
+      .object({
+        events: z.number().int().nonnegative(),
+        activity: z.number().int().nonnegative(),
+        task_messages: z.number().int().nonnegative()
+      })
+      .strict()
+  })
+  .strict();
+export type QueueLineage = z.infer<typeof QueueLineageSchema>;
+
+export const QueueLineageResponseSchema = z
+  .object({
+    lineage: QueueLineageSchema,
+    request_id: id
+  })
+  .strict();
+export type QueueLineageResponse = z.infer<typeof QueueLineageResponseSchema>;
+
 export const McpPollAllAndRouteRequestSchema = z
   .object({
     source_ids: z.array(id).optional(),
@@ -2053,6 +2125,8 @@ export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   QueueActionResponse: QueueActionResponseSchema,
   QueuePriorityRequest: QueuePriorityRequestSchema,
   QueuePriorityResponse: QueuePriorityResponseSchema,
+  QueueRecommendedActionRequest: QueueRecommendedActionRequestSchema,
+  QueueRecommendedActionResponse: QueueRecommendedActionResponseSchema,
   TaskSessionsListResponse: TaskSessionsListResponseSchema,
   TaskSessionGetResponse: TaskSessionGetResponseSchema,
   TaskSessionStartRequest: TaskSessionStartRequestSchema,
@@ -2068,6 +2142,12 @@ export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   TaskMessagesReconcileAttemptedRequest: TaskMessagesReconcileAttemptedRequestSchema,
   TaskMessagesReconcileAttemptedResponse: TaskMessagesReconcileAttemptedResponseSchema,
   RouteDecision: RouteDecisionSchema,
+  EventIngestRequest: EventIngestRequestSchema,
+  EventIngestResponse: EventIngestResponseSchema,
+  EventGetResponse: EventGetResponseSchema,
+  ReviewPacketGetResponse: ReviewPacketGetResponseSchema,
+  QueueLineage: QueueLineageSchema,
+  QueueLineageResponse: QueueLineageResponseSchema,
   ContextEntry: ContextEntrySchema,
   ContextsListResponse: ContextsListResponseSchema,
   ContextRestorePlanRequest: ContextRestorePlanRequestSchema,

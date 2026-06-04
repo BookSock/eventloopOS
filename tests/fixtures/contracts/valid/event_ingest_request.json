@@ -1,0 +1,20 @@
+{
+  "schema": "EventIngestRequest",
+  "data": {
+    "event": {
+      "id": "evt_slack_001",
+      "source": "mcp_poll",
+      "source_id": "slack_lab:slack_msg_001",
+      "idempotency_key": "slack_lab:slack_msg_001",
+      "occurred_at": "2026-05-06T17:01:00Z",
+      "received_at": "2026-05-06T17:02:00Z",
+      "actor": { "id": "U123", "type": "human", "name": "Ada" },
+      "type": "slack.message",
+      "title": "Customer asked for Mac demo",
+      "summary": "Customer wants to know whether the Mac demo is ready.",
+      "raw_ref": { "id": "raw_slack_001", "uri": "artifact://raw/slack/slack-msg-001.json" },
+      "links": [{ "label": "Source thread", "url": "https://slack.example.com/archives/C123/p456" }],
+      "resources": []
+    }
+  }
+}
