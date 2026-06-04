@@ -10,22 +10,28 @@ process.chdir(repoRoot);
 
 const args = process.argv.slice(2);
 const skipScreenshot = args.includes("--skip-screenshot");
+const skipQueueLatency = args.includes("--skip-queue-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY === "0";
+const queueLatencyEnabled = !skipQueueLatency;
 const skipHotkeyLatency = args.includes("--skip-hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "0";
 const hotkeyLatencyRequested = args.includes("--hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "1";
 const hotkeyLatencyEnabled = !skipHotkeyLatency && (hotkeyLatencyRequested || process.platform === "darwin");
 const jsonOnly = args.includes("--json");
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-hotkey-latency] [--hotkey-latency] [--json]
+  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-queue-latency] [--skip-hotkey-latency] [--hotkey-latency] [--json]
 
 Check current Mac Studio human-demo readiness without resetting demo state.
-On macOS, includes a live queue-app hotkey feedback p95 gate by default.
-Use --skip-hotkey-latency only while bootstrapping Accessibility permission.
+Includes a read-only queue/master latency gate by default. On macOS, also
+includes a live queue-app hotkey feedback p95 gate by default.
+Use skip flags only while bootstrapping remote host/Accessibility permission.
 
 Environment:
   LAB_DOGFOOD_PROFILE  default: lab-human-demo
   LAB_DOGFOOD_URL      default: http://127.0.0.1:4480
   SCREEN_SHARING_TITLE default: Zeus
+  EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY=1 keeps queue latency on
+  EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY=0 skips queue latency
+  EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_RUNS default: 3
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=1 forces hotkey latency on
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=0 skips hotkey latency
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_TARGET=local runs latency on this Mac instead of the lab Mac
@@ -61,6 +67,11 @@ if (!skipScreenshot) {
   screenshot = runStep("screen sharing capture", "bin/local-screen-sharing-capture", [path.join(runDir, "screen-sharing.png")], env);
 }
 const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
+const queueLatencyManifestPath = path.join(runDir, "queue-latency.json");
+const queueLatency = queueLatencyEnabled
+  ? runQueueLatencyStep(queueLatencyManifestPath, env)
+  : undefined;
+const queueLatencyManifest = queueLatency ? readJsonIfPresent(queueLatencyManifestPath) : undefined;
 const hotkeyLatency = hotkeyLatencyEnabled
   ? runHotkeyLatencyStep(hotkeyLatencyManifestPath, env)
   : undefined;
@@ -72,6 +83,7 @@ const checks = {
   latest_human_demo_queue_has_two_papers: Number(templateJson?.queue_count ?? 0) >= 2,
   ambient_autosave_proof_ok: templateJson?.ambient_autosave_ok === true,
   screen_sharing_capture_ok: skipScreenshot || screenshot?.status === 0,
+  queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
   hotkey_feedback_latency_ok: !hotkeyLatencyEnabled || (hotkeyLatency?.status === 0 && hotkeyLatencyManifest?.ok === true),
 };
 const failedChecks = Object.entries(checks).filter(([, ok]) => ok !== true).map(([key]) => key);
@@ -87,6 +99,7 @@ const manifest = {
   passed: failedChecks.length === 0,
   profile: env.LAB_DOGFOOD_PROFILE,
   url: env.LAB_DOGFOOD_URL,
+  queue_latency_required: queueLatencyEnabled,
   hotkey_latency_required: hotkeyLatencyEnabled,
   checks,
   failed_checks: failedChecks,
@@ -108,6 +121,15 @@ const manifest = {
     ok: screenshot.status === 0,
     output: path.join(runDir, "screen-sharing.png"),
     exit_code: screenshot.status,
+  } : {
+    skipped: true,
+  },
+  queue_latency: queueLatency ? {
+    ok: queueLatency.status === 0 && queueLatencyManifest?.ok === true,
+    manifest_path: queueLatencyManifestPath,
+    exit_code: queueLatency.status,
+    failed_budgets: queueLatencyManifest?.failed_budgets ?? [],
+    summary: queueLatencyManifest?.summary,
   } : {
     skipped: true,
   },
@@ -135,6 +157,7 @@ const output = {
   failed_checks: failedChecks,
   latest_human_demo: manifest.latest_human_demo,
   screen_sharing_capture: manifest.screen_sharing_capture,
+  queue_latency: manifest.queue_latency,
 };
 
 if (jsonOnly) {
@@ -189,6 +212,19 @@ function runHotkeyLatencyStep(manifestPath, envOverride) {
   ], envOverride);
 }
 
+function runQueueLatencyStep(manifestPath, envOverride) {
+  return runStep("queue latency", "node", [
+    "bin/queue-latency-proof",
+    "--url",
+    envOverride.LAB_DOGFOOD_URL,
+    "--runs",
+    process.env.EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_RUNS ?? "3",
+    "--read-only",
+    "--manifest",
+    manifestPath,
+  ], envOverride);
+}
+
 function extractJsonObject(value) {
   if (!value.trim()) return undefined;
   const starts = [];
@@ -217,6 +253,7 @@ function readJsonIfPresent(relativePath) {
 function renderReadyMarkdown(manifest) {
   const latest = manifest.latest_human_demo;
   const screenshot = manifest.screen_sharing_capture;
+  const queueLatency = manifest.queue_latency;
   const hotkey = manifest.hotkey_feedback_latency;
   return `# eventloopOS Human Demo Ready
 
@@ -226,6 +263,7 @@ function renderReadyMarkdown(manifest) {
 - Latest proof: ${latest?.manifest_path ?? ""}
 - Latest proof screenshot: ${latest?.screenshot_path ?? ""}
 - Fresh Screen Sharing capture: ${screenshot?.output ?? "skipped"}
+- Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
 - Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}${manifest.hotkey_latency_required ? " (required)" : ""}
 - Failed checks: ${manifest.failed_checks.length === 0 ? "none" : manifest.failed_checks.join(", ")}
 
@@ -248,9 +286,12 @@ function runSelfTest() {
     failed_checks: [],
     latest_human_demo: { manifest_path: "artifacts/lab-runs/demo/manifest.json", screenshot_path: "artifacts/lab-runs/demo/screen-sharing.png" },
     screen_sharing_capture: { output: "artifacts/lab-runs/ready/screen-sharing.png" },
+    queue_latency: { manifest_path: "artifacts/lab-runs/ready/queue-latency.json" },
+    queue_latency_required: true,
     hotkey_feedback_latency: { skipped: true },
   });
   assert.match(markdown, /Ready: yes/);
   assert.match(markdown, /artifacts\/lab-runs\/demo\/manifest\.json/);
   assert.match(markdown, /Hotkey feedback latency: skipped/);
+  assert.match(markdown, /Queue latency: artifacts\/lab-runs\/ready\/queue-latency\.json/);
 }

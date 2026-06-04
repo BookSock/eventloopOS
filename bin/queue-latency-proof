@@ -7,13 +7,15 @@ import { performance } from "node:perf_hooks";
 const args = process.argv.slice(2);
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/queue-latency-proof [--url URL] [--runs N] [--manifest PATH]
+  console.log(`Usage: bin/queue-latency-proof [--url URL] [--runs N] [--read-only] [--manifest PATH]
 
 Measures eventloopOS queue/master responsiveness against local budget defaults.
+Use --read-only for demo readiness checks that must not lease queue items.
 
 Environment:
   EVENTLOOPOS_ORCHESTRATOR_URL   default: http://127.0.0.1:4377
   EVENTLOOPOS_QUEUE_LATENCY_RUNS default: 10
+  EVENTLOOPOS_QUEUE_LATENCY_READ_ONLY=1 skips queue lease-next
 `);
   process.exit(0);
 }
@@ -25,10 +27,11 @@ if (args.includes("--self-test")) {
 
 const url = readArg("--url") ?? process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377";
 const runs = positiveInteger(readArg("--runs") ?? process.env.EVENTLOOPOS_QUEUE_LATENCY_RUNS, 10);
+const readOnly = args.includes("--read-only") || process.env.EVENTLOOPOS_QUEUE_LATENCY_READ_ONLY === "1";
 const runId = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
 const manifestPath = readArg("--manifest") ?? path.join("artifacts", "queue-latency", runId, "manifest.json");
 
-const manifest = await measureQueueLatency({ baseUrl: url, runs });
+const manifest = await measureQueueLatency({ baseUrl: url, runs, readOnly });
 writeJson(manifestPath, manifest);
 console.log(`queue latency manifest: ${manifestPath}`);
 console.log(JSON.stringify({
@@ -39,7 +42,7 @@ console.log(JSON.stringify({
 }, null, 2));
 process.exit(manifest.ok ? 0 : 1);
 
-async function measureQueueLatency({ baseUrl, runs }) {
+async function measureQueueLatency({ baseUrl, runs, readOnly = false }) {
   const startedAt = new Date().toISOString();
   const budgetsMs = {
     health: 500,
@@ -56,13 +59,15 @@ async function measureQueueLatency({ baseUrl, runs }) {
       await timed(sample, "health", () => requestJson(baseUrl, "/health"));
       await timed(sample, "queue_list", () => requestJson(baseUrl, "/queue"));
       await timed(sample, "queue_next", () => requestJson(baseUrl, "/queue/next"));
-      await timed(sample, "queue_lease_next", () => requestJson(baseUrl, "/queue/lease-next", {
-        method: "POST",
-        body: {
-          lease_owner: `queue-latency-proof-${process.pid}`,
-          lease_ms: 1,
-        },
-      }));
+      if (!readOnly) {
+        await timed(sample, "queue_lease_next", () => requestJson(baseUrl, "/queue/lease-next", {
+          method: "POST",
+          body: {
+            lease_owner: `queue-latency-proof-${process.pid}`,
+            lease_ms: 1,
+          },
+        }));
+      }
       await timed(sample, "master_fan_out_dry_run", () => requestJson(baseUrl, "/master/fan-out", {
         method: "POST",
         body: {
@@ -82,6 +87,7 @@ async function measureQueueLatency({ baseUrl, runs }) {
   const summary = summarize(samples);
   const failedBudgets = [];
   for (const [name, budget] of Object.entries(budgetsMs)) {
+    if (readOnly && name === "queue_lease_next") continue;
     const p95 = summary[name]?.p95_ms;
     if (typeof p95 === "number" && p95 > budget) {
       failedBudgets.push({ name, p95_ms: p95, budget_ms: budget });
@@ -95,6 +101,7 @@ async function measureQueueLatency({ baseUrl, runs }) {
     finished_at: finishedAt,
     orchestrator_url: baseUrl,
     runs,
+    read_only: readOnly,
     budgets_ms: budgetsMs,
     failed_budgets: failedBudgets,
     summary,
@@ -229,6 +236,14 @@ async function runSelfTest() {
     if (manifest.samples.length !== 2) throw new Error("self-test did not run twice");
     if (!manifest.summary.queue_lease_next) throw new Error("self-test missing queue lease summary");
     if (!manifest.summary.master_fan_out_dry_run) throw new Error("self-test missing master fan-out summary");
+    const readOnlyManifest = await measureQueueLatency({
+      baseUrl: `http://127.0.0.1:${port}`,
+      runs: 1,
+      readOnly: true,
+    });
+    if (!readOnlyManifest.ok) throw new Error(`read-only self-test manifest not ok: ${JSON.stringify(readOnlyManifest)}`);
+    if (readOnlyManifest.read_only !== true) throw new Error("read-only self-test did not record read_only=true");
+    if (readOnlyManifest.summary.queue_lease_next) throw new Error("read-only self-test must not lease queue items");
     console.log("queue-latency-proof self-test passed");
   } finally {
     await new Promise((resolve) => server.close(resolve));
