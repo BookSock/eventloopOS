@@ -246,8 +246,9 @@ Useful standalone uses:
   the window appeared on the human's current workspace
 - an agent wraps a visible test/browser launch with
   `bin/task-window-spawn --task-id task_checkout -- open -na "Google Chrome"`,
-  and the wrapper immediately claims the command process root, then claims any
-  newly-created windows after the command exits
+  and the wrapper immediately claims the command process root, then polls
+  workspace capture and claims matching newly-created windows as they appear
+  after the command exits; `--wait-ms` covers slow LaunchServices/Chrome startup
 - a bound Codex/Claude task session exposes `pid`/`agent_pid`/`terminal_pid`,
   and ambient autosave claims descendant app windows even when the window pops
   onto the human's current paper

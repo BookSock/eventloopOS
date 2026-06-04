@@ -35,6 +35,8 @@ Options:
   --url URL             Orchestrator URL. Default EVENTLOOPOS_ORCHESTRATOR_URL or http://127.0.0.1:4377
   --task-id ID          Required task id, e.g. task_checkout
   --settle-ms MS        Wait after command exits before after-capture. Default 1500
+  --wait-ms MS          Poll for matching new windows after settle. Default 5000
+  --poll-ms MS          Workspace capture poll interval during wait. Default 250
   --ttl-ms MS           Claim TTL. Default 1800000
   --source NAME         Claim source. Default task-window-spawn
   --app CONTAINS        Optional app/app_bundle substring filter for new windows
@@ -53,6 +55,8 @@ function parseArgs(argv) {
     baseUrl: process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377",
     taskId: undefined,
     settleMs: 1_500,
+    waitMs: 5_000,
+    pollMs: 250,
     ttlMs: 30 * 60 * 1_000,
     source: "task-window-spawn",
     appContains: undefined,
@@ -72,6 +76,12 @@ function parseArgs(argv) {
         break;
       case "--settle-ms":
         options.settleMs = readNonNegativeInteger(readValue(optionArgs, ++index, arg), arg);
+        break;
+      case "--wait-ms":
+        options.waitMs = readNonNegativeInteger(readValue(optionArgs, ++index, arg), arg);
+        break;
+      case "--poll-ms":
+        options.pollMs = readPositiveInteger(readValue(optionArgs, ++index, arg), arg);
         break;
       case "--ttl-ms":
         options.ttlMs = readPositiveInteger(readValue(optionArgs, ++index, arg), arg);
@@ -96,6 +106,7 @@ function parseArgs(argv) {
 
 async function runTaskWindowSpawn(options) {
   const before = await captureWorkspace(options.baseUrl);
+  const waitStartedAt = Date.now();
   const rootClaims = [];
   const errors = [];
   const command = await runCommand(options.command, options.args, async (child) => {
@@ -119,9 +130,9 @@ async function runTaskWindowSpawn(options) {
     }
   });
   if (options.settleMs > 0) await sleep(options.settleMs);
-  const after = await captureWorkspace(options.baseUrl);
-  const newWindows = findNewWindows(before.snapshot?.windows ?? [], after.snapshot?.windows ?? [])
-    .filter((window) => windowMatchesFilters(window, options));
+  const waitResult = await captureUntilNewWindows(options, before.snapshot?.windows ?? []);
+  const after = waitResult.after;
+  const newWindows = waitResult.newWindows;
   const claimed = [];
 
   for (const window of newWindows) {
@@ -156,6 +167,9 @@ async function runTaskWindowSpawn(options) {
     command,
     root_claimed_count: rootClaims.length,
     root_claims: rootClaims,
+    waited_ms: Date.now() - waitStartedAt,
+    first_new_window_ms: waitResult.firstNewWindowMs,
+    capture_attempts: waitResult.captureAttempts,
     before_window_count: before.snapshot?.windows?.length ?? 0,
     after_window_count: after.snapshot?.windows?.length ?? 0,
     new_window_count: newWindows.length,
@@ -163,6 +177,28 @@ async function runTaskWindowSpawn(options) {
     claimed,
     errors,
   };
+}
+
+async function captureUntilNewWindows(options, beforeWindows) {
+  const deadline = Date.now() + options.waitMs;
+  let captureAttempts = 0;
+  let after;
+  let newWindows = [];
+  let firstNewWindowMs;
+  do {
+    captureAttempts += 1;
+    after = await captureWorkspace(options.baseUrl);
+    newWindows = findNewWindows(beforeWindows, after.snapshot?.windows ?? [])
+      .filter((window) => windowMatchesFilters(window, options));
+    if (newWindows.length > 0) {
+      firstNewWindowMs = Math.max(0, Date.now() - (deadline - options.waitMs));
+      break;
+    }
+    if (options.waitMs <= 0 || Date.now() >= deadline) break;
+    await sleep(Math.min(options.pollMs, Math.max(0, deadline - Date.now())));
+  } while (Date.now() <= deadline);
+
+  return { after, newWindows, captureAttempts, firstNewWindowMs };
 }
 
 function runCommand(command, args, onSpawn = async () => {}) {
@@ -297,7 +333,7 @@ async function runSelfTest() {
         snapshot: {
           backend: "aerospace",
           activeWorkspace: "main",
-          windows: captureCount === 1 ? [baseWindow] : [baseWindow, spawnedWindow],
+          windows: captureCount < 3 ? [baseWindow] : [baseWindow, spawnedWindow],
         },
       });
       return;
@@ -319,6 +355,8 @@ async function runSelfTest() {
       baseUrl,
       taskId: "task_checkout",
       settleMs: 0,
+      waitMs: 1_000,
+      pollMs: 1,
       ttlMs: 123_000,
       source: "self-test",
       appContains: "chrome",
@@ -329,6 +367,8 @@ async function runSelfTest() {
     if (!result.ok) throw new Error(`self-test result not ok: ${JSON.stringify(result)}`);
     if (result.root_claimed_count !== 1) throw new Error(`expected one root claim, got ${result.root_claimed_count}`);
     if (result.claimed_count !== 1) throw new Error(`expected one claim, got ${result.claimed_count}`);
+    if (result.capture_attempts < 2) throw new Error(`expected polling captures, got ${result.capture_attempts}`);
+    if (!isPositiveInteger(result.first_new_window_ms) && result.first_new_window_ms !== 0) throw new Error(`first new window timing missing: ${JSON.stringify(result)}`);
     if (claims[0]?.task_id !== "task_checkout") throw new Error(`claim task mismatch: ${JSON.stringify(claims[0])}`);
     if (!isPositiveInteger(claims[0]?.process_root_pid)) throw new Error(`root claim pid missing: ${JSON.stringify(claims[0])}`);
     if (claims[0]?.source !== "self-test:process_root") throw new Error(`root claim source mismatch: ${JSON.stringify(claims[0])}`);
