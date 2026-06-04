@@ -69,7 +69,8 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 1. Click `Review Demo Customer Reply` in Queue.
 2. Press `Ctrl-Option-R`.
 3. Confirm Customer Chrome and the shared TextEdit come forward on `demo-customer`.
-4. Move the shared TextEdit window with `Ctrl-Option-Right`, or drag it manually.
+4. Move the shared TextEdit window with `Ctrl-Option-Left`, or drag it manually toward the center/left.
+   It starts on the right side, so `Ctrl-Option-Right` may look like nothing happened.
 5. Wait 2 to 3 seconds. Ambient autosave should remember the moved position without pressing Done/Defer/Advance.
    The Queue footer should keep showing a compact `feedback=...` status so the demo is not silent while actions complete.
 6. Click `Review Demo Metrics Review` in Queue.

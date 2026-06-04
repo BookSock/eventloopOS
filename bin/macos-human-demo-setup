@@ -161,7 +161,7 @@ const manifest = {
   },
   walkthrough: [
     "Start on demo-customer. Press Ctrl-Option-R; Customer Chrome and shared TextEdit should come forward.",
-    "Move shared TextEdit with Ctrl-Option-Right or drag it. Wait 2-3 seconds for ambient autosave.",
+    "Move shared TextEdit with Ctrl-Option-Left or drag it toward center/left. It starts on the right side, so right-half can look unchanged. Wait 2-3 seconds for ambient autosave.",
     "Select Demo Metrics Review in queue and press Ctrl-Option-R. Same TextEdit window should move to metrics position with Metrics Chrome.",
     "Select Demo Customer Reply and press Ctrl-Option-R. Same TextEdit window should return to customer position.",
     "Try Rectangle-style hotkeys on shared TextEdit: Ctrl-Option-Left/Right/Up/Down/C and Ctrl-Option-Shift-Return.",
