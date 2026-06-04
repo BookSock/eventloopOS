@@ -572,22 +572,15 @@ public final class QueueViewModel: ObservableObject {
         state = .loading
         do {
             let selectedID = selectedPacketID
-            let leasedPacket: ReviewPacket?
-            if let selectedID, packets.contains(where: { $0.id == selectedID }) {
-                do {
-                    _ = try await client.renewLease(packetId: selectedID)
-                    leasedPacket = selectedPacket
-                } catch {
-                    leasedPacket = try await client.next(after: nil)
-                }
-            } else {
-                leasedPacket = try await client.next(after: nil)
-            }
+            let leaseResult = try await leaseNextPaperPreservingSelection(selectedID: selectedID)
+            let leasedPacket = leaseResult.packet
 
             packets = try await client.fetchQueue()
             selectedPacketID = leasedPacket?.id ?? packets.first?.id
             state = .loaded
-            if selectedPacketID == nil, packets.isEmpty {
+            if leaseResult.conflict {
+                advanceToast = .actionComplete("Queue paused. Try again.")
+            } else if selectedPacketID == nil, packets.isEmpty {
                 advanceToast = .queueEmpty
             } else if let packetId = selectedPacketID {
                 advanceToast = .switchedToPaper(packetId: packetId)
@@ -600,6 +593,33 @@ public final class QueueViewModel: ObservableObject {
         await loadTaskSessionsForSelectedPacketIfNeeded()
         await prepareSelectedWorkspaceRestore()
         await requestSelectedBrowserContextRestoresIfNeeded()
+    }
+
+    private func leaseNextPaperPreservingSelection(selectedID: String?) async throws -> (packet: ReviewPacket?, conflict: Bool) {
+        if let selectedID, packets.contains(where: { $0.id == selectedID }) {
+            do {
+                _ = try await client.renewLease(packetId: selectedID)
+                return (selectedPacket, false)
+            } catch {
+                do {
+                    return (try await client.next(after: nil), false)
+                } catch {
+                    guard isQueueConflict(error) else {
+                        throw error
+                    }
+                    return (selectedPacket, true)
+                }
+            }
+        }
+
+        do {
+            return (try await client.next(after: nil), false)
+        } catch {
+            guard isQueueConflict(error) else {
+                throw error
+            }
+            return (nil, true)
+        }
     }
 
     public func advance() async {

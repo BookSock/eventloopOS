@@ -28,6 +28,33 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state, .loaded)
     }
 
+    func testPullNextPaperTreatsLeaseNextConflictAsNonFatalWithExistingSelection() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-blog-feedback")
+        client.setNextLeaseError(QueueClientError.httpStatus(409))
+
+        await viewModel.pullNextPaper()
+
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Queue paused. Try again."))
+    }
+
+    func testPullNextPaperTreatsLeaseNextConflictAsNonFatalWithoutSelection() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.loadQueue()
+        client.setNextLeaseError(QueueClientError.httpStatus(409))
+
+        await viewModel.pullNextPaper()
+
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Queue paused. Try again."))
+    }
+
     func testRenewSelectedLeaseIgnoresLeaseConflict() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
         await viewModel.loadQueue()
