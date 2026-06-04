@@ -812,6 +812,67 @@ export const TaskMessageSchema = z
   .strict();
 export type TaskMessage = z.infer<typeof TaskMessageSchema>;
 
+export const TaskRuntimeSessionSchema = z
+  .object({
+    id,
+    task_id: id.optional(),
+    provider: nonEmpty,
+    status: nonEmpty,
+    native_thread_id: z.string().optional(),
+    name: z.string().optional(),
+    preview: z.string().optional(),
+    cwd: z.string().optional(),
+    terminal_ref: z.string().optional(),
+    pid: z.number().int().positive().optional(),
+    agent_pid: z.number().int().positive().optional(),
+    terminal_pid: z.number().int().positive().optional(),
+    root_pid: z.number().int().positive().optional(),
+    pids: z.array(z.number().int().positive()).optional()
+  })
+  .passthrough();
+export type TaskRuntimeSession = z.infer<typeof TaskRuntimeSessionSchema>;
+
+export const TaskSessionBindingSchema = z
+  .object({
+    ok: z.boolean(),
+    task_session_id: id,
+    task_id: id,
+    native_thread_id: z.string().optional(),
+    session: TaskRuntimeSessionSchema.optional()
+  })
+  .passthrough();
+export type TaskSessionBinding = z.infer<typeof TaskSessionBindingSchema>;
+
+export const TaskMessageApiSchema = z
+  .object({
+    id,
+    durable_id: id,
+    task_session_id: id,
+    task_id: id.optional(),
+    queue_item_id: id.optional(),
+    origin: nonEmpty,
+    source_id: z.string().optional(),
+    mode: z.literal("followup"),
+    event_ids: z.array(id),
+    idempotency_key: id,
+    status: z.enum(["attempted", "sent", "blocked", "failed"]),
+    sent_at: isoDateTime.optional(),
+    text_hash: nonEmpty,
+    text_length: z.number().int().nonnegative(),
+    provider: z.string().optional(),
+    native_thread_id: z.string().optional(),
+    native_turn_id: z.string().optional(),
+    native_session_id: z.string().optional(),
+    native_result_session_id: z.string().optional(),
+    error: z.string().optional(),
+    recovery_hint: z.string().optional(),
+    created_at: isoDateTime,
+    updated_at: isoDateTime,
+    durable: z.literal(true)
+  })
+  .strict();
+export type TaskMessageApi = z.infer<typeof TaskMessageApiSchema>;
+
 export const ReviewPacketSchema = z
   .object({
     id,
@@ -985,6 +1046,158 @@ export const QueuePriorityResponseSchema = z
   .strict();
 export type QueuePriorityResponse = z.infer<typeof QueuePriorityResponseSchema>;
 
+export const TaskSessionsListResponseSchema = z
+  .object({
+    sessions: z.array(TaskRuntimeSessionSchema),
+    count: z.number().int().nonnegative(),
+    request_id: id
+  })
+  .strict();
+export type TaskSessionsListResponse = z.infer<typeof TaskSessionsListResponseSchema>;
+
+export const TaskSessionGetResponseSchema = z
+  .object({
+    session: TaskRuntimeSessionSchema,
+    request_id: id
+  })
+  .strict();
+export type TaskSessionGetResponse = z.infer<typeof TaskSessionGetResponseSchema>;
+
+export const TaskSessionStartRequestSchema = z
+  .object({
+    task_id: id.regex(/^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
+    prompt: nonEmpty,
+    cwd: z.string().optional(),
+    model: z.string().optional(),
+    queue_paper: z.boolean().optional(),
+    workspace_snapshot: WorkspaceSnapshotSchema.optional(),
+    idempotency_key: id.optional()
+  })
+  .passthrough();
+export type TaskSessionStartRequest = z.infer<typeof TaskSessionStartRequestSchema>;
+
+export const TaskSessionStartResultSchema = z
+  .object({
+    ok: z.boolean(),
+    task_id: id,
+    task_session_id: id.optional(),
+    session: TaskRuntimeSessionSchema.optional(),
+    deduped: z.boolean().optional(),
+    error: z.string().optional(),
+    message: TaskMessageApiSchema.optional()
+  })
+  .passthrough();
+export type TaskSessionStartResult = z.infer<typeof TaskSessionStartResultSchema>;
+
+export const TaskSessionStartResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    started: TaskSessionStartResultSchema,
+    task_message: TaskMessageApiSchema,
+    task: TaskRecordSchema.optional(),
+    workspace_snapshot: z.union([TaskWorkspaceSnapshotRecordSchema, TaskLayoutRecordSchema]).optional(),
+    queue_item: QueueItemSchema.optional(),
+    review_packet: ReviewPacketSchema.optional(),
+    request_id: id
+  })
+  .strict();
+export type TaskSessionStartResponse = z.infer<typeof TaskSessionStartResponseSchema>;
+
+export const TaskSessionFollowupRequestSchema = z
+  .object({
+    text: nonEmpty,
+    event_ids: z.array(id).optional(),
+    idempotency_key: id.optional(),
+    untrusted_source_text: z.string().optional()
+  })
+  .passthrough();
+export type TaskSessionFollowupRequest = z.infer<typeof TaskSessionFollowupRequestSchema>;
+
+export const TaskSessionFollowupResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    message: TaskMessageApiSchema,
+    request_id: id
+  })
+  .strict();
+export type TaskSessionFollowupResponse = z.infer<typeof TaskSessionFollowupResponseSchema>;
+
+export const TaskSessionReplacementRequestSchema = z
+  .object({
+    prompt: z.string().optional(),
+    text: z.string().optional(),
+    cwd: z.string().optional(),
+    model: z.string().optional(),
+    idempotency_key: id.optional()
+  })
+  .passthrough()
+  .superRefine((request, ctx) => {
+    const prompt = typeof request.prompt === "string" && request.prompt.trim();
+    const text = typeof request.text === "string" && request.text.trim();
+    if (!prompt && !text) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "prompt or text is required",
+        path: ["prompt"]
+      });
+    }
+  });
+export type TaskSessionReplacementRequest = z.infer<typeof TaskSessionReplacementRequestSchema>;
+
+export const TaskSessionReplacementResponseSchema = TaskSessionStartResponseSchema.extend({
+  replaced_session: TaskRuntimeSessionSchema,
+  replacement_for_task_session_id: id
+}).strict();
+export type TaskSessionReplacementResponse = z.infer<typeof TaskSessionReplacementResponseSchema>;
+
+export const TaskSessionBindingRequestSchema = z
+  .object({
+    task_id: id.regex(/^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
+    terminal_ref: z.string().regex(/^(ghostty|tmux|kitty|wezterm):/i).optional()
+  })
+  .passthrough();
+export type TaskSessionBindingRequest = z.infer<typeof TaskSessionBindingRequestSchema>;
+
+export const TaskSessionBindingResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    binding: TaskSessionBindingSchema,
+    request_id: id
+  })
+  .strict();
+export type TaskSessionBindingResponse = z.infer<typeof TaskSessionBindingResponseSchema>;
+
+export const TaskMessagesListResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    messages: z.array(TaskMessageApiSchema),
+    count: z.number().int().nonnegative(),
+    request_id: id
+  })
+  .strict();
+export type TaskMessagesListResponse = z.infer<typeof TaskMessagesListResponseSchema>;
+
+export const TaskMessagesReconcileAttemptedRequestSchema = z
+  .object({
+    action: z.literal("mark_failed"),
+    older_than_ms: z.number().int().positive().optional(),
+    limit: z.number().int().positive().max(500).optional()
+  })
+  .passthrough();
+export type TaskMessagesReconcileAttemptedRequest = z.infer<typeof TaskMessagesReconcileAttemptedRequestSchema>;
+
+export const TaskMessagesReconcileAttemptedResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    reconciled: z.array(TaskMessageApiSchema),
+    count: z.number().int().nonnegative(),
+    scanned: z.number().int().nonnegative(),
+    older_than_ms: z.number().int().positive(),
+    request_id: id
+  })
+  .strict();
+export type TaskMessagesReconcileAttemptedResponse = z.infer<typeof TaskMessagesReconcileAttemptedResponseSchema>;
+
 export const RouteDecisionSchema = z
   .object({
     id,
@@ -1134,7 +1347,7 @@ export const DecisionSchema = z
   .strict();
 export type Decision = z.infer<typeof DecisionSchema>;
 
-export const ContractSchemas = {
+export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   Actor: ActorSchema,
   RawRef: RawRefSchema,
   LinkRef: LinkRefSchema,
@@ -1191,6 +1404,9 @@ export const ContractSchemas = {
   AgentRun: AgentRunSchema,
   TaskSession: TaskSessionSchema,
   TaskMessage: TaskMessageSchema,
+  TaskRuntimeSession: TaskRuntimeSessionSchema,
+  TaskSessionBinding: TaskSessionBindingSchema,
+  TaskMessageApi: TaskMessageApiSchema,
   ReviewPacket: ReviewPacketSchema,
   QueueItem: QueueItemSchema,
   QueueItemWithPacket: QueueItemWithPacketSchema,
@@ -1206,6 +1422,20 @@ export const ContractSchemas = {
   QueueActionResponse: QueueActionResponseSchema,
   QueuePriorityRequest: QueuePriorityRequestSchema,
   QueuePriorityResponse: QueuePriorityResponseSchema,
+  TaskSessionsListResponse: TaskSessionsListResponseSchema,
+  TaskSessionGetResponse: TaskSessionGetResponseSchema,
+  TaskSessionStartRequest: TaskSessionStartRequestSchema,
+  TaskSessionStartResult: TaskSessionStartResultSchema,
+  TaskSessionStartResponse: TaskSessionStartResponseSchema,
+  TaskSessionFollowupRequest: TaskSessionFollowupRequestSchema,
+  TaskSessionFollowupResponse: TaskSessionFollowupResponseSchema,
+  TaskSessionReplacementRequest: TaskSessionReplacementRequestSchema,
+  TaskSessionReplacementResponse: TaskSessionReplacementResponseSchema,
+  TaskSessionBindingRequest: TaskSessionBindingRequestSchema,
+  TaskSessionBindingResponse: TaskSessionBindingResponseSchema,
+  TaskMessagesListResponse: TaskMessagesListResponseSchema,
+  TaskMessagesReconcileAttemptedRequest: TaskMessagesReconcileAttemptedRequestSchema,
+  TaskMessagesReconcileAttemptedResponse: TaskMessagesReconcileAttemptedResponseSchema,
   RouteDecision: RouteDecisionSchema,
   OwnershipLock: OwnershipLockSchema,
   HookDecision: HookDecisionSchema,
@@ -1216,7 +1446,7 @@ export const ContractSchemas = {
   AutonomyGrant: AutonomyGrantSchema,
   Action: ActionSchema,
   Decision: DecisionSchema
-} as const;
+};
 
 export type ContractName = keyof typeof ContractSchemas;
 

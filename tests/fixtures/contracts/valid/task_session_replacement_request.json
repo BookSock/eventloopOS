@@ -1,0 +1,9 @@
+{
+  "schema": "TaskSessionReplacementRequest",
+  "data": {
+    "text": "Restart this task session and preserve context.",
+    "cwd": "/Users/claw/eventloopOS",
+    "model": "gpt-5-codex",
+    "idempotency_key": "idem_replace_demo"
+  }
+}

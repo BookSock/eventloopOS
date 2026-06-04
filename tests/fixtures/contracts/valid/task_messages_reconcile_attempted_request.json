@@ -1,0 +1,8 @@
+{
+  "schema": "TaskMessagesReconcileAttemptedRequest",
+  "data": {
+    "action": "mark_failed",
+    "older_than_ms": 1800000,
+    "limit": 100
+  }
+}

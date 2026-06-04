@@ -1,0 +1,19 @@
+{
+  "schema": "TaskRuntimeSession",
+  "data": {
+    "id": "codex_session_demo",
+    "task_id": "task_demo_customer",
+    "provider": "codex",
+    "status": "idle",
+    "native_thread_id": "thread_demo_customer",
+    "name": "Demo customer",
+    "preview": "Waiting for followup",
+    "cwd": "/Users/claw/eventloopOS",
+    "terminal_ref": "ghostty:front",
+    "pid": 4242,
+    "agent_pid": 4243,
+    "terminal_pid": 4241,
+    "root_pid": 4241,
+    "pids": [4241, 4242, 4243]
+  }
+}

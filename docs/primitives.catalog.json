@@ -356,6 +356,258 @@
         "request_id": { "type": "string", "minLength": 1 }
       }
     },
+    "TaskRuntimeSession": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "provider", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "native_thread_id": { "type": "string" },
+        "name": { "type": "string" },
+        "preview": { "type": "string" },
+        "cwd": { "type": "string" },
+        "terminal_ref": { "type": "string" },
+        "pid": { "type": "integer", "minimum": 1 },
+        "agent_pid": { "type": "integer", "minimum": 1 },
+        "terminal_pid": { "type": "integer", "minimum": 1 },
+        "root_pid": { "type": "integer", "minimum": 1 },
+        "pids": { "type": "array", "items": { "type": "integer", "minimum": 1 } }
+      }
+    },
+    "TaskSessionBinding": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ok", "task_session_id", "task_id"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "task_session_id": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
+        "native_thread_id": { "type": "string" },
+        "session": { "$ref": "#/components/schemas/TaskRuntimeSession" }
+      }
+    },
+    "TaskMessageApi": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "durable_id",
+        "task_session_id",
+        "origin",
+        "mode",
+        "event_ids",
+        "idempotency_key",
+        "status",
+        "text_hash",
+        "text_length",
+        "created_at",
+        "updated_at",
+        "durable"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "durable_id": { "type": "string", "minLength": 1 },
+        "task_session_id": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
+        "queue_item_id": { "type": "string", "minLength": 1 },
+        "origin": { "type": "string", "minLength": 1 },
+        "source_id": { "type": "string" },
+        "mode": { "type": "string", "const": "followup" },
+        "event_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "idempotency_key": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["attempted", "sent", "blocked", "failed"] },
+        "sent_at": { "type": "string", "format": "date-time" },
+        "text_hash": { "type": "string", "minLength": 1 },
+        "text_length": { "type": "integer", "minimum": 0 },
+        "provider": { "type": "string" },
+        "native_thread_id": { "type": "string" },
+        "native_turn_id": { "type": "string" },
+        "native_session_id": { "type": "string" },
+        "native_result_session_id": { "type": "string" },
+        "error": { "type": "string" },
+        "recovery_hint": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "durable": { "type": "boolean", "const": true }
+      }
+    },
+    "TaskSessionsListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sessions", "count", "request_id"],
+      "properties": {
+        "sessions": { "type": "array", "items": { "$ref": "#/components/schemas/TaskRuntimeSession" } },
+        "count": { "type": "integer", "minimum": 0 },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskSessionGetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session", "request_id"],
+      "properties": {
+        "session": { "$ref": "#/components/schemas/TaskRuntimeSession" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskSessionStartRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["task_id", "prompt"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1, "pattern": "^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$" },
+        "prompt": { "type": "string", "minLength": 1 },
+        "cwd": { "type": "string" },
+        "model": { "type": "string" },
+        "queue_paper": { "type": "boolean" },
+        "workspace_snapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "idempotency_key": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskSessionStartResult": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ok", "task_id"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "task_id": { "type": "string", "minLength": 1 },
+        "task_session_id": { "type": "string", "minLength": 1 },
+        "session": { "$ref": "#/components/schemas/TaskRuntimeSession" },
+        "deduped": { "type": "boolean" },
+        "error": { "type": "string" },
+        "message": { "$ref": "#/components/schemas/TaskMessageApi" }
+      }
+    },
+    "TaskSessionStartResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "started", "task_message", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "started": { "$ref": "#/components/schemas/TaskSessionStartResult" },
+        "task_message": { "$ref": "#/components/schemas/TaskMessageApi" },
+        "task": { "$ref": "#/components/schemas/TaskRecord" },
+        "workspace_snapshot": {
+          "anyOf": [
+            { "$ref": "#/components/schemas/TaskWorkspaceSnapshotRecord" },
+            { "$ref": "#/components/schemas/TaskLayoutRecord" }
+          ]
+        },
+        "queue_item": { "$ref": "#/components/schemas/QueueItem" },
+        "review_packet": { "$ref": "#/components/schemas/ReviewPacket" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskSessionFollowupRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["text"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1 },
+        "event_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "idempotency_key": { "type": "string", "minLength": 1 },
+        "untrusted_source_text": { "type": "string" }
+      }
+    },
+    "TaskSessionFollowupResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "message", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "message": { "$ref": "#/components/schemas/TaskMessageApi" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskSessionReplacementRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "prompt": { "type": "string" },
+        "text": { "type": "string" },
+        "cwd": { "type": "string" },
+        "model": { "type": "string" },
+        "idempotency_key": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskSessionReplacementResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "started", "task_message", "request_id", "replaced_session", "replacement_for_task_session_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "started": { "$ref": "#/components/schemas/TaskSessionStartResult" },
+        "task_message": { "$ref": "#/components/schemas/TaskMessageApi" },
+        "task": { "$ref": "#/components/schemas/TaskRecord" },
+        "workspace_snapshot": {
+          "anyOf": [
+            { "$ref": "#/components/schemas/TaskWorkspaceSnapshotRecord" },
+            { "$ref": "#/components/schemas/TaskLayoutRecord" }
+          ]
+        },
+        "queue_item": { "$ref": "#/components/schemas/QueueItem" },
+        "review_packet": { "$ref": "#/components/schemas/ReviewPacket" },
+        "request_id": { "type": "string", "minLength": 1 },
+        "replaced_session": { "$ref": "#/components/schemas/TaskRuntimeSession" },
+        "replacement_for_task_session_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskSessionBindingRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["task_id"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1, "pattern": "^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$" },
+        "terminal_ref": { "type": "string", "pattern": "^(ghostty|tmux|kitty|wezterm):" }
+      }
+    },
+    "TaskSessionBindingResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "binding", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "binding": { "$ref": "#/components/schemas/TaskSessionBinding" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskMessagesListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "messages", "count", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "messages": { "type": "array", "items": { "$ref": "#/components/schemas/TaskMessageApi" } },
+        "count": { "type": "integer", "minimum": 0 },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskMessagesReconcileAttemptedRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["action"],
+      "properties": {
+        "action": { "type": "string", "const": "mark_failed" },
+        "older_than_ms": { "type": "integer", "minimum": 1 },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 500 }
+      }
+    },
+    "TaskMessagesReconcileAttemptedResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "reconciled", "count", "scanned", "older_than_ms", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "reconciled": { "type": "array", "items": { "$ref": "#/components/schemas/TaskMessageApi" } },
+        "count": { "type": "integer", "minimum": 0 },
+        "scanned": { "type": "integer", "minimum": 0 },
+        "older_than_ms": { "type": "integer", "minimum": 1 },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "FollowsWindowExclusionCreateRequest": {
       "type": "object",
       "additionalProperties": true,
@@ -1083,14 +1335,14 @@
       "status": "dogfood",
       "summary": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
       "http": [
-        { "method": "GET", "path": "/task-sessions", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
-        { "method": "POST", "path": "/task-sessions", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
-        { "method": "GET", "path": "/task-sessions/:id", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
-        { "method": "POST", "path": "/task-sessions/:id/followup", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
-        { "method": "POST", "path": "/task-sessions/:id/replacement", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
-        { "method": "PUT", "path": "/task-sessions/:id/task-binding", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
-        { "method": "GET", "path": "/task-messages", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
-        { "method": "POST", "path": "/task-messages/reconcile-attempted", "route_file": "app/orchestrator/src/routes/task_sessions.ts" }
+        { "method": "GET", "path": "/task-sessions", "route_file": "app/orchestrator/src/routes/task_sessions.ts", "response_schema": "TaskSessionsListResponse" },
+        { "method": "POST", "path": "/task-sessions", "route_file": "app/orchestrator/src/routes/task_sessions.ts", "request_schema": "TaskSessionStartRequest", "response_schema": "TaskSessionStartResponse" },
+        { "method": "GET", "path": "/task-sessions/:id", "route_file": "app/orchestrator/src/routes/task_sessions.ts", "response_schema": "TaskSessionGetResponse" },
+        { "method": "POST", "path": "/task-sessions/:id/followup", "route_file": "app/orchestrator/src/routes/task_sessions.ts", "request_schema": "TaskSessionFollowupRequest", "response_schema": "TaskSessionFollowupResponse" },
+        { "method": "POST", "path": "/task-sessions/:id/replacement", "route_file": "app/orchestrator/src/routes/task_sessions.ts", "request_schema": "TaskSessionReplacementRequest", "response_schema": "TaskSessionReplacementResponse" },
+        { "method": "PUT", "path": "/task-sessions/:id/task-binding", "route_file": "app/orchestrator/src/routes/task_sessions.ts", "request_schema": "TaskSessionBindingRequest", "response_schema": "TaskSessionBindingResponse" },
+        { "method": "GET", "path": "/task-messages", "route_file": "app/orchestrator/src/routes/task_sessions.ts", "response_schema": "TaskMessagesListResponse" },
+        { "method": "POST", "path": "/task-messages/reconcile-attempted", "route_file": "app/orchestrator/src/routes/task_sessions.ts", "request_schema": "TaskMessagesReconcileAttemptedRequest", "response_schema": "TaskMessagesReconcileAttemptedResponse" }
       ],
       "cli": ["pnpm task:sessions", "pnpm task:bind", "pnpm task:messages", "pnpm task:replace"],
       "code": ["app/orchestrator/src/task_sessions/types.ts", "app/orchestrator/src/routes/task_sessions.ts"],

@@ -1,0 +1,13 @@
+{
+  "schema": "TaskSessionBindingResponse",
+  "data": {
+    "ok": true,
+    "binding": {
+      "ok": true,
+      "task_session_id": "codex_session_demo",
+      "task_id": "task_demo_customer",
+      "native_thread_id": "thread_demo_customer"
+    },
+    "request_id": "req_task_session_binding"
+  }
+}

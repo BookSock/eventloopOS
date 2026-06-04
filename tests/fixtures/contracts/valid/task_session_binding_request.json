@@ -1,0 +1,7 @@
+{
+  "schema": "TaskSessionBindingRequest",
+  "data": {
+    "task_id": "task_demo_customer",
+    "terminal_ref": "ghostty:front"
+  }
+}

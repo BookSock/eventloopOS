@@ -1,0 +1,14 @@
+{
+  "schema": "TaskSessionStartResult",
+  "data": {
+    "ok": true,
+    "task_id": "task_demo_customer",
+    "task_session_id": "codex_session_demo",
+    "session": {
+      "id": "codex_session_demo",
+      "task_id": "task_demo_customer",
+      "provider": "codex",
+      "status": "running"
+    }
+  }
+}

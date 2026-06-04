@@ -1,0 +1,25 @@
+{
+  "schema": "TaskMessagesListResponse",
+  "data": {
+    "ok": true,
+    "messages": [
+      {
+        "id": "task_msg_demo",
+        "durable_id": "task_msg_demo",
+        "task_session_id": "codex_session_demo",
+        "origin": "task_session_api",
+        "mode": "followup",
+        "event_ids": [],
+        "idempotency_key": "idem_task_msg_demo",
+        "status": "attempted",
+        "text_hash": "sha256-demo",
+        "text_length": 42,
+        "created_at": "2026-05-06T17:13:00Z",
+        "updated_at": "2026-05-06T17:13:00Z",
+        "durable": true
+      }
+    ],
+    "count": 1,
+    "request_id": "req_task_messages"
+  }
+}

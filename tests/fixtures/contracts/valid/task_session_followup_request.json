@@ -1,0 +1,9 @@
+{
+  "schema": "TaskSessionFollowupRequest",
+  "data": {
+    "text": "Please continue after approval.",
+    "event_ids": ["evt_demo_customer"],
+    "idempotency_key": "idem_followup_demo",
+    "untrusted_source_text": "Customer asked for update."
+  }
+}

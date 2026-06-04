@@ -1,0 +1,12 @@
+{
+  "schema": "TaskSessionGetResponse",
+  "data": {
+    "session": {
+      "id": "codex_session_demo",
+      "task_id": "task_demo_customer",
+      "provider": "codex",
+      "status": "idle"
+    },
+    "request_id": "req_task_session_get"
+  }
+}

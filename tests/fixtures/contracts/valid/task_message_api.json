@@ -1,0 +1,24 @@
+{
+  "schema": "TaskMessageApi",
+  "data": {
+    "id": "task_msg_demo",
+    "durable_id": "task_msg_demo",
+    "task_session_id": "codex_session_demo",
+    "task_id": "task_demo_customer",
+    "queue_item_id": "qit_demo_customer",
+    "origin": "task_session_api",
+    "source_id": "evt_demo_customer",
+    "mode": "followup",
+    "event_ids": ["evt_demo_customer"],
+    "idempotency_key": "idem_task_msg_demo",
+    "status": "sent",
+    "sent_at": "2026-05-06T17:14:00Z",
+    "text_hash": "sha256-demo",
+    "text_length": 42,
+    "provider": "codex",
+    "native_thread_id": "thread_demo_customer",
+    "created_at": "2026-05-06T17:13:00Z",
+    "updated_at": "2026-05-06T17:14:00Z",
+    "durable": true
+  }
+}

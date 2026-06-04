@@ -1,0 +1,15 @@
+{
+  "schema": "TaskSessionStartRequest",
+  "data": {
+    "task_id": "task_demo_customer",
+    "prompt": "Continue demo customer work.",
+    "cwd": "/Users/claw/eventloopOS",
+    "model": "gpt-5-codex",
+    "queue_paper": true,
+    "workspace_snapshot": {
+      "backend": "aerospace",
+      "windows": []
+    },
+    "idempotency_key": "idem_start_demo_customer"
+  }
+}

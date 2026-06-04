@@ -1,0 +1,15 @@
+{
+  "schema": "TaskSessionsListResponse",
+  "data": {
+    "sessions": [
+      {
+        "id": "codex_session_demo",
+        "task_id": "task_demo_customer",
+        "provider": "codex",
+        "status": "idle"
+      }
+    ],
+    "count": 1,
+    "request_id": "req_task_sessions_list"
+  }
+}

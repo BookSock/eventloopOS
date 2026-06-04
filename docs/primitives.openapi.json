@@ -2385,7 +2385,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskMessagesListResponse"
                 }
               }
             },
@@ -2419,18 +2419,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/TaskMessagesReconcileAttemptedRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskMessagesReconcileAttemptedResponse"
                 }
               }
             },
@@ -2465,7 +2465,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskSessionsListResponse"
                 }
               }
             },
@@ -2497,18 +2497,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/TaskSessionStartRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskSessionStartResponse"
                 }
               }
             },
@@ -2553,7 +2553,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskSessionGetResponse"
                 }
               }
             },
@@ -2597,18 +2597,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/TaskSessionFollowupRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskSessionFollowupResponse"
                 }
               }
             },
@@ -2652,18 +2652,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/TaskSessionReplacementRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskSessionReplacementResponse"
                 }
               }
             },
@@ -2707,18 +2707,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/TaskSessionBindingRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskSessionBindingResponse"
                 }
               }
             },
@@ -4549,6 +4549,215 @@
         ],
         "type": "object"
       },
+      "TaskMessageApi": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "durable": {
+            "const": true,
+            "type": "boolean"
+          },
+          "durable_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "event_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "idempotency_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "mode": {
+            "const": "followup",
+            "type": "string"
+          },
+          "native_result_session_id": {
+            "type": "string"
+          },
+          "native_session_id": {
+            "type": "string"
+          },
+          "native_thread_id": {
+            "type": "string"
+          },
+          "native_turn_id": {
+            "type": "string"
+          },
+          "origin": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "queue_item_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "recovery_hint": {
+            "type": "string"
+          },
+          "sent_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "source_id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "attempted",
+              "sent",
+              "blocked",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "text_hash": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "text_length": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "durable_id",
+          "task_session_id",
+          "origin",
+          "mode",
+          "event_ids",
+          "idempotency_key",
+          "status",
+          "text_hash",
+          "text_length",
+          "created_at",
+          "updated_at",
+          "durable"
+        ],
+        "type": "object"
+      },
+      "TaskMessagesListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/TaskMessageApi"
+            },
+            "type": "array"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "messages",
+          "count",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "TaskMessagesReconcileAttemptedRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "const": "mark_failed",
+            "type": "string"
+          },
+          "limit": {
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "older_than_ms": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "TaskMessagesReconcileAttemptedResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "older_than_ms": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "reconciled": {
+            "items": {
+              "$ref": "#/components/schemas/TaskMessageApi"
+            },
+            "type": "array"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "scanned": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ok",
+          "reconciled",
+          "count",
+          "scanned",
+          "older_than_ms",
+          "request_id"
+        ],
+        "type": "object"
+      },
       "TaskRecord": {
         "additionalProperties": false,
         "properties": {
@@ -4595,6 +4804,419 @@
           "created_at",
           "updated_at",
           "auto_paper_idle_seconds"
+        ],
+        "type": "object"
+      },
+      "TaskRuntimeSession": {
+        "additionalProperties": true,
+        "properties": {
+          "agent_pid": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "cwd": {
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "native_thread_id": {
+            "type": "string"
+          },
+          "pid": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "pids": {
+            "items": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "type": "array"
+          },
+          "preview": {
+            "type": "string"
+          },
+          "provider": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "root_pid": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "status": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "terminal_pid": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "terminal_ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "status"
+        ],
+        "type": "object"
+      },
+      "TaskSessionBinding": {
+        "additionalProperties": true,
+        "properties": {
+          "native_thread_id": {
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "session": {
+            "$ref": "#/components/schemas/TaskRuntimeSession"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "task_session_id",
+          "task_id"
+        ],
+        "type": "object"
+      },
+      "TaskSessionBindingRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "task_id": {
+            "minLength": 1,
+            "pattern": "^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+            "type": "string"
+          },
+          "terminal_ref": {
+            "pattern": "^(ghostty|tmux|kitty|wezterm):",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      },
+      "TaskSessionBindingResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "binding": {
+            "$ref": "#/components/schemas/TaskSessionBinding"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "binding",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "TaskSessionFollowupRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "event_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "idempotency_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "text": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "untrusted_source_text": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "type": "object"
+      },
+      "TaskSessionFollowupResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/TaskMessageApi"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "message",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "TaskSessionGetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "session": {
+            "$ref": "#/components/schemas/TaskRuntimeSession"
+          }
+        },
+        "required": [
+          "session",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "TaskSessionReplacementRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "cwd": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TaskSessionReplacementResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "queue_item": {
+            "$ref": "#/components/schemas/QueueItem"
+          },
+          "replaced_session": {
+            "$ref": "#/components/schemas/TaskRuntimeSession"
+          },
+          "replacement_for_task_session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "review_packet": {
+            "$ref": "#/components/schemas/ReviewPacket"
+          },
+          "started": {
+            "$ref": "#/components/schemas/TaskSessionStartResult"
+          },
+          "task": {
+            "$ref": "#/components/schemas/TaskRecord"
+          },
+          "task_message": {
+            "$ref": "#/components/schemas/TaskMessageApi"
+          },
+          "workspace_snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskWorkspaceSnapshotRecord"
+              },
+              {
+                "$ref": "#/components/schemas/TaskLayoutRecord"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "started",
+          "task_message",
+          "request_id",
+          "replaced_session",
+          "replacement_for_task_session_id"
+        ],
+        "type": "object"
+      },
+      "TaskSessionStartRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "cwd": {
+            "type": "string"
+          },
+          "idempotency_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "prompt": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "queue_paper": {
+            "type": "boolean"
+          },
+          "task_id": {
+            "minLength": 1,
+            "pattern": "^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$",
+            "type": "string"
+          },
+          "workspace_snapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          }
+        },
+        "required": [
+          "task_id",
+          "prompt"
+        ],
+        "type": "object"
+      },
+      "TaskSessionStartResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "queue_item": {
+            "$ref": "#/components/schemas/QueueItem"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "review_packet": {
+            "$ref": "#/components/schemas/ReviewPacket"
+          },
+          "started": {
+            "$ref": "#/components/schemas/TaskSessionStartResult"
+          },
+          "task": {
+            "$ref": "#/components/schemas/TaskRecord"
+          },
+          "task_message": {
+            "$ref": "#/components/schemas/TaskMessageApi"
+          },
+          "workspace_snapshot": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskWorkspaceSnapshotRecord"
+              },
+              {
+                "$ref": "#/components/schemas/TaskLayoutRecord"
+              }
+            ]
+          }
+        },
+        "required": [
+          "ok",
+          "started",
+          "task_message",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "TaskSessionStartResult": {
+        "additionalProperties": true,
+        "properties": {
+          "deduped": {
+            "type": "boolean"
+          },
+          "error": {
+            "type": "string"
+          },
+          "message": {
+            "$ref": "#/components/schemas/TaskMessageApi"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "session": {
+            "$ref": "#/components/schemas/TaskRuntimeSession"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "task_id"
+        ],
+        "type": "object"
+      },
+      "TaskSessionsListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/TaskRuntimeSession"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "sessions",
+          "count",
+          "request_id"
         ],
         "type": "object"
       },
