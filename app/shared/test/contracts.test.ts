@@ -488,6 +488,12 @@ describe("primitive catalog SDK boundary", () => {
       ["GET /queue?state=ready", readFixture(join(fixturesDir, "valid/queue_list_response.json")).data],
       ["POST /queue/qit_feedback_001/done", readFixture(join(fixturesDir, "valid/queue_action_response.json")).data],
       ["POST /task-window-claims", readFixture(join(fixturesDir, "valid/task_window_claim_response.json")).data],
+      ["GET /task-sessions", readFixture(join(fixturesDir, "valid/task_sessions_list_response.json")).data],
+      ["POST /task-sessions/codex_thread_123/followup", readFixture(join(fixturesDir, "valid/task_session_followup_response.json")).data],
+      ["PUT /task-sessions/codex_thread_123/task-binding", readFixture(join(fixturesDir, "valid/task_session_binding_response.json")).data],
+      ["POST /agents/codex/auto-bind", readFixture(join(fixturesDir, "valid/codex_auto_bind_response.json")).data],
+      ["GET /agents/codex/inspect/codex_thread_123", readFixture(join(fixturesDir, "valid/codex_session_inspection_response.json")).data],
+      ["GET /agents/claude/inspect/claude_session_123", readFixture(join(fixturesDir, "valid/claude_session_inspection_response.json")).data],
       ["DELETE /follows-windows/exclusions/fwex_demo", readFixture(join(fixturesDir, "valid/follows_window_exclusion_response.json")).data],
       ["POST /workspace/restore", readFixture(join(fixturesDir, "valid/workspace_restore_response.json")).data]
     ]);
@@ -520,6 +526,16 @@ describe("primitive catalog SDK boundary", () => {
     await expect(
       client.taskWindowClaims.create(readFixture(join(fixturesDir, "valid/task_window_claim_create_request.json")).data)
     ).resolves.toMatchObject({ ok: true });
+    await expect(client.taskSessions.list()).resolves.toHaveProperty("count");
+    await expect(
+      client.taskSessions.followup("codex_thread_123", readFixture(join(fixturesDir, "valid/task_session_followup_request.json")).data)
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      client.taskSessions.bindTask("codex_thread_123", readFixture(join(fixturesDir, "valid/task_session_binding_request.json")).data)
+    ).resolves.toMatchObject({ ok: true });
+    await expect(client.agents.codex.autoBind()).resolves.toMatchObject({ ok: true });
+    await expect(client.agents.codex.inspect("codex_thread_123")).resolves.toHaveProperty("exists");
+    await expect(client.agents.claude.inspect("claude_session_123")).resolves.toHaveProperty("exists");
     await expect(client.followsWindows.deleteExclusion("fwex_demo")).resolves.toMatchObject({ ok: true });
     await expect(
       client.workspace.restore(readFixture(join(fixturesDir, "valid/workspace_restore_request.json")).data, "idem_workspace_restore")
@@ -529,11 +545,19 @@ describe("primitive catalog SDK boundary", () => {
       "GET /queue?state=ready",
       "POST /queue/qit_feedback_001/done",
       "POST /task-window-claims",
+      "GET /task-sessions",
+      "POST /task-sessions/codex_thread_123/followup",
+      "PUT /task-sessions/codex_thread_123/task-binding",
+      "POST /agents/codex/auto-bind",
+      "GET /agents/codex/inspect/codex_thread_123",
+      "GET /agents/claude/inspect/claude_session_123",
       "DELETE /follows-windows/exclusions/fwex_demo",
       "POST /workspace/restore"
     ]);
     expect(calls[1]?.body).toMatchObject({ action: "done", actor_id: "human_demo" });
-    expect(calls[4]?.headers["idempotency-key"]).toBe("idem_workspace_restore");
+    expect(calls[4]?.body).toMatchObject({ text: expect.any(String) });
+    expect(calls[6]?.body).toBeUndefined();
+    expect(calls[10]?.headers["idempotency-key"]).toBe("idem_workspace_restore");
   });
 });
 

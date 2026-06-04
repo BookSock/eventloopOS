@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { getContractSchema } from "./schemas.js";
 import type {
+  ClaudeSessionInspectionResponse,
+  CodexAutoBindResponse,
+  CodexForegroundResolveResponse,
+  CodexSessionInspectionResponse,
   FollowsWindowExclusionCreateRequest,
   FollowsWindowExclusionResponse,
   FollowsWindowExclusionsListResponse,
@@ -18,6 +22,19 @@ import type {
   QueuePriorityResponse,
   QueueRecommendedActionRequest,
   QueueRecommendedActionResponse,
+  TaskMessagesListResponse,
+  TaskMessagesReconcileAttemptedRequest,
+  TaskMessagesReconcileAttemptedResponse,
+  TaskSessionBindingRequest,
+  TaskSessionBindingResponse,
+  TaskSessionFollowupRequest,
+  TaskSessionFollowupResponse,
+  TaskSessionGetResponse,
+  TaskSessionReplacementRequest,
+  TaskSessionReplacementResponse,
+  TaskSessionsListResponse,
+  TaskSessionStartRequest,
+  TaskSessionStartResponse,
   TaskWindowClaimCreateRequest,
   TaskWindowClaimResponse,
   TaskWindowClaimsListResponse,
@@ -179,6 +196,26 @@ export type PrimitiveOperationsClient = {
   taskWindowClaims: {
     create(body: TaskWindowClaimCreateRequest): Promise<TaskWindowClaimResponse>;
     list(): Promise<TaskWindowClaimsListResponse>;
+  };
+  taskSessions: {
+    list(): Promise<TaskSessionsListResponse>;
+    start(body: TaskSessionStartRequest): Promise<TaskSessionStartResponse>;
+    get(id: string): Promise<TaskSessionGetResponse>;
+    followup(id: string, body: TaskSessionFollowupRequest): Promise<TaskSessionFollowupResponse>;
+    replacement(id: string, body: TaskSessionReplacementRequest): Promise<TaskSessionReplacementResponse>;
+    bindTask(id: string, body: TaskSessionBindingRequest): Promise<TaskSessionBindingResponse>;
+    listMessages(): Promise<TaskMessagesListResponse>;
+    reconcileAttempted(body: TaskMessagesReconcileAttemptedRequest): Promise<TaskMessagesReconcileAttemptedResponse>;
+  };
+  agents: {
+    codex: {
+      autoBind(): Promise<CodexAutoBindResponse>;
+      resolveForeground(): Promise<CodexForegroundResolveResponse>;
+      inspect(id: string): Promise<CodexSessionInspectionResponse>;
+    };
+    claude: {
+      inspect(id: string): Promise<ClaudeSessionInspectionResponse>;
+    };
   };
   followsWindows: {
     exclude(body: FollowsWindowExclusionCreateRequest): Promise<FollowsWindowExclusionResponse>;
@@ -449,6 +486,50 @@ export function bindPrimitiveOperationsClient(client: PrimitiveHttpClient): Prim
       },
       list() {
         return client.request("GET", "/task-window-claims");
+      }
+    },
+    taskSessions: {
+      list() {
+        return client.request("GET", "/task-sessions");
+      },
+      start(body: TaskSessionStartRequest) {
+        return client.request("POST", "/task-sessions", { body });
+      },
+      get(id: string) {
+        return client.request("GET", "/task-sessions/:id", { pathParams: { id } });
+      },
+      followup(id: string, body: TaskSessionFollowupRequest) {
+        return client.request("POST", "/task-sessions/:id/followup", { pathParams: { id }, body });
+      },
+      replacement(id: string, body: TaskSessionReplacementRequest) {
+        return client.request("POST", "/task-sessions/:id/replacement", { pathParams: { id }, body });
+      },
+      bindTask(id: string, body: TaskSessionBindingRequest) {
+        return client.request("PUT", "/task-sessions/:id/task-binding", { pathParams: { id }, body });
+      },
+      listMessages() {
+        return client.request("GET", "/task-messages");
+      },
+      reconcileAttempted(body: TaskMessagesReconcileAttemptedRequest) {
+        return client.request("POST", "/task-messages/reconcile-attempted", { body });
+      }
+    },
+    agents: {
+      codex: {
+        autoBind() {
+          return client.request("POST", "/agents/codex/auto-bind");
+        },
+        resolveForeground() {
+          return client.request("POST", "/agents/codex/resolve-foreground");
+        },
+        inspect(id: string) {
+          return client.request("GET", "/agents/codex/inspect/:id", { pathParams: { id } });
+        }
+      },
+      claude: {
+        inspect(id: string) {
+          return client.request("GET", "/agents/claude/inspect/:id", { pathParams: { id } });
+        }
       }
     },
     followsWindows: {

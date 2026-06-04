@@ -68,6 +68,11 @@ await ops.taskWindowClaims.create({
   process_root_pid: 4242,
   source: "demo_wrapper"
 });
+await ops.taskSessions.followup("codex_thread_123", {
+  text: "please summarize current blocker"
+});
+await ops.agents.codex.autoBind();
+await ops.agents.claude.inspect("claude_session_123");
 await ops.workspace.restore(workspaceRestoreRequest, "idem_restore_checkout");
 ```
 
@@ -76,8 +81,8 @@ or running the orchestrator server package. Request helpers interpolate route
 templates, encode query strings, enforce `no_request_body`, and validate known
 request/response schemas through the exported Zod contract registry.
 `createPrimitiveOperationsClient` layers small typed convenience methods over
-the same validated routes for common queue, workspace, task-window-claim, and
-follows-window operations.
+the same validated routes for common queue, workspace, task-session,
+Codex/Claude agent, task-window-claim, and follows-window operations.
 
 The HTTP client exposes catchable error classes for builder-facing tools:
 
