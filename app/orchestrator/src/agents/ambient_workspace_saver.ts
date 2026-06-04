@@ -1,6 +1,9 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import type { Observability } from "../observability.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
 import type { Runtime } from "../runtime.js";
+import type { TaskRuntimeSession } from "../task_sessions/types.js";
 import type { WorkspaceController } from "../workspace/controller.js";
 import type { AerospaceWindow, WorkspaceSnapshot } from "../workspace/aerospace.js";
 import { normalizeTitlePrefix } from "../store.js";
@@ -54,6 +57,8 @@ export type TaskWindowClaimWriter = (input: {
   now: Date;
   ttlMs?: number;
 }) => Promise<unknown> | unknown;
+export type TaskSessionReader = () => Promise<Iterable<TaskRuntimeSession>> | Iterable<TaskRuntimeSession>;
+export type ProcessAncestorReader = (pid: number) => Promise<Iterable<number>> | Iterable<number>;
 
 export type AmbientWorkspaceSaverDeps = {
   workspace: Pick<WorkspaceController, "capture">;
@@ -64,6 +69,8 @@ export type AmbientWorkspaceSaverDeps = {
   getFollowsWindowIds?: FollowsWindowIdReader;
   getTaskWindowClaims?: TaskWindowClaimReader;
   claimTaskWindow?: TaskWindowClaimWriter;
+  listTaskSessions?: TaskSessionReader;
+  getProcessAncestorPids?: ProcessAncestorReader;
   observability?: Observability;
   pollIntervalMs?: number;
   debounceMs?: number;
@@ -128,6 +135,7 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
       const rawSnapshot = await deps.workspace.capture();
       await recordWindowObservations(deps, rawSnapshot, currentTaskId, tickNow);
       await autoClaimTaggedTaskWindows(deps, rawSnapshot, tickNow);
+      await autoClaimProcessTreeTaskWindows(deps, rawSnapshot, tickNow);
       const snapshot = filterSnapshotForTaskSave(
         rawSnapshot,
         await readFollowsWindowIds(deps),
@@ -264,12 +272,7 @@ async function autoClaimTaggedTaskWindows(
     const taggedTaskId = taskIdFromTaggedWindow(window);
     if (!taggedTaskId) continue;
     if (existingClaims.some((claim) => claim.task_id === taggedTaskId && taskWindowClaimMatches(window, claim))) continue;
-    const appBundle =
-      typeof window.appBundleId === "string" && window.appBundleId.length > 0
-        ? window.appBundleId
-        : typeof window.app === "string" && window.app.length > 0
-          ? window.app
-          : undefined;
+    const appBundle = readWindowAppBundleCandidate(window);
     try {
       await deps.claimTaskWindow({
         taskId: taggedTaskId,
@@ -299,6 +302,71 @@ async function autoClaimTaggedTaskWindows(
   }
 }
 
+async function autoClaimProcessTreeTaskWindows(
+  deps: AmbientWorkspaceSaverDeps,
+  snapshot: WorkspaceSnapshot,
+  now: Date,
+): Promise<void> {
+  if (!deps.claimTaskWindow || !deps.listTaskSessions) return;
+  const sessions = Array.from(await deps.listTaskSessions());
+  const sessionOwners = sessions
+    .map(sessionOwnerFromRuntimeSession)
+    .filter((owner): owner is TaskSessionOwner => owner !== undefined && owner.pids.size > 0);
+  if (sessionOwners.length === 0) return;
+
+  const existingClaims = await readTaskWindowClaims(deps);
+  const readAncestors = deps.getProcessAncestorPids ?? defaultReadProcessAncestorPids;
+  let claimed = 0;
+  let ambiguous = 0;
+
+  for (const window of snapshot.windows) {
+    if (typeof window.pid !== "number" || !Number.isInteger(window.pid) || window.pid <= 0) continue;
+    if (taskIdFromTaggedWindow(window)) continue;
+    if (existingClaims.some((claim) => taskWindowClaimMatches(window, claim))) continue;
+
+    const ancestors = new Set([window.pid, ...Array.from(await readAncestors(window.pid), (pid) => Number(pid)).filter(isPositiveInteger)]);
+    const matchingTaskIds = new Set(
+      sessionOwners
+        .filter((owner) => setIntersects(owner.pids, ancestors))
+        .map((owner) => owner.taskId),
+    );
+    if (matchingTaskIds.size !== 1) {
+      if (matchingTaskIds.size > 1) ambiguous += 1;
+      continue;
+    }
+
+    const [taskId] = matchingTaskIds;
+    if (!taskId) continue;
+    try {
+      await deps.claimTaskWindow({
+        taskId,
+        windowId: String(window.id),
+        appBundle: readWindowAppBundleCandidate(window),
+        titlePrefix: normalizeTitlePrefix(window.title),
+        source: "ambient_process_tree",
+        now,
+        ttlMs: 30 * 60 * 1_000,
+      });
+      claimed += 1;
+    } catch {
+      // Process-tree claims are attribution hints. Never block workspace saving.
+    }
+  }
+
+  if ((claimed > 0 || ambiguous > 0) && deps.observability) {
+    if (claimed > 0) await deps.observability.incrementCounter("task_window_claims_process_tree_total", claimed);
+    if (ambiguous > 0) await deps.observability.incrementCounter("task_window_claims_process_tree_ambiguous_total", ambiguous);
+    await deps.observability.recordActivity({
+      type: "task_window_claims_process_tree",
+      occurred_at: now.toISOString(),
+      actor: "system",
+      status: "ok",
+      summary: `Inferred ${claimed} task window claim(s) from process ancestry.`,
+      details: sanitizeActivityDetails({ claimed, ambiguous, source: "ambient_process_tree" }),
+    });
+  }
+}
+
 async function recordWindowObservations(
   deps: AmbientWorkspaceSaverDeps,
   snapshot: WorkspaceSnapshot,
@@ -311,12 +379,7 @@ async function recordWindowObservations(
     if (!window.workspace) continue;
     const isActiveWorkspace = activeWorkspace !== undefined && window.workspace === activeWorkspace;
     const isTaskWorkspace = isActiveWorkspace && currentTaskId.length > 0;
-    const appBundle =
-      typeof window.appBundleId === "string" && window.appBundleId.length > 0
-        ? window.appBundleId
-        : typeof window.app === "string" && window.app.length > 0
-          ? window.app
-          : undefined;
+    const appBundle = readWindowAppBundleCandidate(window);
     const titlePrefix = normalizeTitlePrefix(window.title);
     try {
       await deps.recordWindowObservation({
@@ -428,6 +491,79 @@ function taskWindowClaimMatches(window: AerospaceWindow, claim: TaskWindowClaim)
   const bundleMatches = claimBundle ? claimBundle === windowBundle : true;
   const titleMatches = claimTitlePrefix ? windowTitlePrefix?.startsWith(claimTitlePrefix) === true : true;
   return Boolean((claimBundle || claimTitlePrefix) && bundleMatches && titleMatches);
+}
+
+type TaskSessionOwner = {
+  taskId: string;
+  pids: Set<number>;
+};
+
+function sessionOwnerFromRuntimeSession(session: TaskRuntimeSession): TaskSessionOwner | undefined {
+  if (!isRecord(session) || typeof session.task_id !== "string" || !session.task_id) return undefined;
+  const pids = new Set<number>();
+  for (const key of ["pid", "process_id", "agent_pid", "terminal_pid", "root_pid"]) {
+    addPid(pids, session[key]);
+  }
+  for (const key of ["pids", "process_pids", "agent_pids"]) {
+    const values = session[key];
+    if (Array.isArray(values)) {
+      for (const value of values) addPid(pids, value);
+    }
+  }
+  return { taskId: session.task_id, pids };
+}
+
+function addPid(output: Set<number>, value: unknown): void {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (isPositiveInteger(parsed)) output.add(parsed);
+}
+
+function isPositiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function setIntersects(left: ReadonlySet<number>, right: ReadonlySet<number>): boolean {
+  for (const value of left) {
+    if (right.has(value)) return true;
+  }
+  return false;
+}
+
+function readWindowAppBundleCandidate(window: AerospaceWindow): string | undefined {
+  return typeof window.appBundleId === "string" && window.appBundleId.length > 0
+    ? window.appBundleId
+    : typeof window.app === "string" && window.app.length > 0
+      ? window.app
+      : undefined;
+}
+
+const execFileAsync = promisify(execFile);
+
+async function defaultReadProcessAncestorPids(pid: number): Promise<number[]> {
+  const ancestors: number[] = [];
+  let current = pid;
+  for (let depth = 0; depth < 12; depth += 1) {
+    const parent = await readParentPid(current);
+    if (!parent || parent === current || ancestors.includes(parent)) break;
+    ancestors.push(parent);
+    current = parent;
+    if (current === 1) break;
+  }
+  return ancestors;
+}
+
+async function readParentPid(pid: number): Promise<number | undefined> {
+  try {
+    const result = await execFileAsync("ps", ["-o", "ppid=", "-p", String(pid)], { timeout: 1_000 });
+    const parsed = Number(result.stdout.trim());
+    return isPositiveInteger(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function readFollowsWindowIds(deps: AmbientWorkspaceSaverDeps): Promise<ReadonlySet<string>> {
@@ -550,6 +686,10 @@ export function createAmbientWorkspaceSaverFromRuntime(
           ttlMs: input.ttlMs,
         })
       : undefined;
+  const listTaskSessions: TaskSessionReader | undefined =
+    typeof runtime.taskSessions?.listSessions === "function"
+      ? async () => runtime.taskSessions?.listSessions?.() ?? []
+      : undefined;
 
   return createAmbientWorkspaceSaver({
     workspace,
@@ -560,6 +700,7 @@ export function createAmbientWorkspaceSaverFromRuntime(
     getFollowsWindowIds,
     getTaskWindowClaims,
     claimTaskWindow,
+    listTaskSessions,
     observability: runtime.observability,
     pollIntervalMs: overrides.pollIntervalMs,
     debounceMs: overrides.debounceMs,

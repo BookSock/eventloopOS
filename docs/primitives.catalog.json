@@ -60,10 +60,10 @@
       "id": "ambient_autosave",
       "title": "Ambient Autosave",
       "status": "dogfood",
-      "summary": "Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, and task-window claim filtering.",
+      "summary": "Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, task-window claim filtering, tagged-window inference, and process-tree claim inference.",
       "code": ["app/orchestrator/src/agents/ambient_workspace_saver.ts"],
       "proofs": ["app/orchestrator/src/agents/ambient_workspace_saver.test.ts"],
-      "gaps": ["Untagged unwrapped Codex/Claude-spawned windows still need automatic process/window emitters."]
+      "gaps": ["Task-session controllers should expose stable root pids by default; LaunchServices-detached apps may still need wrappers, tags, or routed resources."]
     },
     {
       "id": "task_window_claims",

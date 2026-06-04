@@ -167,13 +167,15 @@ Guarantees today:
 - excludes windows explicitly tagged for a different `[task:...]`
 - excludes windows claimed by another task through `POST /task-window-claims`
 - infers task-window claims from any captured window tagged `[task:<slug>]`
+- infers task-window claims from process ancestry when bound task sessions
+  expose `pid`, `agent_pid`, `terminal_pid`, or `pids`
 
 Why it matters: this is the primitive that makes window layout memory feel
 automatic instead of like a manual "save workspace" button.
 
-Known gap: tagged windows are inferred from OS snapshots and routed events can
-auto-claim attached window resources, but truly untagged arbitrary
-Codex/Claude-spawned windows still need first-class process/window emitters.
+Known gap: LaunchServices-detached apps may lose useful parent-process ancestry,
+so wrappers, tags, or routed resources are still needed for those untagged
+launches.
 
 Proof:
 
@@ -215,6 +217,9 @@ Useful standalone uses:
 - an agent wraps a visible test/browser launch with
   `bin/task-window-spawn --task-id task_checkout -- open -na "Google Chrome"`,
   and the wrapper claims any newly-created windows after the command exits
+- a bound Codex/Claude task session exposes `pid`/`agent_pid`/`terminal_pid`,
+  and ambient autosave claims descendant app windows even when the window pops
+  onto the human's current paper
 - browser automation can claim Playwright/Chrome report windows before the
   user sees them
 - browser context capture auto-claims Chrome windows when the event attaches to
@@ -234,8 +239,8 @@ Proof:
 
 Status: dogfood. Browser context capture has an automatic emitter; generic
 routed window resources are auto-claimed; tagged windows are inferred from OS
-snapshots; command-wrapped untagged launches can be claimed; automatic
-Codex/Claude OS process/window emitters are next.
+snapshots; process-tree launches are claimed when session pid metadata exists;
+command-wrapped untagged launches can be claimed.
 
 ## Follows Windows
 
@@ -576,8 +581,8 @@ Highest-leverage steps before calling this a real primitives library:
    hotkey-to-feedback path.
 4. Generalize the restore command envelope beyond the legacy
    `aerospace`/`osascript` command union while keeping the adapter guide green.
-5. Add automatic claim emitters for unwrapped untagged Codex/Claude-spawned
-   foreign windows.
+5. Extend task-session controllers to expose stable root pids by default, so
+   process-tree window claims work without custom session metadata.
 6. Add user-facing follows/unfollows rules and durable rule export/import.
 7. Publish example apps: "restore my desk," "agent attention queue," and
    "window hotkey router."
