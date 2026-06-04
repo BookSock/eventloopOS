@@ -154,13 +154,15 @@
       "code": [
         "app/orchestrator/src/workspace/aerospace.ts",
         "app/orchestrator/src/workspace/controller.ts",
-        "docs/workspace-backend-adapter.md"
+        "docs/workspace-backend-adapter.md",
+        "examples/primitives/restore-my-desk.mjs"
       ],
       "proofs": [
         "app/orchestrator/src/workspace/aerospace.test.ts",
         "app/orchestrator/src/workspace/controller.test.ts",
         "bin/lab-mac-geometry-proof",
-        "bin/task-workspace-memory-proof-smoke"
+        "bin/task-workspace-memory-proof-smoke",
+        "examples/primitives/restore-my-desk.mjs"
       ]
     },
     {
@@ -224,13 +226,15 @@
       "code": [
         "app/orchestrator/src/routes/task_window_claims.ts",
         "app/orchestrator/src/routes/events.ts",
-        "app/orchestrator/src/agents/ambient_workspace_saver.ts"
+        "app/orchestrator/src/agents/ambient_workspace_saver.ts",
+        "examples/primitives/window-hotkey-router.mjs"
       ],
       "proofs": [
         "app/orchestrator/src/routes/task_window_claims.test.ts",
         "app/orchestrator/src/routes/events_task_window_claims.test.ts",
         "app/orchestrator/src/agents/ambient_workspace_saver.test.ts",
-        "app/orchestrator/test/gateway_store_conformance.test.ts"
+        "app/orchestrator/test/gateway_store_conformance.test.ts",
+        "examples/primitives/window-hotkey-router.mjs"
       ],
       "self_tests": ["bin/task-window-spawn --self-test"]
     },
@@ -260,8 +264,15 @@
           "response_schema": "FollowsWindowExclusionResponse"
         }
       ],
-      "code": ["app/orchestrator/src/agents/follows_window_orchestrator.ts", "app/orchestrator/src/routes/follows_windows.ts"],
-      "proofs": ["app/orchestrator/src/agents/follows_window_orchestrator.test.ts"]
+      "code": [
+        "app/orchestrator/src/agents/follows_window_orchestrator.ts",
+        "app/orchestrator/src/routes/follows_windows.ts",
+        "examples/primitives/window-hotkey-router.mjs"
+      ],
+      "proofs": [
+        "app/orchestrator/src/agents/follows_window_orchestrator.test.ts",
+        "examples/primitives/window-hotkey-router.mjs"
+      ]
     },
     {
       "id": "queue_paper_routing",
@@ -277,8 +288,16 @@
         { "method": "POST", "path": "/queue/:id/actions/recommended", "route_file": "app/orchestrator/src/routes/queue.ts" },
         { "method": "POST", "path": "/queue/:id/priority", "route_file": "app/orchestrator/src/routes/queue.ts" }
       ],
-      "code": ["app/orchestrator/src/routes/events.ts", "app/orchestrator/src/routes/queue.ts"],
-      "proofs": ["bin/master-priority-proof-smoke", "bin/event-loop-proof-smoke"]
+      "code": [
+        "app/orchestrator/src/routes/events.ts",
+        "app/orchestrator/src/routes/queue.ts",
+        "examples/primitives/agent-attention-queue.mjs"
+      ],
+      "proofs": [
+        "bin/master-priority-proof-smoke",
+        "bin/event-loop-proof-smoke",
+        "examples/primitives/agent-attention-queue.mjs"
+      ]
     },
     {
       "id": "master_command_router",
@@ -288,11 +307,16 @@
       "http": [{ "method": "POST", "path": "/master/fan-out", "route_file": "app/orchestrator/src/routes/master.ts" }],
       "cli": ["pnpm master:send"],
       "hotkeys": ["Ctrl-Option-K"],
-      "code": ["app/orchestrator/src/routes/master.ts", "app/orchestrator/src/master/master_command_cli.ts"],
+      "code": [
+        "app/orchestrator/src/routes/master.ts",
+        "app/orchestrator/src/master/master_command_cli.ts",
+        "examples/primitives/agent-attention-queue.mjs"
+      ],
       "proofs": [
         "app/orchestrator/test/master_fan_out.test.ts",
         "app/orchestrator/test/master_fan_out_idle_filter.test.ts",
         "app/orchestrator/src/master/master_command_cli.test.ts",
+        "examples/primitives/agent-attention-queue.mjs",
         "bin/master-priority-proof-smoke"
       ]
     },

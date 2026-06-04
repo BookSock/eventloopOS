@@ -12,6 +12,10 @@ Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.
 
+Runnable examples live in `examples/primitives/`: restore a saved desk, inspect
+and rerank an attention queue, and wire external hotkeys to task-window/follows
+rules. Root `pnpm typecheck` runs their self-tests.
+
 Status labels:
 
 - **Stable enough**: covered by unit/integration tests and used by dogfood.
@@ -603,5 +607,5 @@ Highest-leverage steps before calling this a real primitives library:
 5. Extend task-session controllers to expose stable root pids by default, so
    process-tree window claims work without custom session metadata.
 6. Add user-facing follows/unfollows rules and durable rule export/import.
-7. Publish example apps: "restore my desk," "agent attention queue," and
-   "window hotkey router."
+7. Grow `examples/primitives/` from tiny CLI examples into richer starter apps
+   with screenshots and fixture-backed walkthroughs.
