@@ -377,6 +377,59 @@ Proof:
 Status: stable enough internally; public API needs schema docs generated from
 types/tests.
 
+## Task Intake Onboarding
+
+Primitive: scan current local work context into proposed tasks, then approve or
+reject task workbenches.
+
+HTTP/CLI surface:
+
+- `GET /onboarding/scan`
+- `POST /onboarding/approvals`
+- `POST /onboarding/approvals/batch`
+- `POST /onboarding/rejections`
+- `bin/onboarding-live-proof-smoke`
+
+Useful standalone uses:
+
+- turn open browser/workspace context into starter task papers
+- approve several task workbenches in one idempotent batch
+- keep rejected onboarding proposals out of future scans
+
+Proof:
+
+- `app/orchestrator/test/onboarding_happy_path_e2e.test.ts`
+- `app/orchestrator/src/onboarding/task_grouping.test.ts`
+- `app/orchestrator/src/onboarding/onboarding_scan_cli.test.ts`
+- `bin/onboarding-live-proof-smoke`
+
+Status: dogfood.
+
+## Reading Queue
+
+Primitive: promote idle, unbound browser contexts into `task_reading_queue`
+papers either manually or by age threshold.
+
+HTTP surface:
+
+- `GET /reading-queue`
+- `POST /reading-queue/promote`
+- `POST /reading-queue/auto-promote`
+
+Useful standalone uses:
+
+- collect "read later" browser tabs as review papers
+- turn aged tabs into queue work without stealing current focus
+- pause auto-promotion while manual mode is active
+
+Proof:
+
+- `app/orchestrator/test/reading_queue.test.ts`
+- `app/orchestrator/test/reading_queue_auto_promote_integration.test.ts`
+- `app/orchestrator/test/manual_mode_pause_integration.test.ts`
+
+Status: dogfood.
+
 ## Master Command Router
 
 Primitive: send one command to the system and have it route to one task, many
@@ -569,6 +622,59 @@ Proof:
 
 Status: mixed. Local events and agent-run routes are stable enough internally;
 third-party source templates need setup docs and fixture cleanup.
+
+## Agent Focus Binding
+
+Primitive: resolve foreground Codex windows, inspect Codex/Claude sessions, and
+auto-bind visible agent windows back to task sessions.
+
+HTTP surface:
+
+- `POST /agents/codex/auto-bind`
+- `POST /agents/codex/resolve-foreground`
+- `GET /agents/codex/inspect/:id`
+- `GET /agents/claude/inspect/:id`
+
+Useful standalone uses:
+
+- bind an existing agent terminal/window to the current paper
+- detect which Codex thread is in the foreground
+- inspect agent session state before routing followups or human papers
+
+Proof:
+
+- `app/orchestrator/test/auto_bind_integration.test.ts`
+- `app/orchestrator/test/resolve_foreground_route.test.ts`
+- Codex/Claude session inspector tests
+
+Status: dogfood.
+
+## Paper Triggers
+
+Primitive: let tasks declare event-matching rules that create routed papers from
+future source/agent events.
+
+HTTP surface:
+
+- `GET /triggers`
+- `POST /triggers`
+- `GET /triggers/:id`
+- `PATCH /triggers/:id`
+- `DELETE /triggers/:id`
+
+Useful standalone uses:
+
+- route future matching events to a task without a human decision each time
+- create lightweight agent/source automation rules
+- keep trigger edits auditable through store and activity tests
+
+Proof:
+
+- `app/orchestrator/test/triggers_route.test.ts`
+- `app/orchestrator/src/triggers/evaluator.test.ts`
+- migration coverage in `app/orchestrator/test/db_migrations.test.ts`
+
+Status: dogfood.
 
 ## Mac App And Hotkey Surface
 

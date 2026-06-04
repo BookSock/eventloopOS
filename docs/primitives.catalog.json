@@ -329,11 +329,17 @@
       "summary": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
       "http": [
         { "method": "POST", "path": "/events", "route_file": "app/orchestrator/src/routes/events.ts" },
+        { "method": "GET", "path": "/events/:id", "route_file": "app/orchestrator/src/routes/events.ts" },
+        { "method": "GET", "path": "/review-packets/:id", "route_file": "app/orchestrator/src/routes/events.ts" },
         { "method": "GET", "path": "/queue", "route_file": "app/orchestrator/src/routes/queue.ts" },
+        { "method": "GET", "path": "/queue/next", "route_file": "app/orchestrator/src/routes/queue.ts" },
         { "method": "POST", "path": "/queue/lease-next", "route_file": "app/orchestrator/src/routes/queue.ts" },
+        { "method": "POST", "path": "/queue/:id/lease/renew", "route_file": "app/orchestrator/src/routes/queue.ts" },
         { "method": "POST", "path": "/queue/:id/done", "route_file": "app/orchestrator/src/routes/queue.ts" },
         { "method": "POST", "path": "/queue/:id/defer", "route_file": "app/orchestrator/src/routes/queue.ts" },
+        { "method": "POST", "path": "/queue/:id/ignore", "route_file": "app/orchestrator/src/routes/queue.ts" },
         { "method": "POST", "path": "/queue/:id/actions/recommended", "route_file": "app/orchestrator/src/routes/queue.ts" },
+        { "method": "GET", "path": "/queue/:id/lineage", "route_file": "app/orchestrator/src/routes/queue.ts" },
         { "method": "POST", "path": "/queue/:id/priority", "route_file": "app/orchestrator/src/routes/queue.ts" }
       ],
       "code": [
@@ -345,6 +351,47 @@
         "bin/master-priority-proof-smoke",
         "bin/event-loop-proof-smoke",
         "examples/primitives/agent-attention-queue.mjs"
+      ]
+    },
+    {
+      "id": "task_intake_onboarding",
+      "title": "Task Intake Onboarding",
+      "status": "dogfood",
+      "summary": "Scan existing browser/window context into proposed tasks, then approve or reject onboarding workbenches.",
+      "http": [
+        { "method": "GET", "path": "/onboarding/scan", "route_file": "app/orchestrator/src/routes/onboarding.ts" },
+        { "method": "POST", "path": "/onboarding/approvals", "route_file": "app/orchestrator/src/routes/onboarding.ts" },
+        { "method": "POST", "path": "/onboarding/approvals/batch", "route_file": "app/orchestrator/src/routes/onboarding.ts" },
+        { "method": "POST", "path": "/onboarding/rejections", "route_file": "app/orchestrator/src/routes/onboarding.ts" }
+      ],
+      "cli": ["bin/onboarding-live-proof-smoke"],
+      "code": [
+        "app/orchestrator/src/routes/onboarding.ts",
+        "app/orchestrator/src/onboarding/task_grouping.ts",
+        "app/orchestrator/src/onboarding/onboarding_scan_cli.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/test/onboarding_happy_path_e2e.test.ts",
+        "app/orchestrator/src/onboarding/task_grouping.test.ts",
+        "app/orchestrator/src/onboarding/onboarding_scan_cli.test.ts",
+        "bin/onboarding-live-proof-smoke"
+      ]
+    },
+    {
+      "id": "reading_queue",
+      "title": "Reading Queue",
+      "status": "dogfood",
+      "summary": "Promote idle unbound browser contexts into task_reading_queue papers manually or by age threshold.",
+      "http": [
+        { "method": "GET", "path": "/reading-queue", "route_file": "app/orchestrator/src/routes/reading_queue.ts" },
+        { "method": "POST", "path": "/reading-queue/promote", "route_file": "app/orchestrator/src/routes/reading_queue.ts" },
+        { "method": "POST", "path": "/reading-queue/auto-promote", "route_file": "app/orchestrator/src/routes/reading_queue.ts" }
+      ],
+      "code": ["app/orchestrator/src/routes/reading_queue.ts"],
+      "proofs": [
+        "app/orchestrator/test/reading_queue.test.ts",
+        "app/orchestrator/test/reading_queue_auto_promote_integration.test.ts",
+        "app/orchestrator/test/manual_mode_pause_integration.test.ts"
       ]
     },
     {
@@ -376,9 +423,12 @@
       "http": [
         { "method": "GET", "path": "/task-sessions", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
         { "method": "POST", "path": "/task-sessions", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
+        { "method": "GET", "path": "/task-sessions/:id", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
         { "method": "POST", "path": "/task-sessions/:id/followup", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
+        { "method": "POST", "path": "/task-sessions/:id/replacement", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
         { "method": "PUT", "path": "/task-sessions/:id/task-binding", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
-        { "method": "GET", "path": "/task-messages", "route_file": "app/orchestrator/src/routes/task_sessions.ts" }
+        { "method": "GET", "path": "/task-messages", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
+        { "method": "POST", "path": "/task-messages/reconcile-attempted", "route_file": "app/orchestrator/src/routes/task_sessions.ts" }
       ],
       "cli": ["pnpm task:sessions", "pnpm task:bind", "pnpm task:messages", "pnpm task:replace"],
       "code": ["app/orchestrator/src/task_sessions/types.ts", "app/orchestrator/src/routes/task_sessions.ts"],
@@ -393,7 +443,12 @@
         { "method": "GET", "path": "/contexts", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
         { "method": "POST", "path": "/contexts/restore-plan", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
         { "method": "POST", "path": "/contexts/restore-requests", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
-        { "method": "POST", "path": "/contexts/restore-requests/claim-next", "route_file": "app/orchestrator/src/routes/context_restore.ts" }
+        { "method": "GET", "path": "/contexts/restore-requests/next", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
+        { "method": "POST", "path": "/contexts/restore-requests/claim-next", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
+        { "method": "GET", "path": "/contexts/restore-requests/:id", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
+        { "method": "POST", "path": "/contexts/restore-requests/:id/done", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
+        { "method": "POST", "path": "/contexts/restore-requests/:id/failed", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
+        { "method": "POST", "path": "/contexts/restore-requests/:id/retry", "route_file": "app/orchestrator/src/routes/context_restore.ts" }
       ],
       "code": ["app/orchestrator/src/routes/context_restore.ts", "app/orchestrator/src/store/context_restore_store.ts"],
       "proofs": ["docs/planning/17-deeplink-strategies.md"]
@@ -433,11 +488,67 @@
       "http": [
         { "method": "POST", "path": "/mcp/poll", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
         { "method": "GET", "path": "/mcp-sources", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
+        { "method": "POST", "path": "/mcp-sources/poll-all-and-route", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
+        { "method": "GET", "path": "/mcp-sources/:id", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
+        { "method": "POST", "path": "/mcp-sources/:id/poll", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
+        { "method": "POST", "path": "/mcp-sources/:id/preview", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
+        { "method": "POST", "path": "/mcp-sources/:id/poll-and-route", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
         { "method": "POST", "path": "/agent-runs", "route_file": "app/orchestrator/src/routes/agent_runs.ts" },
+        { "method": "GET", "path": "/agent-runs/:id", "route_file": "app/orchestrator/src/routes/agent_runs.ts" },
         { "method": "POST", "path": "/voice/commands", "route_file": "app/orchestrator/src/routes/events.ts" }
       ],
       "code": ["app/orchestrator/src/routes/mcp_sources.ts", "app/orchestrator/src/routes/agent_runs.ts", "docs/codex-mcp-skill.md"],
       "proofs": ["bin/agent-run-cli-smoke", "bin/postgres-mcp-dogfood-smoke"]
+    },
+    {
+      "id": "agent_focus_binding",
+      "title": "Agent Focus Binding",
+      "status": "dogfood",
+      "summary": "Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows.",
+      "http": [
+        { "method": "POST", "path": "/agents/codex/auto-bind", "route_file": "app/orchestrator/src/routes/agents.ts" },
+        { "method": "POST", "path": "/agents/codex/resolve-foreground", "route_file": "app/orchestrator/src/routes/agents.ts" },
+        { "method": "GET", "path": "/agents/codex/inspect/:id", "route_file": "app/orchestrator/src/routes/agents.ts" },
+        { "method": "GET", "path": "/agents/claude/inspect/:id", "route_file": "app/orchestrator/src/routes/agents.ts" }
+      ],
+      "code": [
+        "app/orchestrator/src/routes/agents.ts",
+        "app/orchestrator/src/agents/codex/auto_bind.ts",
+        "app/orchestrator/src/agents/codex/foreground_resolver.ts",
+        "app/orchestrator/src/agents/codex/session_inspector.ts",
+        "app/orchestrator/src/agents/claude/session_inspector.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/test/auto_bind_integration.test.ts",
+        "app/orchestrator/test/resolve_foreground_route.test.ts",
+        "app/orchestrator/src/agents/codex/auto_bind.test.ts",
+        "app/orchestrator/src/agents/codex/foreground_resolver.test.ts",
+        "app/orchestrator/src/agents/codex/session_inspector.test.ts",
+        "app/orchestrator/src/agents/claude/session_inspector.test.ts"
+      ]
+    },
+    {
+      "id": "paper_triggers",
+      "title": "Paper Triggers",
+      "status": "dogfood",
+      "summary": "Let tasks declare event-matching rules that can create routed papers from future agent/source events.",
+      "http": [
+        { "method": "GET", "path": "/triggers", "route_file": "app/orchestrator/src/routes/triggers.ts" },
+        { "method": "POST", "path": "/triggers", "route_file": "app/orchestrator/src/routes/triggers.ts" },
+        { "method": "GET", "path": "/triggers/:id", "route_file": "app/orchestrator/src/routes/triggers.ts" },
+        { "method": "PATCH", "path": "/triggers/:id", "route_file": "app/orchestrator/src/routes/triggers.ts" },
+        { "method": "DELETE", "path": "/triggers/:id", "route_file": "app/orchestrator/src/routes/triggers.ts" }
+      ],
+      "code": [
+        "app/orchestrator/src/routes/triggers.ts",
+        "app/orchestrator/src/triggers/evaluator.ts",
+        "app/orchestrator/src/routes/events.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/test/triggers_route.test.ts",
+        "app/orchestrator/src/triggers/evaluator.test.ts",
+        "app/orchestrator/test/db_migrations.test.ts"
+      ]
     },
     {
       "id": "mac_app_hotkeys",

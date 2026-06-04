@@ -10,6 +10,10 @@
   },
   "tags": [
     {
+      "name": "agent_focus_binding",
+      "description": "Agent Focus Binding: Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows."
+    },
+    {
       "name": "agent_source_hooks",
       "description": "Agent And Source Hooks: Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions."
     },
@@ -42,12 +46,24 @@
       "description": "Observability And Proof Harnesses: Health, metrics, activity, proof runners, latency checks, and machine-readable manifests."
     },
     {
+      "name": "paper_triggers",
+      "description": "Paper Triggers: Let tasks declare event-matching rules that can create routed papers from future agent/source events."
+    },
+    {
       "name": "queue_paper_routing",
       "description": "Queue And Paper Routing: Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency."
     },
     {
+      "name": "reading_queue",
+      "description": "Reading Queue: Promote idle unbound browser contexts into task_reading_queue papers manually or by age threshold."
+    },
+    {
       "name": "runtime_spine",
       "description": "Runtime Spine: Flat dependency record for routes, timers, stores, workspace, sessions, observability, and source polling."
+    },
+    {
+      "name": "task_intake_onboarding",
+      "description": "Task Intake Onboarding: Scan existing browser/window context into proposed tasks, then approve or reject onboarding workbenches."
     },
     {
       "name": "task_session_control",
@@ -145,6 +161,231 @@
         "x-eventloopos-primitive": "agent_source_hooks",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/agent_runs.ts",
         "x-eventloopos-status": "mixed"
+      }
+    },
+    "/agent-runs/{id}": {
+      "get": {
+        "description": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+        "operationId": "agent_source_hooks_get_agent_runs_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent And Source Hooks GET /agent-runs/:id",
+        "tags": [
+          "agent_source_hooks"
+        ],
+        "x-eventloopos-primitive": "agent_source_hooks",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/agent_runs.ts",
+        "x-eventloopos-status": "mixed"
+      }
+    },
+    "/agents/claude/inspect/{id}": {
+      "get": {
+        "description": "Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows.",
+        "operationId": "agent_focus_binding_get_agents_claude_inspect_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent Focus Binding GET /agents/claude/inspect/:id",
+        "tags": [
+          "agent_focus_binding"
+        ],
+        "x-eventloopos-primitive": "agent_focus_binding",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/agents.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/agents/codex/auto-bind": {
+      "post": {
+        "description": "Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows.",
+        "operationId": "agent_focus_binding_post_agents_codex_auto_bind",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent Focus Binding POST /agents/codex/auto-bind",
+        "tags": [
+          "agent_focus_binding"
+        ],
+        "x-eventloopos-primitive": "agent_focus_binding",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/agents.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/agents/codex/inspect/{id}": {
+      "get": {
+        "description": "Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows.",
+        "operationId": "agent_focus_binding_get_agents_codex_inspect_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent Focus Binding GET /agents/codex/inspect/:id",
+        "tags": [
+          "agent_focus_binding"
+        ],
+        "x-eventloopos-primitive": "agent_focus_binding",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/agents.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/agents/codex/resolve-foreground": {
+      "post": {
+        "description": "Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows.",
+        "operationId": "agent_focus_binding_post_agents_codex_resolve_foreground",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent Focus Binding POST /agents/codex/resolve-foreground",
+        "tags": [
+          "agent_focus_binding"
+        ],
+        "x-eventloopos-primitive": "agent_focus_binding",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/agents.ts",
+        "x-eventloopos-status": "dogfood"
       }
     },
     "/contexts": {
@@ -317,6 +558,251 @@
         "x-eventloopos-status": "dogfood"
       }
     },
+    "/contexts/restore-requests/next": {
+      "get": {
+        "description": "Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
+        "operationId": "context_capture_restore_get_contexts_restore_requests_next",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Context Capture And Restore GET /contexts/restore-requests/next",
+        "tags": [
+          "context_capture_restore"
+        ],
+        "x-eventloopos-primitive": "context_capture_restore",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/context_restore.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/contexts/restore-requests/{id}": {
+      "get": {
+        "description": "Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
+        "operationId": "context_capture_restore_get_contexts_restore_requests_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Context Capture And Restore GET /contexts/restore-requests/:id",
+        "tags": [
+          "context_capture_restore"
+        ],
+        "x-eventloopos-primitive": "context_capture_restore",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/context_restore.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/contexts/restore-requests/{id}/done": {
+      "post": {
+        "description": "Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
+        "operationId": "context_capture_restore_post_contexts_restore_requests_by_id_done",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Context Capture And Restore POST /contexts/restore-requests/:id/done",
+        "tags": [
+          "context_capture_restore"
+        ],
+        "x-eventloopos-primitive": "context_capture_restore",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/context_restore.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/contexts/restore-requests/{id}/failed": {
+      "post": {
+        "description": "Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
+        "operationId": "context_capture_restore_post_contexts_restore_requests_by_id_failed",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Context Capture And Restore POST /contexts/restore-requests/:id/failed",
+        "tags": [
+          "context_capture_restore"
+        ],
+        "x-eventloopos-primitive": "context_capture_restore",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/context_restore.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/contexts/restore-requests/{id}/retry": {
+      "post": {
+        "description": "Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
+        "operationId": "context_capture_restore_post_contexts_restore_requests_by_id_retry",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Context Capture And Restore POST /contexts/restore-requests/:id/retry",
+        "tags": [
+          "context_capture_restore"
+        ],
+        "x-eventloopos-primitive": "context_capture_restore",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/context_restore.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
     "/events": {
       "post": {
         "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
@@ -354,6 +840,51 @@
           }
         },
         "summary": "Queue And Paper Routing POST /events",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/events.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/events/{id}": {
+      "get": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_get_events_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing GET /events/:id",
         "tags": [
           "queue_paper_routing"
         ],
@@ -602,6 +1133,261 @@
         "x-eventloopos-status": "mixed"
       }
     },
+    "/mcp-sources/poll-all-and-route": {
+      "post": {
+        "description": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+        "operationId": "agent_source_hooks_post_mcp_sources_poll_all_and_route",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent And Source Hooks POST /mcp-sources/poll-all-and-route",
+        "tags": [
+          "agent_source_hooks"
+        ],
+        "x-eventloopos-primitive": "agent_source_hooks",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
+        "x-eventloopos-status": "mixed"
+      }
+    },
+    "/mcp-sources/{id}": {
+      "get": {
+        "description": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+        "operationId": "agent_source_hooks_get_mcp_sources_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent And Source Hooks GET /mcp-sources/:id",
+        "tags": [
+          "agent_source_hooks"
+        ],
+        "x-eventloopos-primitive": "agent_source_hooks",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
+        "x-eventloopos-status": "mixed"
+      }
+    },
+    "/mcp-sources/{id}/poll": {
+      "post": {
+        "description": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+        "operationId": "agent_source_hooks_post_mcp_sources_by_id_poll",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent And Source Hooks POST /mcp-sources/:id/poll",
+        "tags": [
+          "agent_source_hooks"
+        ],
+        "x-eventloopos-primitive": "agent_source_hooks",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
+        "x-eventloopos-status": "mixed"
+      }
+    },
+    "/mcp-sources/{id}/poll-and-route": {
+      "post": {
+        "description": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+        "operationId": "agent_source_hooks_post_mcp_sources_by_id_poll_and_route",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent And Source Hooks POST /mcp-sources/:id/poll-and-route",
+        "tags": [
+          "agent_source_hooks"
+        ],
+        "x-eventloopos-primitive": "agent_source_hooks",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
+        "x-eventloopos-status": "mixed"
+      }
+    },
+    "/mcp-sources/{id}/preview": {
+      "post": {
+        "description": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+        "operationId": "agent_source_hooks_post_mcp_sources_by_id_preview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent And Source Hooks POST /mcp-sources/:id/preview",
+        "tags": [
+          "agent_source_hooks"
+        ],
+        "x-eventloopos-primitive": "agent_source_hooks",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
+        "x-eventloopos-status": "mixed"
+      }
+    },
     "/mcp/poll": {
       "post": {
         "description": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
@@ -760,6 +1546,176 @@
         "x-eventloopos-status": "stable_enough"
       }
     },
+    "/onboarding/approvals": {
+      "post": {
+        "description": "Scan existing browser/window context into proposed tasks, then approve or reject onboarding workbenches.",
+        "operationId": "task_intake_onboarding_post_onboarding_approvals",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Intake Onboarding POST /onboarding/approvals",
+        "tags": [
+          "task_intake_onboarding"
+        ],
+        "x-eventloopos-primitive": "task_intake_onboarding",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/onboarding.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/onboarding/approvals/batch": {
+      "post": {
+        "description": "Scan existing browser/window context into proposed tasks, then approve or reject onboarding workbenches.",
+        "operationId": "task_intake_onboarding_post_onboarding_approvals_batch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Intake Onboarding POST /onboarding/approvals/batch",
+        "tags": [
+          "task_intake_onboarding"
+        ],
+        "x-eventloopos-primitive": "task_intake_onboarding",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/onboarding.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/onboarding/rejections": {
+      "post": {
+        "description": "Scan existing browser/window context into proposed tasks, then approve or reject onboarding workbenches.",
+        "operationId": "task_intake_onboarding_post_onboarding_rejections",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Intake Onboarding POST /onboarding/rejections",
+        "tags": [
+          "task_intake_onboarding"
+        ],
+        "x-eventloopos-primitive": "task_intake_onboarding",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/onboarding.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/onboarding/scan": {
+      "get": {
+        "description": "Scan existing browser/window context into proposed tasks, then approve or reject onboarding workbenches.",
+        "operationId": "task_intake_onboarding_get_onboarding_scan",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Intake Onboarding GET /onboarding/scan",
+        "tags": [
+          "task_intake_onboarding"
+        ],
+        "x-eventloopos-primitive": "task_intake_onboarding",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/onboarding.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
     "/queue": {
       "get": {
         "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
@@ -832,6 +1788,41 @@
           }
         },
         "summary": "Queue And Paper Routing POST /queue/lease-next",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/queue/next": {
+      "get": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_get_queue_next",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing GET /queue/next",
         "tags": [
           "queue_paper_routing"
         ],
@@ -1005,6 +1996,161 @@
         "x-eventloopos-status": "stable_enough"
       }
     },
+    "/queue/{id}/ignore": {
+      "post": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_post_queue_by_id_ignore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing POST /queue/:id/ignore",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/queue/{id}/lease/renew": {
+      "post": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_post_queue_by_id_lease_renew",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing POST /queue/:id/lease/renew",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/queue/{id}/lineage": {
+      "get": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_get_queue_by_id_lineage",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing GET /queue/:id/lineage",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
     "/queue/{id}/priority": {
       "post": {
         "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
@@ -1060,6 +2206,176 @@
         "x-eventloopos-status": "stable_enough"
       }
     },
+    "/reading-queue": {
+      "get": {
+        "description": "Promote idle unbound browser contexts into task_reading_queue papers manually or by age threshold.",
+        "operationId": "reading_queue_get_reading_queue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Reading Queue GET /reading-queue",
+        "tags": [
+          "reading_queue"
+        ],
+        "x-eventloopos-primitive": "reading_queue",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/reading_queue.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/reading-queue/auto-promote": {
+      "post": {
+        "description": "Promote idle unbound browser contexts into task_reading_queue papers manually or by age threshold.",
+        "operationId": "reading_queue_post_reading_queue_auto_promote",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Reading Queue POST /reading-queue/auto-promote",
+        "tags": [
+          "reading_queue"
+        ],
+        "x-eventloopos-primitive": "reading_queue",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/reading_queue.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/reading-queue/promote": {
+      "post": {
+        "description": "Promote idle unbound browser contexts into task_reading_queue papers manually or by age threshold.",
+        "operationId": "reading_queue_post_reading_queue_promote",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Reading Queue POST /reading-queue/promote",
+        "tags": [
+          "reading_queue"
+        ],
+        "x-eventloopos-primitive": "reading_queue",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/reading_queue.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/review-packets/{id}": {
+      "get": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_get_review_packets_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing GET /review-packets/:id",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/events.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
     "/task-messages": {
       "get": {
         "description": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
@@ -1087,6 +2403,51 @@
           }
         },
         "summary": "Task Session Control GET /task-messages",
+        "tags": [
+          "task_session_control"
+        ],
+        "x-eventloopos-primitive": "task_session_control",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/task_sessions.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/task-messages/reconcile-attempted": {
+      "post": {
+        "description": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
+        "operationId": "task_session_control_post_task_messages_reconcile_attempted",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Session Control POST /task-messages/reconcile-attempted",
         "tags": [
           "task_session_control"
         ],
@@ -1173,6 +2534,51 @@
         "x-eventloopos-status": "dogfood"
       }
     },
+    "/task-sessions/{id}": {
+      "get": {
+        "description": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
+        "operationId": "task_session_control_get_task_sessions_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Session Control GET /task-sessions/:id",
+        "tags": [
+          "task_session_control"
+        ],
+        "x-eventloopos-primitive": "task_session_control",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/task_sessions.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
     "/task-sessions/{id}/followup": {
       "post": {
         "description": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
@@ -1220,6 +2626,61 @@
           }
         },
         "summary": "Task Session Control POST /task-sessions/:id/followup",
+        "tags": [
+          "task_session_control"
+        ],
+        "x-eventloopos-primitive": "task_session_control",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/task_sessions.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/task-sessions/{id}/replacement": {
+      "post": {
+        "description": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
+        "operationId": "task_session_control_post_task_sessions_by_id_replacement",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Session Control POST /task-sessions/:id/replacement",
         "tags": [
           "task_session_control"
         ],
@@ -1679,6 +3140,225 @@
         "x-eventloopos-primitive": "task_workspace_memory",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/tasks.ts",
         "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/triggers": {
+      "get": {
+        "description": "Let tasks declare event-matching rules that can create routed papers from future agent/source events.",
+        "operationId": "paper_triggers_get_triggers",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Paper Triggers GET /triggers",
+        "tags": [
+          "paper_triggers"
+        ],
+        "x-eventloopos-primitive": "paper_triggers",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/triggers.ts",
+        "x-eventloopos-status": "dogfood"
+      },
+      "post": {
+        "description": "Let tasks declare event-matching rules that can create routed papers from future agent/source events.",
+        "operationId": "paper_triggers_post_triggers",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Paper Triggers POST /triggers",
+        "tags": [
+          "paper_triggers"
+        ],
+        "x-eventloopos-primitive": "paper_triggers",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/triggers.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/triggers/{id}": {
+      "delete": {
+        "description": "Let tasks declare event-matching rules that can create routed papers from future agent/source events.",
+        "operationId": "paper_triggers_delete_triggers_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Paper Triggers DELETE /triggers/:id",
+        "tags": [
+          "paper_triggers"
+        ],
+        "x-eventloopos-primitive": "paper_triggers",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/triggers.ts",
+        "x-eventloopos-status": "dogfood"
+      },
+      "get": {
+        "description": "Let tasks declare event-matching rules that can create routed papers from future agent/source events.",
+        "operationId": "paper_triggers_get_triggers_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Paper Triggers GET /triggers/:id",
+        "tags": [
+          "paper_triggers"
+        ],
+        "x-eventloopos-primitive": "paper_triggers",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/triggers.ts",
+        "x-eventloopos-status": "dogfood"
+      },
+      "patch": {
+        "description": "Let tasks declare event-matching rules that can create routed papers from future agent/source events.",
+        "operationId": "paper_triggers_patch_triggers_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Paper Triggers PATCH /triggers/:id",
+        "tags": [
+          "paper_triggers"
+        ],
+        "x-eventloopos-primitive": "paper_triggers",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/triggers.ts",
+        "x-eventloopos-status": "dogfood"
       }
     },
     "/voice/commands": {
@@ -2343,7 +4023,7 @@
   "x-eventloopos-catalog": {
     "schema_version": 1,
     "generated_at": "manual",
-    "primitive_count": 14,
+    "primitive_count": 18,
     "source": "docs/primitives.catalog.json"
   }
 }

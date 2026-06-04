@@ -65,6 +65,7 @@ function auditCatalog(catalog, repoRoot, errors) {
   for (const [index, primitive] of catalog.primitives.entries()) {
     auditPrimitive(primitive, index, repoRoot, allowedStatuses, schemaNames, ids, errors);
   }
+  auditObservedRouteCoverage(catalog, repoRoot, errors);
 }
 
 function auditSharedContractSchemaExports(repoRoot, schemaNames, errors) {
@@ -162,7 +163,7 @@ function auditHttpRoute(route, prefix, repoRoot, schemaNames, errors) {
     errors.push(`${prefix}.method not found in ${routeFile}: ${method}`);
   }
   const staticNeedle = firstStaticPathNeedle(routePath);
-  if (staticNeedle && !source.includes(staticNeedle)) {
+  if (staticNeedle && !routeSourceHasPathNeedle(source, staticNeedle)) {
     errors.push(`${prefix}.path not found in ${routeFile}: ${routePath}`);
   }
   auditSchemaRef(route.request_schema, `${prefix}.request_schema`, schemaNames, errors);
@@ -210,11 +211,62 @@ function auditQueryParameter(parameter, prefix, errors) {
   }
 }
 
+function auditObservedRouteCoverage(catalog, repoRoot, errors) {
+  const routeObservabilityPath = path.resolve(repoRoot, "app/orchestrator/src/http/route_observability.ts");
+  if (!fs.existsSync(routeObservabilityPath)) return;
+  const source = fs.readFileSync(routeObservabilityPath, "utf8");
+  const requiredPaths = observedRoutePaths(source);
+  if (requiredPaths.length === 0) {
+    errors.push("observed route coverage source had no route patterns");
+    return;
+  }
+
+  const catalogPaths = new Set();
+  for (const primitive of catalog.primitives) {
+    if (!isRecord(primitive) || !Array.isArray(primitive.http)) continue;
+    for (const route of primitive.http) {
+      if (!isRecord(route)) continue;
+      const routePath = readNonEmptyString(route.path);
+      if (routePath) catalogPaths.add(routePath);
+    }
+  }
+
+  for (const routePath of requiredPaths) {
+    if (!catalogPaths.has(routePath)) {
+      errors.push(`observed route missing from primitive catalog: ${routePath}`);
+    }
+  }
+}
+
+function observedRoutePaths(source) {
+  const paths = new Set();
+  for (const line of source.split(/\r?\n/)) {
+    const match = line.match(/\[\/\^(.+?)\$\/,\s*"[^"]+"\]/);
+    if (!match) continue;
+    const routePath = observedRegexPatternToCatalogPath(match[1]);
+    if (routePath) paths.add(routePath);
+  }
+  return Array.from(paths).sort();
+}
+
+function observedRegexPatternToCatalogPath(pattern) {
+  if (!pattern) return undefined;
+  return pattern
+    .replace(/\\\//g, "/")
+    .replace(/\[\^\/\]\+/g, ":id")
+    .replace(/\\\./g, ".")
+    .trim();
+}
+
 function routeSourceHasMethod(source, method) {
   return source.includes(`input.method === "${method}"`)
     || source.includes(`input.method !== "${method}"`)
     || source.includes(`request.method === "${method}"`)
     || source.includes(`request.method !== "${method}"`);
+}
+
+function routeSourceHasPathNeedle(source, staticNeedle) {
+  return source.includes(staticNeedle) || source.includes(staticNeedle.replace(/\//g, "\\/"));
 }
 
 function firstStaticPathNeedle(routePath) {
@@ -258,6 +310,7 @@ function isRecord(value) {
 function runSelfTest() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-primitives-catalog-audit-"));
   fs.mkdirSync(path.join(root, "app/orchestrator/src/routes"), { recursive: true });
+  fs.mkdirSync(path.join(root, "app/orchestrator/src/http"), { recursive: true });
   fs.mkdirSync(path.join(root, "app/shared/src"), { recursive: true });
   fs.mkdirSync(path.join(root, "bin"), { recursive: true });
   fs.writeFileSync(path.join(root, "code.ts"), "export {}\n");
@@ -280,6 +333,18 @@ function runSelfTest() {
   fs.writeFileSync(
     path.join(root, "app/orchestrator/src/routes/example.ts"),
     'if (input.method === "POST" && input.pathname === "/example") {}\n',
+  );
+  fs.writeFileSync(
+    path.join(root, "app/orchestrator/src/http/route_observability.ts"),
+    [
+      "export function routeNameForPath() {",
+      "  const entries = [",
+      '    [/^\\/example$/, "example"],',
+      "  ];",
+      "  return entries;",
+      "}",
+      "",
+    ].join("\n"),
   );
 
   const good = {
@@ -334,6 +399,25 @@ function runSelfTest() {
   auditCatalog(badSchema, root, badSchemaErrors);
   if (!badSchemaErrors.some((error) => error.includes("MissingRequest"))) {
     throw new Error(`bad schema fixture did not fail as expected: ${badSchemaErrors.join("; ")}`);
+  }
+
+  fs.writeFileSync(
+    path.join(root, "app/orchestrator/src/http/route_observability.ts"),
+    [
+      "export function routeNameForPath() {",
+      "  const entries = [",
+      '    [/^\\/example$/, "example"],',
+      '    [/^\\/example\\/[^/]+\\/extra$/, "example_extra"],',
+      "  ];",
+      "  return entries;",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  const badRouteCoverageErrors = [];
+  auditCatalog(good, root, badRouteCoverageErrors);
+  if (!badRouteCoverageErrors.some((error) => error.includes("/example/:id/extra"))) {
+    throw new Error(`bad route coverage fixture did not fail as expected: ${badRouteCoverageErrors.join("; ")}`);
   }
 
   fs.rmSync(root, { recursive: true, force: true });
