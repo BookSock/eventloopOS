@@ -57,6 +57,14 @@ export type WorkspaceSnapshot = {
   windows: AerospaceWindow[];
   activeWorkspace?: string;
   focusedWindowId?: number;
+  frameCapture?: WorkspaceFrameCaptureStatus;
+};
+
+export type WorkspaceFrameCaptureStatus = {
+  status: "captured" | "failed" | "skipped";
+  timeoutMs: number;
+  observed: number;
+  error?: string;
 };
 
 export type RestorePlan = {
@@ -78,7 +86,14 @@ export type RestoreSkip = {
 export class AerospaceWorkspaceAdapter {
   readonly backend = "aerospace" as const;
 
-  constructor(private readonly exec: ExecFunction) {}
+  private readonly frameCaptureTimeoutMs: number;
+
+  constructor(
+    private readonly exec: ExecFunction,
+    options: { frameCaptureTimeoutMs?: number } = {},
+  ) {
+    this.frameCaptureTimeoutMs = options.frameCaptureTimeoutMs ?? readFrameCaptureTimeoutMs();
+  }
 
   async capabilityStatus(): Promise<WorkspaceCapabilityStatus> {
     try {
@@ -96,16 +111,23 @@ export class AerospaceWorkspaceAdapter {
   }
 
   async capture(): Promise<WorkspaceSnapshot> {
-    const result = await this.exec("aerospace", captureWorkspacePlan().args);
-    const activeWorkspace = await this.captureFocusedWorkspace().catch(() => undefined);
-    const focusedWindowId = await this.captureFocusedWindowId().catch(() => undefined);
-    const frames = await this.captureWindowFrames().catch(() => []);
+    const resultPromise = this.exec("aerospace", captureWorkspacePlan().args);
+    const activeWorkspacePromise = this.captureFocusedWorkspace().catch(() => undefined);
+    const focusedWindowIdPromise = this.captureFocusedWindowId().catch(() => undefined);
+    const [result, activeWorkspace, focusedWindowId] = await Promise.all([
+      resultPromise,
+      activeWorkspacePromise,
+      focusedWindowIdPromise,
+    ]);
+    const windows = parseAerospaceWindows(result.stdout);
+    const frameCapture = await this.captureWindowFrames(windows);
 
     return {
       backend: this.backend,
-      windows: attachWindowFrames(parseAerospaceWindows(result.stdout), frames),
+      windows: attachWindowFrames(windows, frameCapture.observations),
       activeWorkspace,
       focusedWindowId,
+      frameCapture: frameCapture.status,
     };
   }
 
@@ -135,9 +157,37 @@ export class AerospaceWorkspaceAdapter {
     return focused?.id;
   }
 
-  private async captureWindowFrames(): Promise<MacOSWindowFrameObservation[]> {
-    const result = await this.exec("osascript", ["-e", captureWindowFramesAppleScript()], { timeoutMs: 15_000 });
-    return parseWindowFrameObservations(result.stdout);
+  private async captureWindowFrames(windows: AerospaceWindow[]): Promise<{
+    observations: MacOSWindowFrameObservation[];
+    status: WorkspaceFrameCaptureStatus;
+  }> {
+    const candidates = windows.filter(hasWindowIdentityForFrameRestore);
+    if (candidates.length === 0) {
+      return {
+        observations: [],
+        status: { status: "skipped", timeoutMs: this.frameCaptureTimeoutMs, observed: 0 },
+      };
+    }
+    try {
+      const result = await this.exec("osascript", ["-e", captureWindowFramesAppleScript(candidates)], {
+        timeoutMs: this.frameCaptureTimeoutMs,
+      });
+      const observations = parseWindowFrameObservations(result.stdout);
+      return {
+        observations,
+        status: { status: "captured", timeoutMs: this.frameCaptureTimeoutMs, observed: observations.length },
+      };
+    } catch (error) {
+      return {
+        observations: [],
+        status: {
+          status: "failed",
+          timeoutMs: this.frameCaptureTimeoutMs,
+          observed: 0,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
   }
 }
 
@@ -514,7 +564,18 @@ function assertSafeAerospaceCommand(command: AerospaceCommand): void {
   throw new Error(`unsafe aerospace args: ${command.args.join(" ")}`);
 }
 
-function captureWindowFramesAppleScript(): string {
+function captureWindowFramesAppleScript(windows: AerospaceWindow[]): string {
+  const bundleIds = uniqueStrings(windows.map((window) => window.appBundleId).filter((value): value is string => Boolean(value)));
+  const appNames = uniqueStrings(
+    windows
+      .filter((window) => !window.appBundleId)
+      .map((window) => window.app)
+      .filter((value) => value.length > 0),
+  );
+  const titles = uniqueStrings(windows.map((window) => window.title).filter((value) => value.length > 0));
+  const processCondition = appleScriptOrCondition("bundleId", bundleIds, "appName", appNames);
+  const titleCondition = appleScriptOrCondition("windowName", titles);
+
   return `
 set outputRows to {}
 tell application "System Events"
@@ -522,16 +583,18 @@ tell application "System Events"
     try
       set appName to name of candidateProcess as text
       set bundleId to bundle identifier of candidateProcess as text
-      repeat with candidateWindow in windows of candidateProcess
-        try
-          set windowName to name of candidateWindow as text
-          if windowName is not "" then
-            set windowPosition to position of candidateWindow
-            set windowSize to size of candidateWindow
-            set end of outputRows to appName & tab & bundleId & tab & windowName & tab & (item 1 of windowPosition as text) & tab & (item 2 of windowPosition as text) & tab & (item 1 of windowSize as text) & tab & (item 2 of windowSize as text)
-          end if
-        end try
-      end repeat
+      if ${processCondition} then
+        repeat with candidateWindow in windows of candidateProcess
+          try
+            set windowName to name of candidateWindow as text
+            if windowName is not "" and ${titleCondition} then
+              set windowPosition to position of candidateWindow
+              set windowSize to size of candidateWindow
+              set end of outputRows to appName & tab & bundleId & tab & windowName & tab & (item 1 of windowPosition as text) & tab & (item 2 of windowPosition as text) & tab & (item 1 of windowSize as text) & tab & (item 2 of windowSize as text)
+            end if
+          end try
+        end repeat
+      end if
     end try
   end repeat
 end tell
@@ -572,6 +635,27 @@ return "not_found"
 
 function appleScriptString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function appleScriptOrCondition(primaryVariable: string, primaryValues: string[], secondaryVariable?: string, secondaryValues: string[] = []): string {
+  const secondaryName = secondaryVariable ?? primaryVariable;
+  const terms = [
+    ...primaryValues.map((value) => `${primaryVariable} is ${appleScriptString(value)}`),
+    ...secondaryValues.map((value) => `${secondaryName} is ${appleScriptString(value)}`),
+  ];
+  return terms.length > 0 ? terms.join(" or ") : "true";
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function readFrameCaptureTimeoutMs(): number {
+  const raw = process.env.EVENTLOOPOS_FRAME_CAPTURE_TIMEOUT_MS;
+  if (!raw) return 2_500;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 15_000) return 2_500;
+  return parsed;
 }
 
 function hasWindowIdentityForFrameRestore(window: AerospaceWindow): boolean {

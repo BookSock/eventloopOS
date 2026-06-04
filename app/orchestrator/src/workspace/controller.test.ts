@@ -42,6 +42,7 @@ describe("workspace controller", () => {
       backend: "aerospace",
       activeWorkspace: "eventloop-blog",
       focusedWindowId: 9,
+      frameCapture: { status: "captured", timeoutMs: 2_500, observed: 0 },
       windows: [
         {
           id: 9,

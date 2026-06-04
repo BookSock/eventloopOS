@@ -113,7 +113,7 @@ describe("Aerospace workspace adapter", () => {
     assert.equal(windows[1]?.frame, undefined);
   });
 
-  it("uses a longer timeout for System Events frame capture", async () => {
+  it("uses a bounded timeout for System Events frame capture", async () => {
     const calls: Array<{ command: string; timeoutMs?: number }> = [];
     const adapter = new AerospaceWorkspaceAdapter(async (command, args, options) => {
       calls.push({ command, timeoutMs: options?.timeoutMs });
@@ -138,12 +138,13 @@ describe("Aerospace workspace adapter", () => {
         };
       }
       return { stdout: "TextEdit\tcom.apple.TextEdit\tShared Note\t10\t20\t500\t300\n" };
-    });
+    }, { frameCaptureTimeoutMs: 1_234 });
 
     const snapshot = await adapter.capture();
 
     assert.deepEqual(snapshot.windows[0]?.frame, { x: 10, y: 20, width: 500, height: 300 });
-    assert.equal(calls.find((call) => call.command === "osascript")?.timeoutMs, 15_000);
+    assert.equal(calls.find((call) => call.command === "osascript")?.timeoutMs, 1_234);
+    assert.deepEqual(snapshot.frameCapture, { status: "captured", timeoutMs: 1_234, observed: 1 });
   });
 
   it("reports missing aerospace binary from injected exec", async () => {
@@ -231,6 +232,7 @@ describe("Aerospace workspace adapter", () => {
     ]);
     assert.equal(snapshot.activeWorkspace, "dev");
     assert.equal(snapshot.focusedWindowId, 3);
+    assert.deepEqual(snapshot.frameCapture, { status: "captured", timeoutMs: 2_500, observed: 1 });
     assert.deepEqual(snapshot.windows, [
       {
         id: 3,
