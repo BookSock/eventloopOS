@@ -157,6 +157,8 @@ public final class QueueViewModel: ObservableObject {
     private var autoRestoredContextPacketIds = Set<String>()
     private var paperActionInFlight = false
     private var workspaceRestoreInFlight = false
+    private var lastWorkspaceRestore: RecentWorkspaceRestore?
+    private let workspaceRestoreRepeatWindow: TimeInterval = 2.0
 
     public init(
         client: any QueueClient,
@@ -1660,6 +1662,14 @@ public final class QueueViewModel: ObservableObject {
             return
         }
 
+        if let recent = lastWorkspaceRestore,
+           recent.idempotencyPrefix == idempotencyPrefix,
+           recent.snapshot == snapshot,
+           Date().timeIntervalSince(recent.completedAt) < workspaceRestoreRepeatWindow {
+            workspaceRestoreState = .executed(recent.receipt)
+            return
+        }
+
         workspaceRestoreInFlight = true
         workspaceRestoreState = .restoring
         defer {
@@ -1673,6 +1683,12 @@ public final class QueueViewModel: ObservableObject {
                 idempotencyKey: "\(idempotencyPrefix)_\(UUID().uuidString)"
             )
             workspaceRestoreState = .executed(response.receipt)
+            lastWorkspaceRestore = RecentWorkspaceRestore(
+                idempotencyPrefix: idempotencyPrefix,
+                snapshot: snapshot,
+                completedAt: Date(),
+                receipt: response.receipt
+            )
         } catch {
             workspaceRestoreState = .failed(error.localizedDescription)
         }
@@ -1816,4 +1832,11 @@ public final class QueueViewModel: ObservableObject {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed?.isEmpty == false ? trimmed : nil
     }
+}
+
+private struct RecentWorkspaceRestore {
+    let idempotencyPrefix: String
+    let snapshot: WorkspaceSnapshot
+    let completedAt: Date
+    let receipt: WorkspaceRestoreReceipt
 }
