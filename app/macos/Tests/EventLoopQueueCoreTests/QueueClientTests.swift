@@ -169,7 +169,12 @@ final class QueueClientTests: XCTestCase {
               "status": "idle",
               "name": "Blog feedback",
               "preview": "Draft thread",
-              "cwd": "/repo"
+              "cwd": "/repo",
+              "pid": 410,
+              "agent_pid": 411,
+              "terminal_pid": 409,
+              "root_pid": 400,
+              "pids": [400, 409, 410, 411]
             }
           ],
           "count": 1
@@ -182,6 +187,11 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.sessions.first?.taskId, "task_blog_feedback")
         XCTAssertEqual(envelope.sessions.first?.provider, "codex")
         XCTAssertEqual(envelope.sessions.first?.preview, "Draft thread")
+        XCTAssertEqual(envelope.sessions.first?.pid, 410)
+        XCTAssertEqual(envelope.sessions.first?.agentPid, 411)
+        XCTAssertEqual(envelope.sessions.first?.terminalPid, 409)
+        XCTAssertEqual(envelope.sessions.first?.rootPid, 400)
+        XCTAssertEqual(envelope.sessions.first?.pids, [400, 409, 410, 411])
     }
 
     func testTaskBindingEnvelopeDecodesBinding() throws {

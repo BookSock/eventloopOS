@@ -17,6 +17,11 @@ public struct TaskSession: Codable, Equatable, Identifiable, Sendable {
     public let preview: String?
     public let cwd: String?
     public let terminalRef: String?
+    public let pid: Int?
+    public let agentPid: Int?
+    public let terminalPid: Int?
+    public let rootPid: Int?
+    public let pids: [Int]?
 
     public init(
         id: String,
@@ -26,7 +31,12 @@ public struct TaskSession: Codable, Equatable, Identifiable, Sendable {
         name: String? = nil,
         preview: String? = nil,
         cwd: String? = nil,
-        terminalRef: String? = nil
+        terminalRef: String? = nil,
+        pid: Int? = nil,
+        agentPid: Int? = nil,
+        terminalPid: Int? = nil,
+        rootPid: Int? = nil,
+        pids: [Int]? = nil
     ) {
         self.id = id
         self.taskId = taskId
@@ -36,6 +46,11 @@ public struct TaskSession: Codable, Equatable, Identifiable, Sendable {
         self.preview = preview
         self.cwd = cwd
         self.terminalRef = terminalRef
+        self.pid = pid
+        self.agentPid = agentPid
+        self.terminalPid = terminalPid
+        self.rootPid = rootPid
+        self.pids = pids
     }
 
     enum CodingKeys: String, CodingKey {
@@ -47,6 +62,11 @@ public struct TaskSession: Codable, Equatable, Identifiable, Sendable {
         case preview
         case cwd
         case terminalRef = "terminal_ref"
+        case pid
+        case agentPid = "agent_pid"
+        case terminalPid = "terminal_pid"
+        case rootPid = "root_pid"
+        case pids
     }
 }
 

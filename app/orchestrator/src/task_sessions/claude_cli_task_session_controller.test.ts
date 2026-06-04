@@ -22,6 +22,7 @@ describe("ClaudeCliTaskSessionController", () => {
           pid: 510,
           agent_pid: 511,
           terminal_pid: 509,
+          root_pid: 500,
           pids: [510, 511],
         },
       ],
@@ -50,6 +51,7 @@ describe("ClaudeCliTaskSessionController", () => {
         pid: 510,
         agent_pid: 511,
         terminal_pid: 509,
+        root_pid: 500,
         pids: [510, 511],
       },
     ]);

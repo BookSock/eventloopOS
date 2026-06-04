@@ -24,6 +24,7 @@ describe("CodexNativeThreadController", () => {
           pid: 410,
           agent_pid: 411,
           terminal_pid: 409,
+          root_pid: 400,
           pids: [410, 411],
         },
       ],
@@ -54,6 +55,7 @@ describe("CodexNativeThreadController", () => {
         pid: 410,
         agent_pid: 411,
         terminal_pid: 409,
+        root_pid: 400,
         pids: [410, 411],
       },
     ]);

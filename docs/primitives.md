@@ -170,7 +170,8 @@ Guarantees today:
 - excludes windows claimed by another task through `POST /task-window-claims`
 - infers task-window claims from any captured window tagged `[task:<slug>]`
 - infers task-window claims from process ancestry when bound task sessions
-  expose `pid`, `agent_pid`, `terminal_pid`, or `pids`
+  expose `pid`, `agent_pid`, `terminal_pid`, `root_pid`, or `pids`; macOS
+  queue clients decode these fields so demo/debug UI can inspect ancestry too
 - expands process-root task-window claims into concrete window claims when a
   background agent launch produces descendant app windows
 
