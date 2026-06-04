@@ -424,6 +424,34 @@ export class PrimitiveHttpError extends PrimitiveError {
   }
 }
 
+export type PrimitiveRequestBuildErrorKind =
+  | "invalid_method"
+  | "unknown_route"
+  | "missing_path_param"
+  | "missing_query_param"
+  | "invalid_query_param"
+  | "request_body_required"
+  | "request_body_forbidden"
+  | "request_body_invalid";
+
+export class PrimitiveRequestBuildError extends PrimitiveError {
+  readonly kind: PrimitiveRequestBuildErrorKind;
+  readonly parameter?: string;
+
+  constructor(
+    message: string,
+    details: PrimitiveErrorDetails & {
+      kind: PrimitiveRequestBuildErrorKind;
+      parameter?: string;
+    }
+  ) {
+    super(message, details);
+    this.name = "PrimitiveRequestBuildError";
+    this.kind = details.kind;
+    this.parameter = details.parameter;
+  }
+}
+
 export class PrimitiveResponseParseError extends PrimitiveError {
   readonly responseText: string;
 
@@ -456,6 +484,8 @@ export type PrimitiveErrorSummary = {
   message: string;
   method?: PrimitiveHttpMethod;
   path?: string;
+  kind?: PrimitiveRequestBuildErrorKind;
+  parameter?: string;
   status?: number;
   code?: string;
   detail?: string;
@@ -483,12 +513,17 @@ export function primitiveErrorSummary(error: unknown): PrimitiveErrorSummary {
     };
   }
   if (error instanceof PrimitiveError) {
-    return {
+    const summary: PrimitiveErrorSummary = {
       name: error.name,
       message: error.message,
       method: error.method,
       path: error.path
     };
+    if (error instanceof PrimitiveRequestBuildError) {
+      summary.kind = error.kind;
+      summary.parameter = error.parameter;
+    }
+    return summary;
   }
   if (error instanceof Error) {
     return {
@@ -528,13 +563,25 @@ export function getPrimitiveRoute(
 }
 
 export function buildPrimitiveRequest(input: PrimitiveRequestBuildInput): PrimitiveRequest {
-  const method = normalizePrimitiveMethod(input.method);
+  let method: PrimitiveHttpMethod;
+  try {
+    method = normalizePrimitiveMethod(input.method);
+  } catch (error) {
+    throw new PrimitiveRequestBuildError(`Invalid primitive HTTP method: ${String(input.method)}`, {
+      kind: "invalid_method",
+      cause: error
+    });
+  }
   const route = getPrimitiveRoute(input.catalog, method, input.path);
   if (!route) {
-    throw new Error(`Unknown primitive route: ${method} ${input.path}`);
+    throw new PrimitiveRequestBuildError(`Unknown primitive route: ${method} ${input.path}`, {
+      kind: "unknown_route",
+      method,
+      path: input.path
+    });
   }
 
-  const path = interpolatePrimitivePath(route.path, input.pathParams ?? {});
+  const path = interpolatePrimitivePath(route, input.pathParams ?? {});
   const query = encodePrimitiveQuery(route, input.query ?? {});
   const baseUrl = input.baseUrl ?? "http://127.0.0.1:4377";
   const url = new URL(path, baseUrl);
@@ -552,9 +599,25 @@ export function buildPrimitiveRequest(input: PrimitiveRequestBuildInput): Primit
   if (routeHasRequestBody(route)) {
     if (input.body === undefined) {
       if (route.request_body_required === false) return request;
-      throw new Error(`Primitive route requires request body: ${method} ${route.path}`);
+      throw new PrimitiveRequestBuildError(`Primitive route requires request body: ${method} ${route.path}`, {
+        kind: "request_body_required",
+        route,
+        method,
+        path: route.path
+      });
     }
-    const parsedBody = validatePrimitiveRequestBody(route, input.body);
+    let parsedBody: unknown;
+    try {
+      parsedBody = validatePrimitiveRequestBody(route, input.body);
+    } catch (error) {
+      throw new PrimitiveRequestBuildError(`Primitive request body failed schema validation: ${method} ${route.path}`, {
+        kind: "request_body_invalid",
+        route,
+        method,
+        path: route.path,
+        cause: error
+      });
+    }
     request.headers = {
       "content-type": "application/json",
       ...headers
@@ -564,7 +627,12 @@ export function buildPrimitiveRequest(input: PrimitiveRequestBuildInput): Primit
   }
 
   if (input.body !== undefined) {
-    throw new Error(`Primitive route does not accept request body: ${method} ${route.path}`);
+    throw new PrimitiveRequestBuildError(`Primitive route does not accept request body: ${method} ${route.path}`, {
+      kind: "request_body_forbidden",
+      route,
+      method,
+      path: route.path
+    });
   }
   return request;
 }
@@ -940,11 +1008,17 @@ function normalizePrimitiveMethod(method: PrimitiveHttpMethod | Lowercase<Primit
   return PrimitiveHttpMethodSchema.parse(method.toUpperCase());
 }
 
-function interpolatePrimitivePath(path: string, pathParams: Record<string, string | number | boolean>): string {
-  return path.replace(/:([A-Za-z0-9_]+)/g, (_match, name: string) => {
+function interpolatePrimitivePath(route: PrimitiveHttpRoute, pathParams: Record<string, string | number | boolean>): string {
+  return route.path.replace(/:([A-Za-z0-9_]+)/g, (_match, name: string) => {
     const value = pathParams[name];
     if (value === undefined) {
-      throw new Error(`Missing primitive path parameter: ${name}`);
+      throw new PrimitiveRequestBuildError(`Missing primitive path parameter: ${name}`, {
+        kind: "missing_path_param",
+        route,
+        method: route.method,
+        path: route.path,
+        parameter: name
+      });
     }
     return encodeURIComponent(String(value));
   });
@@ -957,7 +1031,13 @@ function encodePrimitiveQuery(route: PrimitiveHttpRoute, query: Record<string, s
     const value = query[parameter.name];
     if (value === undefined || value === null) {
       if (parameter.required) {
-        throw new Error(`Missing primitive query parameter: ${parameter.name}`);
+        throw new PrimitiveRequestBuildError(`Missing primitive query parameter: ${parameter.name}`, {
+          kind: "missing_query_param",
+          route,
+          method: route.method,
+          path: route.path,
+          parameter: parameter.name
+        });
       }
       continue;
     }
@@ -983,38 +1063,54 @@ function validatePrimitiveQueryValue(
 
   const enumValues = schema.enum;
   if (Array.isArray(enumValues) && !enumValues.some((enumValue) => String(enumValue) === String(value))) {
-    throw new Error(`${label} must be one of: ${enumValues.map(String).join(", ")}`);
+    throwInvalidQueryValue(route, parameter, `${label} must be one of: ${enumValues.map(String).join(", ")}`);
   }
 
   const type = typeof schema.type === "string" ? schema.type : undefined;
   if (type === "integer") {
     const parsed = typeof value === "number" ? value : Number(value);
     if (!Number.isInteger(parsed)) {
-      throw new Error(`${label} must be an integer`);
+      throwInvalidQueryValue(route, parameter, `${label} must be an integer`);
     }
-    validateNumericBounds(label, parsed, schema);
+    validateNumericBounds(route, parameter, label, parsed, schema);
     return;
   }
   if (type === "number") {
     const parsed = typeof value === "number" ? value : Number(value);
     if (!Number.isFinite(parsed)) {
-      throw new Error(`${label} must be a number`);
+      throwInvalidQueryValue(route, parameter, `${label} must be a number`);
     }
-    validateNumericBounds(label, parsed, schema);
+    validateNumericBounds(route, parameter, label, parsed, schema);
     return;
   }
   if (type === "boolean" && typeof value !== "boolean") {
-    throw new Error(`${label} must be a boolean`);
+    throwInvalidQueryValue(route, parameter, `${label} must be a boolean`);
   }
 }
 
-function validateNumericBounds(label: string, value: number, schema: Record<string, unknown>): void {
+function validateNumericBounds(
+  route: PrimitiveHttpRoute,
+  parameter: PrimitiveQueryParameter,
+  label: string,
+  value: number,
+  schema: Record<string, unknown>
+): void {
   if (typeof schema.minimum === "number" && value < schema.minimum) {
-    throw new Error(`${label} must be >= ${schema.minimum}`);
+    throwInvalidQueryValue(route, parameter, `${label} must be >= ${schema.minimum}`);
   }
   if (typeof schema.maximum === "number" && value > schema.maximum) {
-    throw new Error(`${label} must be <= ${schema.maximum}`);
+    throwInvalidQueryValue(route, parameter, `${label} must be <= ${schema.maximum}`);
   }
+}
+
+function throwInvalidQueryValue(route: PrimitiveHttpRoute, parameter: PrimitiveQueryParameter, message: string): never {
+  throw new PrimitiveRequestBuildError(message, {
+    kind: "invalid_query_param",
+    route,
+    method: route.method,
+    path: route.path,
+    parameter: parameter.name
+  });
 }
 
 function parsePrimitiveResponsePayload(request: PrimitiveRequest, text: string): unknown {

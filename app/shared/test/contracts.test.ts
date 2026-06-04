@@ -28,6 +28,7 @@ import {
   parsePrimitiveCatalog,
   primitiveErrorSummary,
   PrimitiveHttpError,
+  PrimitiveRequestBuildError,
   PrimitiveResponseParseError,
   PrimitiveResponseValidationError,
   primitiveRoutes,
@@ -387,6 +388,71 @@ describe("primitive catalog SDK boundary", () => {
       readFixture(join(fixturesDir, "valid/codex_auto_bind_response.json")).data
     );
     expect((response as { ok: boolean }).ok).toBe(true);
+  });
+
+  it("exposes typed primitive request-build failures before fetch", () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+
+    expect(() =>
+      buildPrimitiveRequest({
+        catalog,
+        method: "GET",
+        path: "/tasks/:id"
+      })
+    ).toThrow(PrimitiveRequestBuildError);
+
+    try {
+      buildPrimitiveRequest({
+        catalog,
+        method: "GET",
+        path: "/tasks/:id"
+      });
+      throw new Error("expected missing path parameter");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PrimitiveRequestBuildError);
+      const primitiveError = error as PrimitiveRequestBuildError;
+      expect(primitiveError.kind).toBe("missing_path_param");
+      expect(primitiveError.parameter).toBe("id");
+      expect(primitiveErrorSummary(error)).toMatchObject({
+        name: "PrimitiveRequestBuildError",
+        method: "GET",
+        path: "/tasks/:id",
+        kind: "missing_path_param",
+        parameter: "id"
+      });
+    }
+
+    try {
+      buildPrimitiveRequest({
+        catalog,
+        method: "GET",
+        path: "/queue/:id/lineage",
+        pathParams: { id: "qit_feedback_001" },
+        query: { limit: "many" }
+      });
+      throw new Error("expected invalid query parameter");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PrimitiveRequestBuildError);
+      const primitiveError = error as PrimitiveRequestBuildError;
+      expect(primitiveError.kind).toBe("invalid_query_param");
+      expect(primitiveError.parameter).toBe("limit");
+      expect(primitiveError.message).toMatch(/must be an integer/);
+    }
+
+    try {
+      buildPrimitiveRequest({
+        catalog,
+        method: "POST",
+        path: "/task-window-claims",
+        body: { task_id: "task_demo" }
+      });
+      throw new Error("expected invalid request body");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PrimitiveRequestBuildError);
+      const primitiveError = error as PrimitiveRequestBuildError;
+      expect(primitiveError.kind).toBe("request_body_invalid");
+      expect(primitiveError.cause).toBeTruthy();
+    }
   });
 
   it("creates a primitive HTTP client that validates successful JSON responses", async () => {

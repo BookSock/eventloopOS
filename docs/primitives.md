@@ -32,12 +32,14 @@ The catalog audit also verifies every catalog schema has a matching
 entry, and that cataloged HTTP routes cannot silently drift back to freeform
 envelopes.
 The shared primitive HTTP client validates request and response bodies and
-throws typed errors for non-2xx responses, invalid JSON, and response-schema
-mismatches so builders can recover from conflicts, dependency failures, and
-server drift without string-matching generic exceptions. HTTP errors expose
-`status`, server `code`, server detail text, route metadata, and exported guard
-helpers for branching on recoverable cases like manual-mode pauses or stale
-task-session bindings.
+throws typed errors for request-build failures, non-2xx responses, invalid JSON,
+and response-schema mismatches so builders can recover from malformed inputs,
+conflicts, dependency failures, and server drift without string-matching generic
+exceptions. Request-build errors expose a stable `kind` and affected parameter
+for unknown routes, missing path/query params, invalid query values, and invalid
+request bodies. HTTP errors expose `status`, server `code`, server detail text,
+route metadata, and exported guard helpers for branching on recoverable cases
+like manual-mode pauses or stale task-session bindings.
 It also exposes `createPrimitiveOperationsClient`, a small typed convenience
 layer for common master-command, manual-mode, task-workspace, queue,
 workspace, task-session, Codex/Claude agent, task-window-claim,
@@ -835,8 +837,9 @@ Highest-leverage steps before calling this a real primitives library:
    validating HTTP client into a published SDK, including typed convenience
    clients generated from `docs/primitives.openapi.json`.
    Current shared helpers already include request builders, a validating HTTP
-   client, typed primitive client errors, and first-pass operation-specific
-   convenience methods over master-command, manual-mode, task-workspace,
+   client, typed primitive request/HTTP/response errors, and first-pass
+   operation-specific convenience methods over master-command, manual-mode,
+   task-workspace,
    queue, workspace, task-session, Codex/Claude agent, task-window-claim,
    follows-window, reading-queue, onboarding, context-restore, and trigger
    primitives, with route-coverage tests across every cataloged HTTP
