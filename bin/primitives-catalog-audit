@@ -1,0 +1,233 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/primitives-catalog-audit [--self-test] [catalog.json]
+
+Validates docs/primitives.catalog.json references so primitive/API docs do not
+silently drift from code, route files, proof scripts, and CLI surfaces.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  process.exit(0);
+}
+
+const catalogPath = args[0] ?? "docs/primitives.catalog.json";
+const result = auditCatalogFile(catalogPath, process.cwd());
+if (!result.ok) {
+  for (const error of result.errors) console.error(error);
+  process.exit(1);
+}
+console.log(`primitives catalog audit passed: ${catalogPath} (${result.primitive_count} primitives)`);
+
+function auditCatalogFile(catalogPath, repoRoot) {
+  const fullPath = path.resolve(repoRoot, catalogPath);
+  const errors = [];
+  let catalog;
+  try {
+    catalog = JSON.parse(fs.readFileSync(fullPath, "utf8"));
+  } catch (error) {
+    return { ok: false, primitive_count: 0, errors: [`catalog parse failed: ${error.message}`] };
+  }
+  auditCatalog(catalog, repoRoot, errors);
+  return {
+    ok: errors.length === 0,
+    primitive_count: Array.isArray(catalog?.primitives) ? catalog.primitives.length : 0,
+    errors,
+  };
+}
+
+function auditCatalog(catalog, repoRoot, errors) {
+  if (!isRecord(catalog)) {
+    errors.push("catalog must be an object");
+    return;
+  }
+  if (catalog.schema_version !== 1) errors.push("schema_version must be 1");
+  if (!Array.isArray(catalog.primitives) || catalog.primitives.length === 0) {
+    errors.push("primitives must be a non-empty array");
+    return;
+  }
+
+  const allowedStatuses = new Set(Array.isArray(catalog.status_labels) ? catalog.status_labels : []);
+  const ids = new Set();
+  for (const [index, primitive] of catalog.primitives.entries()) {
+    auditPrimitive(primitive, index, repoRoot, allowedStatuses, ids, errors);
+  }
+}
+
+function auditPrimitive(primitive, index, repoRoot, allowedStatuses, ids, errors) {
+  const prefix = `primitives[${index}]`;
+  if (!isRecord(primitive)) {
+    errors.push(`${prefix} must be an object`);
+    return;
+  }
+
+  const id = readNonEmptyString(primitive.id);
+  if (!id) errors.push(`${prefix}.id is required`);
+  if (id && ids.has(id)) errors.push(`${prefix}.id duplicate: ${id}`);
+  if (id) ids.add(id);
+
+  if (!readNonEmptyString(primitive.title)) errors.push(`${prefix}.title is required`);
+  if (!readNonEmptyString(primitive.summary)) errors.push(`${prefix}.summary is required`);
+  const status = readNonEmptyString(primitive.status);
+  if (!status) errors.push(`${prefix}.status is required`);
+  if (status && allowedStatuses.size > 0 && !allowedStatuses.has(status)) {
+    errors.push(`${prefix}.status unknown: ${status}`);
+  }
+
+  const code = arrayOfStrings(primitive.code, `${prefix}.code`, errors);
+  const proofs = arrayOfStrings(primitive.proofs, `${prefix}.proofs`, errors);
+  if (code.length === 0) errors.push(`${prefix}.code must list at least one code/doc path`);
+  if (proofs.length === 0) errors.push(`${prefix}.proofs must list at least one proof path`);
+
+  for (const entry of [...code, ...proofs]) {
+    assertPathExists(repoRoot, entry, `${prefix} reference`, errors);
+  }
+
+  for (const cli of arrayOfStrings(primitive.cli, `${prefix}.cli`, errors, { optional: true })) {
+    if (cli.startsWith("bin/")) assertPathExists(repoRoot, cli, `${prefix}.cli`, errors);
+  }
+
+  for (const selfTest of arrayOfStrings(primitive.self_tests, `${prefix}.self_tests`, errors, { optional: true })) {
+    const command = selfTest.split(/\s+/)[0];
+    if (command.startsWith("bin/")) assertPathExists(repoRoot, command, `${prefix}.self_tests`, errors);
+  }
+
+  const http = primitive.http;
+  if (http !== undefined) {
+    if (!Array.isArray(http)) {
+      errors.push(`${prefix}.http must be an array when present`);
+    } else {
+      for (const [httpIndex, route] of http.entries()) {
+        auditHttpRoute(route, `${prefix}.http[${httpIndex}]`, repoRoot, errors);
+      }
+    }
+  }
+}
+
+function auditHttpRoute(route, prefix, repoRoot, errors) {
+  if (!isRecord(route)) {
+    errors.push(`${prefix} must be an object`);
+    return;
+  }
+  const method = readNonEmptyString(route.method);
+  const routePath = readNonEmptyString(route.path);
+  const routeFile = readNonEmptyString(route.route_file);
+  if (!method) errors.push(`${prefix}.method is required`);
+  if (!routePath || !routePath.startsWith("/")) errors.push(`${prefix}.path must start with /`);
+  if (!routeFile) {
+    errors.push(`${prefix}.route_file is required`);
+    return;
+  }
+  const fullRouteFile = path.resolve(repoRoot, routeFile);
+  if (!fs.existsSync(fullRouteFile)) {
+    errors.push(`${prefix}.route_file missing: ${routeFile}`);
+    return;
+  }
+  const source = fs.readFileSync(fullRouteFile, "utf8");
+  if (method && !routeSourceHasMethod(source, method)) {
+    errors.push(`${prefix}.method not found in ${routeFile}: ${method}`);
+  }
+  const staticNeedle = firstStaticPathNeedle(routePath);
+  if (staticNeedle && !source.includes(staticNeedle)) {
+    errors.push(`${prefix}.path not found in ${routeFile}: ${routePath}`);
+  }
+}
+
+function routeSourceHasMethod(source, method) {
+  return source.includes(`input.method === "${method}"`)
+    || source.includes(`input.method !== "${method}"`)
+    || source.includes(`request.method === "${method}"`)
+    || source.includes(`request.method !== "${method}"`);
+}
+
+function firstStaticPathNeedle(routePath) {
+  if (!routePath) return undefined;
+  const dynamicIndex = routePath.indexOf(":");
+  const staticPart = dynamicIndex === -1 ? routePath : routePath.slice(0, dynamicIndex);
+  return staticPart.replace(/\/+$/, "") || "/";
+}
+
+function assertPathExists(repoRoot, value, label, errors) {
+  if (!value || value.startsWith("pnpm ")) return;
+  const target = path.resolve(repoRoot, value);
+  if (!fs.existsSync(target)) errors.push(`${label} missing: ${value}`);
+}
+
+function arrayOfStrings(value, label, errors, options = {}) {
+  if (value === undefined && options.optional) return [];
+  if (!Array.isArray(value)) {
+    errors.push(`${label} must be an array`);
+    return [];
+  }
+  const strings = [];
+  for (const [index, entry] of value.entries()) {
+    if (typeof entry !== "string" || entry.trim().length === 0) {
+      errors.push(`${label}[${index}] must be a non-empty string`);
+    } else {
+      strings.push(entry);
+    }
+  }
+  return strings;
+}
+
+function readNonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
+
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function runSelfTest() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-primitives-catalog-audit-"));
+  fs.mkdirSync(path.join(root, "app/orchestrator/src/routes"), { recursive: true });
+  fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code.ts"), "export {}\n");
+  fs.writeFileSync(path.join(root, "proof.test.ts"), "export {}\n");
+  fs.writeFileSync(path.join(root, "bin/proof"), "#!/usr/bin/env node\n");
+  fs.writeFileSync(
+    path.join(root, "app/orchestrator/src/routes/example.ts"),
+    'if (input.method === "POST" && input.pathname === "/example") {}\n',
+  );
+
+  const good = {
+    schema_version: 1,
+    status_labels: ["dogfood"],
+    primitives: [{
+      id: "example",
+      title: "Example",
+      status: "dogfood",
+      summary: "Example primitive.",
+      http: [{ method: "POST", path: "/example", route_file: "app/orchestrator/src/routes/example.ts" }],
+      code: ["code.ts"],
+      proofs: ["proof.test.ts"],
+      cli: ["bin/proof"],
+      self_tests: ["bin/proof --self-test"],
+    }],
+  };
+  const goodErrors = [];
+  auditCatalog(good, root, goodErrors);
+  if (goodErrors.length > 0) throw new Error(`good fixture failed: ${goodErrors.join("; ")}`);
+
+  const bad = {
+    schema_version: 1,
+    status_labels: ["dogfood"],
+    primitives: [{ ...good.primitives[0], id: "bad", code: ["missing.ts"] }],
+  };
+  const badErrors = [];
+  auditCatalog(bad, root, badErrors);
+  if (!badErrors.some((error) => error.includes("missing.ts"))) {
+    throw new Error(`bad fixture did not fail as expected: ${badErrors.join("; ")}`);
+  }
+
+  fs.rmSync(root, { recursive: true, force: true });
+  console.log("primitives-catalog-audit self-test passed");
+}

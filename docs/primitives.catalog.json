@@ -1,0 +1,228 @@
+{
+  "schema_version": 1,
+  "generated_at": "manual",
+  "license": "AGPL-3.0-only",
+  "status_labels": ["stable_enough", "dogfood", "experimental", "mixed"],
+  "primitives": [
+    {
+      "id": "runtime_spine",
+      "title": "Runtime Spine",
+      "status": "stable_enough",
+      "summary": "Flat dependency record for routes, timers, stores, workspace, sessions, observability, and source polling.",
+      "code": ["app/orchestrator/src/runtime.ts"],
+      "proofs": ["app/orchestrator/test/gateway_store_conformance.test.ts"]
+    },
+    {
+      "id": "workspace_control",
+      "title": "Workspace Control",
+      "status": "dogfood",
+      "summary": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+      "http": [
+        { "method": "GET", "path": "/workspace/status", "route_file": "app/orchestrator/src/routes/workspace.ts" },
+        { "method": "POST", "path": "/workspace/capture", "route_file": "app/orchestrator/src/routes/workspace.ts" },
+        { "method": "POST", "path": "/workspace/restore-plan", "route_file": "app/orchestrator/src/routes/workspace.ts" },
+        { "method": "POST", "path": "/workspace/restore", "route_file": "app/orchestrator/src/routes/workspace.ts" }
+      ],
+      "code": ["app/orchestrator/src/workspace/aerospace.ts", "app/orchestrator/src/workspace/controller.ts"],
+      "proofs": [
+        "app/orchestrator/src/workspace/aerospace.test.ts",
+        "app/orchestrator/src/workspace/controller.test.ts",
+        "bin/lab-mac-geometry-proof",
+        "bin/task-workspace-memory-proof-smoke"
+      ]
+    },
+    {
+      "id": "task_workspace_memory",
+      "title": "Task Workspace Memory",
+      "status": "stable_enough",
+      "summary": "Persist task-specific workspace snapshots so later papers inherit task desk state.",
+      "http": [
+        { "method": "POST", "path": "/tasks", "route_file": "app/orchestrator/src/routes/tasks.ts" },
+        { "method": "GET", "path": "/tasks", "route_file": "app/orchestrator/src/routes/tasks.ts" },
+        { "method": "GET", "path": "/tasks/:id/layout", "route_file": "app/orchestrator/src/routes/tasks.ts" },
+        { "method": "PUT", "path": "/tasks/:id/layout", "route_file": "app/orchestrator/src/routes/tasks.ts" },
+        { "method": "POST", "path": "/tasks/:id/workspace-snapshot", "route_file": "app/orchestrator/src/routes/tasks.ts" },
+        { "method": "GET", "path": "/tasks/current", "route_file": "app/orchestrator/src/routes/tasks.ts" },
+        { "method": "POST", "path": "/tasks/current", "route_file": "app/orchestrator/src/routes/tasks.ts" }
+      ],
+      "code": ["app/orchestrator/src/routes/tasks.ts", "app/orchestrator/src/agents/ambient_workspace_saver.ts"],
+      "proofs": [
+        "app/orchestrator/test/ambient_workspace_saver_integration.test.ts",
+        "bin/task-workspace-memory-proof-smoke",
+        "bin/lab-mac-human-demo-setup"
+      ]
+    },
+    {
+      "id": "ambient_autosave",
+      "title": "Ambient Autosave",
+      "status": "dogfood",
+      "summary": "Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, and task-window claim filtering.",
+      "code": ["app/orchestrator/src/agents/ambient_workspace_saver.ts"],
+      "proofs": ["app/orchestrator/src/agents/ambient_workspace_saver.test.ts"],
+      "gaps": ["Untagged unwrapped Codex/Claude-spawned windows still need automatic process/window emitters."]
+    },
+    {
+      "id": "task_window_claims",
+      "title": "Task Window Claims",
+      "status": "dogfood",
+      "summary": "Declare or infer that windows belong to tasks so foreign windows do not pollute active paper snapshots.",
+      "http": [
+        { "method": "POST", "path": "/task-window-claims", "route_file": "app/orchestrator/src/routes/task_window_claims.ts" },
+        { "method": "GET", "path": "/task-window-claims", "route_file": "app/orchestrator/src/routes/task_window_claims.ts" }
+      ],
+      "cli": ["bin/task-window-spawn"],
+      "code": [
+        "app/orchestrator/src/routes/task_window_claims.ts",
+        "app/orchestrator/src/routes/events.ts",
+        "app/orchestrator/src/agents/ambient_workspace_saver.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/src/routes/task_window_claims.test.ts",
+        "app/orchestrator/src/routes/events_task_window_claims.test.ts",
+        "app/orchestrator/src/agents/ambient_workspace_saver.test.ts",
+        "app/orchestrator/test/gateway_store_conformance.test.ts"
+      ],
+      "self_tests": ["bin/task-window-spawn --self-test"]
+    },
+    {
+      "id": "follows_windows",
+      "title": "Follows Windows",
+      "status": "dogfood",
+      "summary": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded.",
+      "http": [
+        { "method": "POST", "path": "/follows-windows/exclude", "route_file": "app/orchestrator/src/routes/follows_windows.ts" }
+      ],
+      "code": ["app/orchestrator/src/agents/follows_window_orchestrator.ts", "app/orchestrator/src/routes/follows_windows.ts"],
+      "proofs": ["app/orchestrator/src/agents/follows_window_orchestrator.test.ts"]
+    },
+    {
+      "id": "queue_paper_routing",
+      "title": "Queue And Paper Routing",
+      "status": "stable_enough",
+      "summary": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+      "http": [
+        { "method": "POST", "path": "/events", "route_file": "app/orchestrator/src/routes/events.ts" },
+        { "method": "GET", "path": "/queue", "route_file": "app/orchestrator/src/routes/queue.ts" },
+        { "method": "POST", "path": "/queue/lease-next", "route_file": "app/orchestrator/src/routes/queue.ts" },
+        { "method": "POST", "path": "/queue/:id/done", "route_file": "app/orchestrator/src/routes/queue.ts" },
+        { "method": "POST", "path": "/queue/:id/defer", "route_file": "app/orchestrator/src/routes/queue.ts" },
+        { "method": "POST", "path": "/queue/:id/actions/recommended", "route_file": "app/orchestrator/src/routes/queue.ts" },
+        { "method": "POST", "path": "/queue/:id/priority", "route_file": "app/orchestrator/src/routes/queue.ts" }
+      ],
+      "code": ["app/orchestrator/src/routes/events.ts", "app/orchestrator/src/routes/queue.ts"],
+      "proofs": ["bin/master-priority-proof-smoke", "bin/event-loop-proof-smoke"]
+    },
+    {
+      "id": "master_command_router",
+      "title": "Master Command Router",
+      "status": "dogfood",
+      "summary": "Route one universal command to tasks, idle sessions, fan-out targets, or queue prioritization.",
+      "http": [{ "method": "POST", "path": "/master/fan-out", "route_file": "app/orchestrator/src/routes/master.ts" }],
+      "cli": ["pnpm master:send"],
+      "hotkeys": ["Ctrl-Option-K"],
+      "code": ["app/orchestrator/src/routes/master.ts", "app/orchestrator/src/master/master_command_cli.ts"],
+      "proofs": [
+        "app/orchestrator/test/master_fan_out.test.ts",
+        "app/orchestrator/test/master_fan_out_idle_filter.test.ts",
+        "app/orchestrator/src/master/master_command_cli.test.ts",
+        "bin/master-priority-proof-smoke"
+      ]
+    },
+    {
+      "id": "task_session_control",
+      "title": "Task Session Control",
+      "status": "dogfood",
+      "summary": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
+      "http": [
+        { "method": "GET", "path": "/task-sessions", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
+        { "method": "POST", "path": "/task-sessions", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
+        { "method": "POST", "path": "/task-sessions/:id/followup", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
+        { "method": "PUT", "path": "/task-sessions/:id/task-binding", "route_file": "app/orchestrator/src/routes/task_sessions.ts" },
+        { "method": "GET", "path": "/task-messages", "route_file": "app/orchestrator/src/routes/task_sessions.ts" }
+      ],
+      "cli": ["pnpm task:sessions", "pnpm task:bind", "pnpm task:messages", "pnpm task:replace"],
+      "code": ["app/orchestrator/src/task_sessions/types.ts", "app/orchestrator/src/routes/task_sessions.ts"],
+      "proofs": ["app/orchestrator/src/task_sessions/task_session_cli.test.ts", "bin/task-runtime-smoke"]
+    },
+    {
+      "id": "context_capture_restore",
+      "title": "Context Capture And Restore",
+      "status": "dogfood",
+      "summary": "Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
+      "http": [
+        { "method": "GET", "path": "/contexts", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
+        { "method": "POST", "path": "/contexts/restore-plan", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
+        { "method": "POST", "path": "/contexts/restore-requests", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
+        { "method": "POST", "path": "/contexts/restore-requests/claim-next", "route_file": "app/orchestrator/src/routes/context_restore.ts" }
+      ],
+      "code": ["app/orchestrator/src/routes/context_restore.ts", "app/orchestrator/src/store/context_restore_store.ts"],
+      "proofs": ["docs/planning/17-deeplink-strategies.md"]
+    },
+    {
+      "id": "manual_mode",
+      "title": "Manual Mode",
+      "status": "stable_enough",
+      "summary": "Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
+      "http": [
+        { "method": "GET", "path": "/modes/manual", "route_file": "app/orchestrator/src/routes/modes.ts" },
+        { "method": "POST", "path": "/modes/manual", "route_file": "app/orchestrator/src/routes/modes.ts" }
+      ],
+      "hotkeys": ["Ctrl-Option-M", "Ctrl-Option-Shift-M"],
+      "code": ["app/orchestrator/src/routes/modes.ts", "app/orchestrator/src/agents/ambient_workspace_saver.ts"],
+      "proofs": [
+        "app/orchestrator/test/manual_mode_pause_integration.test.ts",
+        "app/orchestrator/test/manual_mode_round_trip.test.ts"
+      ]
+    },
+    {
+      "id": "agent_source_hooks",
+      "title": "Agent And Source Hooks",
+      "status": "mixed",
+      "summary": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+      "http": [
+        { "method": "POST", "path": "/mcp/poll", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
+        { "method": "GET", "path": "/mcp-sources", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
+        { "method": "POST", "path": "/agent-runs", "route_file": "app/orchestrator/src/routes/agent_runs.ts" },
+        { "method": "POST", "path": "/voice/commands", "route_file": "app/orchestrator/src/routes/events.ts" }
+      ],
+      "code": ["app/orchestrator/src/routes/mcp_sources.ts", "app/orchestrator/src/routes/agent_runs.ts", "docs/codex-mcp-skill.md"],
+      "proofs": ["bin/agent-run-cli-smoke", "bin/postgres-mcp-dogfood-smoke"]
+    },
+    {
+      "id": "mac_app_hotkeys",
+      "title": "Mac App And Hotkey Surface",
+      "status": "dogfood",
+      "summary": "Swift macOS queue UI, hotkeys, manual mode, restore, voice capture, and master command shell.",
+      "hotkeys": [
+        "Ctrl-Option-J",
+        "Ctrl-Option-E",
+        "Ctrl-Option-Return",
+        "Ctrl-Option-H",
+        "Ctrl-Option-R",
+        "Ctrl-Option-K",
+        "Ctrl-Option-M",
+        "Ctrl-Option-Shift-M"
+      ],
+      "code": ["app/macos/Sources/EventLoopQueueCore", "app/macos/Sources/EventLoopQueueApp"],
+      "proofs": ["docs/human-demo-walkthrough.md", "bin/lab-mac-human-demo-setup"]
+    },
+    {
+      "id": "observability_proofs",
+      "title": "Observability And Proof Harnesses",
+      "status": "stable_enough",
+      "summary": "Health, metrics, activity, proof runners, latency checks, and machine-readable manifests.",
+      "http": [
+        { "method": "GET", "path": "/health", "route_file": "app/orchestrator/src/server.ts" },
+        { "method": "GET", "path": "/metrics", "route_file": "app/orchestrator/src/server.ts" },
+        { "method": "GET", "path": "/activity", "route_file": "app/orchestrator/src/server.ts" }
+      ],
+      "code": ["app/orchestrator/src/routes/observability.ts"],
+      "proofs": [
+        "bin/proof-agent",
+        "bin/proof-repeat",
+        "bin/product-readiness-proof",
+        "bin/workspace-latency-proof"
+      ]
+    }
+  ]
+}

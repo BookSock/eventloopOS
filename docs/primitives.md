@@ -4,6 +4,9 @@ eventloopOS is currently a product, but the code already exposes reusable
 operating-system control primitives. This document catalogs the primitives that
 other tools could build on without taking the whole queue app.
 
+Machine-readable catalog: `docs/primitives.catalog.json`. Validate it with
+`bin/primitives-catalog-audit docs/primitives.catalog.json`.
+
 Status labels:
 
 - **Stable enough**: covered by unit/integration tests and used by dogfood.
