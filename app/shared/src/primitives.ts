@@ -2,12 +2,40 @@ import { z } from "zod";
 import { getContractSchema } from "./schemas.js";
 import type {
   ClaudeSessionInspectionResponse,
+  ContextRestoreClaimRequest,
+  ContextRestoreFinishRequest,
+  ContextRestorePlanRequest,
+  ContextRestorePlanResponse,
+  ContextRestoreRequestMaybeResponse,
+  ContextRestoreRequestResponse,
+  ContextsListResponse,
   CodexAutoBindResponse,
   CodexForegroundResolveResponse,
   CodexSessionInspectionResponse,
+  CreateTaskRequest,
+  CreateTaskResponse,
+  CurrentTaskResponse,
+  CurrentTaskSetRequest,
   FollowsWindowExclusionCreateRequest,
   FollowsWindowExclusionResponse,
   FollowsWindowExclusionsListResponse,
+  ManualModeGetResponse,
+  ManualModeSetRequest,
+  ManualModeSetResponse,
+  MasterFanOutRequest,
+  MasterFanOutResponse,
+  OnboardingApprovalBatchRequest,
+  OnboardingApprovalBatchResponse,
+  OnboardingApprovalRequest,
+  OnboardingApprovalResponse,
+  OnboardingRejectionRequest,
+  OnboardingRejectionResponse,
+  OnboardingScanResponse,
+  PaperTriggerCreateRequest,
+  PaperTriggerGetResponse,
+  PaperTriggerListResponse,
+  PaperTriggerMutationResponse,
+  PaperTriggerPatchRequest,
   QueueActionResponse,
   QueueDeferRequest,
   QueueDoneRequest,
@@ -22,6 +50,15 @@ import type {
   QueuePriorityResponse,
   QueueRecommendedActionRequest,
   QueueRecommendedActionResponse,
+  ReadingQueueAutoPromoteRequest,
+  ReadingQueueAutoPromoteResponse,
+  ReadingQueueListResponse,
+  ReadingQueuePromoteRequest,
+  ReadingQueuePromoteResponse,
+  TaskGetResponse,
+  TaskLayoutResponse,
+  TaskLayoutUpdateResponse,
+  TaskListResponse,
   TaskMessagesListResponse,
   TaskMessagesReconcileAttemptedRequest,
   TaskMessagesReconcileAttemptedResponse,
@@ -35,9 +72,12 @@ import type {
   TaskSessionsListResponse,
   TaskSessionStartRequest,
   TaskSessionStartResponse,
+  TaskWorkspaceSnapshotSaveRequest,
+  TaskWorkspaceSnapshotSaveResponse,
   TaskWindowClaimCreateRequest,
   TaskWindowClaimResponse,
   TaskWindowClaimsListResponse,
+  WorkspaceSnapshot,
   WorkspaceCaptureResponse,
   WorkspaceRestorePlanRequest,
   WorkspaceRestorePlanResponse,
@@ -181,6 +221,23 @@ export type PrimitiveQueueLineageOptions = {
 };
 
 export type PrimitiveOperationsClient = {
+  master: {
+    fanOut(body: MasterFanOutRequest): Promise<MasterFanOutResponse>;
+  };
+  manualMode: {
+    get(): Promise<ManualModeGetResponse>;
+    set(body: ManualModeSetRequest): Promise<ManualModeSetResponse>;
+  };
+  tasks: {
+    create(body: CreateTaskRequest): Promise<CreateTaskResponse>;
+    list(): Promise<TaskListResponse>;
+    get(id: string): Promise<TaskGetResponse>;
+    getLayout(id: string): Promise<TaskLayoutResponse>;
+    updateLayout(id: string, snapshot: WorkspaceSnapshot): Promise<TaskLayoutUpdateResponse>;
+    saveWorkspaceSnapshot(id: string, body: TaskWorkspaceSnapshotSaveRequest): Promise<TaskWorkspaceSnapshotSaveResponse>;
+    current(): Promise<CurrentTaskResponse>;
+    setCurrent(body: CurrentTaskSetRequest): Promise<CurrentTaskResponse>;
+  };
   queue: {
     list(options?: PrimitiveQueueListOptions): Promise<QueueListResponse>;
     next(): Promise<QueueNextResponse>;
@@ -216,6 +273,35 @@ export type PrimitiveOperationsClient = {
     claude: {
       inspect(id: string): Promise<ClaudeSessionInspectionResponse>;
     };
+  };
+  readingQueue: {
+    list(): Promise<ReadingQueueListResponse>;
+    promote(body: ReadingQueuePromoteRequest): Promise<ReadingQueuePromoteResponse>;
+    autoPromote(body: ReadingQueueAutoPromoteRequest): Promise<ReadingQueueAutoPromoteResponse>;
+  };
+  onboarding: {
+    scan(): Promise<OnboardingScanResponse>;
+    approve(body: OnboardingApprovalRequest): Promise<OnboardingApprovalResponse>;
+    approveBatch(body: OnboardingApprovalBatchRequest): Promise<OnboardingApprovalBatchResponse>;
+    reject(body: OnboardingRejectionRequest): Promise<OnboardingRejectionResponse>;
+  };
+  contexts: {
+    list(): Promise<ContextsListResponse>;
+    restorePlan(body: ContextRestorePlanRequest): Promise<ContextRestorePlanResponse>;
+    createRestoreRequest(body: ContextRestorePlanRequest): Promise<ContextRestoreRequestResponse>;
+    nextRestoreRequest(): Promise<ContextRestoreRequestMaybeResponse>;
+    claimNextRestoreRequest(body: ContextRestoreClaimRequest): Promise<ContextRestoreRequestMaybeResponse>;
+    getRestoreRequest(id: string): Promise<ContextRestoreRequestResponse>;
+    markRestoreRequestDone(id: string, body: ContextRestoreFinishRequest): Promise<ContextRestoreRequestResponse>;
+    markRestoreRequestFailed(id: string, body: ContextRestoreFinishRequest): Promise<ContextRestoreRequestResponse>;
+    retryRestoreRequest(id: string): Promise<ContextRestoreRequestResponse>;
+  };
+  triggers: {
+    list(): Promise<PaperTriggerListResponse>;
+    create(body: PaperTriggerCreateRequest): Promise<PaperTriggerMutationResponse>;
+    get(id: string): Promise<PaperTriggerGetResponse>;
+    patch(id: string, body: PaperTriggerPatchRequest): Promise<PaperTriggerMutationResponse>;
+    delete(id: string): Promise<PaperTriggerMutationResponse>;
   };
   followsWindows: {
     exclude(body: FollowsWindowExclusionCreateRequest): Promise<FollowsWindowExclusionResponse>;
@@ -448,6 +534,45 @@ export function createPrimitiveOperationsClient(options: PrimitiveHttpClientOpti
 
 export function bindPrimitiveOperationsClient(client: PrimitiveHttpClient): PrimitiveOperationsClient {
   return {
+    master: {
+      fanOut(body: MasterFanOutRequest) {
+        return client.request("POST", "/master/fan-out", { body });
+      }
+    },
+    manualMode: {
+      get() {
+        return client.request("GET", "/modes/manual");
+      },
+      set(body: ManualModeSetRequest) {
+        return client.request("POST", "/modes/manual", { body });
+      }
+    },
+    tasks: {
+      create(body: CreateTaskRequest) {
+        return client.request("POST", "/tasks", { body });
+      },
+      list() {
+        return client.request("GET", "/tasks");
+      },
+      get(id: string) {
+        return client.request("GET", "/tasks/:id", { pathParams: { id } });
+      },
+      getLayout(id: string) {
+        return client.request("GET", "/tasks/:id/layout", { pathParams: { id } });
+      },
+      updateLayout(id: string, snapshot: WorkspaceSnapshot) {
+        return client.request("PUT", "/tasks/:id/layout", { pathParams: { id }, body: snapshot });
+      },
+      saveWorkspaceSnapshot(id: string, body: TaskWorkspaceSnapshotSaveRequest) {
+        return client.request("POST", "/tasks/:id/workspace-snapshot", { pathParams: { id }, body });
+      },
+      current() {
+        return client.request("GET", "/tasks/current");
+      },
+      setCurrent(body: CurrentTaskSetRequest) {
+        return client.request("POST", "/tasks/current", { body });
+      }
+    },
     queue: {
       list(options: PrimitiveQueueListOptions = {}) {
         return client.request("GET", "/queue", { query: options });
@@ -530,6 +655,77 @@ export function bindPrimitiveOperationsClient(client: PrimitiveHttpClient): Prim
         inspect(id: string) {
           return client.request("GET", "/agents/claude/inspect/:id", { pathParams: { id } });
         }
+      }
+    },
+    readingQueue: {
+      list() {
+        return client.request("GET", "/reading-queue");
+      },
+      promote(body: ReadingQueuePromoteRequest) {
+        return client.request("POST", "/reading-queue/promote", { body });
+      },
+      autoPromote(body: ReadingQueueAutoPromoteRequest) {
+        return client.request("POST", "/reading-queue/auto-promote", { body });
+      }
+    },
+    onboarding: {
+      scan() {
+        return client.request("GET", "/onboarding/scan");
+      },
+      approve(body: OnboardingApprovalRequest) {
+        return client.request("POST", "/onboarding/approvals", { body });
+      },
+      approveBatch(body: OnboardingApprovalBatchRequest) {
+        return client.request("POST", "/onboarding/approvals/batch", { body });
+      },
+      reject(body: OnboardingRejectionRequest) {
+        return client.request("POST", "/onboarding/rejections", { body });
+      }
+    },
+    contexts: {
+      list() {
+        return client.request("GET", "/contexts");
+      },
+      restorePlan(body: ContextRestorePlanRequest) {
+        return client.request("POST", "/contexts/restore-plan", { body });
+      },
+      createRestoreRequest(body: ContextRestorePlanRequest) {
+        return client.request("POST", "/contexts/restore-requests", { body });
+      },
+      nextRestoreRequest() {
+        return client.request("GET", "/contexts/restore-requests/next");
+      },
+      claimNextRestoreRequest(body: ContextRestoreClaimRequest) {
+        return client.request("POST", "/contexts/restore-requests/claim-next", { body });
+      },
+      getRestoreRequest(id: string) {
+        return client.request("GET", "/contexts/restore-requests/:id", { pathParams: { id } });
+      },
+      markRestoreRequestDone(id: string, body: ContextRestoreFinishRequest) {
+        return client.request("POST", "/contexts/restore-requests/:id/done", { pathParams: { id }, body });
+      },
+      markRestoreRequestFailed(id: string, body: ContextRestoreFinishRequest) {
+        return client.request("POST", "/contexts/restore-requests/:id/failed", { pathParams: { id }, body });
+      },
+      retryRestoreRequest(id: string) {
+        return client.request("POST", "/contexts/restore-requests/:id/retry", { pathParams: { id } });
+      }
+    },
+    triggers: {
+      list() {
+        return client.request("GET", "/triggers");
+      },
+      create(body: PaperTriggerCreateRequest) {
+        return client.request("POST", "/triggers", { body });
+      },
+      get(id: string) {
+        return client.request("GET", "/triggers/:id", { pathParams: { id } });
+      },
+      patch(id: string, body: PaperTriggerPatchRequest) {
+        return client.request("PATCH", "/triggers/:id", { pathParams: { id }, body });
+      },
+      delete(id: string) {
+        return client.request("DELETE", "/triggers/:id", { pathParams: { id } });
       }
     },
     followsWindows: {

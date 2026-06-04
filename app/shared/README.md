@@ -73,6 +73,12 @@ await ops.taskSessions.followup("codex_thread_123", {
 });
 await ops.agents.codex.autoBind();
 await ops.agents.claude.inspect("claude_session_123");
+await ops.master.fanOut({ message: "summarize status", selector: { idle_min_seconds: 60 } });
+await ops.manualMode.set({ active: true, reason: "human_review" });
+await ops.readingQueue.autoPromote({ min_age_ms: 900_000 });
+await ops.onboarding.scan();
+await ops.contexts.nextRestoreRequest();
+await ops.triggers.list();
 await ops.workspace.restore(workspaceRestoreRequest, "idem_restore_checkout");
 ```
 
@@ -81,8 +87,10 @@ or running the orchestrator server package. Request helpers interpolate route
 templates, encode query strings, enforce `no_request_body`, and validate known
 request/response schemas through the exported Zod contract registry.
 `createPrimitiveOperationsClient` layers small typed convenience methods over
-the same validated routes for common queue, workspace, task-session,
-Codex/Claude agent, task-window-claim, and follows-window operations.
+the same validated routes for common master-command, manual-mode,
+task-workspace, queue, workspace, task-session, Codex/Claude agent,
+task-window-claim, follows-window, reading-queue, onboarding, context-restore,
+and trigger operations.
 
 The HTTP client exposes catchable error classes for builder-facing tools:
 

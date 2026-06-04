@@ -20,6 +20,7 @@ import {
   getContractSchema
 } from "../src/index.js";
 import {
+  bindPrimitiveOperationsClient,
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
   createPrimitiveOperationsClient,
@@ -481,7 +482,7 @@ describe("primitive catalog SDK boundary", () => {
     }
   });
 
-  it("creates typed primitive operation helpers over queue, windows, follows rules, and workspace routes", async () => {
+  it("creates typed primitive operation helpers over queue, sessions, windows, follows rules, and workspace routes", async () => {
     const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
     const calls: Array<{ url: string; method?: string; headers: Record<string, string>; body?: unknown }> = [];
     const responseFixtures = new Map<string, unknown>([
@@ -558,6 +559,95 @@ describe("primitive catalog SDK boundary", () => {
     expect(calls[4]?.body).toMatchObject({ text: expect.any(String) });
     expect(calls[6]?.body).toBeUndefined();
     expect(calls[10]?.headers["idempotency-key"]).toBe("idem_workspace_restore");
+  });
+
+  it("binds primitive operation helpers for master, manual mode, tasks, reading, onboarding, contexts, and triggers", async () => {
+    const calls: Array<{ method: string; path: string; input?: unknown }> = [];
+    const ops = bindPrimitiveOperationsClient({
+      async request(method, path, input) {
+        calls.push({ method: String(method).toUpperCase(), path, input });
+        return {};
+      }
+    });
+    const workspaceSnapshot = readFixture(join(fixturesDir, "valid/workspace_snapshot.json")).data;
+
+    await ops.master.fanOut(readFixture(join(fixturesDir, "valid/master_fan_out_request.json")).data);
+    await ops.manualMode.get();
+    await ops.manualMode.set(readFixture(join(fixturesDir, "valid/manual_mode_set_request.json")).data);
+    await ops.tasks.create(readFixture(join(fixturesDir, "valid/create_task_request.json")).data);
+    await ops.tasks.list();
+    await ops.tasks.get("task_demo_customer");
+    await ops.tasks.getLayout("task_demo_customer");
+    await ops.tasks.updateLayout("task_demo_customer", workspaceSnapshot);
+    await ops.tasks.saveWorkspaceSnapshot(
+      "task_demo_customer",
+      readFixture(join(fixturesDir, "valid/task_workspace_snapshot_save_request.json")).data
+    );
+    await ops.tasks.current();
+    await ops.tasks.setCurrent(readFixture(join(fixturesDir, "valid/current_task_set_request.json")).data);
+    await ops.readingQueue.list();
+    await ops.readingQueue.promote(readFixture(join(fixturesDir, "valid/reading_queue_promote_request.json")).data);
+    await ops.readingQueue.autoPromote(readFixture(join(fixturesDir, "valid/reading_queue_auto_promote_request.json")).data);
+    await ops.onboarding.scan();
+    await ops.onboarding.approve(readFixture(join(fixturesDir, "valid/onboarding_approval_request.json")).data);
+    await ops.onboarding.approveBatch(readFixture(join(fixturesDir, "valid/onboarding_approval_batch_request.json")).data);
+    await ops.onboarding.reject(readFixture(join(fixturesDir, "valid/onboarding_rejection_request.json")).data);
+    await ops.contexts.list();
+    await ops.contexts.restorePlan(readFixture(join(fixturesDir, "valid/context_restore_plan_request.json")).data);
+    await ops.contexts.createRestoreRequest(readFixture(join(fixturesDir, "valid/context_restore_plan_request.json")).data);
+    await ops.contexts.nextRestoreRequest();
+    await ops.contexts.claimNextRestoreRequest(readFixture(join(fixturesDir, "valid/context_restore_claim_request.json")).data);
+    await ops.contexts.getRestoreRequest("ctx_restore_123");
+    await ops.contexts.markRestoreRequestDone("ctx_restore_123", readFixture(join(fixturesDir, "valid/context_restore_finish_request.json")).data);
+    await ops.contexts.markRestoreRequestFailed(
+      "ctx_restore_123",
+      readFixture(join(fixturesDir, "valid/context_restore_finish_request.json")).data
+    );
+    await ops.contexts.retryRestoreRequest("ctx_restore_123");
+    await ops.triggers.list();
+    await ops.triggers.create(readFixture(join(fixturesDir, "valid/paper_trigger_create_request.json")).data);
+    await ops.triggers.get("trg_deploy_watcher");
+    await ops.triggers.patch("trg_deploy_watcher", readFixture(join(fixturesDir, "valid/paper_trigger_patch_request.json")).data);
+    await ops.triggers.delete("trg_deploy_watcher");
+
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "POST /master/fan-out",
+      "GET /modes/manual",
+      "POST /modes/manual",
+      "POST /tasks",
+      "GET /tasks",
+      "GET /tasks/:id",
+      "GET /tasks/:id/layout",
+      "PUT /tasks/:id/layout",
+      "POST /tasks/:id/workspace-snapshot",
+      "GET /tasks/current",
+      "POST /tasks/current",
+      "GET /reading-queue",
+      "POST /reading-queue/promote",
+      "POST /reading-queue/auto-promote",
+      "GET /onboarding/scan",
+      "POST /onboarding/approvals",
+      "POST /onboarding/approvals/batch",
+      "POST /onboarding/rejections",
+      "GET /contexts",
+      "POST /contexts/restore-plan",
+      "POST /contexts/restore-requests",
+      "GET /contexts/restore-requests/next",
+      "POST /contexts/restore-requests/claim-next",
+      "GET /contexts/restore-requests/:id",
+      "POST /contexts/restore-requests/:id/done",
+      "POST /contexts/restore-requests/:id/failed",
+      "POST /contexts/restore-requests/:id/retry",
+      "GET /triggers",
+      "POST /triggers",
+      "GET /triggers/:id",
+      "PATCH /triggers/:id",
+      "DELETE /triggers/:id"
+    ]);
+    expect(calls[5]?.input).toMatchObject({ pathParams: { id: "task_demo_customer" } });
+    expect(calls[7]?.input).toMatchObject({ body: workspaceSnapshot });
+    expect(calls[23]?.input).toMatchObject({ pathParams: { id: "ctx_restore_123" } });
+    expect(calls[30]?.input).toMatchObject({ pathParams: { id: "trg_deploy_watcher" } });
   });
 });
 
