@@ -86,6 +86,7 @@ public final class FakeAeroSpaceWorkspaceClient: AeroSpaceWorkspaceClient, @unch
     private var workspaces: [String]
     private var switchHistory: [String] = []
     private var switchError: Error?
+    private var readDelayNanoseconds: UInt64 = 0
 
     public init(focused: String = "1", workspaces: [String]? = nil) {
         self.focused = focused
@@ -113,12 +114,18 @@ public final class FakeAeroSpaceWorkspaceClient: AeroSpaceWorkspaceClient, @unch
         lock.withLock { switchError = error }
     }
 
+    public func setReadDelayNanoseconds(_ delay: UInt64) {
+        lock.withLock { readDelayNanoseconds = delay }
+    }
+
     public func focusedWorkspace() async throws -> String {
-        lock.withLock { focused }
+        await sleepReadDelayIfNeeded()
+        return lock.withLock { focused }
     }
 
     public func listWorkspaces() async throws -> [String] {
-        lock.withLock { workspaces }
+        await sleepReadDelayIfNeeded()
+        return lock.withLock { workspaces }
     }
 
     public func switchTo(workspace: String) async throws {
@@ -129,6 +136,13 @@ public final class FakeAeroSpaceWorkspaceClient: AeroSpaceWorkspaceClient, @unch
             if !workspaces.contains(workspace) {
                 workspaces.append(workspace)
             }
+        }
+    }
+
+    private func sleepReadDelayIfNeeded() async {
+        let delay = lock.withLock { readDelayNanoseconds }
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: delay)
         }
     }
 }

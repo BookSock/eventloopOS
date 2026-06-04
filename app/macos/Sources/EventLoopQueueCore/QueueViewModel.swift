@@ -617,17 +617,20 @@ public final class QueueViewModel: ObservableObject {
     }
 
     private func loadAdvanceSnapshot() async throws -> AdvanceServerSnapshot {
-        let manualModeState = try await client.getManualMode()
-        let currentWorkspaceId: String?
-        do {
-            currentWorkspaceId = try await aeroSpaceClient.focusedWorkspace()
-        } catch {
-            currentWorkspaceId = nil
-        }
-        let currentTaskState = try await client.getCurrentTask()
-        let allTasks = (try? await client.listTasks()) ?? []
-        let queue = (try? await client.fetchQueue()) ?? []
-        let foreground = await codexForegroundResolver.resolveForeground()
+        async let manualModeStateTask = client.getManualMode()
+        async let currentWorkspaceIdTask = focusedWorkspaceOrNil()
+        async let currentTaskStateTask = client.getCurrentTask()
+        async let allTasksTask = listTasksOrEmpty()
+        async let queueTask = fetchQueueOrEmpty()
+        async let foregroundTask = codexForegroundResolver.resolveForeground()
+        async let workspacesTask = listWorkspacesOrEmpty()
+
+        let manualModeState = try await manualModeStateTask
+        let currentWorkspaceId = await currentWorkspaceIdTask
+        let currentTaskState = try await currentTaskStateTask
+        let allTasks = await allTasksTask
+        let queue = await queueTask
+        let foreground = await foregroundTask
         packets = queue
 
         var relevantTaskIds = Set<String>()
@@ -651,7 +654,8 @@ public final class QueueViewModel: ObservableObject {
         }
 
         currentTask = currentTaskState.task
-        let resolvedLimboWorkspaceId = await pickLimboWorkspace(boundWorkspaceIds: boundWorkspaceIds) ?? limboWorkspaceId
+        let workspaces = await workspacesTask
+        let resolvedLimboWorkspaceId = pickLimboWorkspace(in: workspaces, boundWorkspaceIds: boundWorkspaceIds) ?? limboWorkspaceId
 
         return AdvanceServerSnapshot(
             manualModeActive: manualModeState.active,
@@ -664,6 +668,26 @@ public final class QueueViewModel: ObservableObject {
         )
     }
 
+    private func focusedWorkspaceOrNil() async -> String? {
+        do {
+            return try await aeroSpaceClient.focusedWorkspace()
+        } catch {
+            return nil
+        }
+    }
+
+    private func listTasksOrEmpty() async -> [TaskRecord] {
+        (try? await client.listTasks()) ?? []
+    }
+
+    private func fetchQueueOrEmpty() async -> [ReviewPacket] {
+        (try? await client.fetchQueue()) ?? []
+    }
+
+    private func listWorkspacesOrEmpty() async -> [String] {
+        (try? await aeroSpaceClient.listWorkspaces()) ?? []
+    }
+
     private func workspaceIdForTask(_ task: TaskRecord) async -> String? {
         if let workspaceId = task.aerospaceWorkspaceId, !workspaceId.isEmpty {
             return workspaceId
@@ -674,10 +698,7 @@ public final class QueueViewModel: ObservableObject {
         return envelope.layout?.layout.activeWorkspace
     }
 
-    private func pickLimboWorkspace(boundWorkspaceIds: Set<String>) async -> String? {
-        guard let workspaces = try? await aeroSpaceClient.listWorkspaces() else {
-            return nil
-        }
+    private func pickLimboWorkspace(in workspaces: [String], boundWorkspaceIds: Set<String>) -> String? {
         return workspaces.first { workspace in
             !boundWorkspaceIds.contains(workspace)
         }

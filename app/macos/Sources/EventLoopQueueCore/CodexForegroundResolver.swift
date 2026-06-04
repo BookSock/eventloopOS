@@ -10,17 +10,27 @@ public protocol CodexForegroundResolver: Sendable {
 public final class FakeCodexForegroundResolver: CodexForegroundResolver, @unchecked Sendable {
     private let lock = NSLock()
     private var nextResult: AdvanceForegroundContext
+    private var readDelayNanoseconds: UInt64
 
-    public init(_ initial: AdvanceForegroundContext = .none) {
+    public init(_ initial: AdvanceForegroundContext = .none, readDelayNanoseconds: UInt64 = 0) {
         self.nextResult = initial
+        self.readDelayNanoseconds = readDelayNanoseconds
     }
 
     public func setNext(_ context: AdvanceForegroundContext) {
         lock.withLock { nextResult = context }
     }
 
+    public func setReadDelayNanoseconds(_ delay: UInt64) {
+        lock.withLock { readDelayNanoseconds = delay }
+    }
+
     public func resolveForeground() async -> AdvanceForegroundContext {
-        lock.withLock { nextResult }
+        let delay = lock.withLock { readDelayNanoseconds }
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: delay)
+        }
+        return lock.withLock { nextResult }
     }
 }
 

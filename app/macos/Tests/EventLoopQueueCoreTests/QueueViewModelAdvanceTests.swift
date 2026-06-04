@@ -71,6 +71,34 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
     }
 
+    func testAdvanceSnapshotReadsRunConcurrently() async {
+        let delay: UInt64 = 100_000_000
+        let client = FakeQueueClient(packets: [])
+        client.setReadDelayNanoseconds(delay)
+        client.setManualModeFakeState(ManualModeState(active: true, updatedAt: Date()))
+        let workspaceClient = FakeWorkspaceClient()
+        let aero = FakeAeroSpaceWorkspaceClient(focused: "1", workspaces: ["1", "limbo"])
+        aero.setReadDelayNanoseconds(delay)
+        let resolver = FakeCodexForegroundResolver(.none, readDelayNanoseconds: delay)
+        let viewModel = QueueViewModel(
+            client: client,
+            workspaceClient: workspaceClient,
+            aeroSpaceClient: aero,
+            codexForegroundResolver: resolver
+        )
+
+        let started = DispatchTime.now().uptimeNanoseconds
+        await viewModel.advance()
+        let elapsed = DispatchTime.now().uptimeNanoseconds - started
+
+        XCTAssertEqual(viewModel.advanceToast, .manualModeActive)
+        XCTAssertLessThan(
+            elapsed,
+            450_000_000,
+            "advance snapshot reads should overlap; elapsed \(elapsed)ns suggests serial reads"
+        )
+    }
+
     func testAdvanceFromStateBWithEmptyQueueEntersLimbo() async {
         let client = FakeQueueClient(packets: [])
         let workspaceClient = FakeWorkspaceClient(

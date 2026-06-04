@@ -39,6 +39,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var manualModeFakeError: Error?
     private var manualModeSetCalls: [(active: Bool, reason: String?)] = []
     private var manualModeGetCallCount: Int = 0
+    private var readDelayNanoseconds: UInt64 = 0
     private var readingQueueContexts: [ReadingQueueContext] = []
     private var fakeActivityEvents: [ActivityEvent] = []
     private var fakeAutoBindRunCount: Int = 0
@@ -220,6 +221,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         lock.withLock { manualModeFakeError = error }
     }
 
+    public func setReadDelayNanoseconds(_ delay: UInt64) {
+        lock.withLock { readDelayNanoseconds = delay }
+    }
+
     public func setNextLeaseError(_ error: Error?) {
         lock.withLock { nextLeaseError = error }
     }
@@ -242,7 +247,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func fetchQueue() async throws -> [ReviewPacket] {
-        lock.withLock { packets }
+        await sleepReadDelayIfNeeded()
+        return lock.withLock { packets }
     }
 
     public func complete(packetId: String, workspaceSnapshot: WorkspaceSnapshot? = nil) async throws -> QueueActionResult {
@@ -635,7 +641,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func getManualMode() async throws -> ManualModeState {
-        try lock.withLock {
+        await sleepReadDelayIfNeeded()
+        return try lock.withLock {
             manualModeGetCallCount += 1
             if let manualModeFakeError {
                 throw manualModeFakeError
@@ -859,7 +866,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func getCurrentTask() async throws -> CurrentTaskState {
-        lock.withLock {
+        await sleepReadDelayIfNeeded()
+        return lock.withLock {
             let task = currentTaskId.flatMap { id in tasks.first { $0.taskId == id } }
             return CurrentTaskState(task: task, enteredAt: currentTaskEnteredAt, updatedAt: currentTaskEnteredAt)
         }
@@ -879,7 +887,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func listTasks() async throws -> [TaskRecord] {
-        lock.withLock { tasks }
+        await sleepReadDelayIfNeeded()
+        return lock.withLock { tasks }
     }
 
     public func getTaskWithLayout(taskId: String) async throws -> TaskGetEnvelope {
@@ -1025,5 +1034,12 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
             taskSessions: taskSessions,
             warnings: []
         )
+    }
+
+    private func sleepReadDelayIfNeeded() async {
+        let delay = lock.withLock { readDelayNanoseconds }
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: delay)
+        }
     }
 }
