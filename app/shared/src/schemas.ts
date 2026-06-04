@@ -1500,6 +1500,66 @@ export const PaperTriggerMutationResponseSchema = z
   .strict();
 export type PaperTriggerMutationResponse = z.infer<typeof PaperTriggerMutationResponseSchema>;
 
+export const HealthResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    service: nonEmpty,
+    time: isoDateTime,
+    request_id: id
+  })
+  .strict();
+export type HealthResponse = z.infer<typeof HealthResponseSchema>;
+
+export const MetricsSnapshotSchema = z
+  .object({
+    counters: z.record(z.number()),
+    activity_count: z.number().int().nonnegative()
+  })
+  .strict();
+export type MetricsSnapshot = z.infer<typeof MetricsSnapshotSchema>;
+
+export const MetricsResponseSchema = z
+  .object({
+    metrics: MetricsSnapshotSchema,
+    generated_at: isoDateTime,
+    request_id: id
+  })
+  .strict();
+export type MetricsResponse = z.infer<typeof MetricsResponseSchema>;
+
+export const ActivityActorSchema = z.enum(["system", "human", "agent"]);
+export type ActivityActor = z.infer<typeof ActivityActorSchema>;
+
+export const ActivityStatusSchema = z.enum(["ok", "failed", "blocked"]);
+export type ActivityStatus = z.infer<typeof ActivityStatusSchema>;
+
+export const ActivityEventSchema = z
+  .object({
+    id,
+    type: nonEmpty,
+    occurred_at: isoDateTime,
+    actor: ActivityActorSchema,
+    task_id: id.optional(),
+    queue_item_id: id.optional(),
+    event_id: id.optional(),
+    task_session_id: id.optional(),
+    source_id: id.optional(),
+    status: ActivityStatusSchema.optional(),
+    summary: nonEmpty,
+    details: z.record(z.unknown())
+  })
+  .strict();
+export type ActivityEvent = z.infer<typeof ActivityEventSchema>;
+
+export const ActivityResponseSchema = z
+  .object({
+    events: z.array(ActivityEventSchema),
+    count: z.number().int().nonnegative(),
+    request_id: id
+  })
+  .strict();
+export type ActivityResponse = z.infer<typeof ActivityResponseSchema>;
+
 export const RouteEventResultSchema = z
   .object({
     event: EventSchema,
@@ -2035,6 +2095,13 @@ export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   PaperTriggerListResponse: PaperTriggerListResponseSchema,
   PaperTriggerGetResponse: PaperTriggerGetResponseSchema,
   PaperTriggerMutationResponse: PaperTriggerMutationResponseSchema,
+  HealthResponse: HealthResponseSchema,
+  MetricsSnapshot: MetricsSnapshotSchema,
+  MetricsResponse: MetricsResponseSchema,
+  ActivityActor: ActivityActorSchema,
+  ActivityStatus: ActivityStatusSchema,
+  ActivityEvent: ActivityEventSchema,
+  ActivityResponse: ActivityResponseSchema,
   RouteEventResult: RouteEventResultSchema,
   McpPollAllAndRouteRequest: McpPollAllAndRouteRequestSchema,
   McpPollSourceRequest: McpPollSourceRequestSchema,

@@ -1,0 +1,21 @@
+{
+  "schema": "ActivityResponse",
+  "data": {
+    "events": [
+      {
+        "id": "actv_demo_001",
+        "type": "queue_item_done",
+        "occurred_at": "2026-05-10T12:00:00.000Z",
+        "actor": "human",
+        "queue_item_id": "qit_release_review",
+        "status": "ok",
+        "summary": "Queue item marked done",
+        "details": {
+          "actor_id": "mac_queue_app"
+        }
+      }
+    ],
+    "count": 1,
+    "request_id": "req_activity"
+  }
+}

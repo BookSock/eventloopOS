@@ -1363,6 +1363,79 @@
         "request_id": { "type": "string", "minLength": 1 }
       }
     },
+    "HealthResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "service", "time", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "service": { "type": "string", "minLength": 1 },
+        "time": { "type": "string", "format": "date-time" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "MetricsSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["counters", "activity_count"],
+      "properties": {
+        "counters": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        },
+        "activity_count": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "MetricsResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["metrics", "generated_at", "request_id"],
+      "properties": {
+        "metrics": { "$ref": "#/components/schemas/MetricsSnapshot" },
+        "generated_at": { "type": "string", "format": "date-time" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ActivityActor": {
+      "type": "string",
+      "enum": ["system", "human", "agent"]
+    },
+    "ActivityStatus": {
+      "type": "string",
+      "enum": ["ok", "failed", "blocked"]
+    },
+    "ActivityEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "occurred_at", "actor", "summary", "details"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "actor": { "$ref": "#/components/schemas/ActivityActor" },
+        "task_id": { "type": "string", "minLength": 1 },
+        "queue_item_id": { "type": "string", "minLength": 1 },
+        "event_id": { "type": "string", "minLength": 1 },
+        "task_session_id": { "type": "string", "minLength": 1 },
+        "source_id": { "type": "string", "minLength": 1 },
+        "status": { "$ref": "#/components/schemas/ActivityStatus" },
+        "summary": { "type": "string", "minLength": 1 },
+        "details": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "ActivityResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["events", "count", "request_id"],
+      "properties": {
+        "events": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/ActivityEvent" }
+        },
+        "count": { "type": "integer", "minimum": 0 },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "RouteEventResult": {
       "type": "object",
       "additionalProperties": true,
@@ -2240,9 +2313,9 @@
       "status": "stable_enough",
       "summary": "Health, metrics, activity, proof runners, latency checks, and machine-readable manifests.",
       "http": [
-        { "method": "GET", "path": "/health", "route_file": "app/orchestrator/src/server.ts" },
-        { "method": "GET", "path": "/metrics", "route_file": "app/orchestrator/src/server.ts" },
-        { "method": "GET", "path": "/activity", "route_file": "app/orchestrator/src/server.ts" }
+        { "method": "GET", "path": "/health", "route_file": "app/orchestrator/src/server.ts", "response_schema": "HealthResponse" },
+        { "method": "GET", "path": "/metrics", "route_file": "app/orchestrator/src/server.ts", "response_schema": "MetricsResponse" },
+        { "method": "GET", "path": "/activity", "route_file": "app/orchestrator/src/server.ts", "response_schema": "ActivityResponse" }
       ],
       "code": ["app/orchestrator/src/routes/observability.ts"],
       "proofs": [

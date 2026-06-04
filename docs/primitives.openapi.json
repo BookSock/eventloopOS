@@ -92,7 +92,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ActivityResponse"
                 }
               }
             },
@@ -1027,7 +1027,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/HealthResponse"
                 }
               }
             },
@@ -1442,7 +1442,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/MetricsResponse"
                 }
               }
             },
@@ -3645,6 +3645,107 @@
           }
         }
       },
+      "ActivityActor": {
+        "enum": [
+          "system",
+          "human",
+          "agent"
+        ],
+        "type": "string"
+      },
+      "ActivityEvent": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "$ref": "#/components/schemas/ActivityActor"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "event_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "queue_item_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ActivityStatus"
+          },
+          "summary": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "occurred_at",
+          "actor",
+          "summary",
+          "details"
+        ],
+        "type": "object"
+      },
+      "ActivityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/ActivityEvent"
+            },
+            "type": "array"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "events",
+          "count",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "ActivityStatus": {
+        "enum": [
+          "ok",
+          "failed",
+          "blocked"
+        ],
+        "type": "string"
+      },
       "AerospaceCommand": {
         "additionalProperties": false,
         "properties": {
@@ -4570,6 +4671,34 @@
         ],
         "type": "object"
       },
+      "HealthResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "service": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "time": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "service",
+          "time",
+          "request_id"
+        ],
+        "type": "object"
+      },
       "ManualModeGetResponse": {
         "additionalProperties": false,
         "properties": {
@@ -5270,6 +5399,48 @@
           "sources",
           "count",
           "request_id"
+        ],
+        "type": "object"
+      },
+      "MetricsResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "metrics": {
+            "$ref": "#/components/schemas/MetricsSnapshot"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "metrics",
+          "generated_at",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "MetricsSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "activity_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "counters": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "counters",
+          "activity_count"
         ],
         "type": "object"
       },

@@ -1,0 +1,10 @@
+{
+  "schema": "MetricsSnapshot",
+  "data": {
+    "counters": {
+      "events_ingested_total": 4,
+      "queue_items_created_total": 2
+    },
+    "activity_count": 3
+  }
+}

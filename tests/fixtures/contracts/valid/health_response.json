@@ -1,0 +1,9 @@
+{
+  "schema": "HealthResponse",
+  "data": {
+    "ok": true,
+    "service": "eventloop-orchestrator",
+    "time": "2026-05-10T12:00:00.000Z",
+    "request_id": "req_health"
+  }
+}

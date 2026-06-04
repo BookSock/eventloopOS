@@ -1,0 +1,20 @@
+{
+  "schema": "ActivityEvent",
+  "data": {
+    "id": "actv_demo_001",
+    "type": "queue_item_done",
+    "occurred_at": "2026-05-10T12:00:00.000Z",
+    "actor": "human",
+    "task_id": "task_release_ops",
+    "queue_item_id": "qit_release_review",
+    "event_id": "evt_release_ready",
+    "task_session_id": "task_session_release",
+    "source_id": "slack:T1:C1",
+    "status": "ok",
+    "summary": "Queue item marked done",
+    "details": {
+      "actor_id": "mac_queue_app",
+      "priority": 900
+    }
+  }
+}

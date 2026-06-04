@@ -1,0 +1,14 @@
+{
+  "schema": "MetricsResponse",
+  "data": {
+    "metrics": {
+      "counters": {
+        "events_ingested_total": 4,
+        "queue_items_created_total": 2
+      },
+      "activity_count": 3
+    },
+    "generated_at": "2026-05-10T12:00:00.000Z",
+    "request_id": "req_metrics"
+  }
+}
