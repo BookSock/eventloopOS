@@ -335,7 +335,11 @@ struct QueueWindowView: View {
                         await viewModel.refreshContextRestoreRequest()
                     }
                 }
-                AdvanceToastBanner(toast: viewModel.advanceToast, queueCount: viewModel.packets.count)
+                AdvanceToastBanner(
+                    toast: viewModel.advanceToast,
+                    queueCount: viewModel.packets.count,
+                    feedbackSequence: viewModel.feedbackSequence
+                )
             }
                 .padding(12)
         }
@@ -617,25 +621,72 @@ struct QueueHarnessStatusText {
 private struct AdvanceToastBanner: View {
     let toast: AdvanceToast?
     let queueCount: Int
+    let feedbackSequence: Int
 
     var body: some View {
         if let toast {
-            Label {
-                Text(message(for: toast))
-            } icon: {
-                Image(systemName: icon(for: toast))
+            let presentation = AdvanceToastBannerPresentation.make(
+                toast: toast,
+                queueCount: queueCount,
+                feedbackSequence: feedbackSequence
+            )
+            HStack(spacing: 8) {
+                RoundedRectangle(cornerRadius: 2)
+                    .fill(foreground(for: presentation.foregroundRole))
+                    .frame(width: 3)
+                    .opacity(presentation.pulseOpacity)
+                Label {
+                    Text(presentation.message)
+                } icon: {
+                    Image(systemName: presentation.icon)
+                }
             }
             .font(.caption.weight(.medium))
-            .foregroundStyle(foreground(for: toast))
+            .foregroundStyle(foreground(for: presentation.foregroundRole))
             .padding(.horizontal, 10)
             .padding(.vertical, 7)
             .background(.thinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .accessibilityIdentifier("queue-advance-toast")
+            .accessibilityValue("feedback_seq=\(feedbackSequence)")
+            .animation(.easeOut(duration: 0.14), value: feedbackSequence)
         }
     }
 
-    private func message(for toast: AdvanceToast) -> String {
+    private func foreground(for role: AdvanceToastForegroundRole) -> Color {
+        switch role {
+        case .warning:
+            return .orange
+        case .muted:
+            return .secondary
+        case .success:
+            return .green
+        }
+    }
+}
+
+enum AdvanceToastForegroundRole: Equatable {
+    case warning
+    case muted
+    case success
+}
+
+struct AdvanceToastBannerPresentation: Equatable {
+    let message: String
+    let icon: String
+    let foregroundRole: AdvanceToastForegroundRole
+    let pulseOpacity: Double
+
+    static func make(toast: AdvanceToast, queueCount: Int, feedbackSequence: Int) -> AdvanceToastBannerPresentation {
+        AdvanceToastBannerPresentation(
+            message: message(for: toast, queueCount: queueCount),
+            icon: icon(for: toast),
+            foregroundRole: foregroundRole(for: toast),
+            pulseOpacity: feedbackSequence.isMultiple(of: 2) ? 0.55 : 1.0
+        )
+    }
+
+    private static func message(for toast: AdvanceToast, queueCount: Int) -> String {
         switch toast {
         case .manualModeActive:
             return "Manual Mode active. Return to Event Loop before advancing."
@@ -661,7 +712,7 @@ private struct AdvanceToastBanner: View {
         }
     }
 
-    private func icon(for toast: AdvanceToast) -> String {
+    private static func icon(for toast: AdvanceToast) -> String {
         switch toast {
         case .manualModeActive:
             return "pause.circle.fill"
@@ -682,14 +733,14 @@ private struct AdvanceToastBanner: View {
         }
     }
 
-    private func foreground(for toast: AdvanceToast) -> Color {
+    private static func foregroundRole(for toast: AdvanceToast) -> AdvanceToastForegroundRole {
         switch toast {
         case .manualModeActive:
-            return .orange
+            return .warning
         case .noForegroundCodex, .queueEmpty, .enteredLimbo:
-            return .secondary
+            return .muted
         case .actionComplete, .deferredUntil, .taskCreated, .switchedToPaper, .returnedToTask:
-            return .green
+            return .success
         }
     }
 }
