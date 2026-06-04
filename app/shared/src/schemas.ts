@@ -259,6 +259,42 @@ export const ContextRestoreRequestSchema = z
   .strict();
 export type ContextRestoreRequest = z.infer<typeof ContextRestoreRequestSchema>;
 
+export const ManualModeStateSchema = z
+  .object({
+    active: z.boolean(),
+    entered_at: isoDateTime.optional(),
+    reason: z.string().optional(),
+    updated_at: isoDateTime
+  })
+  .strict();
+export type ManualModeState = z.infer<typeof ManualModeStateSchema>;
+
+export const ManualModeSetRequestSchema = z
+  .object({
+    active: z.boolean(),
+    reason: z.string().optional()
+  })
+  .passthrough();
+export type ManualModeSetRequest = z.infer<typeof ManualModeSetRequestSchema>;
+
+export const ManualModeGetResponseSchema = z
+  .object({
+    manual_mode: ManualModeStateSchema,
+    request_id: id
+  })
+  .strict();
+export type ManualModeGetResponse = z.infer<typeof ManualModeGetResponseSchema>;
+
+export const ManualModeSetResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    manual_mode: ManualModeStateSchema,
+    transitioned: z.boolean(),
+    request_id: id
+  })
+  .strict();
+export type ManualModeSetResponse = z.infer<typeof ManualModeSetResponseSchema>;
+
 export const TaskWindowClaimRecordSchema = z
   .object({
     claim_id: id,
@@ -698,6 +734,10 @@ export const ContractSchemas = {
   ContextResource: ContextResourceSchema,
   ContextRestorePlan: ContextRestorePlanSchema,
   ContextRestoreRequest: ContextRestoreRequestSchema,
+  ManualModeState: ManualModeStateSchema,
+  ManualModeSetRequest: ManualModeSetRequestSchema,
+  ManualModeGetResponse: ManualModeGetResponseSchema,
+  ManualModeSetResponse: ManualModeSetResponseSchema,
   TaskWindowClaimRecord: TaskWindowClaimRecordSchema,
   TaskWindowClaimCreateRequest: TaskWindowClaimCreateRequestSchema,
   TaskWindowClaimResponse: TaskWindowClaimResponseSchema,

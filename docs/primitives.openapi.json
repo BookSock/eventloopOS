@@ -691,7 +691,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ManualModeGetResponse"
                 }
               }
             },
@@ -723,18 +723,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/ManualModeSetRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ManualModeSetResponse"
                 }
               }
             },
@@ -2038,6 +2038,88 @@
           "exclusions",
           "count",
           "request_id"
+        ],
+        "type": "object"
+      },
+      "ManualModeGetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "manual_mode": {
+            "$ref": "#/components/schemas/ManualModeState"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "manual_mode",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "ManualModeSetRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "active"
+        ],
+        "type": "object"
+      },
+      "ManualModeSetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "manual_mode": {
+            "$ref": "#/components/schemas/ManualModeState"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "transitioned": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "manual_mode",
+          "transitioned",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "ManualModeState": {
+        "additionalProperties": false,
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "entered_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "active",
+          "updated_at"
         ],
         "type": "object"
       },

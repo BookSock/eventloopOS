@@ -1,0 +1,9 @@
+{
+  "schema": "ManualModeState",
+  "data": {
+    "active": true,
+    "entered_at": "2026-06-04T09:15:00.000Z",
+    "reason": "user_hotkey",
+    "updated_at": "2026-06-04T09:15:00.000Z"
+  }
+}

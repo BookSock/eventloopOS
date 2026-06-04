@@ -1,0 +1,8 @@
+{
+  "schema": "ManualModeSetRequest",
+  "data": {
+    "active": true,
+    "reason": "user_hotkey",
+    "future_client_field": "ignored"
+  }
+}

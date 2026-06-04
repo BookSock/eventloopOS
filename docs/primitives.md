@@ -6,9 +6,9 @@ other tools could build on without taking the whole queue app.
 
 Machine-readable catalog: `docs/primitives.catalog.json`. Builder-facing HTTP
 OpenAPI artifact: `docs/primitives.openapi.json`. It includes concrete schemas
-for task-window claims and follows-window exclusion rules; those schemas are
-also exported from `@eventloopos/shared`. Broader routes still use conservative
-freeform envelopes until their validators are exported.
+for task-window claims, follows-window exclusion rules, and manual mode; those
+schemas are also exported from `@eventloopos/shared`. Broader routes still use
+conservative freeform envelopes until their validators are exported.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.
@@ -504,6 +504,13 @@ HTTP surface:
 
 - `GET /modes/manual`
 - `POST /modes/manual`
+
+Shared contracts:
+
+- `ManualModeState`
+- `ManualModeSetRequest`
+- `ManualModeGetResponse`
+- `ManualModeSetResponse`
 
 Mac hotkeys:
 

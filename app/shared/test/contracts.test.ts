@@ -10,6 +10,7 @@ import {
   ContextResourceSchema,
   EventSchema,
   FollowsWindowExclusionCreateRequestSchema,
+  ManualModeSetRequestSchema,
   ReviewPacketSchema,
   TaskWindowClaimCreateRequestSchema,
   WorkspaceSnapshotResourceSchema,
@@ -171,6 +172,14 @@ describe("contract schemas", () => {
         ignored_future_field: true
       }).titleSubstring
     ).toBe("playwright");
+
+    expect(
+      ManualModeSetRequestSchema.parse({
+        active: true,
+        reason: "user_hotkey",
+        ignored_future_field: true
+      }).active
+    ).toBe(true);
   });
 
   it("allows failed context restore requests for retryable browser failures", () => {

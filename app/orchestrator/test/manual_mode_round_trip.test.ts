@@ -16,21 +16,20 @@ import type { WorkspaceController } from "../src/workspace/controller.js";
 
 // V13 — Manual-mode round-trip proof against a fake AeroSpace controller.
 //
-// Honest finding (this is the proof, not papered over): manual mode lives
-// entirely in the Mac SwiftUI ViewModel (`QueueViewModel.toggleManualMode...`).
-// The orchestrator has no `/modes/manual`, no queue-pause primitive, and no
-// "personal desktop" layout concept. The Mac client owns the snapshot in
-// `manualWorkspaceSnapshot: WorkspaceSnapshot?` and the toggle reduces to:
+// Manual mode now has an orchestrator pause primitive at `/modes/manual`, but
+// the Mac client still owns the held workspace snapshot in
+// `manualWorkspaceSnapshot: WorkspaceSnapshot?`. The workspace round trip
+// reduces to:
 //
 //   enter  → POST /workspace/capture       (save current workbench)
 //   exit   → POST /workspace/restore       (restore the saved workbench)
 //
-// The orchestrator never sees a "mode" change — it just receives capture and
-// restore HTTP calls. Any AeroSpace plan written by the orchestrator therefore
-// only fires on the *exit* leg (the restore-plan that drives the loop back
-// onto the original workbench). The "personal desktop" layout on enter is the
-// user's pre-existing AeroSpace state — eventloopOS does not synthesize a
-// layout for it; it only saves a snapshot of it.
+// The orchestrator pauses automation through `/modes/manual` in separate tests;
+// this test focuses on capture/restore semantics. Any AeroSpace plan written by
+// the orchestrator therefore only fires on the exit leg (the restore-plan that
+// drives the loop back onto the original workbench). The "personal desktop"
+// layout on enter is the user's pre-existing AeroSpace state; eventloopOS does
+// not synthesize a layout for it, it only saves a snapshot of it.
 //
 // This test boots the gateway in-process with a fake/recording AeroSpace
 // controller and drives exactly the same sequence the Mac client does, then

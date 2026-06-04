@@ -129,6 +129,46 @@
         "count": { "type": "integer", "minimum": 0 },
         "request_id": { "type": "string", "minLength": 1 }
       }
+    },
+    "ManualModeState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["active", "updated_at"],
+      "properties": {
+        "active": { "type": "boolean" },
+        "entered_at": { "type": "string", "format": "date-time" },
+        "reason": { "type": "string" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ManualModeSetRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["active"],
+      "properties": {
+        "active": { "type": "boolean" },
+        "reason": { "type": "string" }
+      }
+    },
+    "ManualModeGetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["manual_mode", "request_id"],
+      "properties": {
+        "manual_mode": { "$ref": "#/components/schemas/ManualModeState" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ManualModeSetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "manual_mode", "transitioned", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "manual_mode": { "$ref": "#/components/schemas/ManualModeState" },
+        "transitioned": { "type": "boolean" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
     }
   },
   "primitives": [
@@ -364,8 +404,19 @@
       "status": "stable_enough",
       "summary": "Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
       "http": [
-        { "method": "GET", "path": "/modes/manual", "route_file": "app/orchestrator/src/routes/modes.ts" },
-        { "method": "POST", "path": "/modes/manual", "route_file": "app/orchestrator/src/routes/modes.ts" }
+        {
+          "method": "GET",
+          "path": "/modes/manual",
+          "route_file": "app/orchestrator/src/routes/modes.ts",
+          "response_schema": "ManualModeGetResponse"
+        },
+        {
+          "method": "POST",
+          "path": "/modes/manual",
+          "route_file": "app/orchestrator/src/routes/modes.ts",
+          "request_schema": "ManualModeSetRequest",
+          "response_schema": "ManualModeSetResponse"
+        }
       ],
       "hotkeys": ["Ctrl-Option-M", "Ctrl-Option-Shift-M"],
       "code": ["app/orchestrator/src/routes/modes.ts", "app/orchestrator/src/agents/ambient_workspace_saver.ts"],
