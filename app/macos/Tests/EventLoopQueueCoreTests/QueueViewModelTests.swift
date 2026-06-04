@@ -471,7 +471,20 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state, .loaded)
         XCTAssertEqual(viewModel.packets.map(\.id), ["packet-ci-failed", "packet-external-send"])
         XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
-        XCTAssertEqual(viewModel.advanceToast, .switchedToPaper(packetId: "packet-ci-failed"))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Done. Next paper ready."))
+    }
+
+    func testDeferSelectedPacketShowsSuccessToastWhenNextPaperExists() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        let dueAt = Date(timeIntervalSince1970: 1_778_074_500)
+        await viewModel.pullNextPaper()
+
+        await viewModel.deferSelectedPacket(until: dueAt)
+
+        XCTAssertEqual(client.deferredPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+        XCTAssertEqual(viewModel.advanceToast, .deferredUntil(dueAt))
     }
 
     func testDeferSelectedPacketShowsEmptyQueueToastWhenNoNextPaper() async {

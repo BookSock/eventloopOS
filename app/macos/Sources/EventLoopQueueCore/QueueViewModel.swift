@@ -926,7 +926,7 @@ public final class QueueViewModel: ObservableObject {
         state = .loading
         do {
             _ = try await client.complete(packetId: packetId, workspaceSnapshot: workspaceSnapshot)
-            try await loadNextAfterQueueAction(emptyToast: .actionComplete("Done. Queue empty."))
+            try await loadNextAfterQueueAction(successToast: .actionComplete("Done. Next paper ready."))
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -943,7 +943,7 @@ public final class QueueViewModel: ObservableObject {
         state = .loading
         do {
             _ = try await client.deferPacket(packetId: packetId, until: dueAt, workspaceSnapshot: workspaceSnapshot)
-            try await loadNextAfterQueueAction(emptyToast: .deferredUntil(dueAt))
+            try await loadNextAfterQueueAction(successToast: .deferredUntil(dueAt))
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -964,7 +964,7 @@ public final class QueueViewModel: ObservableObject {
         state = .loading
         do {
             _ = try await client.ignorePacket(packetId: packetId, workspaceSnapshot: workspaceSnapshot)
-            try await loadNextAfterQueueAction(emptyToast: .actionComplete("Ignored. Queue empty."))
+            try await loadNextAfterQueueAction(successToast: .actionComplete("Ignored. Next paper ready."))
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -1042,13 +1042,13 @@ public final class QueueViewModel: ObservableObject {
         state = .loading
         do {
             _ = try await client.executeRecommendedAction(packetId: packetId, workspaceSnapshot: workspaceSnapshot)
-            try await loadNextAfterQueueAction(emptyToast: .actionComplete("Sent to agent. Queue empty."))
+            try await loadNextAfterQueueAction(successToast: .actionComplete("Sent to agent. Next paper ready."))
         } catch {
             state = .failed(error.localizedDescription)
         }
     }
 
-    private func loadNextAfterQueueAction(emptyToast: AdvanceToast) async throws {
+    private func loadNextAfterQueueAction(successToast: AdvanceToast) async throws {
         let leasedPacket: ReviewPacket?
         do {
             leasedPacket = try await client.next(after: nil)
@@ -1059,7 +1059,7 @@ public final class QueueViewModel: ObservableObject {
             packets = (try? await client.fetchQueue()) ?? packets
             selectedPacketID = packets.first?.id
             state = .loaded
-            advanceToast = packets.isEmpty ? emptyToast : .actionComplete("Queue paused. Try again.")
+            advanceToast = packets.isEmpty ? successToast : .actionComplete("Queue paused. Try again.")
             await loadTaskSessionsForSelectedPacketIfNeeded()
             await prepareSelectedWorkspaceRestore()
             await requestSelectedBrowserContextRestoresIfNeeded()
@@ -1068,10 +1068,8 @@ public final class QueueViewModel: ObservableObject {
         packets = try await client.fetchQueue()
         selectedPacketID = leasedPacket?.id ?? packets.first?.id
         state = .loaded
-        if let selectedPacketID {
-            advanceToast = .switchedToPaper(packetId: selectedPacketID)
-        } else if packets.isEmpty {
-            advanceToast = emptyToast
+        if selectedPacketID != nil || packets.isEmpty {
+            advanceToast = successToast
         }
         await loadTaskSessionsForSelectedPacketIfNeeded()
         await prepareSelectedWorkspaceRestore()
