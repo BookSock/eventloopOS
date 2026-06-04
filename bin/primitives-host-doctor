@@ -58,6 +58,8 @@ async function runDoctor(options, deps = {}) {
   const checks = [];
 
   checks.push(commandCheck(commandRunner, "catalog_audit", "node", ["bin/primitives-catalog-audit", "docs/primitives.catalog.json"]));
+  checks.push(commandCheck(commandRunner, "strict_readiness", "node", ["bin/primitives-readiness-report", "--strict", "--json", "docs/primitives.catalog.json"]));
+  checks.push(commandCheck(commandRunner, "builder_docs_current", "node", ["bin/primitives-docs-audit", "docs/primitives.catalog.json", "docs/primitives.md"]));
   checks.push(commandCheck(commandRunner, "openapi_current", "node", ["bin/primitives-openapi-export", "--check", "docs/primitives.catalog.json", "docs/primitives.openapi.json"]));
   checks.push(commandCheck(commandRunner, "restore_my_desk_example", "node", ["examples/primitives/restore-my-desk.mjs", "--self-test"]));
   checks.push(commandCheck(commandRunner, "agent_attention_queue_example", "node", ["examples/primitives/agent-attention-queue.mjs", "--self-test"]));
@@ -236,6 +238,8 @@ async function runSelfTest() {
   }, { commandRunner, fetcher });
   assert.equal(manifest.ok, true);
   assert.equal(manifest.failed_checks.length, 0);
+  assert.ok(manifest.checks.some((check) => check.name === "strict_readiness"));
+  assert.ok(manifest.checks.some((check) => check.name === "builder_docs_current"));
   assert.ok(manifest.checks.some((check) => check.name === "live_workspace_status"));
 
   const warningManifest = await runDoctor({

@@ -783,8 +783,9 @@ Useful standalone uses:
 
 Status: stable enough internally. `bin/primitives-host-doctor` is the small
 "prove my host" entrypoint for builders: it validates catalog/OpenAPI drift,
-runs primitive example self-tests, and optionally gates live orchestrator
-`/health`, `/metrics`, `/activity`, and `/workspace/status` with
+runs strict readiness, verifies this builder-facing docs index against the
+catalog, runs primitive example self-tests, and optionally gates live
+orchestrator `/health`, `/metrics`, `/activity`, and `/workspace/status` with
 `--require-live`.
 
 ## Near-Term Library Hardening
