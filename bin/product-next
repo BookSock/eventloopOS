@@ -205,7 +205,13 @@ const summaryCommandGroups = summary?.next_command_groups ?? {};
 const labWaitCommandGroups = commandGroupsFromLabWait(labWaitManifest);
 const commandGroups = mergeCommandGroups(summaryCommandGroups, labWaitCommandGroups);
 const summaryNextCommands = flattenCommandGroups(commandGroups, summary?.next_commands ?? []);
-const selected = chooseCommand({ labOnline, summaryNextCommands, commandGroups, primaryNextAction: summary?.primary_next_action });
+const selected = chooseCommand({
+  labOnline,
+  summaryNextCommands,
+  commandGroups,
+  primaryNextAction: summary?.primary_next_action,
+  releaseReady: summary?.release_ready === true,
+});
 const selectedCleanCommand = cleanCommand(selected.command);
 const selectedTarget = selected.target ?? commandTarget(selected.command);
 const selectedRunHint = runHint(selected);
@@ -391,13 +397,22 @@ function formatChecks(checks) {
     .join(", ");
 }
 
-function chooseCommand({ labOnline, summaryNextCommands, commandGroups, primaryNextAction }) {
+function chooseCommand({ labOnline, summaryNextCommands, commandGroups, primaryNextAction, releaseReady = false }) {
+  if (releaseReady) {
+    return {
+      reason: "release readiness is already green; no product-readiness command is pending",
+      autorun: false,
+    };
+  }
   if (labOnline) {
     if ((commandGroups.lab ?? []).includes("pnpm product:lab-ready")) {
       return { command: "pnpm product:lab-ready", reason: "lab transport/setup is green; verify dogfood stack readiness before real Codex scenario" };
     }
     if ((commandGroups.lab ?? []).includes("pnpm product:dogfood")) {
       return { command: "pnpm product:dogfood", reason: "lab transport is online and lab quick was already green" };
+    }
+    if ((commandGroups.release ?? []).length > 0) {
+      return { command: commandGroups.release[0], reason: "release proof is the next product-readiness gate" };
     }
     return { command: "pnpm product:quick", reason: "lab transport is online; refresh full lab quick before dogfood" };
   }
@@ -928,6 +943,25 @@ function runSelfTest() {
   });
   assert.equal(dogfoodSelected.command, "pnpm product:dogfood");
   assert.equal(nonAutorunSkipReason(dogfoodSelected), undefined);
+
+  const releaseSelected = chooseCommand({
+    labOnline: true,
+    summaryNextCommands: [],
+    commandGroups: { local: [], lab: [], release: ["pnpm product:release:fast"] },
+  });
+  assert.equal(releaseSelected.command, "pnpm product:release:fast");
+  assert.equal(releaseSelected.reason, "release proof is the next product-readiness gate");
+
+  const releaseReadySelected = chooseCommand({
+    labOnline: true,
+    summaryNextCommands: [],
+    commandGroups: { local: [], lab: [], release: ["pnpm product:quick"] },
+    releaseReady: true,
+  });
+  assert.equal(releaseReadySelected.command, undefined);
+  assert.equal(releaseReadySelected.autorun, false);
+  assert.match(releaseReadySelected.reason, /already green/);
+
   assert.equal(commandTarget("pnpm setup:status"), "controller");
   assert.equal(commandTarget("pnpm lab:local-bootstrap"), "lab");
 
