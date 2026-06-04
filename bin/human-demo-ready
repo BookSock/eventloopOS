@@ -176,10 +176,15 @@ const output = {
   ready: readyPath,
   ok: manifest.ok,
   failed_checks: failedChecks,
+  checks: manifest.checks,
+  queue_latency_required: manifest.queue_latency_required,
+  workspace_latency_required: manifest.workspace_latency_required,
+  hotkey_latency_required: manifest.hotkey_latency_required,
   latest_human_demo: manifest.latest_human_demo,
   screen_sharing_capture: manifest.screen_sharing_capture,
   queue_latency: manifest.queue_latency,
   workspace_latency: manifest.workspace_latency,
+  hotkey_feedback_latency: manifest.hotkey_feedback_latency,
 };
 
 if (jsonOnly) {

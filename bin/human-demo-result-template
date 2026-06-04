@@ -6,10 +6,11 @@ const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "
 const args = process.argv.slice(2);
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/human-demo-result-template [--manifest artifacts/lab-runs/.../manifest.json] [--json] [--write|--output path]
+  console.log(`Usage: bin/human-demo-result-template [--manifest artifacts/lab-runs/.../manifest.json] [--json] [--write|--output path] [--allow-stale-readiness]
 
 Print a prefilled human dogfood result template from the latest Mac Studio
-human-demo artifact.
+human-demo artifact. Writes require green human-demo readiness latency gates
+unless --allow-stale-readiness is used for debugging.
 `);
   process.exit(0);
 }
@@ -58,12 +59,16 @@ if (args.includes("--self-test")) {
   assertIncludes(rendered, "Readiness workspace latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/workspace-latency.json ok=true required=true");
   assertIncludes(rendered, "Readiness hotkey latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/hotkey-latency.json ok=true required=true");
   assertIncludes(rendered, "Automated proof: ok=true, queue_count=2, ambient_autosave=true");
+  const staleReadiness = readinessSummary({});
+  assertEqual(staleReadiness.ok, false);
+  assertEqual(staleReadiness.failed_gates.join(","), "queue_latency_ok,workspace_latency_ok");
   console.log("human-demo-result-template self-test passed");
   process.exit(0);
 }
 
 const json = args.includes("--json");
 const write = args.includes("--write");
+const allowStaleReadiness = args.includes("--allow-stale-readiness");
 const manifestArg = valueAfter("--manifest");
 const outputArg = valueAfter("--output");
 const manifestPath = manifestArg ?? latestManifestPath();
@@ -90,6 +95,13 @@ const template = renderTemplate({
 });
 const readiness = readinessSummary(ready);
 if (outputPath) {
+  if (!allowStaleReadiness && readiness.ok !== true) {
+    console.error("Latest human-demo readiness is not green. Run `bin/human-demo-ready`, then retry.");
+    console.error(`Readiness manifest: ${readyManifestPath ?? "(missing)"}`);
+    console.error(`Failed readiness gates: ${readiness.failed_gates.join(", ") || "(unknown)"}`);
+    console.error("Use --allow-stale-readiness only for debugging.");
+    process.exit(1);
+  }
   const absoluteOutputPath = path.resolve(repoRoot, outputPath);
   fs.mkdirSync(path.dirname(absoluteOutputPath), { recursive: true });
   fs.writeFileSync(absoluteOutputPath, template, "utf8");
@@ -105,6 +117,9 @@ const result = {
   readiness_queue_latency_ok: readiness.queue.ok,
   readiness_workspace_latency_ok: readiness.workspace.ok,
   readiness_hotkey_latency_ok: readiness.hotkey.ok,
+  readiness_ok: readiness.ok,
+  readiness_failed_gates: readiness.failed_gates,
+  ready_to_write: readiness.ok === true || allowStaleReadiness,
   output_path: outputPath,
   ok: manifest.ok === true,
   queue_count: manifest.proofs?.demo_queue?.count ?? null,
@@ -216,10 +231,19 @@ Ship/block decision:
 }
 
 function readinessSummary(ready) {
-  return {
+  const gates = {
     queue: readinessGate(ready, "queue_latency", "queue_latency_ok", "queue_latency_required", true),
     workspace: readinessGate(ready, "workspace_latency", "workspace_latency_ok", "workspace_latency_required", true),
     hotkey: readinessGate(ready, "hotkey_feedback_latency", "hotkey_feedback_latency_ok", "hotkey_latency_required", false),
+  };
+  const failedGates = [];
+  if (!gates.queue.ok) failedGates.push("queue_latency_ok");
+  if (!gates.workspace.ok) failedGates.push("workspace_latency_ok");
+  if (!gates.hotkey.ok) failedGates.push("hotkey_feedback_latency_ok");
+  return {
+    ...gates,
+    ok: failedGates.length === 0,
+    failed_gates: failedGates,
   };
 }
 
@@ -232,7 +256,7 @@ function readinessGate(ready, sectionKey, checkKey, requiredKey, defaultRequired
   const checkOk = ready?.checks?.[checkKey] === true || section?.ok === true;
   return {
     path: pathOrSkipped,
-    ok: checkOk || (skipped && required === false),
+    ok: checkOk || required === false,
     required,
   };
 }
@@ -240,5 +264,11 @@ function readinessGate(ready, sectionKey, checkKey, requiredKey, defaultRequired
 function assertIncludes(value, expected) {
   if (!value.includes(expected)) {
     throw new Error(`expected output to include ${expected}`);
+  }
+}
+
+function assertEqual(actual, expected) {
+  if (actual !== expected) {
+    throw new Error(`expected ${String(expected)}, got ${String(actual)}`);
   }
 }

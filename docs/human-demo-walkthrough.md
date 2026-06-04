@@ -110,12 +110,17 @@ Report any of these as product issues:
 Generate a prefilled template from the latest successful demo artifact, then fill in pass/fail and friction:
 
 ```sh
+bin/human-demo-ready
 bin/human-demo-result-template --write
 ```
 
-It writes `artifacts/human-demo-results/*-human-demo-result.md` with the latest
-proof manifest, proof screenshot, readiness manifest, and readiness screenshot
-paths. Fill the generated file after the hands-on pass. The output shape is:
+The template write refuses stale or incomplete readiness by default. If it says
+readiness is not green, rerun `bin/human-demo-ready` and fix any failed gate
+before starting the human result artifact. It writes
+`artifacts/human-demo-results/*-human-demo-result.md` with the latest proof
+manifest, proof screenshot, readiness manifest, readiness screenshot, and
+latency manifest paths. Fill the generated file after the hands-on pass. The
+output shape is:
 
 ```text
 Human demo date:
