@@ -47,6 +47,7 @@ artifacts/product-readiness/*
 artifacts/product-readiness-artifact-audit/*
 artifacts/product-next/*
 artifacts/proof-repeat/*
+artifacts/primitives-self-tests/*
 artifacts/readiness-summary/*
 artifacts/lab-runs/*
 artifacts/.cache/*
