@@ -80,8 +80,30 @@ export function createFollowsWindowOrchestrator(deps: FollowsWindowOrchestratorD
   let lastFocusedWorkspace: string | undefined;
   let lastPruneAtMs = 0;
   let timer: NodeJS.Timeout | undefined;
+  let tickInFlight: Promise<FollowsTickResult> | undefined;
+  let tickAgain = false;
 
   async function tick(injectedNow?: Date): Promise<FollowsTickResult> {
+    if (!injectedNow && tickInFlight) {
+      tickAgain = true;
+      return tickInFlight;
+    }
+    const run = runTick(injectedNow);
+    tickInFlight = run;
+    try {
+      return await run;
+    } finally {
+      if (tickInFlight === run) {
+        tickInFlight = undefined;
+      }
+      if (!injectedNow && tickAgain) {
+        tickAgain = false;
+        void tick().catch(() => undefined);
+      }
+    }
+  }
+
+  async function runTick(injectedNow?: Date): Promise<FollowsTickResult> {
     const tickNow = injectedNow ?? now();
     try {
       const manual = await deps.store.getManualModeState();

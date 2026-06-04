@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import http from "node:http";
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 const args = process.argv.slice(2);
 
@@ -109,7 +112,10 @@ async function runTaskWindowSpawn(options) {
   const waitStartedAt = Date.now();
   const rootClaims = [];
   const errors = [];
-  const command = await runCommand(options.command, options.args, async (child) => {
+  const taskWorkspace = await readTaskWorkspace(options.baseUrl, options.taskId).catch(() => undefined);
+  const focusWorkspace = before.snapshot?.activeWorkspace;
+  let commandDoneAt;
+  const commandPromise = runCommand(options.command, options.args, async (child) => {
     if (!isPositiveInteger(child.pid)) return;
     try {
       const claim = await claimWindow(options.baseUrl, {
@@ -128,43 +134,31 @@ async function runTaskWindowSpawn(options) {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }).then((result) => {
+    commandDoneAt = Date.now();
+    return result;
   });
-  if (options.settleMs > 0) await sleep(options.settleMs);
-  const waitResult = await captureUntilNewWindows(options, before.snapshot?.windows ?? []);
+  const waitResultPromise = watchNewWindows({
+    options,
+    beforeWindows: before.snapshot?.windows ?? [],
+    taskWorkspace,
+    focusWorkspace,
+    commandDoneAt: () => commandDoneAt,
+    errors,
+  });
+  const command = await commandPromise;
+  const waitResult = await waitResultPromise;
   const after = waitResult.after;
   const newWindows = waitResult.newWindows;
-  const claimed = [];
-
-  for (const window of newWindows) {
-    try {
-      const claim = await claimWindow(options.baseUrl, {
-        task_id: options.taskId,
-        window_id: String(window.id),
-        app_bundle: readWindowAppBundle(window),
-        title_prefix: readWindowTitle(window),
-        source: options.source,
-        ttl_ms: options.ttlMs,
-      });
-      claimed.push({
-        window_id: String(window.id),
-        app: window.app,
-        app_bundle: readWindowAppBundle(window),
-        title: readWindowTitle(window),
-        claim_id: claim.claim?.claim_id,
-      });
-    } catch (error) {
-      errors.push({
-        window_id: String(window.id),
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
+  const claimed = waitResult.claimed;
+  const moved = waitResult.moved;
 
   return {
     ok: errors.length === 0 && (command.exit_code === 0 || command.exit_code === null),
     task_id: options.taskId,
     source: options.source,
     command,
+    task_workspace: taskWorkspace,
     root_claimed_count: rootClaims.length,
     root_claims: rootClaims,
     waited_ms: Date.now() - waitStartedAt,
@@ -175,30 +169,87 @@ async function runTaskWindowSpawn(options) {
     new_window_count: newWindows.length,
     claimed_count: claimed.length,
     claimed,
+    moved_count: moved.length,
+    moved,
     errors,
   };
 }
 
-async function captureUntilNewWindows(options, beforeWindows) {
-  const deadline = Date.now() + options.waitMs;
+async function watchNewWindows({ options, beforeWindows, taskWorkspace, focusWorkspace, commandDoneAt, errors }) {
+  const startedAt = Date.now();
   let captureAttempts = 0;
   let after;
   let newWindows = [];
   let firstNewWindowMs;
+  const seenWindowIds = new Set(beforeWindows.map((window) => String(window.id)));
+  const claimed = [];
+  const moved = [];
+
   do {
     captureAttempts += 1;
     after = await captureWorkspace(options.baseUrl);
-    newWindows = findNewWindows(beforeWindows, after.snapshot?.windows ?? [])
+    const currentNewWindows = findNewWindowsFromSeen(seenWindowIds, after.snapshot?.windows ?? [])
       .filter((window) => windowMatchesFilters(window, options));
-    if (newWindows.length > 0) {
-      firstNewWindowMs = Math.max(0, Date.now() - (deadline - options.waitMs));
-      break;
+    if (currentNewWindows.length > 0 && firstNewWindowMs === undefined) {
+      firstNewWindowMs = Math.max(0, Date.now() - startedAt);
     }
-    if (options.waitMs <= 0 || Date.now() >= deadline) break;
-    await sleep(Math.min(options.pollMs, Math.max(0, deadline - Date.now())));
-  } while (Date.now() <= deadline);
+    for (const window of currentNewWindows) {
+      newWindows.push(window);
+      try {
+        const claim = await claimWindow(options.baseUrl, {
+          task_id: options.taskId,
+          window_id: String(window.id),
+          app_bundle: readWindowAppBundle(window),
+          title_prefix: readWindowTitle(window),
+          source: options.source,
+          ttl_ms: options.ttlMs,
+        });
+        claimed.push({
+          window_id: String(window.id),
+          app: window.app,
+          app_bundle: readWindowAppBundle(window),
+          title: readWindowTitle(window),
+          claim_id: claim.claim?.claim_id,
+        });
+      } catch (error) {
+        errors.push({
+          window_id: String(window.id),
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (taskWorkspace && window.workspace !== taskWorkspace) {
+        try {
+          await runAerospace(["move-node-to-workspace", "--window-id", String(window.id), taskWorkspace]);
+          moved.push({
+            window_id: String(window.id),
+            from_workspace: window.workspace,
+            to_workspace: taskWorkspace,
+          });
+          if (focusWorkspace && focusWorkspace !== taskWorkspace) {
+            await runAerospace(["workspace", focusWorkspace]).catch(() => undefined);
+          }
+        } catch (error) {
+          errors.push({
+            window_id: String(window.id),
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
+    const doneAt = commandDoneAt();
+    if (doneAt !== undefined) {
+      const settledAt = doneAt + options.settleMs;
+      const timeoutAt = settledAt + options.waitMs;
+      const now = Date.now();
+      if (now >= settledAt && (newWindows.length > 0 || now >= timeoutAt)) break;
+      const nextDeadline = newWindows.length > 0 ? settledAt : timeoutAt;
+      await sleep(Math.min(options.pollMs, Math.max(1, nextDeadline - now)));
+    } else {
+      await sleep(options.pollMs);
+    }
+  } while (true);
 
-  return { after, newWindows, captureAttempts, firstNewWindowMs };
+  return { after, newWindows, claimed, moved, captureAttempts, firstNewWindowMs };
 }
 
 function runCommand(command, args, onSpawn = async () => {}) {
@@ -262,6 +313,18 @@ function findNewWindows(beforeWindows, afterWindows) {
   return afterWindows.filter((window) => window?.id !== undefined && !beforeIds.has(String(window.id)));
 }
 
+function findNewWindowsFromSeen(seenWindowIds, afterWindows) {
+  const newWindows = [];
+  for (const window of afterWindows) {
+    if (window?.id === undefined) continue;
+    const id = String(window.id);
+    if (seenWindowIds.has(id)) continue;
+    seenWindowIds.add(id);
+    newWindows.push(window);
+  }
+  return newWindows;
+}
+
 function windowMatchesFilters(window, options) {
   if (options.appContains) {
     const haystack = `${window.app ?? ""}\n${readWindowAppBundle(window) ?? ""}`.toLowerCase();
@@ -305,6 +368,15 @@ function readNonNegativeInteger(value, option) {
 
 function isPositiveInteger(value) {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+async function readTaskWorkspace(baseUrl, taskId) {
+  const body = await requestJson(baseUrl, `/tasks/${encodeURIComponent(taskId)}`);
+  return readString(body?.task?.aerospace_workspace_id);
+}
+
+async function runAerospace(args) {
+  await execFileAsync("aerospace", args, { timeout: 5_000 });
 }
 
 function sleep(ms) {
