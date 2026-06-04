@@ -31,6 +31,9 @@ bin/human-demo-ready
 This does not restart or reseed the demo. It checks the current lab dogfood stack,
 verifies the latest human-demo proof artifact, captures only the local Screen
 Sharing window, and writes `artifacts/lab-runs/*-human-demo-ready/READY.md`.
+For a serious hands-on pass, run `bin/human-demo-ready --hotkey-latency` after
+the queue app has Accessibility permission. That adds a live hotkey-to-feedback
+p95 latency gate to the readiness artifact.
 
 Latest known-good proof:
 

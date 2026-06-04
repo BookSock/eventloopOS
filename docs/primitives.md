@@ -593,8 +593,8 @@ Highest-leverage steps before calling this a real primitives library:
    from route validators and fixtures.
 2. Split `@eventloopos/orchestrator` into public contracts and private server
    implementation packages.
-3. Feed live Mac hotkey-to-feedback latency manifests into dogfood/release gates
-   after each human-demo setup.
+3. Make `bin/human-demo-ready --hotkey-latency` mandatory before release demos
+   once the queue app has stable Accessibility permission on the lab Mac.
 4. Generalize the restore command envelope beyond the legacy
    `aerospace`/`osascript` command union while keeping the adapter guide green.
 5. Extend task-session controllers to expose stable root pids by default, so

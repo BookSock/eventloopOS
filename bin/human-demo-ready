@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
@@ -10,17 +10,20 @@ process.chdir(repoRoot);
 
 const args = process.argv.slice(2);
 const skipScreenshot = args.includes("--skip-screenshot");
+const hotkeyLatencyEnabled = args.includes("--hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "1";
 const jsonOnly = args.includes("--json");
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--json]
+  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--hotkey-latency] [--json]
 
 Check current Mac Studio human-demo readiness without resetting demo state.
+Use --hotkey-latency to include a live macOS queue-app hotkey feedback p95 gate.
 
 Environment:
   LAB_DOGFOOD_PROFILE  default: lab-human-demo
   LAB_DOGFOOD_URL      default: http://127.0.0.1:4480
   SCREEN_SHARING_TITLE default: Zeus
+  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=1 enables --hotkey-latency
 `);
   process.exit(0);
 }
@@ -52,6 +55,15 @@ let screenshot;
 if (!skipScreenshot) {
   screenshot = runStep("screen sharing capture", "bin/local-screen-sharing-capture", [path.join(runDir, "screen-sharing.png")], env);
 }
+const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
+const hotkeyLatency = hotkeyLatencyEnabled
+  ? runStep("hotkey feedback latency", "node", [
+      "bin/macos-hotkey-feedback-latency",
+      "--manifest",
+      hotkeyLatencyManifestPath,
+    ], env)
+  : undefined;
+const hotkeyLatencyManifest = hotkeyLatency ? readJsonIfPresent(hotkeyLatencyManifestPath) : undefined;
 
 const checks = {
   dogfood_status_ok: dogfood.status === 0 && dogfoodManifest?.ok === true,
@@ -59,6 +71,7 @@ const checks = {
   latest_human_demo_queue_has_two_papers: Number(templateJson?.queue_count ?? 0) >= 2,
   ambient_autosave_proof_ok: templateJson?.ambient_autosave_ok === true,
   screen_sharing_capture_ok: skipScreenshot || screenshot?.status === 0,
+  hotkey_feedback_latency_ok: !hotkeyLatencyEnabled || (hotkeyLatency?.status === 0 && hotkeyLatencyManifest?.ok === true),
 };
 const failedChecks = Object.entries(checks).filter(([, ok]) => ok !== true).map(([key]) => key);
 const finishedAt = new Date().toISOString();
@@ -93,6 +106,15 @@ const manifest = {
     ok: screenshot.status === 0,
     output: path.join(runDir, "screen-sharing.png"),
     exit_code: screenshot.status,
+  } : {
+    skipped: true,
+  },
+  hotkey_feedback_latency: hotkeyLatency ? {
+    ok: hotkeyLatency.status === 0 && hotkeyLatencyManifest?.ok === true,
+    manifest_path: hotkeyLatencyManifestPath,
+    exit_code: hotkeyLatency.status,
+    failed_budgets: hotkeyLatencyManifest?.failed_budgets ?? [],
+    summary: hotkeyLatencyManifest?.summary,
   } : {
     skipped: true,
   },
@@ -168,9 +190,18 @@ function extractJsonObject(value) {
   return undefined;
 }
 
+function readJsonIfPresent(relativePath) {
+  try {
+    return JSON.parse(readFileSync(path.resolve(repoRoot, relativePath), "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
 function renderReadyMarkdown(manifest) {
   const latest = manifest.latest_human_demo;
   const screenshot = manifest.screen_sharing_capture;
+  const hotkey = manifest.hotkey_feedback_latency;
   return `# eventloopOS Human Demo Ready
 
 - Ready: ${manifest.ok ? "yes" : "no"}
@@ -179,6 +210,7 @@ function renderReadyMarkdown(manifest) {
 - Latest proof: ${latest?.manifest_path ?? ""}
 - Latest proof screenshot: ${latest?.screenshot_path ?? ""}
 - Fresh Screen Sharing capture: ${screenshot?.output ?? "skipped"}
+- Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}
 - Failed checks: ${manifest.failed_checks.length === 0 ? "none" : manifest.failed_checks.join(", ")}
 
 Next: use \`docs/human-demo-walkthrough.md\`, then run \`bin/human-demo-result-template --write\` and fill the generated result after Jason finishes hands-on pass.
@@ -200,7 +232,9 @@ function runSelfTest() {
     failed_checks: [],
     latest_human_demo: { manifest_path: "artifacts/lab-runs/demo/manifest.json", screenshot_path: "artifacts/lab-runs/demo/screen-sharing.png" },
     screen_sharing_capture: { output: "artifacts/lab-runs/ready/screen-sharing.png" },
+    hotkey_feedback_latency: { skipped: true },
   });
   assert.match(markdown, /Ready: yes/);
   assert.match(markdown, /artifacts\/lab-runs\/demo\/manifest\.json/);
+  assert.match(markdown, /Hotkey feedback latency: skipped/);
 }
