@@ -1,0 +1,7 @@
+{
+  "schema": "McpPollSourceRequest",
+  "data": {
+    "items": [],
+    "next_cursor": "cursor_002"
+  }
+}

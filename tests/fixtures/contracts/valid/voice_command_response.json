@@ -1,0 +1,12 @@
+{
+  "schema": "VoiceCommandResponse",
+  "data": {
+    "ok": true,
+    "intent": "defer",
+    "selector": "demo",
+    "defer_seconds": 3600,
+    "due_at": "2026-05-06T18:20:00Z",
+    "deferred": [],
+    "request_id": "req_voice_001"
+  }
+}

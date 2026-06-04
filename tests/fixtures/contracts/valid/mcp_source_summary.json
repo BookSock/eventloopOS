@@ -1,0 +1,12 @@
+{
+  "schema": "McpSourceSummary",
+  "data": {
+    "id": "slack_lab",
+    "title": "Slack Lab",
+    "kind": "slack",
+    "provider": "mcp",
+    "description": "Slack messages routed into eventloopOS papers.",
+    "enabled": true,
+    "cursor": "cursor_002"
+  }
+}

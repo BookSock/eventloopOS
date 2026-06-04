@@ -1,0 +1,12 @@
+{
+  "schema": "AgentRunUpsertRequest",
+  "data": {
+    "id": "run_codex_001",
+    "provider": "codex",
+    "task_id": "task_blog_feedback",
+    "thread_id": "codex_thread_001",
+    "status": "waiting_approval",
+    "blocked_reason": "Needs approval before external reply draft is sent.",
+    "risk_tags": ["external_send"]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "schema": "McpPreviewResponse",
+  "data": {
+    "source_id": "slack_lab",
+    "events_seen": 1,
+    "duplicates_ignored": 0,
+    "cursor": "cursor_002",
+    "preview": [
+      {
+        "source": "mcp_poll",
+        "type": "slack.message",
+        "occurred_at": "2026-05-06T17:01:00Z",
+        "actor": {
+          "type": "human",
+          "name_present": true
+        },
+        "has_project_hint": true,
+        "has_task_hint": true,
+        "links": 1,
+        "resources": 1,
+        "first_link_host": "slack.example.com"
+      }
+    ],
+    "request_id": "req_mcp_preview_001"
+  }
+}

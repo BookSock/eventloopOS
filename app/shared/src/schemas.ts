@@ -1367,6 +1367,224 @@ export const ReadingQueueAutoPromoteResponseSchema = z
   .strict();
 export type ReadingQueueAutoPromoteResponse = z.infer<typeof ReadingQueueAutoPromoteResponseSchema>;
 
+export const McpPollItemSchema = z
+  .object({
+    id,
+    occurred_at: isoDateTime,
+    title: nonEmpty,
+    summary: nonEmpty,
+    thread_url: z.string().url(),
+    actor_id: id,
+    actor_name: nonEmpty,
+    type: nonEmpty,
+    workspace_id: z.string().optional(),
+    channel_id: z.string().optional(),
+    thread_ts: z.string().optional(),
+    project_hint: z.string().optional(),
+    task_hint: z.string().optional()
+  })
+  .passthrough();
+export type McpPollItem = z.infer<typeof McpPollItemSchema>;
+
+export const McpPollRequestSchema = z
+  .object({
+    source_id: id.optional(),
+    items: z.array(McpPollItemSchema),
+    next_cursor: z.string().optional()
+  })
+  .passthrough();
+export type McpPollRequest = z.infer<typeof McpPollRequestSchema>;
+
+export const McpPollResponseSchema = z
+  .object({
+    source_id: id,
+    events: z.array(EventSchema),
+    duplicates_ignored: z.number().int().nonnegative(),
+    cursor: z.string().optional(),
+    request_id: id
+  })
+  .strict();
+export type McpPollResponse = z.infer<typeof McpPollResponseSchema>;
+
+export const McpSourceSummarySchema = z
+  .object({
+    id,
+    title: nonEmpty.optional(),
+    kind: nonEmpty.optional(),
+    provider: nonEmpty.optional(),
+    description: z.string().optional(),
+    enabled: z.boolean().optional(),
+    cursor: z.string().optional()
+  })
+  .passthrough();
+export type McpSourceSummary = z.infer<typeof McpSourceSummarySchema>;
+
+export const McpSourcesListResponseSchema = z
+  .object({
+    sources: z.array(McpSourceSummarySchema),
+    count: z.number().int().nonnegative(),
+    request_id: id
+  })
+  .strict();
+export type McpSourcesListResponse = z.infer<typeof McpSourcesListResponseSchema>;
+
+export const McpSourceGetResponseSchema = z
+  .object({
+    source: McpSourceSummarySchema,
+    request_id: id
+  })
+  .strict();
+export type McpSourceGetResponse = z.infer<typeof McpSourceGetResponseSchema>;
+
+export const RouteEventResultSchema = z
+  .object({
+    event: EventSchema,
+    route_decision: RouteDecisionSchema,
+    review_packet: ReviewPacketSchema.optional(),
+    queue_item: QueueItemWithPacketSchema.optional(),
+    task_message: TaskMessageApiSchema.optional(),
+    trigger_fires: z.array(z.object({
+      trigger_id: id,
+      task_id: id,
+      queue_item_id: id.optional(),
+      event_id: id
+    }).strict()).optional()
+  })
+  .passthrough();
+export type RouteEventResult = z.infer<typeof RouteEventResultSchema>;
+
+export const McpPollAllAndRouteRequestSchema = z
+  .object({
+    source_ids: z.array(id).optional(),
+    inputs_by_source_id: z.record(z.unknown()).optional()
+  })
+  .passthrough();
+export type McpPollAllAndRouteRequest = z.infer<typeof McpPollAllAndRouteRequestSchema>;
+
+export const McpPollSourceRequestSchema = z.object({}).passthrough();
+export type McpPollSourceRequest = z.infer<typeof McpPollSourceRequestSchema>;
+
+export const McpPollAndRouteResultSchema = z
+  .object({
+    source_id: id,
+    ok: z.boolean(),
+    events_seen: z.number().int().nonnegative().optional(),
+    routed: z.array(RouteEventResultSchema).optional(),
+    duplicates_ignored: z.number().int().nonnegative().optional(),
+    cursor: z.string().optional(),
+    error: z.string().optional()
+  })
+  .strict();
+export type McpPollAndRouteResult = z.infer<typeof McpPollAndRouteResultSchema>;
+
+export const McpPollAllAndRouteResponseSchema = z
+  .object({
+    ok: z.boolean(),
+    sources_seen: z.number().int().nonnegative(),
+    events_seen: z.number().int().nonnegative(),
+    routed_count: z.number().int().nonnegative(),
+    duplicates_ignored: z.number().int().nonnegative(),
+    errors: z.number().int().nonnegative(),
+    polled: z.array(McpPollAndRouteResultSchema),
+    request_id: id
+  })
+  .strict();
+export type McpPollAllAndRouteResponse = z.infer<typeof McpPollAllAndRouteResponseSchema>;
+
+export const McpPreviewItemSchema = z
+  .object({
+    source: nonEmpty,
+    type: nonEmpty,
+    occurred_at: isoDateTime,
+    actor: z.object({
+      type: nonEmpty,
+      name_present: z.boolean()
+    }).strict(),
+    has_project_hint: z.boolean(),
+    has_task_hint: z.boolean(),
+    links: z.number().int().nonnegative(),
+    resources: z.number().int().nonnegative(),
+    first_link_host: z.string().optional()
+  })
+  .strict();
+export type McpPreviewItem = z.infer<typeof McpPreviewItemSchema>;
+
+export const McpPreviewResponseSchema = z
+  .object({
+    source_id: id,
+    events_seen: z.number().int().nonnegative(),
+    duplicates_ignored: z.number().int().nonnegative(),
+    cursor: z.string().optional(),
+    preview: z.array(McpPreviewItemSchema),
+    request_id: id
+  })
+  .strict();
+export type McpPreviewResponse = z.infer<typeof McpPreviewResponseSchema>;
+
+export const McpPollAndRouteResponseSchema = z
+  .object({
+    source_id: id,
+    events_seen: z.number().int().nonnegative(),
+    routed: z.array(RouteEventResultSchema),
+    duplicates_ignored: z.number().int().nonnegative(),
+    cursor: z.string().optional(),
+    request_id: id
+  })
+  .strict();
+export type McpPollAndRouteResponse = z.infer<typeof McpPollAndRouteResponseSchema>;
+
+export const AgentRunUpsertRequestSchema = AgentRunSchema.partial({
+  risk_tags: true,
+  evidence: true,
+  output_refs: true,
+  resume_actions: true,
+  updated_at: true
+}).extend({
+  id,
+  provider: z.enum(["codex", "claude", "openai", "manual", "fake"]),
+  status: z.enum(["queued", "running", "blocked", "waiting_approval", "completed", "failed", "cancelled"])
+}).passthrough();
+export type AgentRunUpsertRequest = z.infer<typeof AgentRunUpsertRequestSchema>;
+
+export const AgentRunUpsertResponseSchema = z
+  .object({
+    agent_run: AgentRunSchema,
+    review_packet: ReviewPacketSchema.optional(),
+    queue_item: QueueItemWithPacketSchema.optional(),
+    request_id: id
+  })
+  .strict();
+export type AgentRunUpsertResponse = z.infer<typeof AgentRunUpsertResponseSchema>;
+
+export const AgentRunGetResponseSchema = z
+  .object({
+    agent_run: AgentRunSchema,
+    request_id: id
+  })
+  .strict();
+export type AgentRunGetResponse = z.infer<typeof AgentRunGetResponseSchema>;
+
+export const VoiceCommandRequestSchema = z
+  .object({
+    transcript: nonEmpty,
+    idempotency_key: id.optional(),
+    source_id: id.optional(),
+    occurred_at: isoDateTime.optional(),
+    project_hint: z.string().optional(),
+    task_hint: z.string().optional()
+  })
+  .passthrough();
+export type VoiceCommandRequest = z.infer<typeof VoiceCommandRequestSchema>;
+
+export const VoiceCommandResponseSchema = z
+  .object({
+    ok: z.boolean(),
+    intent: nonEmpty.optional(),
+    request_id: id
+  })
+  .passthrough();
+export type VoiceCommandResponse = z.infer<typeof VoiceCommandResponseSchema>;
+
 export const OwnershipLockSchema = z
   .object({
     id,
@@ -1597,6 +1815,25 @@ export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   ReadingQueuePromoteResponse: ReadingQueuePromoteResponseSchema,
   ReadingQueueAutoPromoteRequest: ReadingQueueAutoPromoteRequestSchema,
   ReadingQueueAutoPromoteResponse: ReadingQueueAutoPromoteResponseSchema,
+  McpPollItem: McpPollItemSchema,
+  McpPollRequest: McpPollRequestSchema,
+  McpPollResponse: McpPollResponseSchema,
+  McpSourceSummary: McpSourceSummarySchema,
+  McpSourcesListResponse: McpSourcesListResponseSchema,
+  McpSourceGetResponse: McpSourceGetResponseSchema,
+  RouteEventResult: RouteEventResultSchema,
+  McpPollAllAndRouteRequest: McpPollAllAndRouteRequestSchema,
+  McpPollSourceRequest: McpPollSourceRequestSchema,
+  McpPollAndRouteResult: McpPollAndRouteResultSchema,
+  McpPollAllAndRouteResponse: McpPollAllAndRouteResponseSchema,
+  McpPreviewItem: McpPreviewItemSchema,
+  McpPreviewResponse: McpPreviewResponseSchema,
+  McpPollAndRouteResponse: McpPollAndRouteResponseSchema,
+  AgentRunUpsertRequest: AgentRunUpsertRequestSchema,
+  AgentRunUpsertResponse: AgentRunUpsertResponseSchema,
+  AgentRunGetResponse: AgentRunGetResponseSchema,
+  VoiceCommandRequest: VoiceCommandRequestSchema,
+  VoiceCommandResponse: VoiceCommandResponseSchema,
   OwnershipLock: OwnershipLockSchema,
   HookDecision: HookDecisionSchema,
   EvidenceReceipt: EvidenceReceiptSchema,

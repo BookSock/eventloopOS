@@ -126,18 +126,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/AgentRunUpsertRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/AgentRunUpsertResponse"
                 }
               }
             },
@@ -182,7 +182,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/AgentRunGetResponse"
                 }
               }
             },
@@ -1107,7 +1107,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/McpSourcesListResponse"
                 }
               }
             },
@@ -1141,18 +1141,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/McpPollAllAndRouteRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/McpPollAllAndRouteResponse"
                 }
               }
             },
@@ -1197,7 +1197,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/McpSourceGetResponse"
                 }
               }
             },
@@ -1241,18 +1241,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/McpPollSourceRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/McpPollResponse"
                 }
               }
             },
@@ -1296,18 +1296,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/McpPollSourceRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/McpPollAndRouteResponse"
                 }
               }
             },
@@ -1351,18 +1351,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/McpPollSourceRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/McpPreviewResponse"
                 }
               }
             },
@@ -1396,18 +1396,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/McpPollRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/McpPollResponse"
                 }
               }
             },
@@ -3414,18 +3414,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/VoiceCommandRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/VoiceCommandResponse"
                 }
               }
             },
@@ -3665,6 +3665,129 @@
         "required": [
           "command",
           "args"
+        ],
+        "type": "object"
+      },
+      "AgentRunGetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_run": {
+            "$ref": "#/components/schemas/AgentRun"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_run",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "AgentRunUpsertRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "blocked_reason": {
+            "type": "string"
+          },
+          "completed_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceRef"
+            },
+            "type": "array"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "output_refs": {
+            "items": {
+              "$ref": "#/components/schemas/RawRef"
+            },
+            "type": "array"
+          },
+          "provider": {
+            "enum": [
+              "codex",
+              "claude",
+              "openai",
+              "manual",
+              "fake"
+            ],
+            "type": "string"
+          },
+          "resume_actions": {
+            "items": {
+              "$ref": "#/components/schemas/Action"
+            },
+            "type": "array"
+          },
+          "risk_tags": {
+            "items": {
+              "$ref": "#/components/schemas/RiskTag"
+            },
+            "type": "array"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "blocked",
+              "waiting_approval",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "thread_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "status"
+        ],
+        "type": "object"
+      },
+      "AgentRunUpsertResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "agent_run": {
+            "$ref": "#/components/schemas/AgentRun"
+          },
+          "queue_item": {
+            "$ref": "#/components/schemas/QueueItemWithPacket"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "review_packet": {
+            "$ref": "#/components/schemas/ReviewPacket"
+          }
+        },
+        "required": [
+          "agent_run",
+          "request_id"
         ],
         "type": "object"
       },
@@ -4265,6 +4388,445 @@
         "required": [
           "active",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "McpPollAllAndRouteRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "inputs_by_source_id": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "source_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "McpPollAllAndRouteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "duplicates_ignored": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "errors": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "events_seen": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "polled": {
+            "items": {
+              "$ref": "#/components/schemas/McpPollAndRouteResult"
+            },
+            "type": "array"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "routed_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sources_seen": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ok",
+          "sources_seen",
+          "events_seen",
+          "routed_count",
+          "duplicates_ignored",
+          "errors",
+          "polled",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "McpPollAndRouteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "duplicates_ignored": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "events_seen": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "routed": {
+            "items": {
+              "$ref": "#/components/schemas/RouteEventResult"
+            },
+            "type": "array"
+          },
+          "source_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "events_seen",
+          "routed",
+          "duplicates_ignored",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "McpPollAndRouteResult": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "duplicates_ignored": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "events_seen": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "routed": {
+            "items": {
+              "$ref": "#/components/schemas/RouteEventResult"
+            },
+            "type": "array"
+          },
+          "source_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "ok"
+        ],
+        "type": "object"
+      },
+      "McpPollItem": {
+        "additionalProperties": true,
+        "properties": {
+          "actor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "actor_name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "channel_id": {
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "project_hint": {
+            "type": "string"
+          },
+          "summary": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_hint": {
+            "type": "string"
+          },
+          "thread_ts": {
+            "type": "string"
+          },
+          "thread_url": {
+            "format": "uri",
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "occurred_at",
+          "title",
+          "summary",
+          "thread_url",
+          "actor_id",
+          "actor_name",
+          "type"
+        ],
+        "type": "object"
+      },
+      "McpPollRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/McpPollItem"
+            },
+            "type": "array"
+          },
+          "next_cursor": {
+            "type": "string"
+          },
+          "source_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "McpPollResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "duplicates_ignored": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "type": "array"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "events",
+          "duplicates_ignored",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "McpPollSourceRequest": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "McpPreviewItem": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "additionalProperties": false,
+            "properties": {
+              "name_present": {
+                "type": "boolean"
+              },
+              "type": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "name_present"
+            ],
+            "type": "object"
+          },
+          "first_link_host": {
+            "type": "string"
+          },
+          "has_project_hint": {
+            "type": "boolean"
+          },
+          "has_task_hint": {
+            "type": "boolean"
+          },
+          "links": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "resources": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "source": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "type",
+          "occurred_at",
+          "actor",
+          "has_project_hint",
+          "has_task_hint",
+          "links",
+          "resources"
+        ],
+        "type": "object"
+      },
+      "McpPreviewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "duplicates_ignored": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "events_seen": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "preview": {
+            "items": {
+              "$ref": "#/components/schemas/McpPreviewItem"
+            },
+            "type": "array"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_id",
+          "events_seen",
+          "duplicates_ignored",
+          "preview",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "McpSourceGetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/McpSourceSummary"
+          }
+        },
+        "required": [
+          "source",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "McpSourceSummary": {
+        "additionalProperties": true,
+        "properties": {
+          "cursor": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "provider": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "type": "object"
+      },
+      "McpSourcesListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/McpSourceSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "sources",
+          "count",
+          "request_id"
         ],
         "type": "object"
       },
@@ -4977,6 +5539,61 @@
           "confidence",
           "evidence",
           "created_at"
+        ],
+        "type": "object"
+      },
+      "RouteEventResult": {
+        "additionalProperties": true,
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/Event"
+          },
+          "queue_item": {
+            "$ref": "#/components/schemas/QueueItemWithPacket"
+          },
+          "review_packet": {
+            "$ref": "#/components/schemas/ReviewPacket"
+          },
+          "route_decision": {
+            "$ref": "#/components/schemas/RouteDecision"
+          },
+          "task_message": {
+            "$ref": "#/components/schemas/TaskMessageApi"
+          },
+          "trigger_fires": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "event_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "queue_item_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "task_id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "trigger_id": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "trigger_id",
+                "task_id",
+                "event_id"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "event",
+          "route_decision"
         ],
         "type": "object"
       },
@@ -6095,6 +6712,58 @@
         "required": [
           "ok",
           "workspace_snapshot",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "VoiceCommandRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "idempotency_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "project_hint": {
+            "type": "string"
+          },
+          "source_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_hint": {
+            "type": "string"
+          },
+          "transcript": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "transcript"
+        ],
+        "type": "object"
+      },
+      "VoiceCommandResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "intent": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
           "request_id"
         ],
         "type": "object"

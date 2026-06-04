@@ -1,0 +1,13 @@
+{
+  "schema": "McpSourceGetResponse",
+  "data": {
+    "source": {
+      "id": "slack_lab",
+      "title": "Slack Lab",
+      "kind": "slack",
+      "provider": "mcp",
+      "enabled": true
+    },
+    "request_id": "req_mcp_source_001"
+  }
+}

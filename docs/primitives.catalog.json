@@ -1208,6 +1208,261 @@
         "transitioned": { "type": "boolean" },
         "request_id": { "type": "string", "minLength": 1 }
       }
+    },
+    "McpPollItem": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "occurred_at", "title", "summary", "thread_url", "actor_id", "actor_name", "type"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "title": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 },
+        "thread_url": { "type": "string", "format": "uri" },
+        "actor_id": { "type": "string", "minLength": 1 },
+        "actor_name": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 },
+        "workspace_id": { "type": "string" },
+        "channel_id": { "type": "string" },
+        "thread_ts": { "type": "string" },
+        "project_hint": { "type": "string" },
+        "task_hint": { "type": "string" }
+      }
+    },
+    "McpPollRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["items"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "items": { "type": "array", "items": { "$ref": "#/components/schemas/McpPollItem" } },
+        "next_cursor": { "type": "string" }
+      }
+    },
+    "McpPollResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "events", "duplicates_ignored", "request_id"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "events": { "type": "array", "items": { "$ref": "#/components/schemas/Event" } },
+        "duplicates_ignored": { "type": "integer", "minimum": 0 },
+        "cursor": { "type": "string" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "McpSourceSummary": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string", "minLength": 1 },
+        "description": { "type": "string" },
+        "enabled": { "type": "boolean" },
+        "cursor": { "type": "string" }
+      }
+    },
+    "McpSourcesListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sources", "count", "request_id"],
+      "properties": {
+        "sources": { "type": "array", "items": { "$ref": "#/components/schemas/McpSourceSummary" } },
+        "count": { "type": "integer", "minimum": 0 },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "McpSourceGetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "request_id"],
+      "properties": {
+        "source": { "$ref": "#/components/schemas/McpSourceSummary" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "RouteEventResult": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["event", "route_decision"],
+      "properties": {
+        "event": { "$ref": "#/components/schemas/Event" },
+        "route_decision": { "$ref": "#/components/schemas/RouteDecision" },
+        "review_packet": { "$ref": "#/components/schemas/ReviewPacket" },
+        "queue_item": { "$ref": "#/components/schemas/QueueItemWithPacket" },
+        "task_message": { "$ref": "#/components/schemas/TaskMessageApi" },
+        "trigger_fires": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["trigger_id", "task_id", "event_id"],
+            "properties": {
+              "trigger_id": { "type": "string", "minLength": 1 },
+              "task_id": { "type": "string", "minLength": 1 },
+              "queue_item_id": { "type": "string", "minLength": 1 },
+              "event_id": { "type": "string", "minLength": 1 }
+            }
+          }
+        }
+      }
+    },
+    "McpPollAllAndRouteRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "source_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "inputs_by_source_id": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "McpPollSourceRequest": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "McpPollAndRouteResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "ok"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "ok": { "type": "boolean" },
+        "events_seen": { "type": "integer", "minimum": 0 },
+        "routed": { "type": "array", "items": { "$ref": "#/components/schemas/RouteEventResult" } },
+        "duplicates_ignored": { "type": "integer", "minimum": 0 },
+        "cursor": { "type": "string" },
+        "error": { "type": "string" }
+      }
+    },
+    "McpPollAllAndRouteResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "sources_seen", "events_seen", "routed_count", "duplicates_ignored", "errors", "polled", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "sources_seen": { "type": "integer", "minimum": 0 },
+        "events_seen": { "type": "integer", "minimum": 0 },
+        "routed_count": { "type": "integer", "minimum": 0 },
+        "duplicates_ignored": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 },
+        "polled": { "type": "array", "items": { "$ref": "#/components/schemas/McpPollAndRouteResult" } },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "McpPreviewItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "type", "occurred_at", "actor", "has_project_hint", "has_task_hint", "links", "resources"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "type": { "type": "string", "minLength": 1 },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "actor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type", "name_present"],
+          "properties": {
+            "type": { "type": "string", "minLength": 1 },
+            "name_present": { "type": "boolean" }
+          }
+        },
+        "has_project_hint": { "type": "boolean" },
+        "has_task_hint": { "type": "boolean" },
+        "links": { "type": "integer", "minimum": 0 },
+        "resources": { "type": "integer", "minimum": 0 },
+        "first_link_host": { "type": "string" }
+      }
+    },
+    "McpPreviewResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "events_seen", "duplicates_ignored", "preview", "request_id"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "events_seen": { "type": "integer", "minimum": 0 },
+        "duplicates_ignored": { "type": "integer", "minimum": 0 },
+        "cursor": { "type": "string" },
+        "preview": { "type": "array", "items": { "$ref": "#/components/schemas/McpPreviewItem" } },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "McpPollAndRouteResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "events_seen", "routed", "duplicates_ignored", "request_id"],
+      "properties": {
+        "source_id": { "type": "string", "minLength": 1 },
+        "events_seen": { "type": "integer", "minimum": 0 },
+        "routed": { "type": "array", "items": { "$ref": "#/components/schemas/RouteEventResult" } },
+        "duplicates_ignored": { "type": "integer", "minimum": 0 },
+        "cursor": { "type": "string" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "AgentRunUpsertRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["id", "provider", "status"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "provider": { "type": "string", "enum": ["codex", "claude", "openai", "manual", "fake"] },
+        "task_id": { "type": "string", "minLength": 1 },
+        "thread_id": { "type": "string" },
+        "status": { "type": "string", "enum": ["queued", "running", "blocked", "waiting_approval", "completed", "failed", "cancelled"] },
+        "started_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "completed_at": { "type": "string", "format": "date-time" },
+        "blocked_reason": { "type": "string" },
+        "risk_tags": { "type": "array", "items": { "$ref": "#/components/schemas/RiskTag" } },
+        "evidence": { "type": "array", "items": { "$ref": "#/components/schemas/EvidenceRef" } },
+        "output_refs": { "type": "array", "items": { "$ref": "#/components/schemas/RawRef" } },
+        "resume_actions": { "type": "array", "items": { "$ref": "#/components/schemas/Action" } }
+      }
+    },
+    "AgentRunUpsertResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_run", "request_id"],
+      "properties": {
+        "agent_run": { "$ref": "#/components/schemas/AgentRun" },
+        "review_packet": { "$ref": "#/components/schemas/ReviewPacket" },
+        "queue_item": { "$ref": "#/components/schemas/QueueItemWithPacket" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "AgentRunGetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_run", "request_id"],
+      "properties": {
+        "agent_run": { "$ref": "#/components/schemas/AgentRun" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "VoiceCommandRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["transcript"],
+      "properties": {
+        "transcript": { "type": "string", "minLength": 1 },
+        "idempotency_key": { "type": "string", "minLength": 1 },
+        "source_id": { "type": "string", "minLength": 1 },
+        "occurred_at": { "type": "string", "format": "date-time" },
+        "project_hint": { "type": "string" },
+        "task_hint": { "type": "string" }
+      }
+    },
+    "VoiceCommandResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ok", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean" },
+        "intent": { "type": "string", "minLength": 1 },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
     }
   },
   "primitives": [
@@ -1644,16 +1899,16 @@
       "status": "mixed",
       "summary": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
       "http": [
-        { "method": "POST", "path": "/mcp/poll", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
-        { "method": "GET", "path": "/mcp-sources", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
-        { "method": "POST", "path": "/mcp-sources/poll-all-and-route", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
-        { "method": "GET", "path": "/mcp-sources/:id", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
-        { "method": "POST", "path": "/mcp-sources/:id/poll", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
-        { "method": "POST", "path": "/mcp-sources/:id/preview", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
-        { "method": "POST", "path": "/mcp-sources/:id/poll-and-route", "route_file": "app/orchestrator/src/routes/mcp_sources.ts" },
-        { "method": "POST", "path": "/agent-runs", "route_file": "app/orchestrator/src/routes/agent_runs.ts" },
-        { "method": "GET", "path": "/agent-runs/:id", "route_file": "app/orchestrator/src/routes/agent_runs.ts" },
-        { "method": "POST", "path": "/voice/commands", "route_file": "app/orchestrator/src/routes/events.ts" }
+        { "method": "POST", "path": "/mcp/poll", "route_file": "app/orchestrator/src/routes/mcp_sources.ts", "request_schema": "McpPollRequest", "response_schema": "McpPollResponse" },
+        { "method": "GET", "path": "/mcp-sources", "route_file": "app/orchestrator/src/routes/mcp_sources.ts", "response_schema": "McpSourcesListResponse" },
+        { "method": "POST", "path": "/mcp-sources/poll-all-and-route", "route_file": "app/orchestrator/src/routes/mcp_sources.ts", "request_schema": "McpPollAllAndRouteRequest", "response_schema": "McpPollAllAndRouteResponse" },
+        { "method": "GET", "path": "/mcp-sources/:id", "route_file": "app/orchestrator/src/routes/mcp_sources.ts", "response_schema": "McpSourceGetResponse" },
+        { "method": "POST", "path": "/mcp-sources/:id/poll", "route_file": "app/orchestrator/src/routes/mcp_sources.ts", "request_schema": "McpPollSourceRequest", "response_schema": "McpPollResponse" },
+        { "method": "POST", "path": "/mcp-sources/:id/preview", "route_file": "app/orchestrator/src/routes/mcp_sources.ts", "request_schema": "McpPollSourceRequest", "response_schema": "McpPreviewResponse" },
+        { "method": "POST", "path": "/mcp-sources/:id/poll-and-route", "route_file": "app/orchestrator/src/routes/mcp_sources.ts", "request_schema": "McpPollSourceRequest", "response_schema": "McpPollAndRouteResponse" },
+        { "method": "POST", "path": "/agent-runs", "route_file": "app/orchestrator/src/routes/agent_runs.ts", "request_schema": "AgentRunUpsertRequest", "response_schema": "AgentRunUpsertResponse" },
+        { "method": "GET", "path": "/agent-runs/:id", "route_file": "app/orchestrator/src/routes/agent_runs.ts", "response_schema": "AgentRunGetResponse" },
+        { "method": "POST", "path": "/voice/commands", "route_file": "app/orchestrator/src/routes/events.ts", "request_schema": "VoiceCommandRequest", "response_schema": "VoiceCommandResponse" }
       ],
       "code": ["app/orchestrator/src/routes/mcp_sources.ts", "app/orchestrator/src/routes/agent_runs.ts", "docs/codex-mcp-skill.md"],
       "proofs": ["bin/agent-run-cli-smoke", "bin/postgres-mcp-dogfood-smoke"]

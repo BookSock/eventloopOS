@@ -1,0 +1,11 @@
+{
+  "schema": "McpPollAllAndRouteRequest",
+  "data": {
+    "source_ids": ["slack_lab"],
+    "inputs_by_source_id": {
+      "slack_lab": {
+        "items": []
+      }
+    }
+  }
+}

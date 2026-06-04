@@ -1,0 +1,19 @@
+{
+  "schema": "McpPollRequest",
+  "data": {
+    "source_id": "slack_lab",
+    "items": [
+      {
+        "id": "slack_msg_001",
+        "occurred_at": "2026-05-06T17:01:00Z",
+        "title": "Customer asked for Mac demo",
+        "summary": "Customer wants to know whether the Mac demo is ready.",
+        "thread_url": "https://slack.example.com/archives/C123/p456",
+        "actor_id": "U123",
+        "actor_name": "Ada",
+        "type": "slack.message"
+      }
+    ],
+    "next_cursor": "cursor_002"
+  }
+}

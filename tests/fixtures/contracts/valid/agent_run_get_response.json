@@ -1,0 +1,31 @@
+{
+  "schema": "AgentRunGetResponse",
+  "data": {
+    "agent_run": {
+      "id": "run_codex_001",
+      "provider": "codex",
+      "task_id": "task_blog_feedback",
+      "thread_id": "codex_thread_001",
+      "status": "waiting_approval",
+      "updated_at": "2026-05-06T17:10:00Z",
+      "blocked_reason": "Needs approval before external reply draft is sent.",
+      "risk_tags": ["external_send"],
+      "evidence": [
+        {
+          "id": "evref_run_log",
+          "kind": "log",
+          "title": "Codex run log",
+          "ref": "raw_codex_stream_001"
+        }
+      ],
+      "output_refs": [
+        {
+          "id": "raw_codex_stream_001",
+          "uri": "artifact://raw/codex/stream-001.jsonl"
+        }
+      ],
+      "resume_actions": []
+    },
+    "request_id": "req_agent_run_get_001"
+  }
+}

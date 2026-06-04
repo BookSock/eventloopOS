@@ -1,0 +1,22 @@
+{
+  "schema": "McpPollAllAndRouteResponse",
+  "data": {
+    "ok": true,
+    "sources_seen": 1,
+    "events_seen": 0,
+    "routed_count": 0,
+    "duplicates_ignored": 0,
+    "errors": 0,
+    "polled": [
+      {
+        "source_id": "slack_lab",
+        "ok": true,
+        "events_seen": 0,
+        "routed": [],
+        "duplicates_ignored": 0,
+        "cursor": "cursor_002"
+      }
+    ],
+    "request_id": "req_mcp_poll_all_001"
+  }
+}
