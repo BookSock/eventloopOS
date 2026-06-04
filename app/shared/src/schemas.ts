@@ -1222,6 +1222,76 @@ export const RouteDecisionSchema = z
   .strict();
 export type RouteDecision = z.infer<typeof RouteDecisionSchema>;
 
+export const ContextEntrySchema = z
+  .object({
+    event_id: id,
+    event_title: nonEmpty,
+    event_source: nonEmpty,
+    task_id: id.optional(),
+    route_decision: RouteDecisionSchema,
+    resource: ContextResourceSchema,
+    captured_at: isoDateTime,
+    relevance_score: z.number(),
+    match_reasons: z.array(nonEmpty)
+  })
+  .strict();
+export type ContextEntry = z.infer<typeof ContextEntrySchema>;
+
+export const ContextsListResponseSchema = z
+  .object({
+    entries: z.array(ContextEntrySchema),
+    count: z.number().int().nonnegative(),
+    request_id: id
+  })
+  .strict();
+export type ContextsListResponse = z.infer<typeof ContextsListResponseSchema>;
+
+export const ContextRestorePlanRequestSchema = z
+  .object({
+    resource: ContextResourceSchema
+  })
+  .passthrough();
+export type ContextRestorePlanRequest = z.infer<typeof ContextRestorePlanRequestSchema>;
+
+export const ContextRestorePlanResponseSchema = z
+  .object({
+    restore_plan: ContextRestorePlanSchema,
+    request_id: id
+  })
+  .strict();
+export type ContextRestorePlanResponse = z.infer<typeof ContextRestorePlanResponseSchema>;
+
+export const ContextRestoreRequestResponseSchema = z
+  .object({
+    restore_request: ContextRestoreRequestSchema,
+    request_id: id
+  })
+  .strict();
+export type ContextRestoreRequestResponse = z.infer<typeof ContextRestoreRequestResponseSchema>;
+
+export const ContextRestoreRequestMaybeResponseSchema = z
+  .object({
+    restore_request: ContextRestoreRequestSchema.nullable(),
+    request_id: id
+  })
+  .strict();
+export type ContextRestoreRequestMaybeResponse = z.infer<typeof ContextRestoreRequestMaybeResponseSchema>;
+
+export const ContextRestoreClaimRequestSchema = z
+  .object({
+    lease_owner: id,
+    lease_ms: z.number().int().positive().max(1_800_000).optional()
+  })
+  .passthrough();
+export type ContextRestoreClaimRequest = z.infer<typeof ContextRestoreClaimRequestSchema>;
+
+export const ContextRestoreFinishRequestSchema = z
+  .object({
+    result: z.unknown().optional()
+  })
+  .passthrough();
+export type ContextRestoreFinishRequest = z.infer<typeof ContextRestoreFinishRequestSchema>;
+
 export const OwnershipLockSchema = z
   .object({
     id,
@@ -1437,6 +1507,14 @@ export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   TaskMessagesReconcileAttemptedRequest: TaskMessagesReconcileAttemptedRequestSchema,
   TaskMessagesReconcileAttemptedResponse: TaskMessagesReconcileAttemptedResponseSchema,
   RouteDecision: RouteDecisionSchema,
+  ContextEntry: ContextEntrySchema,
+  ContextsListResponse: ContextsListResponseSchema,
+  ContextRestorePlanRequest: ContextRestorePlanRequestSchema,
+  ContextRestorePlanResponse: ContextRestorePlanResponseSchema,
+  ContextRestoreRequestResponse: ContextRestoreRequestResponseSchema,
+  ContextRestoreRequestMaybeResponse: ContextRestoreRequestMaybeResponseSchema,
+  ContextRestoreClaimRequest: ContextRestoreClaimRequestSchema,
+  ContextRestoreFinishRequest: ContextRestoreFinishRequestSchema,
   OwnershipLock: OwnershipLockSchema,
   HookDecision: HookDecisionSchema,
   EvidenceReceipt: EvidenceReceiptSchema,

@@ -1,0 +1,10 @@
+{
+  "schema": "ContextRestoreFinishRequest",
+  "data": {
+    "result": {
+      "ok": true,
+      "tabId": 7,
+      "restoredScroll": true
+    }
+  }
+}

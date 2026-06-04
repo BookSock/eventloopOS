@@ -1,0 +1,23 @@
+{
+  "schema": "ContextRestorePlanResponse",
+  "data": {
+    "restore_plan": {
+      "kind": "browser_extension_message",
+      "side_effect": "local",
+      "execute_supported": false,
+      "target": "eventloopOS browser extension runtime",
+      "message": {
+        "type": "eventloop.restore",
+        "resource": {
+          "id": "ctx_browser_123",
+          "kind": "browser_tab",
+          "title": "Launch doc",
+          "url": "https://example.test/launch",
+          "source": "chrome-extension",
+          "restore_confidence": "high"
+        }
+      }
+    },
+    "request_id": "req_restore_plan"
+  }
+}

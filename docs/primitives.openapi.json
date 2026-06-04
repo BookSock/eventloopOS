@@ -397,7 +397,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ContextsListResponse"
                 }
               }
             },
@@ -431,18 +431,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/ContextRestorePlanRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ContextRestorePlanResponse"
                 }
               }
             },
@@ -476,18 +476,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/ContextRestorePlanRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ContextRestoreRequestResponse"
                 }
               }
             },
@@ -521,18 +521,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/ContextRestoreClaimRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ContextRestoreRequestMaybeResponse"
                 }
               }
             },
@@ -567,7 +567,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ContextRestoreRequestMaybeResponse"
                 }
               }
             },
@@ -612,7 +612,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ContextRestoreRequestResponse"
                 }
               }
             },
@@ -656,18 +656,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/ContextRestoreFinishRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ContextRestoreRequestResponse"
                 }
               }
             },
@@ -711,18 +711,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/ContextRestoreFinishRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ContextRestoreRequestResponse"
                 }
               }
             },
@@ -777,7 +777,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ContextRestoreRequestResponse"
                 }
               }
             },
@@ -3668,6 +3668,249 @@
         ],
         "type": "object"
       },
+      "ContextEntry": {
+        "additionalProperties": false,
+        "properties": {
+          "captured_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "event_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "event_source": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "event_title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "match_reasons": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "relevance_score": {
+            "type": "number"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/ContextResource"
+          },
+          "route_decision": {
+            "$ref": "#/components/schemas/RouteDecision"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_title",
+          "event_source",
+          "route_decision",
+          "resource",
+          "captured_at",
+          "relevance_score",
+          "match_reasons"
+        ],
+        "type": "object"
+      },
+      "ContextResource": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        ]
+      },
+      "ContextRestoreClaimRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "lease_ms": {
+            "maximum": 1800000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "lease_owner": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "lease_owner"
+        ],
+        "type": "object"
+      },
+      "ContextRestoreFinishRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "result": {}
+        },
+        "type": "object"
+      },
+      "ContextRestorePlan": {
+        "anyOf": [
+          {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        ]
+      },
+      "ContextRestorePlanRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "resource": {
+            "$ref": "#/components/schemas/ContextResource"
+          }
+        },
+        "required": [
+          "resource"
+        ],
+        "type": "object"
+      },
+      "ContextRestorePlanResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "restore_plan": {
+            "$ref": "#/components/schemas/ContextRestorePlan"
+          }
+        },
+        "required": [
+          "restore_plan",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "ContextRestoreRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "idempotency_key": {
+            "type": "string"
+          },
+          "lease_expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "lease_owner": {
+            "type": "string"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/ContextResource"
+          },
+          "restore_plan": {
+            "$ref": "#/components/schemas/ContextRestorePlan"
+          },
+          "result": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "leased",
+              "done",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "created_at",
+          "updated_at",
+          "resource",
+          "restore_plan"
+        ],
+        "type": "object"
+      },
+      "ContextRestoreRequestMaybeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "restore_request": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ContextRestoreRequest"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "restore_request",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "ContextRestoreRequestResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "restore_request": {
+            "$ref": "#/components/schemas/ContextRestoreRequest"
+          }
+        },
+        "required": [
+          "restore_request",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "ContextsListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/ContextEntry"
+            },
+            "type": "array"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "entries",
+          "count",
+          "request_id"
+        ],
+        "type": "object"
+      },
       "CreateTaskRequest": {
         "additionalProperties": true,
         "properties": {
@@ -3778,6 +4021,46 @@
         },
         "required": [
           "task_id"
+        ],
+        "type": "object"
+      },
+      "EvidenceRef": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "raw",
+              "receipt",
+              "link",
+              "resource",
+              "test",
+              "log",
+              "artifact"
+            ],
+            "type": "string"
+          },
+          "ref": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "ref"
         ],
         "type": "object"
       },
@@ -4390,6 +4673,75 @@
           "reason",
           "windowId",
           "workspace"
+        ],
+        "type": "object"
+      },
+      "RouteDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "ignore",
+              "store_only",
+              "attach_to_task",
+              "start_agent_thread",
+              "inject_into_agent_thread",
+              "create_review_packet",
+              "ask_human_now",
+              "defer_until_context"
+            ],
+            "type": "string"
+          },
+          "confidence": {
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "event_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceRef"
+            },
+            "type": "array"
+          },
+          "human_queue_reason": {
+            "enum": [
+              "human_blocked",
+              "ambiguous",
+              "risky"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target_task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target_task_session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "event_id",
+          "action",
+          "confidence",
+          "evidence",
+          "created_at"
         ],
         "type": "object"
       },

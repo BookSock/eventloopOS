@@ -1,0 +1,7 @@
+{
+  "schema": "ContextRestoreRequestMaybeResponse",
+  "data": {
+    "restore_request": null,
+    "request_id": "req_restore_request_next"
+  }
+}

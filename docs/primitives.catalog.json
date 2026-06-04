@@ -209,6 +209,160 @@
         "request_id": { "type": "string", "minLength": 1 }
       }
     },
+    "ContextResource": {
+      "anyOf": [{ "type": "object", "additionalProperties": true }]
+    },
+    "ContextRestorePlan": {
+      "anyOf": [{ "type": "object", "additionalProperties": true }]
+    },
+    "EvidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title", "ref"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "enum": ["raw", "receipt", "link", "resource", "test", "log", "artifact"] },
+        "title": { "type": "string", "minLength": 1 },
+        "ref": { "type": "string", "minLength": 1 },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "RouteDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "event_id", "action", "confidence", "evidence", "created_at"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "event_id": { "type": "string", "minLength": 1 },
+        "action": {
+          "type": "string",
+          "enum": [
+            "ignore",
+            "store_only",
+            "attach_to_task",
+            "start_agent_thread",
+            "inject_into_agent_thread",
+            "create_review_packet",
+            "ask_human_now",
+            "defer_until_context"
+          ]
+        },
+        "target_task_id": { "type": "string", "minLength": 1 },
+        "target_task_session_id": { "type": "string", "minLength": 1 },
+        "confidence": { "type": "string", "enum": ["low", "medium", "high"] },
+        "human_queue_reason": { "type": "string", "enum": ["human_blocked", "ambiguous", "risky"] },
+        "evidence": { "type": "array", "items": { "$ref": "#/components/schemas/EvidenceRef" } },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ContextRestoreRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "status", "created_at", "updated_at", "resource", "restore_plan"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "enum": ["pending", "leased", "done", "failed"] },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "idempotency_key": { "type": "string" },
+        "resource": { "$ref": "#/components/schemas/ContextResource" },
+        "restore_plan": { "$ref": "#/components/schemas/ContextRestorePlan" },
+        "result": { "type": "object", "additionalProperties": true },
+        "lease_owner": { "type": "string" },
+        "lease_expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "ContextEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_id",
+        "event_title",
+        "event_source",
+        "route_decision",
+        "resource",
+        "captured_at",
+        "relevance_score",
+        "match_reasons"
+      ],
+      "properties": {
+        "event_id": { "type": "string", "minLength": 1 },
+        "event_title": { "type": "string", "minLength": 1 },
+        "event_source": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
+        "route_decision": { "$ref": "#/components/schemas/RouteDecision" },
+        "resource": { "$ref": "#/components/schemas/ContextResource" },
+        "captured_at": { "type": "string", "format": "date-time" },
+        "relevance_score": { "type": "number" },
+        "match_reasons": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "ContextsListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entries", "count", "request_id"],
+      "properties": {
+        "entries": { "type": "array", "items": { "$ref": "#/components/schemas/ContextEntry" } },
+        "count": { "type": "integer", "minimum": 0 },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ContextRestorePlanRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["resource"],
+      "properties": {
+        "resource": { "$ref": "#/components/schemas/ContextResource" }
+      }
+    },
+    "ContextRestorePlanResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["restore_plan", "request_id"],
+      "properties": {
+        "restore_plan": { "$ref": "#/components/schemas/ContextRestorePlan" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ContextRestoreRequestResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["restore_request", "request_id"],
+      "properties": {
+        "restore_request": { "$ref": "#/components/schemas/ContextRestoreRequest" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ContextRestoreRequestMaybeResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["restore_request", "request_id"],
+      "properties": {
+        "restore_request": {
+          "anyOf": [
+            { "$ref": "#/components/schemas/ContextRestoreRequest" },
+            { "type": "null" }
+          ]
+        },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ContextRestoreClaimRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["lease_owner"],
+      "properties": {
+        "lease_owner": { "type": "string", "minLength": 1 },
+        "lease_ms": { "type": "integer", "minimum": 1, "maximum": 1800000 }
+      }
+    },
+    "ContextRestoreFinishRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "result": {}
+      }
+    },
     "QueueItemWithPacket": {
       "type": "object",
       "additionalProperties": false,
@@ -1354,15 +1508,15 @@
       "status": "dogfood",
       "summary": "Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
       "http": [
-        { "method": "GET", "path": "/contexts", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
-        { "method": "POST", "path": "/contexts/restore-plan", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
-        { "method": "POST", "path": "/contexts/restore-requests", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
-        { "method": "GET", "path": "/contexts/restore-requests/next", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
-        { "method": "POST", "path": "/contexts/restore-requests/claim-next", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
-        { "method": "GET", "path": "/contexts/restore-requests/:id", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
-        { "method": "POST", "path": "/contexts/restore-requests/:id/done", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
-        { "method": "POST", "path": "/contexts/restore-requests/:id/failed", "route_file": "app/orchestrator/src/routes/context_restore.ts" },
-        { "method": "POST", "path": "/contexts/restore-requests/:id/retry", "route_file": "app/orchestrator/src/routes/context_restore.ts" }
+        { "method": "GET", "path": "/contexts", "route_file": "app/orchestrator/src/routes/context_restore.ts", "response_schema": "ContextsListResponse" },
+        { "method": "POST", "path": "/contexts/restore-plan", "route_file": "app/orchestrator/src/routes/context_restore.ts", "request_schema": "ContextRestorePlanRequest", "response_schema": "ContextRestorePlanResponse" },
+        { "method": "POST", "path": "/contexts/restore-requests", "route_file": "app/orchestrator/src/routes/context_restore.ts", "request_schema": "ContextRestorePlanRequest", "response_schema": "ContextRestoreRequestResponse" },
+        { "method": "GET", "path": "/contexts/restore-requests/next", "route_file": "app/orchestrator/src/routes/context_restore.ts", "response_schema": "ContextRestoreRequestMaybeResponse" },
+        { "method": "POST", "path": "/contexts/restore-requests/claim-next", "route_file": "app/orchestrator/src/routes/context_restore.ts", "request_schema": "ContextRestoreClaimRequest", "response_schema": "ContextRestoreRequestMaybeResponse" },
+        { "method": "GET", "path": "/contexts/restore-requests/:id", "route_file": "app/orchestrator/src/routes/context_restore.ts", "response_schema": "ContextRestoreRequestResponse" },
+        { "method": "POST", "path": "/contexts/restore-requests/:id/done", "route_file": "app/orchestrator/src/routes/context_restore.ts", "request_schema": "ContextRestoreFinishRequest", "response_schema": "ContextRestoreRequestResponse" },
+        { "method": "POST", "path": "/contexts/restore-requests/:id/failed", "route_file": "app/orchestrator/src/routes/context_restore.ts", "request_schema": "ContextRestoreFinishRequest", "response_schema": "ContextRestoreRequestResponse" },
+        { "method": "POST", "path": "/contexts/restore-requests/:id/retry", "route_file": "app/orchestrator/src/routes/context_restore.ts", "response_schema": "ContextRestoreRequestResponse" }
       ],
       "code": ["app/orchestrator/src/routes/context_restore.ts", "app/orchestrator/src/store/context_restore_store.ts"],
       "proofs": ["docs/planning/17-deeplink-strategies.md"]

@@ -1,0 +1,7 @@
+{
+  "schema": "ContextRestoreClaimRequest",
+  "data": {
+    "lease_owner": "browser_extension_test",
+    "lease_ms": 60000
+  }
+}

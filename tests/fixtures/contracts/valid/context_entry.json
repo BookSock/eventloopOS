@@ -1,0 +1,37 @@
+{
+  "schema": "ContextEntry",
+  "data": {
+    "event_id": "evt_browser_ctx_123",
+    "event_title": "Launch doc captured",
+    "event_source": "browser",
+    "task_id": "task_launch",
+    "route_decision": {
+      "id": "route_browser_ctx_123",
+      "event_id": "evt_browser_ctx_123",
+      "action": "store_only",
+      "confidence": "high",
+      "created_at": "2026-05-06T17:00:00Z",
+      "evidence": [
+        {
+          "id": "evref_context_capture_001",
+          "kind": "resource",
+          "title": "Captured browser context",
+          "ref": "ctx_browser_123"
+        }
+      ]
+    },
+    "resource": {
+      "id": "ctx_browser_123",
+      "kind": "browser_tab",
+      "title": "Launch doc",
+      "url": "https://example.test/launch",
+      "source": "chrome-extension",
+      "restore_confidence": "high"
+    },
+    "captured_at": "2026-05-06T17:00:00Z",
+    "relevance_score": 100,
+    "match_reasons": [
+      "task_match"
+    ]
+  }
+}
