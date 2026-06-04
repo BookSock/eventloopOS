@@ -246,7 +246,8 @@ Useful standalone uses:
   the window appeared on the human's current workspace
 - an agent wraps a visible test/browser launch with
   `bin/task-window-spawn --task-id task_checkout -- open -na "Google Chrome"`,
-  and the wrapper claims any newly-created windows after the command exits
+  and the wrapper immediately claims the command process root, then claims any
+  newly-created windows after the command exits
 - a bound Codex/Claude task session exposes `pid`/`agent_pid`/`terminal_pid`,
   and ambient autosave claims descendant app windows even when the window pops
   onto the human's current paper
@@ -278,9 +279,9 @@ Proof:
 Status: dogfood. Browser context capture has an automatic emitter; generic
 routed window resources are auto-claimed; tagged windows are inferred from OS
 snapshots; process-tree launches are claimed when session pid metadata exists;
-command-wrapped untagged launches can be claimed by window id, title/bundle, or
-process root pid; claimed windows that appear on the active paper are redirected
-to the owning task workspace when possible.
+command-wrapped untagged launches are pre-claimed by process root and then by
+window id/title/bundle; claimed windows that appear on the active paper are
+redirected to the owning task workspace when possible.
 
 ## Follows Windows
 

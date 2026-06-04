@@ -27,8 +27,9 @@ try {
 function printUsage() {
   console.log(`Usage: bin/task-window-spawn --task-id TASK_ID [options] -- COMMAND [ARGS...]
 
-Runs COMMAND, captures workspace before/after, and claims any newly-created
-windows for TASK_ID via /task-window-claims.
+Runs COMMAND, immediately claims COMMAND's process root for TASK_ID, captures
+workspace before/after, and claims any newly-created windows for TASK_ID via
+/task-window-claims.
 
 Options:
   --url URL             Orchestrator URL. Default EVENTLOOPOS_ORCHESTRATOR_URL or http://127.0.0.1:4377
@@ -95,13 +96,33 @@ function parseArgs(argv) {
 
 async function runTaskWindowSpawn(options) {
   const before = await captureWorkspace(options.baseUrl);
-  const command = await runCommand(options.command, options.args);
+  const rootClaims = [];
+  const errors = [];
+  const command = await runCommand(options.command, options.args, async (child) => {
+    if (!isPositiveInteger(child.pid)) return;
+    try {
+      const claim = await claimWindow(options.baseUrl, {
+        task_id: options.taskId,
+        process_root_pid: child.pid,
+        source: `${options.source}:process_root`,
+        ttl_ms: options.ttlMs,
+      });
+      rootClaims.push({
+        process_root_pid: child.pid,
+        claim_id: claim.claim?.claim_id,
+      });
+    } catch (error) {
+      errors.push({
+        process_root_pid: child.pid,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
   if (options.settleMs > 0) await sleep(options.settleMs);
   const after = await captureWorkspace(options.baseUrl);
   const newWindows = findNewWindows(before.snapshot?.windows ?? [], after.snapshot?.windows ?? [])
     .filter((window) => windowMatchesFilters(window, options));
   const claimed = [];
-  const errors = [];
 
   for (const window of newWindows) {
     try {
@@ -133,6 +154,8 @@ async function runTaskWindowSpawn(options) {
     task_id: options.taskId,
     source: options.source,
     command,
+    root_claimed_count: rootClaims.length,
+    root_claims: rootClaims,
     before_window_count: before.snapshot?.windows?.length ?? 0,
     after_window_count: after.snapshot?.windows?.length ?? 0,
     new_window_count: newWindows.length,
@@ -142,14 +165,25 @@ async function runTaskWindowSpawn(options) {
   };
 }
 
-function runCommand(command, args) {
+function runCommand(command, args, onSpawn = async () => {}) {
   return new Promise((resolve) => {
     const child = spawn(command, args, { stdio: "inherit" });
+    const spawnHooks = [];
+    let settled = false;
+    if (isPositiveInteger(child.pid)) {
+      spawnHooks.push(Promise.resolve(onSpawn(child)));
+    }
+    const finish = async (result) => {
+      if (settled) return;
+      settled = true;
+      await Promise.allSettled(spawnHooks);
+      resolve(result);
+    };
     child.on("error", (error) => {
-      resolve({ command, args, exit_code: 127, signal: null, error: error.message });
+      finish({ command, args, exit_code: 127, signal: null, error: error.message });
     });
     child.on("close", (code, signal) => {
-      resolve({ command, args, exit_code: code, signal });
+      finish({ command, args, exit_code: code, signal });
     });
   });
 }
@@ -233,6 +267,10 @@ function readNonNegativeInteger(value, option) {
   return parsed;
 }
 
+function isPositiveInteger(value) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -289,10 +327,14 @@ async function runSelfTest() {
       args: ["-e", ""],
     });
     if (!result.ok) throw new Error(`self-test result not ok: ${JSON.stringify(result)}`);
+    if (result.root_claimed_count !== 1) throw new Error(`expected one root claim, got ${result.root_claimed_count}`);
     if (result.claimed_count !== 1) throw new Error(`expected one claim, got ${result.claimed_count}`);
     if (claims[0]?.task_id !== "task_checkout") throw new Error(`claim task mismatch: ${JSON.stringify(claims[0])}`);
-    if (claims[0]?.window_id !== "99") throw new Error(`claim window mismatch: ${JSON.stringify(claims[0])}`);
-    if (claims[0]?.app_bundle !== "com.google.Chrome") throw new Error(`claim app bundle mismatch: ${JSON.stringify(claims[0])}`);
+    if (!isPositiveInteger(claims[0]?.process_root_pid)) throw new Error(`root claim pid missing: ${JSON.stringify(claims[0])}`);
+    if (claims[0]?.source !== "self-test:process_root") throw new Error(`root claim source mismatch: ${JSON.stringify(claims[0])}`);
+    if (claims[1]?.task_id !== "task_checkout") throw new Error(`window claim task mismatch: ${JSON.stringify(claims[1])}`);
+    if (claims[1]?.window_id !== "99") throw new Error(`claim window mismatch: ${JSON.stringify(claims[1])}`);
+    if (claims[1]?.app_bundle !== "com.google.Chrome") throw new Error(`claim app bundle mismatch: ${JSON.stringify(claims[1])}`);
     console.log("task-window-spawn self-test passed");
   } finally {
     await new Promise((resolve, reject) => {
