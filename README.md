@@ -66,7 +66,7 @@ Major in-flight directions:
 
 - Real-world dogfood: product-readiness and lab proofs are green, but daily-use friction still drives the roadmap.
 - Primitive SDK/library hardening: run `pnpm primitives:doctor` to validate the catalog, OpenAPI export, examples, and optional live host API.
-- Polished follows/unfollow UX: APIs and rules exist; Mac UI controls are still thin.
+- Follows/unfollow UX: Queue toolbar and command menu now expose a Mac rule editor; remaining work is richer per-window suggestions and live demo proof.
 - Richer starter apps/examples on top of `@eventloopos/shared/primitives`.
 
 ## Contributing
