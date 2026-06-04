@@ -1,0 +1,382 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { createWriteStream, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/primitives-self-test-runner [--catalog PATH] [--manifest PATH] [--timeout-ms N] [--list] [--json]
+
+Runs every self_tests command from docs/primitives.catalog.json once, grouped by
+command, and writes a manifest with per-command logs and primitive coverage.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  await runSelfTest();
+  console.log("primitives-self-test-runner self-test passed");
+  process.exit(0);
+}
+
+const options = parseArgs(args);
+const manifest = await runPrimitiveSelfTests(options);
+if (options.json || options.listOnly) {
+  console.log(JSON.stringify(summaryOutput(manifest), null, 2));
+} else {
+  console.log(`primitives self-test manifest: ${manifest.manifest_path}`);
+  console.log(JSON.stringify(summaryOutput(manifest), null, 2));
+}
+process.exit(manifest.ok ? 0 : 1);
+
+function parseArgs(argv) {
+  const runId = utcStamp();
+  return {
+    catalogPath: readArg(argv, "--catalog") ?? "docs/primitives.catalog.json",
+    manifestPath: readArg(argv, "--manifest") ?? path.join("artifacts", "primitives-self-tests", runId, "manifest.json"),
+    timeoutMs: positiveInt(readArg(argv, "--timeout-ms"), 120_000),
+    listOnly: argv.includes("--list"),
+    json: argv.includes("--json"),
+    repoRoot,
+  };
+}
+
+async function runPrimitiveSelfTests(options, deps = {}) {
+  const startedAt = new Date().toISOString();
+  const resolvedRepoRoot = path.resolve(options.repoRoot ?? repoRoot);
+  const manifestPath = path.resolve(resolvedRepoRoot, options.manifestPath);
+  const artifactDir = path.dirname(manifestPath);
+  const catalogPath = path.resolve(resolvedRepoRoot, options.catalogPath);
+  const catalog = JSON.parse(readFileSync(catalogPath, "utf8"));
+  const commands = selfTestCommands(catalog);
+  mkdirSync(artifactDir, { recursive: true });
+  const runner = deps.runner ?? runCommand;
+  const manifest = {
+    schema_version: 1,
+    kind: "eventloopos.primitives_self_tests",
+    started_at: startedAt,
+    finished_at: undefined,
+    duration_ms: undefined,
+    ok: false,
+    passed: false,
+    catalog_path: path.relative(resolvedRepoRoot, catalogPath),
+    manifest_path: path.relative(resolvedRepoRoot, manifestPath),
+    artifact_dir: path.relative(resolvedRepoRoot, artifactDir),
+    repo: gitMetadata(resolvedRepoRoot),
+    primitive_count: Array.isArray(catalog.primitives) ? catalog.primitives.length : 0,
+    expected_command_count: commands.length,
+    completed_command_count: 0,
+    failed_command_count: 0,
+    list_only: Boolean(options.listOnly),
+    timeout_ms: options.timeoutMs,
+    commands: commands.map((command, index) => ({
+      id: commandId(index, command.command),
+      status: options.listOnly ? "listed" : "pending",
+      command: command.command,
+      primitive_ids: command.primitive_ids,
+      started_at: undefined,
+      finished_at: undefined,
+      duration_ms: undefined,
+      exit_code: undefined,
+      signal: undefined,
+      error: undefined,
+      stdout_path: undefined,
+      stderr_path: undefined,
+    })),
+  };
+  writeManifest(manifestPath, manifest);
+
+  if (!options.listOnly) {
+    for (const command of manifest.commands) {
+      let result;
+      try {
+        result = await runner(command, {
+          cwd: resolvedRepoRoot,
+          artifactDir,
+          timeoutMs: options.timeoutMs,
+        });
+      } catch (error) {
+        const finishedAt = new Date().toISOString();
+        result = {
+          status: "failed",
+          started_at: command.started_at ?? finishedAt,
+          finished_at: finishedAt,
+          duration_ms: 0,
+          exit_code: 1,
+          signal: undefined,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      }
+      Object.assign(command, result);
+      manifest.completed_command_count = manifest.commands.filter((entry) => entry.status !== "pending").length;
+      manifest.failed_command_count = manifest.commands.filter((entry) => entry.status !== "passed").length;
+      writeManifest(manifestPath, manifest);
+      if (command.status !== "passed") break;
+    }
+  }
+
+  const finishedAt = new Date().toISOString();
+  manifest.finished_at = finishedAt;
+  manifest.duration_ms = Date.parse(finishedAt) - Date.parse(startedAt);
+  manifest.ok = options.listOnly
+    ? commands.length > 0
+    : manifest.commands.length > 0 && manifest.commands.every((command) => command.status === "passed");
+  manifest.passed = manifest.ok;
+  manifest.failed_command_count = manifest.commands.filter((command) => !["passed", "listed"].includes(command.status)).length;
+  writeManifest(manifestPath, manifest);
+  return manifest;
+}
+
+function selfTestCommands(catalog) {
+  const grouped = new Map();
+  for (const primitive of Array.isArray(catalog.primitives) ? catalog.primitives : []) {
+    const primitiveId = readString(primitive?.id) ?? "unknown";
+    for (const rawCommand of Array.isArray(primitive?.self_tests) ? primitive.self_tests : []) {
+      if (typeof rawCommand !== "string" || !rawCommand.trim()) continue;
+      const command = rawCommand.trim();
+      if (!grouped.has(command)) grouped.set(command, new Set());
+      grouped.get(command).add(primitiveId);
+    }
+  }
+  return Array.from(grouped.entries())
+    .map(([command, primitiveIds]) => ({ command, primitive_ids: Array.from(primitiveIds).sort() }))
+    .sort((left, right) => left.command.localeCompare(right.command));
+}
+
+async function runCommand(commandRecord, options) {
+  const startedAt = new Date().toISOString();
+  const safeName = safeFileName(commandRecord.command);
+  const stdoutPath = path.join(options.artifactDir, `${commandRecord.id}-${safeName}.stdout.log`);
+  const stderrPath = path.join(options.artifactDir, `${commandRecord.id}-${safeName}.stderr.log`);
+  const stdout = createWriteStream(stdoutPath, { flags: "w" });
+  const stderr = createWriteStream(stderrPath, { flags: "w" });
+  const parsed = parseCommand(commandRecord.command);
+  let timedOut = false;
+  let killTimer;
+  const child = spawn(parsed.command, parsed.args, {
+    cwd: options.cwd,
+    env: { ...process.env, ...parsed.env },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  child.stdout.pipe(stdout);
+  child.stderr.pipe(stderr);
+
+  const exit = await new Promise((resolveExit) => {
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      stderr.write(`primitive self-test timed out after ${options.timeoutMs}ms\n`);
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+    }, options.timeoutMs);
+    child.on("error", (error) => {
+      clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
+      stderr.write(`${error.stack ?? error.message}\n`);
+      resolveExit({ code: 1, signal: undefined, error: error.message });
+    });
+    child.on("exit", (code, signal) => {
+      clearTimeout(timeout);
+      if (killTimer) clearTimeout(killTimer);
+      resolveExit({
+        code: timedOut ? 1 : code ?? 1,
+        signal: signal ?? undefined,
+        error: timedOut ? `timed out after ${options.timeoutMs}ms` : undefined,
+      });
+    });
+  });
+
+  await closeStream(stdout);
+  await closeStream(stderr);
+  const finishedAt = new Date().toISOString();
+  return {
+    status: commandStatus(exit),
+    started_at: startedAt,
+    finished_at: finishedAt,
+    duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
+    exit_code: exit.code,
+    signal: exit.signal,
+    error: exit.error,
+    stdout_path: stdoutPath,
+    stderr_path: stderrPath,
+  };
+}
+
+function parseCommand(command) {
+  const tokens = tokenizeCommand(command);
+  if (tokens.length === 0) throw new Error("empty primitive self-test command");
+  const env = {};
+  let commandIndex = 0;
+  while (tokens[commandIndex] && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[commandIndex])) {
+    const [key, ...valueParts] = tokens[commandIndex].split("=");
+    env[key] = valueParts.join("=");
+    commandIndex += 1;
+  }
+  const executable = tokens[commandIndex];
+  if (!executable) throw new Error(`missing executable in primitive self-test command: ${command}`);
+  return {
+    env,
+    command: executable,
+    args: tokens.slice(commandIndex + 1),
+  };
+}
+
+function tokenizeCommand(command) {
+  const tokens = [];
+  let token = "";
+  let quote;
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    if (quote) {
+      if (char === quote) quote = undefined;
+      else token += char;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (token) {
+        tokens.push(token);
+        token = "";
+      }
+      continue;
+    }
+    token += char;
+  }
+  if (token) tokens.push(token);
+  return tokens;
+}
+
+function commandStatus(exit) {
+  if (exit.error?.startsWith("timed out after ")) return "timed_out";
+  if (exit.signal) return "signaled";
+  if (exit.code === 0) return "passed";
+  return "failed";
+}
+
+function summaryOutput(manifest) {
+  return {
+    manifest: manifest.manifest_path,
+    ok: manifest.ok,
+    primitive_count: manifest.primitive_count,
+    expected_command_count: manifest.expected_command_count,
+    completed_command_count: manifest.completed_command_count,
+    failed_command_count: manifest.failed_command_count,
+    list_only: manifest.list_only,
+  };
+}
+
+function writeManifest(manifestPath, manifest) {
+  mkdirSync(path.dirname(manifestPath), { recursive: true });
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+}
+
+function commandId(index, command) {
+  return `${String(index + 1).padStart(2, "0")}-${safeFileName(command).slice(0, 48)}`;
+}
+
+function safeFileName(value) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "command";
+}
+
+function utcStamp() {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+}
+
+function readArg(argv, name) {
+  const index = argv.indexOf(name);
+  return index === -1 ? undefined : argv[index + 1];
+}
+
+function positiveInt(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function closeStream(stream) {
+  return new Promise((resolve) => stream.end(resolve));
+}
+
+function gitMetadata(cwd) {
+  const status = git(["status", "--short"], cwd);
+  return {
+    commit: git(["rev-parse", "HEAD"], cwd),
+    branch: git(["rev-parse", "--abbrev-ref", "HEAD"], cwd),
+    status_short: status ? status.split("\n").filter(Boolean) : [],
+  };
+}
+
+function git(args, cwd) {
+  const result = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (result.status !== 0) return undefined;
+  return result.stdout.trim();
+}
+
+async function runSelfTest() {
+  const root = mkdtempSync(path.join(tmpdir(), "eventloopos-primitives-self-tests-"));
+  mkdirSync(path.join(root, "bin"), { recursive: true });
+  writeFileSync(path.join(root, "bin/pass.mjs"), "console.log('pass')\n", "utf8");
+  writeFileSync(path.join(root, "bin/fail.mjs"), "console.error('fail')\nprocess.exit(7)\n", "utf8");
+  const catalogPath = path.join(root, "catalog.json");
+  const manifestPath = path.join(root, "artifacts/manifest.json");
+
+  writeFileSync(catalogPath, JSON.stringify({
+    primitives: [{
+      id: "runtime_spine",
+      self_tests: ["node bin/pass.mjs --self-test"],
+    }, {
+      id: "workspace_control",
+      self_tests: ["node bin/pass.mjs --self-test"],
+    }],
+  }), "utf8");
+  const good = await runPrimitiveSelfTests({
+    catalogPath,
+    manifestPath,
+    timeoutMs: 5_000,
+    repoRoot: root,
+  });
+  assert.equal(good.ok, true);
+  assert.equal(good.primitive_count, 2);
+  assert.equal(good.expected_command_count, 1);
+  assert.deepEqual(good.commands[0].primitive_ids, ["runtime_spine", "workspace_control"]);
+  assert.equal(existsSync(good.commands[0].stdout_path), true);
+
+  const listed = await runPrimitiveSelfTests({
+    catalogPath,
+    manifestPath: path.join(root, "artifacts/list.json"),
+    timeoutMs: 5_000,
+    listOnly: true,
+    repoRoot: root,
+  });
+  assert.equal(listed.ok, true);
+  assert.equal(listed.commands[0].status, "listed");
+
+  writeFileSync(catalogPath, JSON.stringify({
+    primitives: [{
+      id: "agent_source_hooks",
+      self_tests: ["node bin/fail.mjs"],
+    }],
+  }), "utf8");
+  const bad = await runPrimitiveSelfTests({
+    catalogPath,
+    manifestPath: path.join(root, "artifacts/bad.json"),
+    timeoutMs: 5_000,
+    repoRoot: root,
+  });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.failed_command_count, 1);
+  assert.equal(bad.commands[0].exit_code, 7);
+  assert.equal(existsSync(bad.commands[0].stderr_path), true);
+
+  rmSync(root, { recursive: true, force: true });
+}

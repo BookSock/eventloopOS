@@ -23,6 +23,9 @@ self-tests, 62 proof refs.
 Strict readiness is expected to stay green: every cataloged primitive
 has a `self_tests` command, and the shared primitive operation-helper test
 proves typed helper coverage for every cataloged HTTP route.
+`bin/primitives-self-test-runner` executes the cataloged self-test commands
+once per unique command and records a manifest that maps each proof back to the
+primitive ids it covers.
 The catalog audit also verifies every catalog schema has a matching
 `@eventloopos/shared` Zod schema, TypeScript type, and ContractSchemas registry
 entry, and that cataloged HTTP routes cannot silently drift back to freeform
@@ -783,10 +786,10 @@ Useful standalone uses:
 
 Status: stable enough internally. `bin/primitives-host-doctor` is the small
 "prove my host" entrypoint for builders: it validates catalog/OpenAPI drift,
-runs strict readiness, verifies this builder-facing docs index against the
-catalog, runs primitive example self-tests, and optionally gates live
-orchestrator `/health`, `/metrics`, `/activity`, and `/workspace/status` with
-`--require-live`.
+runs strict readiness, executes the cataloged primitive self-tests, verifies
+this builder-facing docs index against the catalog, runs primitive example
+self-tests, and optionally gates live orchestrator `/health`, `/metrics`,
+`/activity`, and `/workspace/status` with `--require-live`.
 
 ## Near-Term Library Hardening
 
