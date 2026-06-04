@@ -1054,6 +1054,41 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(result.exclusions.first?.titleSubstring, "Screen Sharing")
     }
 
+    func testHTTPQueueClientFetchesFollowsWindowsWithThreshold() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/follows-windows?min_workspace_count=2")
+            return """
+            {
+              "ok": true,
+              "windows": [
+                {
+                  "window_id": "1002",
+                  "known_workspaces": ["demo-customer", "demo-ops"],
+                  "app_bundle": "com.tinyspeck.slackmacgap",
+                  "title_prefix": "team-eng | slack",
+                  "slot_window_ids": ["1001", "1002"]
+                }
+              ],
+              "count": 1,
+              "ttl_ms": 86400000,
+              "request_id": "req_follows_windows"
+            }
+            """
+        }
+
+        let result = try await client.fetchFollowsWindows(minWorkspaceCount: 2)
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.ttlMs, 86_400_000)
+        XCTAssertEqual(result.windows.first?.windowId, "1002")
+        XCTAssertEqual(result.windows.first?.knownWorkspaces, ["demo-customer", "demo-ops"])
+        XCTAssertEqual(result.windows.first?.appBundle, "com.tinyspeck.slackmacgap")
+        XCTAssertEqual(result.windows.first?.titlePrefix, "team-eng | slack")
+        XCTAssertEqual(result.windows.first?.slotWindowIds, ["1001", "1002"])
+    }
+
     func testHTTPQueueClientAddsFollowsWindowExclusion() async throws {
         let (client, recorder) = makeHTTPClient { request in
             XCTAssertEqual(request.httpMethod, "POST")

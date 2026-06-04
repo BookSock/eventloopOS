@@ -49,15 +49,15 @@ when synchronously binding the matching task session. Evidence:
 
 ### 1.3 Follows windows: accidental membership needs stronger live affordances
 
-You drag Spotify from workspace 1 to workspace 2 because you wanted to listen to music while working on task 2. Now Spotify is `follows` and gets pulled to every workspace until excluded. The Queue toolbar and command menu now have a Follows Rules sheet where a user can add/remove app-bundle or title-substring exclusions, but the app still does not yet suggest "this window looks accidentally sticky; exclude it?" from the active desktop.
+You drag Spotify from workspace 1 to workspace 2 because you wanted to listen to music while working on task 2. Now Spotify is `follows` and gets pulled to every workspace until excluded. The Queue toolbar and command menu have a Follows Rules sheet where a user can add/remove app-bundle or title-substring exclusions, with current follows candidates shown before generic active-desktop suggestions.
 
 **Mitigations:**
-- Add active-window suggestions to the Mac Follows Rules sheet.
+- Current follows candidates and active-window suggestions in the Mac Follows Rules sheet.
 - Aging: a window seen in only one workspace recently → un-mark follows.
 - Threshold: require 3+ workspaces, not 2, before marking `follows`.
 - Voice intent: "stop sharing Spotify."
 
-**Question:** how cheap an exit ramp do you want? My lean: current rules sheet + 3-workspace threshold + voice "stop sharing X."
+**Question:** how cheap an exit ramp do you want beyond current candidates sheet + 3-workspace threshold + voice "stop sharing X"?
 
 ---
 

@@ -1333,6 +1333,21 @@ final class QueueViewModelTests: XCTestCase {
                 titleSubstring: "Already ignored"
             ),
         ])
+        client.setFakeFollowsWindows([
+            FollowsWindowRecord(
+                windowId: "sticky-slack",
+                knownWorkspaces: ["eventloop-customer", "eventloop-ops"],
+                appBundle: "com.tinyspeck.slackmacgap",
+                titlePrefix: "team-eng | slack",
+                slotWindowIds: ["sticky-slack-old", "sticky-slack"]
+            ),
+            FollowsWindowRecord(
+                windowId: "sticky-notes",
+                knownWorkspaces: ["eventloop-customer", "eventloop-ops"],
+                appBundle: "com.apple.TextEdit",
+                titlePrefix: "Customer notes"
+            ),
+        ])
         let snapshot = WorkspaceSnapshot(
             windows: [
                 WorkspaceWindow(
@@ -1344,27 +1359,34 @@ final class QueueViewModelTests: XCTestCase {
                 ),
                 WorkspaceWindow(
                     id: 202,
+                    app: "Slack",
+                    title: "team-eng | slack",
+                    workspace: "eventloop-customer",
+                    appBundleId: "com.tinyspeck.slackmacgap"
+                ),
+                WorkspaceWindow(
+                    id: 203,
                     app: "TextEdit",
                     title: "Customer notes",
                     workspace: "eventloop-customer",
                     appBundleId: "com.apple.TextEdit"
                 ),
                 WorkspaceWindow(
-                    id: 203,
+                    id: 204,
                     app: "Tailscale",
                     title: "Tailscale",
                     workspace: "eventloop-customer",
                     appBundleId: "io.tailscale.ipn.macos"
                 ),
                 WorkspaceWindow(
-                    id: 204,
+                    id: 205,
                     app: "Safari",
                     title: "Other workspace",
                     workspace: "manual",
                     appBundleId: "com.apple.Safari"
                 ),
                 WorkspaceWindow(
-                    id: 205,
+                    id: 206,
                     app: "Numbers",
                     title: "Already ignored budget",
                     workspace: "eventloop-customer",
@@ -1380,11 +1402,17 @@ final class QueueViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.followsRulesState, .loaded)
         XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
-        XCTAssertEqual(viewModel.followsWindowSuggestions.count, 1)
-        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.appName, "Google Chrome")
-        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.appBundle, "com.google.Chrome")
-        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.title, "Playwright Report")
-        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.workspace, "eventloop-customer")
+        XCTAssertEqual(viewModel.followsWindowSuggestions.count, 2)
+        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.appName, "team-eng | slack")
+        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.appBundle, "com.tinyspeck.slackmacgap")
+        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.title, "team-eng | slack")
+        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.workspace, "eventloop-customer, eventloop-ops")
+        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.isCurrentFollowsCandidate, true)
+        XCTAssertEqual(viewModel.followsWindowSuggestions.last?.appName, "Google Chrome")
+        XCTAssertEqual(viewModel.followsWindowSuggestions.last?.appBundle, "com.google.Chrome")
+        XCTAssertEqual(viewModel.followsWindowSuggestions.last?.title, "Playwright Report")
+        XCTAssertEqual(viewModel.followsWindowSuggestions.last?.workspace, "eventloop-customer")
+        XCTAssertEqual(viewModel.followsWindowSuggestions.last?.isCurrentFollowsCandidate, false)
     }
 
     func testAddFollowsRuleRequiresMatcher() async {

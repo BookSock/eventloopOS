@@ -1501,15 +1501,33 @@ public final class QueueViewModel: ObservableObject {
     }
 
     private func captureFollowsRuleSuggestions(exclusions: [FollowsWindowExclusion]) async -> [FollowsWindowSuggestion] {
+        let followsCandidates = (try? await client.fetchFollowsWindows(minWorkspaceCount: 2))?.windows ?? []
+        var suggestions = followsCandidates.compactMap { candidate -> FollowsWindowSuggestion? in
+            guard !isFollowsCandidateAlreadyExcluded(candidate, exclusions: exclusions) else {
+                return nil
+            }
+            let appName = normalizedOptional(candidate.titlePrefix)
+                ?? normalizedOptional(candidate.appBundle)
+                ?? "Window \(candidate.windowId)"
+            let workspace = candidate.knownWorkspaces.isEmpty ? "known follows window" : candidate.knownWorkspaces.joined(separator: ", ")
+            return FollowsWindowSuggestion(
+                appName: appName,
+                appBundle: normalizedOptional(candidate.appBundle),
+                title: normalizedOptional(candidate.titlePrefix),
+                workspace: workspace,
+                isCurrentFollowsCandidate: true
+            )
+        }
+        var seen = Set(suggestions.map { followsSuggestionIdentity(appBundle: $0.appBundle, appName: $0.appName, title: $0.title) })
+
         guard let snapshot = try? await workspaceClient.capture(),
               let activeWorkspace = snapshot.activeWorkspace?.trimmingCharacters(in: .whitespacesAndNewlines),
               !activeWorkspace.isEmpty
         else {
-            return []
+            return suggestions
         }
 
-        var seen = Set<String>()
-        return snapshot.windows.compactMap { window in
+        let activeDesktopSuggestions = snapshot.windows.compactMap { window -> FollowsWindowSuggestion? in
             guard window.workspace == activeWorkspace,
                   isFollowsRuleSuggestionEligible(window),
                   !isWindowAlreadyExcluded(window, exclusions: exclusions)
@@ -1525,11 +1543,20 @@ public final class QueueViewModel: ObservableObject {
                 title: title,
                 workspace: window.workspace
             )
-            guard seen.insert(suggestion.id).inserted else {
+            guard seen.insert(followsSuggestionIdentity(appBundle: suggestion.appBundle, appName: suggestion.appName, title: suggestion.title)).inserted else {
                 return nil
             }
             return suggestion
         }
+        suggestions.append(contentsOf: activeDesktopSuggestions)
+        return suggestions
+    }
+
+    private func followsSuggestionIdentity(appBundle: String?, appName: String, title: String?) -> String {
+        [
+            normalizedOptional(appBundle)?.lowercased() ?? appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+            normalizedOptional(title)?.lowercased() ?? "",
+        ].joined(separator: "|")
     }
 
     private func isFollowsRuleSuggestionEligible(_ window: WorkspaceWindow) -> Bool {
@@ -1561,6 +1588,22 @@ public final class QueueViewModel: ObservableObject {
             if let appBundle = normalizedOptional(exclusion.appBundle)?.lowercased(),
                let windowBundle,
                appBundle == windowBundle {
+                return true
+            }
+            if let titleSubstring = normalizedOptional(exclusion.titleSubstring)?.lowercased(), title.contains(titleSubstring) {
+                return true
+            }
+            return false
+        }
+    }
+
+    private func isFollowsCandidateAlreadyExcluded(_ candidate: FollowsWindowRecord, exclusions: [FollowsWindowExclusion]) -> Bool {
+        let candidateBundle = normalizedOptional(candidate.appBundle)?.lowercased()
+        let title = normalizedOptional(candidate.titlePrefix)?.lowercased() ?? ""
+        return exclusions.contains { exclusion in
+            if let appBundle = normalizedOptional(exclusion.appBundle)?.lowercased(),
+               let candidateBundle,
+               appBundle == candidateBundle {
                 return true
             }
             if let titleSubstring = normalizedOptional(exclusion.titleSubstring)?.lowercased(), title.contains(titleSubstring) {

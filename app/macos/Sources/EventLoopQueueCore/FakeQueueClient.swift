@@ -42,6 +42,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var readDelayNanoseconds: UInt64 = 0
     private var readingQueueContexts: [ReadingQueueContext] = []
     private var fakeActivityEvents: [ActivityEvent] = []
+    private var followsWindows: [FollowsWindowRecord] = []
     private var followsWindowExclusions: [FollowsWindowExclusion] = []
     private var fakeAutoBindRunCount: Int = 0
     private let masterCommandResult: MasterCommandResult?
@@ -789,6 +790,16 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         }
     }
 
+    public func fetchFollowsWindows(minWorkspaceCount: Int? = nil) async throws -> FollowsWindowsListResult {
+        lock.withLock {
+            let windows = followsWindows.filter { record in
+                guard let minWorkspaceCount else { return true }
+                return record.knownWorkspaces.count >= minWorkspaceCount
+            }
+            return FollowsWindowsListResult(windows: windows, count: windows.count)
+        }
+    }
+
     public func addFollowsWindowExclusion(appBundle: String?, titleSubstring: String?) async throws -> FollowsWindowExclusionMutationResult {
         lock.withLock {
             let exclusion = FollowsWindowExclusion(
@@ -814,6 +825,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public func setFakeFollowsWindowExclusions(_ exclusions: [FollowsWindowExclusion]) {
         lock.withLock { followsWindowExclusions = exclusions }
+    }
+
+    public func setFakeFollowsWindows(_ windows: [FollowsWindowRecord]) {
+        lock.withLock { followsWindows = windows }
     }
 
     public func runCodexAutoBind() async throws -> CodexAutoBindResult {

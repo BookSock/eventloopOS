@@ -380,8 +380,11 @@ Useful standalone uses:
   the HTTP primitive without linking the Mac app
 
 macOS UI: Queue toolbar and command menu expose a follows-rules editor for
-adding, refreshing, and removing sticky-window exclusions. The checked CLI and
-export/import format remain available for scripted movement between machines.
+adding, refreshing, and removing sticky-window exclusions. The sheet lists
+current follows candidates from `GET /follows-windows` before generic
+active-desktop suggestions, so an accidental shared window has a direct exit
+ramp. The checked CLI and export/import format remain available for scripted
+movement between machines.
 
 Proof:
 

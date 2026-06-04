@@ -1,5 +1,58 @@
 import Foundation
 
+public struct FollowsWindowRecord: Decodable, Equatable, Identifiable, Sendable {
+    public let windowId: String
+    public let knownWorkspaces: [String]
+    public let appBundle: String?
+    public let titlePrefix: String?
+    public let slotWindowIds: [String]
+
+    public var id: String { windowId }
+
+    public init(
+        windowId: String,
+        knownWorkspaces: [String] = [],
+        appBundle: String? = nil,
+        titlePrefix: String? = nil,
+        slotWindowIds: [String] = []
+    ) {
+        self.windowId = windowId
+        self.knownWorkspaces = knownWorkspaces
+        self.appBundle = appBundle
+        self.titlePrefix = titlePrefix
+        self.slotWindowIds = slotWindowIds
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case windowId = "window_id"
+        case knownWorkspaces = "known_workspaces"
+        case appBundle = "app_bundle"
+        case titlePrefix = "title_prefix"
+        case slotWindowIds = "slot_window_ids"
+    }
+}
+
+public struct FollowsWindowsListResult: Decodable, Equatable, Sendable {
+    public let windows: [FollowsWindowRecord]
+    public let count: Int
+    public let ttlMs: Int?
+    public let requestId: String?
+
+    public init(windows: [FollowsWindowRecord], count: Int? = nil, ttlMs: Int? = nil, requestId: String? = nil) {
+        self.windows = windows
+        self.count = count ?? windows.count
+        self.ttlMs = ttlMs
+        self.requestId = requestId
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case windows
+        case count
+        case ttlMs = "ttl_ms"
+        case requestId = "request_id"
+    }
+}
+
 public struct FollowsWindowExclusion: Codable, Equatable, Identifiable, Sendable {
     public let exclusionId: String
     public let appBundle: String?
@@ -93,18 +146,22 @@ public struct FollowsWindowSuggestion: Equatable, Identifiable, Sendable {
     public let appBundle: String?
     public let title: String?
     public let workspace: String
+    public let isCurrentFollowsCandidate: Bool
 
     public init(
         appName: String,
         appBundle: String? = nil,
         title: String? = nil,
-        workspace: String
+        workspace: String,
+        isCurrentFollowsCandidate: Bool = false
     ) {
         self.appName = appName
         self.appBundle = appBundle
         self.title = title
         self.workspace = workspace
+        self.isCurrentFollowsCandidate = isCurrentFollowsCandidate
         self.id = [
+            isCurrentFollowsCandidate ? "follows" : "active",
             appBundle?.lowercased() ?? appName.lowercased(),
             title?.lowercased() ?? "",
             workspace.lowercased(),

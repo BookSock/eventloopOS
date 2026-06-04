@@ -32,6 +32,7 @@ public protocol QueueClient: Sendable {
     func bumpQueueItemPriority(packetId: String, delta: Int?, score: Int?, reason: String?) async throws -> QueueActionResult
     func masterFanOut(message: String, taskHintSubstring: String?, taskIdPattern: String?, taskIds: [String], dryRun: Bool, idempotencyKey: String) async throws -> MasterFanOutResult
     func fetchActivity(limit: Int) async throws -> ActivityFeedResult
+    func fetchFollowsWindows(minWorkspaceCount: Int?) async throws -> FollowsWindowsListResult
     func fetchFollowsWindowExclusions() async throws -> FollowsWindowExclusionsListResult
     func addFollowsWindowExclusion(appBundle: String?, titleSubstring: String?) async throws -> FollowsWindowExclusionMutationResult
     func deleteFollowsWindowExclusion(id: String) async throws -> FollowsWindowExclusionMutationResult
@@ -490,6 +491,17 @@ public struct HTTPQueueClient: QueueClient {
         let (data, response) = try await session.data(from: url)
         try validate(data: data, response: response)
         return try decoder.decode(ActivityFeedResult.self, from: data)
+    }
+
+    public func fetchFollowsWindows(minWorkspaceCount: Int? = nil) async throws -> FollowsWindowsListResult {
+        var components = URLComponents(url: baseURL.appending(path: "follows-windows"), resolvingAgainstBaseURL: false)
+        if let minWorkspaceCount {
+            components?.queryItems = [URLQueryItem(name: "min_workspace_count", value: String(minWorkspaceCount))]
+        }
+        guard let url = components?.url else { throw QueueClientError.invalidResponse }
+        let (data, response) = try await session.data(from: url)
+        try validate(data: data, response: response)
+        return try decoder.decode(FollowsWindowsListResult.self, from: data)
     }
 
     public func fetchFollowsWindowExclusions() async throws -> FollowsWindowExclusionsListResult {

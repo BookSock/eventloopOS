@@ -152,9 +152,19 @@ private struct FollowsSuggestionRow: View {
                 .foregroundStyle(.blue)
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 3) {
-                Text(suggestion.appName)
-                    .font(.callout.weight(.medium))
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(suggestion.appName)
+                        .font(.callout.weight(.medium))
+                        .lineLimit(1)
+                    if suggestion.isCurrentFollowsCandidate {
+                        Text("Currently follows")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.blue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(.blue.opacity(0.10), in: Capsule())
+                    }
+                }
                 HStack(spacing: 6) {
                     if let appBundle = suggestion.appBundle {
                         Text(appBundle)
