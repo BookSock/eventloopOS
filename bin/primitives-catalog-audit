@@ -60,10 +60,11 @@ function auditCatalog(catalog, repoRoot, errors) {
 
   const allowedStatuses = new Set(Array.isArray(catalog.status_labels) ? catalog.status_labels : []);
   const schemaNames = new Set(isRecord(catalog.schemas) ? Object.keys(catalog.schemas) : []);
+  const packageScripts = loadPackageScripts(repoRoot);
   auditSharedContractSchemaExports(repoRoot, schemaNames, errors);
   const ids = new Set();
   for (const [index, primitive] of catalog.primitives.entries()) {
-    auditPrimitive(primitive, index, repoRoot, allowedStatuses, schemaNames, ids, errors);
+    auditPrimitive(primitive, index, repoRoot, allowedStatuses, schemaNames, ids, packageScripts, errors);
   }
   auditObservedRouteCoverage(catalog, repoRoot, errors);
 }
@@ -89,7 +90,7 @@ function auditSharedContractSchemaExports(repoRoot, schemaNames, errors) {
   }
 }
 
-function auditPrimitive(primitive, index, repoRoot, allowedStatuses, schemaNames, ids, errors) {
+function auditPrimitive(primitive, index, repoRoot, allowedStatuses, schemaNames, ids, packageScripts, errors) {
   const prefix = `primitives[${index}]`;
   if (!isRecord(primitive)) {
     errors.push(`${prefix} must be an object`);
@@ -123,8 +124,7 @@ function auditPrimitive(primitive, index, repoRoot, allowedStatuses, schemaNames
   }
 
   for (const selfTest of arrayOfStrings(primitive.self_tests, `${prefix}.self_tests`, errors, { optional: true })) {
-    const command = selfTest.split(/\s+/)[0];
-    if (command.startsWith("bin/")) assertPathExists(repoRoot, command, `${prefix}.self_tests`, errors);
+    assertSelfTestCommandExists(repoRoot, selfTest, `${prefix}.self_tests`, packageScripts, errors);
   }
 
   const http = primitive.http;
@@ -305,6 +305,138 @@ function assertPathExists(repoRoot, value, label, errors) {
   if (!fs.existsSync(target)) errors.push(`${label} missing: ${value}`);
 }
 
+function assertSelfTestCommandExists(repoRoot, command, label, packageScripts, errors) {
+  const tokens = tokenizeCommand(command);
+  if (tokens.length === 0) return;
+  if (tokens[0] === "pnpm") {
+    assertPnpmRunScriptExists(tokens, label, packageScripts, errors);
+    return;
+  }
+  if (tokens[0] === "node" && tokens[1]) {
+    assertPathExists(repoRoot, tokens[1], label, errors);
+    return;
+  }
+  if (tokens[0].startsWith("bin/") || tokens[0].startsWith("examples/")) {
+    assertPathExists(repoRoot, tokens[0], label, errors);
+  }
+}
+
+function assertPnpmRunScriptExists(tokens, label, packageScripts, errors) {
+  let filter;
+  let scriptName;
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token === "--filter" || token === "-F") {
+      filter = tokens[index + 1];
+      index += 1;
+      continue;
+    }
+    if (token.startsWith("--filter=")) {
+      filter = token.slice("--filter=".length);
+      continue;
+    }
+    if (token === "run") {
+      scriptName = tokens[index + 1];
+      break;
+    }
+  }
+  if (!scriptName) {
+    errors.push(`${label} pnpm command must include "run <script>": ${tokens.join(" ")}`);
+    return;
+  }
+  const packageName = filter ?? packageScripts.rootName;
+  if (!packageName) {
+    errors.push(`${label} pnpm command must include --filter or root package name: ${tokens.join(" ")}`);
+    return;
+  }
+  const packageInfo = packageScripts.byName.get(packageName);
+  if (!packageInfo) {
+    errors.push(`${label} references missing pnpm package: ${packageName}`);
+    return;
+  }
+  if (!packageInfo.scripts.has(scriptName)) {
+    errors.push(`${label} references missing pnpm script: ${packageName}#${scriptName}`);
+  }
+}
+
+function tokenizeCommand(command) {
+  const tokens = [];
+  let token = "";
+  let quote;
+  for (let index = 0; index < command.length; index += 1) {
+    const char = command[index];
+    if (quote) {
+      if (char === quote) {
+        quote = undefined;
+      } else {
+        token += char;
+      }
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (/\s/.test(char)) {
+      if (token.length > 0) {
+        tokens.push(token);
+        token = "";
+      }
+      continue;
+    }
+    token += char;
+  }
+  if (token.length > 0) tokens.push(token);
+  return tokens;
+}
+
+function loadPackageScripts(repoRoot) {
+  const byName = new Map();
+  let rootName;
+  for (const packageJsonPath of packageJsonPaths(repoRoot)) {
+    let packageJson;
+    try {
+      packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+    } catch {
+      continue;
+    }
+    const name = readNonEmptyString(packageJson.name);
+    if (!name) continue;
+    const scripts = new Set(isRecord(packageJson.scripts) ? Object.keys(packageJson.scripts) : []);
+    if (packageJsonPath === path.resolve(repoRoot, "package.json")) rootName = name;
+    byName.set(name, {
+      path: path.relative(repoRoot, packageJsonPath),
+      scripts,
+    });
+  }
+  return { byName, rootName };
+}
+
+function packageJsonPaths(repoRoot) {
+  const ignoredDirs = new Set([
+    ".git",
+    ".next",
+    ".build",
+    "artifacts",
+    "build",
+    "dist",
+    "node_modules",
+    "target",
+  ]);
+  const paths = [];
+  const visit = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (!ignoredDirs.has(entry.name)) visit(path.join(dir, entry.name));
+        continue;
+      }
+      if (entry.isFile() && entry.name === "package.json") paths.push(path.join(dir, entry.name));
+    }
+  };
+  visit(repoRoot);
+  return paths;
+}
+
 function arrayOfStrings(value, label, errors, options = {}) {
   if (value === undefined && options.optional) return [];
   if (!Array.isArray(value)) {
@@ -336,6 +468,14 @@ function runSelfTest() {
   fs.mkdirSync(path.join(root, "app/orchestrator/src/http"), { recursive: true });
   fs.mkdirSync(path.join(root, "app/shared/src"), { recursive: true });
   fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "package.json"),
+    JSON.stringify({ name: "eventloopos", scripts: { "root-proof": "node bin/proof --self-test" } }, null, 2),
+  );
+  fs.writeFileSync(
+    path.join(root, "app/orchestrator/package.json"),
+    JSON.stringify({ name: "@eventloopos/orchestrator", scripts: { "test:runtime-spine": "node --test dist/src/runtime.test.js" } }, null, 2),
+  );
   fs.writeFileSync(path.join(root, "code.ts"), "export {}\n");
   fs.writeFileSync(path.join(root, "proof.test.ts"), "export {}\n");
   fs.writeFileSync(path.join(root, "bin/proof"), "#!/usr/bin/env node\n");
@@ -398,7 +538,12 @@ function runSelfTest() {
       code: ["code.ts"],
       proofs: ["proof.test.ts"],
       cli: ["bin/proof"],
-      self_tests: ["bin/proof --self-test"],
+      self_tests: [
+        "bin/proof --self-test",
+        "node bin/proof --self-test",
+        "pnpm run root-proof",
+        "pnpm --filter @eventloopos/orchestrator run test:runtime-spine",
+      ],
     }],
     schemas: {
       ExampleRequest: { type: "object" },
@@ -419,6 +564,32 @@ function runSelfTest() {
   auditCatalog(bad, root, badErrors);
   if (!badErrors.some((error) => error.includes("missing.ts"))) {
     throw new Error(`bad fixture did not fail as expected: ${badErrors.join("; ")}`);
+  }
+
+  const badPackage = {
+    ...good,
+    primitives: [{
+      ...good.primitives[0],
+      self_tests: ["pnpm --filter @eventloopos/missing run test:runtime-spine"],
+    }],
+  };
+  const badPackageErrors = [];
+  auditCatalog(badPackage, root, badPackageErrors);
+  if (!badPackageErrors.some((error) => error.includes("missing pnpm package"))) {
+    throw new Error(`bad package fixture did not fail as expected: ${badPackageErrors.join("; ")}`);
+  }
+
+  const badScript = {
+    ...good,
+    primitives: [{
+      ...good.primitives[0],
+      self_tests: ["pnpm --filter @eventloopos/orchestrator run test:missing"],
+    }],
+  };
+  const badScriptErrors = [];
+  auditCatalog(badScript, root, badScriptErrors);
+  if (!badScriptErrors.some((error) => error.includes("missing pnpm script"))) {
+    throw new Error(`bad script fixture did not fail as expected: ${badScriptErrors.join("; ")}`);
   }
 
   const badSchema = {
