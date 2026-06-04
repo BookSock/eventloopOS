@@ -155,6 +155,7 @@ public final class QueueViewModel: ObservableObject {
     private var activityRefreshTask: Task<Void, Never>?
     private var autoBindLoopTask: Task<Void, Never>?
     private var autoRestoredContextPacketIds = Set<String>()
+    private var workspaceRestoreInFlight = false
 
     public init(
         client: any QueueClient,
@@ -1556,12 +1557,7 @@ public final class QueueViewModel: ObservableObject {
             let response = try await workspaceClient.restorePlan(snapshot: snapshot, currentWindows: nil)
             workspaceRestoreState = .planned(response.plan)
             if response.executeSupported && !response.plan.commands.isEmpty {
-                let executed = try await workspaceClient.restore(
-                    snapshot: snapshot,
-                    currentWindows: nil,
-                    idempotencyKey: "mac_workspace_restore_\(UUID().uuidString)"
-                )
-                workspaceRestoreState = .executed(executed.receipt)
+                await executeWorkspaceRestore(snapshot: snapshot, idempotencyPrefix: "mac_workspace_restore")
             }
         } catch {
             workspaceRestoreState = .failed(error.localizedDescription)
@@ -1583,11 +1579,26 @@ public final class QueueViewModel: ObservableObject {
             return
         }
 
+        await executeWorkspaceRestore(snapshot: snapshot, idempotencyPrefix: "mac_workspace_restore")
+    }
+
+    private func executeWorkspaceRestore(snapshot: WorkspaceSnapshot, idempotencyPrefix: String) async {
+        guard !workspaceRestoreInFlight else {
+            workspaceRestoreState = .restoring
+            return
+        }
+
+        workspaceRestoreInFlight = true
+        workspaceRestoreState = .restoring
+        defer {
+            workspaceRestoreInFlight = false
+        }
+
         do {
             let response = try await workspaceClient.restore(
                 snapshot: snapshot,
                 currentWindows: nil,
-                idempotencyKey: "mac_workspace_restore_\(UUID().uuidString)"
+                idempotencyKey: "\(idempotencyPrefix)_\(UUID().uuidString)"
             )
             workspaceRestoreState = .executed(response.receipt)
         } catch {

@@ -109,7 +109,7 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
 
       const rawSnapshot = await deps.workspace.capture();
       await recordWindowObservations(deps, rawSnapshot, currentTaskId, tickNow);
-      const snapshot = filterSnapshotForTaskSave(rawSnapshot, await readFollowsWindowIds(deps));
+      const snapshot = filterSnapshotForTaskSave(rawSnapshot, await readFollowsWindowIds(deps), currentTaskId);
       const fingerprint = snapshotFingerprint(snapshot);
       const lastFingerprint = lastSavedSnapshotByTask.get(currentTaskId);
 
@@ -289,11 +289,15 @@ export function snapshotFingerprint(snapshot: WorkspaceSnapshot): string {
   ].join("\n");
 }
 
-export function filterSnapshotForTaskSave(snapshot: WorkspaceSnapshot, followsWindowIds: ReadonlySet<string> = new Set()): WorkspaceSnapshot {
+export function filterSnapshotForTaskSave(
+  snapshot: WorkspaceSnapshot,
+  followsWindowIds: ReadonlySet<string> = new Set(),
+  currentTaskId?: string,
+): WorkspaceSnapshot {
   if (!snapshot.activeWorkspace) return snapshot;
   const windows = snapshot.windows.filter(
     (window) =>
-      isTaskSnapshotEligibleWindow(window)
+      isTaskSnapshotEligibleWindow(window, currentTaskId)
       && (window.workspace === snapshot.activeWorkspace || followsWindowIds.has(String(window.id))),
   );
   const focusedWindowId =
@@ -308,10 +312,25 @@ export function filterSnapshotForTaskSave(snapshot: WorkspaceSnapshot, followsWi
   };
 }
 
-function isTaskSnapshotEligibleWindow(window: WorkspaceSnapshot["windows"][number]): boolean {
+function isTaskSnapshotEligibleWindow(window: WorkspaceSnapshot["windows"][number], currentTaskId?: string): boolean {
   const app = window.app.trim().toLowerCase();
   const bundle = typeof window.appBundleId === "string" ? window.appBundleId.trim().toLowerCase() : "";
-  return !TASK_SNAPSHOT_APP_BLOCKLIST.has(app) && !TASK_SNAPSHOT_BUNDLE_BLOCKLIST.has(bundle);
+  if (TASK_SNAPSHOT_APP_BLOCKLIST.has(app) || TASK_SNAPSHOT_BUNDLE_BLOCKLIST.has(bundle)) return false;
+
+  const taggedTaskId = taskIdFromTaggedWindow(window);
+  return !taggedTaskId || !currentTaskId || taggedTaskId === currentTaskId;
+}
+
+function taskIdFromTaggedWindow(window: WorkspaceSnapshot["windows"][number]): string | undefined {
+  const match = /\[task:([^\]]+)\]/i.exec(`${window.app} ${window.title} ${window.workspace}`);
+  const hint = match?.[1]?.trim();
+  return hint ? normalizeTaskId(hint) : undefined;
+}
+
+function normalizeTaskId(value: string): string {
+  const trimmed = value.trim().toLowerCase().replace(/^task_/, "");
+  const slug = trimmed.replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return `task_${slug || "untitled"}`;
 }
 
 async function readFollowsWindowIds(deps: AmbientWorkspaceSaverDeps): Promise<ReadonlySet<string>> {

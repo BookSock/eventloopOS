@@ -69,6 +69,8 @@ public struct QueueMenuSummary: Equatable, Sendable {
             return nil
         case .skippedManualMode:
             return "Workspace restore paused"
+        case .restoring:
+            return "Restoring workspace..."
         case let .planned(plan):
             return "Workspace plan: \(plan.commands.count) commands"
         case let .executed(receipt):

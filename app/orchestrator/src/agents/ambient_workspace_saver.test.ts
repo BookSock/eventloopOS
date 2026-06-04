@@ -367,6 +367,41 @@ describe("ambient_workspace_saver", () => {
     assert.deepEqual(writes[0]?.snapshot.windows.map((window) => window.id), [1, 3]);
   });
 
+  it("does not save windows explicitly tagged for a different task into the current paper", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 2,
+      windows: [
+        { id: 1, app: "TextEdit", title: "[task:paper a] reply", workspace: "paper-a" },
+        { id: 2, app: "Google Chrome", title: "[task:paper b] Playwright report", workspace: "paper-a" },
+        { id: 3, app: "Ghostty", title: "[task:paper b] codex", workspace: "paper-b" },
+      ],
+    };
+
+    const filtered = filterSnapshotForTaskSave(snapshot, new Set(["3"]), "task_paper_a");
+
+    assert.deepEqual(filtered.windows.map((window) => window.id), [1]);
+    assert.equal(filtered.focusedWindowId, undefined, "focused foreign-task window must not be persisted as current paper focus");
+  });
+
+  it("keeps user-created untagged windows on the active paper", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 2,
+      windows: [
+        { id: 1, app: "TextEdit", title: "[task:paper a] reply", workspace: "paper-a" },
+        { id: 2, app: "Numbers", title: "Scratch budget", workspace: "paper-a" },
+      ],
+    };
+
+    const filtered = filterSnapshotForTaskSave(snapshot, new Set(), "task_paper_a");
+
+    assert.deepEqual(filtered.windows.map((window) => window.id), [1, 2]);
+    assert.equal(filtered.focusedWindowId, 2);
+  });
+
   it("recovers from updateTaskLayout error and emits an error event", async () => {
     const workspace = makeFakeWorkspace(makeSnapshot([1]));
     const obs = makeFakeObservability();

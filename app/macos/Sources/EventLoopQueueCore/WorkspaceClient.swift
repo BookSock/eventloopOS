@@ -243,6 +243,7 @@ public struct WorkspaceRestoreSkip: Codable, Equatable, Sendable {
 public enum WorkspaceRestoreState: Equatable, Sendable {
     case idle
     case skippedManualMode
+    case restoring
     case planned(WorkspaceRestorePlan)
     case executed(WorkspaceRestoreReceipt)
     case savedTaskLayout(String)
@@ -350,6 +351,7 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
     private let captureSnapshot: WorkspaceSnapshot
     private let planEnvelope: WorkspaceRestorePlanEnvelope
     private let restoreEnvelope: WorkspaceRestoreExecutionEnvelope
+    private let restoreDelayNanoseconds: UInt64
     private var captureCount = 0
     private var requestedSnapshots: [WorkspaceSnapshot] = []
     private var restoreSnapshots: [WorkspaceSnapshot] = []
@@ -371,12 +373,14 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
             receipt: WorkspaceRestoreReceipt(commands: [], skipped: []),
             executeSupported: true,
             idempotencyKey: "idem_fake_workspace_restore"
-        )
+        ),
+        restoreDelayNanoseconds: UInt64 = 0
     ) {
         self.statusEnvelope = statusEnvelope
         self.captureSnapshot = captureSnapshot
         self.planEnvelope = planEnvelope
         self.restoreEnvelope = restoreEnvelope
+        self.restoreDelayNanoseconds = restoreDelayNanoseconds
     }
 
     public var workspaceCaptureCount: Int {
@@ -421,6 +425,9 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
         lock.withLock {
             restoreSnapshots.append(snapshot)
             restoreKeys.append(idempotencyKey)
+        }
+        if restoreDelayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: restoreDelayNanoseconds)
         }
         return restoreEnvelope
     }

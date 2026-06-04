@@ -2410,6 +2410,60 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }
 
+    func testRapidSelectedWorkspaceRestoreDeduplicatesWhileInFlight() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+        let packet = ReviewPacket(
+            id: "packet-with-workspace",
+            title: "Review with workspace",
+            summary: "Needs workspace restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: snapshot
+        )
+        let receipt = WorkspaceRestoreReceipt(
+            commands: [WorkspaceExecutedCommand(command: "aerospace", args: ["workspace", "eventloop-blog"], stdout: "ok")],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            restoreEnvelope: WorkspaceRestoreExecutionEnvelope(
+                ok: true,
+                plan: WorkspaceRestorePlan(commands: [], skipped: []),
+                receipt: receipt,
+                executeSupported: true,
+                idempotencyKey: "idem_fake"
+            ),
+            restoreDelayNanoseconds: 100_000_000
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: [packet]),
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-with-workspace")
+
+        let firstRestore = Task { @MainActor in
+            await viewModel.confirmSelectedWorkspaceRestore()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .restoring)
+
+        let secondRestore = Task { @MainActor in
+            await viewModel.confirmSelectedWorkspaceRestore()
+        }
+
+        await firstRestore.value
+        await secondRestore.value
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+    }
+
     func testConfirmWorkspaceRestoreExecutesWithIdempotencyKey() async {
         let receipt = WorkspaceRestoreReceipt(
             commands: [WorkspaceExecutedCommand(command: "aerospace", args: ["workspace", "eventloop-blog"], stdout: "ok")],

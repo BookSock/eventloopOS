@@ -962,6 +962,13 @@ private struct WorkspaceRestoreBanner: View {
                 .background(.secondary.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityIdentifier("workspace-restore-paused")
+        case .restoring:
+            Text("Restoring workspace...")
+                .font(.caption)
+                .padding(8)
+                .background(.blue.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("workspace-restore-running")
         case let .planned(plan):
             Text("Workspace plan: \(plan.commands.count) commands")
                 .font(.caption)
