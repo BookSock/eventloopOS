@@ -12,6 +12,9 @@ from `@eventloopos/shared` and validated against contract fixtures. The shared
 package also exports `@eventloopos/shared/primitives` helpers for parsing the
 catalog, finding routes, and summarizing primitive coverage without importing
 the orchestrator server package.
+The shared summary helper now returns both global totals and per-primitive
+capability rows with status, category, route count, CLI command count,
+self-test count, proof count, and request/response schema coverage.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.

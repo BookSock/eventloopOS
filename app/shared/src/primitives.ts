@@ -204,6 +204,24 @@ export type PrimitiveCatalogSummary = {
   requestSchemaCount: number;
   noRequestBodyCount: number;
   schemaCount: number;
+  statusCounts: Record<string, number>;
+  categoryCounts: Record<string, number>;
+  primitives: PrimitiveCapabilitySummary[];
+};
+
+export type PrimitiveCapabilitySummary = {
+  id: string;
+  title: string;
+  status: string;
+  category: string;
+  summary: string;
+  routeCount: number;
+  cliCommandCount: number;
+  selfTestCount: number;
+  proofRefCount: number;
+  responseSchemaRouteCount: number;
+  requestSchemaRouteCount: number;
+  noRequestBodyRouteCount: number;
 };
 
 export type PrimitiveRequestBuildInput = {
@@ -994,14 +1012,65 @@ export function bindPrimitiveOperationsClient(client: PrimitiveHttpClient): Prim
 
 export function summarizePrimitiveCatalog(catalog: PrimitiveCatalog): PrimitiveCatalogSummary {
   const routes = primitiveRoutes(catalog);
+  const primitives = catalog.primitives.map(summarizePrimitiveCapability);
   return {
     primitiveCount: catalog.primitives.length,
     routeCount: routes.length,
     responseSchemaCount: routes.filter((route) => route.response_schema).length,
     requestSchemaCount: routes.filter((route) => route.request_schema).length,
     noRequestBodyCount: routes.filter((route) => route.no_request_body === true).length,
-    schemaCount: Object.keys(catalog.schemas).length
+    schemaCount: Object.keys(catalog.schemas).length,
+    statusCounts: countBy(primitives, (primitive) => primitive.status),
+    categoryCounts: countBy(primitives, (primitive) => primitive.category),
+    primitives
   };
+}
+
+function summarizePrimitiveCapability(primitive: PrimitiveDefinition): PrimitiveCapabilitySummary {
+  const http = primitive.http ?? [];
+  const cli = primitive.cli ?? [];
+  const selfTests = primitive.self_tests ?? [];
+  const proofs = primitive.proofs ?? [];
+  return {
+    id: primitive.id,
+    title: primitive.title,
+    status: primitive.status,
+    category: classifyPrimitiveCapability(primitive, http),
+    summary: primitive.summary,
+    routeCount: http.length,
+    cliCommandCount: cli.length,
+    selfTestCount: selfTests.length,
+    proofRefCount: proofs.length,
+    responseSchemaRouteCount: http.filter((route) => route.response_schema).length,
+    requestSchemaRouteCount: http.filter((route) => route.request_schema).length,
+    noRequestBodyRouteCount: http.filter((route) => route.no_request_body === true).length
+  };
+}
+
+function classifyPrimitiveCapability(primitive: PrimitiveDefinition, routes: PrimitiveHttpRoute[]): string {
+  const id = primitive.id;
+  if (id.includes("workspace") || id.includes("window") || id === "manual_mode" || id === "mac_app_hotkeys") {
+    return "os_control";
+  }
+  if (id.includes("queue") || id.includes("routing") || id.includes("command") || id.includes("trigger")) {
+    return "attention_routing";
+  }
+  if (id.includes("agent") || id.includes("session") || id.includes("context")) {
+    return "agent_context";
+  }
+  if (routes.some((route) => route.path.startsWith("/health") || route.path.startsWith("/metrics"))) {
+    return "observability";
+  }
+  return "runtime";
+}
+
+function countBy<T>(items: T[], keyFn: (item: T) => string): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of items) {
+    const key = keyFn(item) || "unknown";
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
 }
 
 function normalizePrimitiveMethod(method: PrimitiveHttpMethod | Lowercase<PrimitiveHttpMethod>): PrimitiveHttpMethod {

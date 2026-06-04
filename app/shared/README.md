@@ -36,8 +36,11 @@ import {
 
 const catalog = parsePrimitiveCatalog(catalogJson);
 const route = getPrimitiveRoute(catalog, "POST", "/onboarding/approvals/batch");
+const summary = summarizePrimitiveCatalog(catalog);
 
-console.log(summarizePrimitiveCatalog(catalog));
+console.log(summary.statusCounts);
+console.log(summary.categoryCounts);
+console.log(summary.primitives.find((primitive) => primitive.id === "workspace_control"));
 console.log(route?.request_schema);
 console.log(route ? routeHasRequestBody(route) : false);
 
@@ -86,6 +89,10 @@ Use this when building tools on top of eventloopOS primitives without importing
 or running the orchestrator server package. Request helpers interpolate route
 templates, encode query strings, enforce `no_request_body`, and validate known
 request/response schemas through the exported Zod contract registry.
+`summarizePrimitiveCatalog` returns both global totals and per-primitive
+capability rows, including status/category, route count, CLI command count,
+self-test count, proof count, and request/response schema coverage, so tools can
+pick stable surfaces without parsing prose docs.
 `createPrimitiveOperationsClient` layers small typed convenience methods over
 the same validated routes for common master-command, manual-mode,
 task-workspace, queue, workspace, task-session, Codex/Claude agent,

@@ -255,6 +255,28 @@ describe("primitive catalog SDK boundary", () => {
     expect(summary.responseSchemaCount).toBe(summary.routeCount);
     expect(summary.requestSchemaCount + summary.noRequestBodyCount).toBeGreaterThan(40);
     expect(summary.schemaCount).toBeGreaterThan(100);
+    expect(summary.statusCounts).toMatchObject({ dogfood: 12, mixed: 1, stable_enough: 5 });
+    expect(summary.categoryCounts).toMatchObject({
+      agent_context: 4,
+      attention_routing: 4,
+      observability: 1,
+      os_control: 6,
+      runtime: 3
+    });
+    expect(summary.primitives).toContainEqual(
+      expect.objectContaining({
+        id: "workspace_control",
+        category: "os_control",
+        routeCount: 4,
+        responseSchemaRouteCount: 4,
+        proofRefCount: expect.any(Number)
+      })
+    );
+    expect(summary.primitives.find((primitive) => primitive.id === "runtime_spine")).toMatchObject({
+      category: "runtime",
+      routeCount: 0,
+      selfTestCount: 1
+    });
 
     const onboarding = getPrimitive(catalog, "task_intake_onboarding");
     expect(onboarding?.title).toBe("Task Intake Onboarding");
