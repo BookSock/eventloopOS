@@ -1436,6 +1436,70 @@ export const McpSourceGetResponseSchema = z
   .strict();
 export type McpSourceGetResponse = z.infer<typeof McpSourceGetResponseSchema>;
 
+export const PaperTriggerRecordSchema = z
+  .object({
+    trigger_id: id,
+    task_id: id,
+    name: nonEmpty,
+    match_event_type: nonEmpty,
+    match_source_id_pattern: nonEmpty.optional(),
+    match_body_substring: nonEmpty.optional(),
+    enabled: z.boolean(),
+    created_at: isoDateTime,
+    updated_at: isoDateTime,
+    last_fired_at: isoDateTime.optional()
+  })
+  .strict();
+export type PaperTriggerRecord = z.infer<typeof PaperTriggerRecordSchema>;
+
+export const PaperTriggerCreateRequestSchema = z
+  .object({
+    task_id: id,
+    name: nonEmpty,
+    match_event_type: nonEmpty,
+    match_source_id_pattern: nonEmpty.optional(),
+    match_body_substring: nonEmpty.optional(),
+    enabled: z.boolean().optional()
+  })
+  .strict();
+export type PaperTriggerCreateRequest = z.infer<typeof PaperTriggerCreateRequestSchema>;
+
+export const PaperTriggerPatchRequestSchema = z
+  .object({
+    name: nonEmpty.optional(),
+    match_event_type: nonEmpty.optional(),
+    match_source_id_pattern: nonEmpty.nullable().optional(),
+    match_body_substring: nonEmpty.nullable().optional(),
+    enabled: z.boolean().optional()
+  })
+  .strict();
+export type PaperTriggerPatchRequest = z.infer<typeof PaperTriggerPatchRequestSchema>;
+
+export const PaperTriggerListResponseSchema = z
+  .object({
+    triggers: z.array(PaperTriggerRecordSchema),
+    request_id: id
+  })
+  .strict();
+export type PaperTriggerListResponse = z.infer<typeof PaperTriggerListResponseSchema>;
+
+export const PaperTriggerGetResponseSchema = z
+  .object({
+    trigger: PaperTriggerRecordSchema,
+    request_id: id
+  })
+  .strict();
+export type PaperTriggerGetResponse = z.infer<typeof PaperTriggerGetResponseSchema>;
+
+export const PaperTriggerMutationResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    trigger: PaperTriggerRecordSchema,
+    request_id: id
+  })
+  .strict();
+export type PaperTriggerMutationResponse = z.infer<typeof PaperTriggerMutationResponseSchema>;
+
 export const RouteEventResultSchema = z
   .object({
     event: EventSchema,
@@ -1965,6 +2029,12 @@ export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   McpSourceSummary: McpSourceSummarySchema,
   McpSourcesListResponse: McpSourcesListResponseSchema,
   McpSourceGetResponse: McpSourceGetResponseSchema,
+  PaperTriggerRecord: PaperTriggerRecordSchema,
+  PaperTriggerCreateRequest: PaperTriggerCreateRequestSchema,
+  PaperTriggerPatchRequest: PaperTriggerPatchRequestSchema,
+  PaperTriggerListResponse: PaperTriggerListResponseSchema,
+  PaperTriggerGetResponse: PaperTriggerGetResponseSchema,
+  PaperTriggerMutationResponse: PaperTriggerMutationResponseSchema,
   RouteEventResult: RouteEventResultSchema,
   McpPollAllAndRouteRequest: McpPollAllAndRouteRequestSchema,
   McpPollSourceRequest: McpPollSourceRequestSchema,

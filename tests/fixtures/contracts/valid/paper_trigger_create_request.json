@@ -1,0 +1,11 @@
+{
+  "schema": "PaperTriggerCreateRequest",
+  "data": {
+    "task_id": "task_release_ops",
+    "name": "deploy watcher",
+    "match_event_type": "slack.message_received",
+    "match_source_id_pattern": "slack:T1:.*",
+    "match_body_substring": "deploy",
+    "enabled": true
+  }
+}

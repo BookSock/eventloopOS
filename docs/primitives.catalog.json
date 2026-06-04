@@ -1284,6 +1284,85 @@
         "request_id": { "type": "string", "minLength": 1 }
       }
     },
+    "PaperTriggerRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trigger_id", "task_id", "name", "match_event_type", "enabled", "created_at", "updated_at"],
+      "properties": {
+        "trigger_id": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "match_event_type": { "type": "string", "minLength": 1 },
+        "match_source_id_pattern": { "type": "string", "minLength": 1 },
+        "match_body_substring": { "type": "string", "minLength": 1 },
+        "enabled": { "type": "boolean" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "last_fired_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "PaperTriggerCreateRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "name", "match_event_type"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "match_event_type": { "type": "string", "minLength": 1 },
+        "match_source_id_pattern": { "type": "string", "minLength": 1 },
+        "match_body_substring": { "type": "string", "minLength": 1 },
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "PaperTriggerPatchRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "match_event_type": { "type": "string", "minLength": 1 },
+        "match_source_id_pattern": {
+          "anyOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "match_body_substring": {
+          "anyOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "PaperTriggerListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["triggers", "request_id"],
+      "properties": {
+        "triggers": { "type": "array", "items": { "$ref": "#/components/schemas/PaperTriggerRecord" } },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "PaperTriggerGetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trigger", "request_id"],
+      "properties": {
+        "trigger": { "$ref": "#/components/schemas/PaperTriggerRecord" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "PaperTriggerMutationResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "trigger", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "trigger": { "$ref": "#/components/schemas/PaperTriggerRecord" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "RouteEventResult": {
       "type": "object",
       "additionalProperties": true,
@@ -2119,11 +2198,11 @@
       "status": "dogfood",
       "summary": "Let tasks declare event-matching rules that can create routed papers from future agent/source events.",
       "http": [
-        { "method": "GET", "path": "/triggers", "route_file": "app/orchestrator/src/routes/triggers.ts" },
-        { "method": "POST", "path": "/triggers", "route_file": "app/orchestrator/src/routes/triggers.ts" },
-        { "method": "GET", "path": "/triggers/:id", "route_file": "app/orchestrator/src/routes/triggers.ts" },
-        { "method": "PATCH", "path": "/triggers/:id", "route_file": "app/orchestrator/src/routes/triggers.ts" },
-        { "method": "DELETE", "path": "/triggers/:id", "route_file": "app/orchestrator/src/routes/triggers.ts" }
+        { "method": "GET", "path": "/triggers", "route_file": "app/orchestrator/src/routes/triggers.ts", "response_schema": "PaperTriggerListResponse" },
+        { "method": "POST", "path": "/triggers", "route_file": "app/orchestrator/src/routes/triggers.ts", "request_schema": "PaperTriggerCreateRequest", "response_schema": "PaperTriggerMutationResponse" },
+        { "method": "GET", "path": "/triggers/:id", "route_file": "app/orchestrator/src/routes/triggers.ts", "response_schema": "PaperTriggerGetResponse" },
+        { "method": "PATCH", "path": "/triggers/:id", "route_file": "app/orchestrator/src/routes/triggers.ts", "request_schema": "PaperTriggerPatchRequest", "response_schema": "PaperTriggerMutationResponse" },
+        { "method": "DELETE", "path": "/triggers/:id", "route_file": "app/orchestrator/src/routes/triggers.ts", "response_schema": "PaperTriggerMutationResponse" }
       ],
       "code": [
         "app/orchestrator/src/routes/triggers.ts",

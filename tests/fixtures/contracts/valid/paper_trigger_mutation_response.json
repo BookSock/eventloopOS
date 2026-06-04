@@ -1,0 +1,17 @@
+{
+  "schema": "PaperTriggerMutationResponse",
+  "data": {
+    "ok": true,
+    "trigger": {
+      "trigger_id": "trg_deploy_watcher",
+      "task_id": "task_release_ops",
+      "name": "deploy watcher",
+      "match_event_type": "slack.message_received",
+      "match_body_substring": "deploy",
+      "enabled": true,
+      "created_at": "2026-05-10T12:00:00.000Z",
+      "updated_at": "2026-05-10T12:00:00.000Z"
+    },
+    "request_id": "req_trigger_create"
+  }
+}

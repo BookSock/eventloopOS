@@ -3196,7 +3196,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/PaperTriggerListResponse"
                 }
               }
             },
@@ -3228,18 +3228,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/PaperTriggerCreateRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/PaperTriggerMutationResponse"
                 }
               }
             },
@@ -3284,7 +3284,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/PaperTriggerMutationResponse"
                 }
               }
             },
@@ -3327,7 +3327,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/PaperTriggerGetResponse"
                 }
               }
             },
@@ -3369,18 +3369,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/PaperTriggerPatchRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/PaperTriggerMutationResponse"
                 }
               }
             },
@@ -5270,6 +5270,192 @@
           "sources",
           "count",
           "request_id"
+        ],
+        "type": "object"
+      },
+      "PaperTriggerCreateRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "match_body_substring": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "match_event_type": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "match_source_id_pattern": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "name",
+          "match_event_type"
+        ],
+        "type": "object"
+      },
+      "PaperTriggerGetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/PaperTriggerRecord"
+          }
+        },
+        "required": [
+          "trigger",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "PaperTriggerListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "triggers": {
+            "items": {
+              "$ref": "#/components/schemas/PaperTriggerRecord"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "triggers",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "PaperTriggerMutationResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "trigger": {
+            "$ref": "#/components/schemas/PaperTriggerRecord"
+          }
+        },
+        "required": [
+          "ok",
+          "trigger",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "PaperTriggerPatchRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "match_body_substring": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "match_event_type": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "match_source_id_pattern": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "PaperTriggerRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "last_fired_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "match_body_substring": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "match_event_type": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "match_source_id_pattern": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "trigger_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trigger_id",
+          "task_id",
+          "name",
+          "match_event_type",
+          "enabled",
+          "created_at",
+          "updated_at"
         ],
         "type": "object"
       },

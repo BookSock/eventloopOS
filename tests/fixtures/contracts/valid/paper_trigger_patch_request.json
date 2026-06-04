@@ -1,0 +1,9 @@
+{
+  "schema": "PaperTriggerPatchRequest",
+  "data": {
+    "name": "deploy watcher v2",
+    "match_source_id_pattern": null,
+    "match_body_substring": "ship",
+    "enabled": false
+  }
+}
