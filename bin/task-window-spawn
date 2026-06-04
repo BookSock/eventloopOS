@@ -1,0 +1,320 @@
+#!/usr/bin/env node
+import http from "node:http";
+import { spawn } from "node:child_process";
+
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  printUsage();
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  await runSelfTest();
+  process.exit(0);
+}
+
+try {
+  const options = parseArgs(args);
+  const result = await runTaskWindowSpawn(options);
+  console.log(JSON.stringify(result, null, 2));
+  process.exit(result.command.exit_code ?? (result.ok ? 0 : 1));
+} catch (error) {
+  console.error(error instanceof Error ? error.message : String(error));
+  process.exit(2);
+}
+
+function printUsage() {
+  console.log(`Usage: bin/task-window-spawn --task-id TASK_ID [options] -- COMMAND [ARGS...]
+
+Runs COMMAND, captures workspace before/after, and claims any newly-created
+windows for TASK_ID via /task-window-claims.
+
+Options:
+  --url URL             Orchestrator URL. Default EVENTLOOPOS_ORCHESTRATOR_URL or http://127.0.0.1:4377
+  --task-id ID          Required task id, e.g. task_checkout
+  --settle-ms MS        Wait after command exits before after-capture. Default 1500
+  --ttl-ms MS           Claim TTL. Default 1800000
+  --source NAME         Claim source. Default task-window-spawn
+  --app CONTAINS        Optional app/app_bundle substring filter for new windows
+  --title CONTAINS      Optional title substring filter for new windows
+`);
+}
+
+function parseArgs(argv) {
+  const passthroughIndex = argv.indexOf("--");
+  if (passthroughIndex < 0) throw new Error("missing -- before command");
+  const optionArgs = argv.slice(0, passthroughIndex);
+  const commandArgs = argv.slice(passthroughIndex + 1);
+  if (commandArgs.length === 0) throw new Error("missing command after --");
+
+  const options = {
+    baseUrl: process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377",
+    taskId: undefined,
+    settleMs: 1_500,
+    ttlMs: 30 * 60 * 1_000,
+    source: "task-window-spawn",
+    appContains: undefined,
+    titleContains: undefined,
+    command: commandArgs[0],
+    args: commandArgs.slice(1),
+  };
+
+  for (let index = 0; index < optionArgs.length; index += 1) {
+    const arg = optionArgs[index];
+    switch (arg) {
+      case "--url":
+        options.baseUrl = readValue(optionArgs, ++index, arg);
+        break;
+      case "--task-id":
+        options.taskId = readValue(optionArgs, ++index, arg);
+        break;
+      case "--settle-ms":
+        options.settleMs = readNonNegativeInteger(readValue(optionArgs, ++index, arg), arg);
+        break;
+      case "--ttl-ms":
+        options.ttlMs = readPositiveInteger(readValue(optionArgs, ++index, arg), arg);
+        break;
+      case "--source":
+        options.source = readValue(optionArgs, ++index, arg);
+        break;
+      case "--app":
+        options.appContains = readValue(optionArgs, ++index, arg).toLowerCase();
+        break;
+      case "--title":
+        options.titleContains = readValue(optionArgs, ++index, arg).toLowerCase();
+        break;
+      default:
+        throw new Error(`unknown option: ${arg}`);
+    }
+  }
+
+  if (!options.taskId) throw new Error("--task-id is required");
+  return options;
+}
+
+async function runTaskWindowSpawn(options) {
+  const before = await captureWorkspace(options.baseUrl);
+  const command = await runCommand(options.command, options.args);
+  if (options.settleMs > 0) await sleep(options.settleMs);
+  const after = await captureWorkspace(options.baseUrl);
+  const newWindows = findNewWindows(before.snapshot?.windows ?? [], after.snapshot?.windows ?? [])
+    .filter((window) => windowMatchesFilters(window, options));
+  const claimed = [];
+  const errors = [];
+
+  for (const window of newWindows) {
+    try {
+      const claim = await claimWindow(options.baseUrl, {
+        task_id: options.taskId,
+        window_id: String(window.id),
+        app_bundle: readWindowAppBundle(window),
+        title_prefix: readWindowTitle(window),
+        source: options.source,
+        ttl_ms: options.ttlMs,
+      });
+      claimed.push({
+        window_id: String(window.id),
+        app: window.app,
+        app_bundle: readWindowAppBundle(window),
+        title: readWindowTitle(window),
+        claim_id: claim.claim?.claim_id,
+      });
+    } catch (error) {
+      errors.push({
+        window_id: String(window.id),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return {
+    ok: errors.length === 0 && (command.exit_code === 0 || command.exit_code === null),
+    task_id: options.taskId,
+    source: options.source,
+    command,
+    before_window_count: before.snapshot?.windows?.length ?? 0,
+    after_window_count: after.snapshot?.windows?.length ?? 0,
+    new_window_count: newWindows.length,
+    claimed_count: claimed.length,
+    claimed,
+    errors,
+  };
+}
+
+function runCommand(command, args) {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { stdio: "inherit" });
+    child.on("error", (error) => {
+      resolve({ command, args, exit_code: 127, signal: null, error: error.message });
+    });
+    child.on("close", (code, signal) => {
+      resolve({ command, args, exit_code: code, signal });
+    });
+  });
+}
+
+async function captureWorkspace(baseUrl) {
+  return requestJson(baseUrl, "/workspace/capture", { method: "POST", body: {} });
+}
+
+async function claimWindow(baseUrl, body) {
+  return requestJson(baseUrl, "/task-window-claims", { method: "POST", body });
+}
+
+async function requestJson(baseUrl, route, options = {}) {
+  const headers = { ...(options.headers ?? {}) };
+  let body;
+  if (options.body !== undefined) {
+    headers["content-type"] = "application/json";
+    body = JSON.stringify(options.body);
+  }
+  const response = await fetch(new URL(route, baseUrl), {
+    method: options.method ?? "GET",
+    headers,
+    body,
+  });
+  const text = await response.text();
+  let parsed;
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch {
+    parsed = { raw: text };
+  }
+  if (!response.ok) {
+    throw new Error(`${route} HTTP ${response.status}: ${JSON.stringify(parsed)}`);
+  }
+  return parsed;
+}
+
+function findNewWindows(beforeWindows, afterWindows) {
+  const beforeIds = new Set(beforeWindows.map((window) => String(window.id)));
+  return afterWindows.filter((window) => window?.id !== undefined && !beforeIds.has(String(window.id)));
+}
+
+function windowMatchesFilters(window, options) {
+  if (options.appContains) {
+    const haystack = `${window.app ?? ""}\n${readWindowAppBundle(window) ?? ""}`.toLowerCase();
+    if (!haystack.includes(options.appContains)) return false;
+  }
+  if (options.titleContains) {
+    if (!String(readWindowTitle(window) ?? "").toLowerCase().includes(options.titleContains)) return false;
+  }
+  return true;
+}
+
+function readWindowAppBundle(window) {
+  return readString(window.appBundleId) ?? readString(window.app_bundle) ?? readString(window.app);
+}
+
+function readWindowTitle(window) {
+  return readString(window.title) ?? readString(window.window_title);
+}
+
+function readString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readValue(argv, index, option) {
+  const value = argv[index];
+  if (!value || value.startsWith("--")) throw new Error(`${option} requires a value`);
+  return value;
+}
+
+function readPositiveInteger(value, option) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`${option} must be a positive integer`);
+  return parsed;
+}
+
+function readNonNegativeInteger(value, option) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) throw new Error(`${option} must be a non-negative integer`);
+  return parsed;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runSelfTest() {
+  const claims = [];
+  let captureCount = 0;
+  const server = http.createServer(async (request, response) => {
+    const send = (status, body) => {
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify(body));
+    };
+    if (request.method === "POST" && request.url === "/workspace/capture") {
+      captureCount += 1;
+      const baseWindow = { id: 1, app: "TextEdit", title: "Notes", workspace: "main" };
+      const spawnedWindow = {
+        id: 99,
+        app: "Google Chrome",
+        appBundleId: "com.google.Chrome",
+        title: "Checkout smoke report",
+        workspace: "main",
+      };
+      send(200, {
+        snapshot: {
+          backend: "aerospace",
+          activeWorkspace: "main",
+          windows: captureCount === 1 ? [baseWindow] : [baseWindow, spawnedWindow],
+        },
+      });
+      return;
+    }
+    if (request.method === "POST" && request.url === "/task-window-claims") {
+      const body = await readRequestJson(request);
+      claims.push(body);
+      send(200, { ok: true, claim: { claim_id: `twc_${body.window_id}`, ...body } });
+      return;
+    }
+    send(404, { ok: false });
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address();
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  try {
+    const result = await runTaskWindowSpawn({
+      baseUrl,
+      taskId: "task_checkout",
+      settleMs: 0,
+      ttlMs: 123_000,
+      source: "self-test",
+      appContains: "chrome",
+      titleContains: "checkout",
+      command: process.execPath,
+      args: ["-e", ""],
+    });
+    if (!result.ok) throw new Error(`self-test result not ok: ${JSON.stringify(result)}`);
+    if (result.claimed_count !== 1) throw new Error(`expected one claim, got ${result.claimed_count}`);
+    if (claims[0]?.task_id !== "task_checkout") throw new Error(`claim task mismatch: ${JSON.stringify(claims[0])}`);
+    if (claims[0]?.window_id !== "99") throw new Error(`claim window mismatch: ${JSON.stringify(claims[0])}`);
+    if (claims[0]?.app_bundle !== "com.google.Chrome") throw new Error(`claim app bundle mismatch: ${JSON.stringify(claims[0])}`);
+    console.log("task-window-spawn self-test passed");
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => (error ? reject(error) : resolve()));
+    });
+  }
+}
+
+function readRequestJson(request) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => {
+      data += chunk;
+    });
+    request.on("end", () => {
+      try {
+        resolve(data ? JSON.parse(data) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+    request.on("error", reject);
+  });
+}

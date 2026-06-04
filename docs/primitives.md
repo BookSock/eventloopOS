@@ -184,6 +184,10 @@ HTTP surface:
 - `POST /task-window-claims`
 - `GET /task-window-claims`
 
+CLI surface:
+
+- `bin/task-window-spawn --task-id TASK_ID -- COMMAND [ARGS...]`
+
 Claim identity:
 
 - exact `window_id`
@@ -200,6 +204,9 @@ Useful standalone uses:
 - a test command opens a window titled `[task:checkout] Playwright report`, and
   the ambient saver claims it for `task_checkout` from the OS snapshot even if
   the window appeared on the human's current workspace
+- an agent wraps a visible test/browser launch with
+  `bin/task-window-spawn --task-id task_checkout -- open -na "Google Chrome"`,
+  and the wrapper claims any newly-created windows after the command exits
 - browser automation can claim Playwright/Chrome report windows before the
   user sees them
 - browser context capture auto-claims Chrome windows when the event attaches to
@@ -215,10 +222,12 @@ Proof:
 - `app/orchestrator/src/routes/events_task_window_claims.test.ts`
 - `app/orchestrator/src/agents/ambient_workspace_saver.test.ts`
 - `app/orchestrator/test/gateway_store_conformance.test.ts`
+- `bin/task-window-spawn --self-test`
 
 Status: dogfood. Browser context capture has an automatic emitter; generic
 routed window resources are auto-claimed; tagged windows are inferred from OS
-snapshots; untagged Codex/Claude OS process/window emitters are next.
+snapshots; command-wrapped untagged launches can be claimed; automatic
+Codex/Claude OS process/window emitters are next.
 
 ## Follows Windows
 
@@ -556,8 +565,8 @@ Highest-leverage steps before calling this a real primitives library:
 3. Extend latency budgets from workspace HTTP proof to queue lease and Mac
    hotkey-to-feedback path.
 4. Add a public "workspace backend adapter" guide with a fake backend example.
-5. Add automatic claim emitters for untagged Codex/Claude-spawned foreign
-   windows.
+5. Add automatic claim emitters for unwrapped untagged Codex/Claude-spawned
+   foreign windows.
 6. Add user-facing follows/unfollows rules and durable rule export/import.
 7. Publish example apps: "restore my desk," "agent attention queue," and
    "window hotkey router."
