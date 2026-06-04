@@ -91,6 +91,90 @@ describe("event routing task-window claims", () => {
 
     assert.deepEqual(await store.listTaskWindowClaims({ now }), []);
   });
+
+  it("auto-claims agent-spawned app windows when routed to a task", async () => {
+    const store = createInMemoryGatewayStore(makeStore());
+    const now = new Date("2026-06-04T10:00:00.000Z");
+    await store.createTask({
+      taskId: "task_checkout_test",
+      primaryAnchor: { kind: "codex_thread", id: "thread-checkout" },
+      capturedLayout: { backend: "aerospace", windows: [] },
+      now,
+    });
+
+    const routed = await routeEventThroughGateway({
+      store,
+      observability: createInMemoryObservability(),
+    }, {
+      id: "evt_codex_spawned_checkout_chrome",
+      source: "codex",
+      source_id: "codex:run-checkout",
+      idempotency_key: "codex:run-checkout:spawned-window",
+      occurred_at: now.toISOString(),
+      received_at: now.toISOString(),
+      actor: { id: "codex_checkout_agent", type: "agent" },
+      task_hint: "checkout test",
+      type: "agent.window_spawned",
+      title: "Codex spawned Chrome for checkout test",
+      summary: "Agent opened a local Chrome test window.",
+      raw_ref: { id: "raw_codex_spawned_checkout_chrome", uri: "codex://runs/run-checkout", media_type: "application/json" },
+      links: [],
+      resources: [
+        {
+          id: "aerospace_window:1207",
+          kind: "spawned_window",
+          window_id: "1207",
+          app_bundle: "com.google.Chrome",
+          title: "Checkout smoke test - Google Chrome",
+          source: "codex",
+          captured_at: now.toISOString(),
+        },
+      ],
+    }, now);
+
+    assert.equal(routed.route_decision.action, "attach_to_task");
+    const claims = await store.listTaskWindowClaims({ taskId: "task_checkout_test", now });
+    assert.equal(claims.length, 1);
+    assert.equal(claims[0]?.task_id, "task_checkout_test");
+    assert.equal(claims[0]?.window_id, "1207");
+    assert.equal(claims[0]?.app_bundle, "com.google.chrome");
+    assert.equal(claims[0]?.title_prefix, "checkout smoke test - google chrome");
+    assert.equal(claims[0]?.source, "agent.window_spawned");
+    assert.equal(claims[0]?.expires_at, "2026-06-04T10:30:00.000Z");
+  });
+
+  it("does not auto-claim non-window resources", async () => {
+    const store = createInMemoryGatewayStore(makeStore());
+    const now = new Date("2026-06-04T11:00:00.000Z");
+    await store.createTask({
+      taskId: "task_notes",
+      primaryAnchor: { kind: "codex_thread", id: "thread-notes" },
+      capturedLayout: { backend: "aerospace", windows: [] },
+      now,
+    });
+
+    await routeEventThroughGateway({
+      store,
+      observability: createInMemoryObservability(),
+    }, {
+      id: "evt_notes_file_context",
+      source: "codex",
+      source_id: "codex:notes",
+      idempotency_key: "codex:notes:file-context",
+      occurred_at: now.toISOString(),
+      received_at: now.toISOString(),
+      actor: { id: "codex_notes_agent", type: "agent" },
+      task_hint: "notes",
+      type: "agent.context",
+      title: "Notes file context",
+      summary: "Agent attached a file context.",
+      raw_ref: { id: "raw_notes", uri: "codex://runs/notes", media_type: "application/json" },
+      links: [],
+      resources: [{ id: "file:notes", kind: "file", title: "notes.md", path: "notes.md" }],
+    }, now);
+
+    assert.deepEqual(await store.listTaskWindowClaims({ now }), []);
+  });
 });
 
 function makeStore(): InMemoryStore {

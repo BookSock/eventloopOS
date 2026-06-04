@@ -1139,11 +1139,35 @@ function routeActionForEvent(event: McpEvent): RouteDecision["action"] {
     return "ask_human_now";
   }
 
+  if (event.task_hint && eventHasTaskWindowResource(event)) {
+    return "attach_to_task";
+  }
+
   return "ask_human_now";
+}
+
+function eventHasTaskWindowResource(event: McpEvent): boolean {
+  return event.resources.some((resource) => {
+    if (!isRecord(resource)) return false;
+    const kind = typeof resource.kind === "string" ? resource.kind : undefined;
+    if (
+      kind === "app_window"
+      || kind === "aerospace_window"
+      || kind === "window"
+      || kind === "spawned_window"
+    ) {
+      return true;
+    }
+    return typeof resource.window_id === "string"
+      || typeof resource.aerospace_window_id === "string"
+      || typeof resource.app_bundle === "string"
+      || typeof resource.bundle_id === "string";
+  });
 }
 
 function routeConfidenceForEvent(event: McpEvent, action: RouteDecision["action"]): RouteDecision["confidence"] {
   if (action === "store_only" && event.type === "browser.context_captured") return "high";
+  if (action === "attach_to_task" && eventHasTaskWindowResource(event)) return "high";
   if (event.task_hint || event.project_hint) return "medium";
   return "low";
 }

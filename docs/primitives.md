@@ -162,8 +162,8 @@ Guarantees today:
 Why it matters: this is the primitive that makes window layout memory feel
 automatic instead of like a manual "save workspace" button.
 
-Known gap: browser-context events now auto-claim attached Chrome windows, but
-Codex/Claude process-spawn tooling still needs first-class claim emitters.
+Known gap: routed events can now auto-claim attached window resources, but
+Codex/Claude process-spawn tooling still needs first-class OS-side emitters.
 
 Proof:
 
@@ -192,12 +192,16 @@ Claim identity:
 
 Useful standalone uses:
 
-- background Codex/Claude test opens Chrome, claims it for its task, and
-  ambient autosave avoids polluting the human's active paper
+- background Codex/Claude test opens Chrome, emits a routed `app_window` or
+  `spawned_window` resource, and ambient autosave avoids polluting the human's
+  active paper
 - browser automation can claim Playwright/Chrome report windows before the
   user sees them
 - browser context capture auto-claims Chrome windows when the event attaches to
   a task
+- routed agent events auto-claim `browser_tab`, `app_window`,
+  `aerospace_window`, `window`, and `spawned_window` resources when they attach
+  to a task
 - tools can inspect current claims to explain why a window was ignored
 
 Proof:
@@ -207,8 +211,9 @@ Proof:
 - `app/orchestrator/src/agents/ambient_workspace_saver.test.ts`
 - `app/orchestrator/test/gateway_store_conformance.test.ts`
 
-Status: dogfood. Browser context capture has an automatic emitter; Codex/Claude
-runtime emitters are next.
+Status: dogfood. Browser context capture has an automatic emitter; generic
+routed window resources are auto-claimed; Codex/Claude OS process/window
+emitters are next.
 
 ## Follows Windows
 

@@ -498,7 +498,7 @@ export async function routeEventThroughGateway(
       taskMessageError = typeof injected.taskMessage.error === "string" ? injected.taskMessage.error : "task followup failed";
     } else {
       const result = await options.store.recordEventRoute(event, injected.routeDecision, now);
-      await autoClaimBrowserContextWindows(options, event, result.route_decision, now);
+      await autoClaimRoutedWindows(options, event, result.route_decision, now);
       await recordRoutedEventActivity(options, event, result.route_decision, {
         taskMessage: injected.taskMessage,
         queueItemId: undefined,
@@ -514,7 +514,7 @@ export async function routeEventThroughGateway(
   }
 
   const result = await options.store.ingestEventAsReviewPacket(event, now);
-  await autoClaimBrowserContextWindows(options, event, result.route_decision, now);
+  await autoClaimRoutedWindows(options, event, result.route_decision, now);
   await recordRoutedEventActivity(options, event, result.route_decision, {
     queueItemId: result.queue_item?.id,
     taskMessage: injected?.taskMessage,
@@ -530,13 +530,12 @@ export async function routeEventThroughGateway(
   };
 }
 
-async function autoClaimBrowserContextWindows(
+async function autoClaimRoutedWindows(
   options: EventGatewayOptions,
   event: McpEvent,
   routeDecision: RouteDecision,
   now: Date,
 ): Promise<void> {
-  if (event.type !== "browser.context_captured") return;
   if (routeDecision.action !== "attach_to_task" && routeDecision.action !== "inject_into_agent_thread") return;
   const taskId = routeDecision.target_task_id;
   if (!taskId) return;
@@ -545,16 +544,14 @@ async function autoClaimBrowserContextWindows(
 
   let claimed = 0;
   for (const resource of event.resources) {
-    if (!isRecord(resource) || resource.kind !== "browser_tab") continue;
-    const titlePrefix = readString(resource.title);
-    const windowId = readString(resource.window_id);
-    if (!titlePrefix && !windowId) continue;
+    const claim = taskWindowClaimFromEventResource(resource, event);
+    if (!claim) continue;
     await options.store.claimTaskWindow({
       taskId,
-      windowId,
-      appBundle: readString(resource.app_bundle) ?? "com.google.Chrome",
-      titlePrefix,
-      source: "browser.context_captured",
+      windowId: claim.windowId,
+      appBundle: claim.appBundle,
+      titlePrefix: claim.titlePrefix,
+      source: event.type,
       now,
       ttlMs: 30 * 60 * 1_000,
     });
@@ -570,7 +567,7 @@ async function autoClaimBrowserContextWindows(
     event_id: event.id,
     source_id: event.source_id,
     status: "ok",
-    summary: `Auto-claimed ${claimed} browser window(s) for ${taskId}.`,
+    summary: `Auto-claimed ${claimed} routed window(s) for ${taskId}.`,
     details: sanitizeActivityDetails({
       count: claimed,
       route_action: routeDecision.action,
@@ -578,6 +575,36 @@ async function autoClaimBrowserContextWindows(
       type: event.type,
     }),
   });
+}
+
+function taskWindowClaimFromEventResource(
+  resource: Record<string, unknown>,
+  event: McpEvent,
+): { windowId?: string; appBundle?: string; titlePrefix?: string } | undefined {
+  if (!isRecord(resource)) return undefined;
+  const kind = readString(resource.kind);
+  const windowId = readString(resource.window_id) ?? readString(resource.aerospace_window_id);
+  const titlePrefix = readString(resource.title) ?? readString(resource.window_title);
+  let appBundle = readString(resource.app_bundle) ?? readString(resource.bundle_id);
+  if (!appBundle && kind === "browser_tab" && event.type === "browser.context_captured") {
+    appBundle = "com.google.Chrome";
+  }
+  const appName = readString(resource.app) ?? readString(resource.app_name);
+  if (!windowId && !appBundle && !titlePrefix && !appName) return undefined;
+  if (!isWindowClaimResourceKind(kind) && !windowId && !appBundle) return undefined;
+  return {
+    windowId,
+    appBundle: appBundle ?? appName,
+    titlePrefix,
+  };
+}
+
+function isWindowClaimResourceKind(kind: string | undefined): boolean {
+  return kind === "browser_tab"
+    || kind === "app_window"
+    || kind === "aerospace_window"
+    || kind === "window"
+    || kind === "spawned_window";
 }
 
 async function fireMatchingPaperTriggers(
