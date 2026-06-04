@@ -17,6 +17,7 @@ Environment:
   LAB_WINDOW_CHURN_INTERVAL default: 0.5 seconds
   LAB_WINDOW_CHURN_MAX_CHANGES default: 8
   LAB_WINDOW_CHURN_COLLECT_BOUNDS default: 1
+  LAB_WINDOW_CHURN_BOUNDS_TIMEOUT default: 8 seconds
 EOF
 }
 
@@ -41,6 +42,7 @@ samples="${LAB_WINDOW_CHURN_SAMPLES:-10}"
 interval="${LAB_WINDOW_CHURN_INTERVAL:-0.5}"
 max_changes="${LAB_WINDOW_CHURN_MAX_CHANGES:-8}"
 collect_bounds="${LAB_WINDOW_CHURN_COLLECT_BOUNDS:-1}"
+bounds_timeout="${LAB_WINDOW_CHURN_BOUNDS_TIMEOUT:-8}"
 remote="${lab_user}@${lab_host}"
 remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
 
@@ -54,7 +56,7 @@ if ! [[ "$max_changes" =~ ^[0-9]+$ ]]; then
 fi
 
 ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 "$remote" \
-  "bash -s -- '$remote_repo' '$samples' '$interval' '$max_changes' '$collect_bounds'" <<'REMOTE'
+  "bash -s -- '$remote_repo' '$samples' '$interval' '$max_changes' '$collect_bounds' '$bounds_timeout'" <<'REMOTE'
 set -euo pipefail
 
 repo="$1"
@@ -62,6 +64,7 @@ samples="$2"
 interval="$3"
 max_changes="$4"
 collect_bounds="$5"
+bounds_timeout="$6"
 export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 cd "$repo"
@@ -72,6 +75,7 @@ printf "%s\n" "$samples" >"$run/sample-count.txt"
 printf "%s\n" "$interval" >"$run/sample-interval.txt"
 printf "%s\n" "$max_changes" >"$run/max-changes.txt"
 printf "%s\n" "$collect_bounds" >"$run/collect-bounds.txt"
+printf "%s\n" "$bounds_timeout" >"$run/bounds-timeout.txt"
 
 for index in $(seq 1 "$samples"); do
   prefix="$run/samples/sample-$index"
@@ -83,45 +87,66 @@ for index in $(seq 1 "$samples"); do
     printf "aerospace missing\n" >"$prefix.aerospace.err"
   fi
   if [[ "$collect_bounds" == "1" ]]; then
-    timeout 4 osascript >"$prefix.bounds.json" 2>"$prefix.bounds.err" <<'APPLESCRIPT' || printf "[]\n" >"$prefix.bounds.json"
-use framework "Foundation"
-use scripting additions
+    if timeout "$bounds_timeout" osascript -l JavaScript >"$prefix.bounds.json" 2>"$prefix.bounds.err" <<'JXA'
+function run() {
+  const rows = [];
+  const systemEvents = Application("System Events");
+  const processes = systemEvents.applicationProcesses();
 
-set rows to current application's NSMutableArray's array()
-tell application "System Events"
-  repeat with proc in application processes
-    try
-      set procName to name of proc as string
-      set winIndex to 0
-      repeat with candidateWindow in windows of proc
-        set winIndex to winIndex + 1
-        try
-          set winTitle to name of candidateWindow as string
-        on error
-          set winTitle to ""
-        end try
-        try
-          set winPosition to position of candidateWindow
-          set winSize to size of candidateWindow
-          set row to current application's NSMutableDictionary's dictionary()
-          (row's setObject:procName forKey:"app")
-          (row's setObject:winTitle forKey:"title")
-          (row's setObject:winIndex forKey:"index")
-          (row's setObject:{item 1 of winPosition, item 2 of winPosition} forKey:"position")
-          (row's setObject:{item 1 of winSize, item 2 of winSize} forKey:"size")
-          (rows's addObject:row)
-        end try
-      end repeat
-    end try
-  end repeat
-end tell
-set jsonData to current application's NSJSONSerialization's dataWithJSONObject:rows options:0 |error|:(missing value)
-set jsonText to current application's NSString's alloc()'s initWithData:jsonData encoding:(current application's NSUTF8StringEncoding)
-return jsonText as text
-APPLESCRIPT
+  for (const proc of processes) {
+    let app = "";
+    try {
+      app = String(proc.name());
+    } catch (_) {
+      continue;
+    }
+
+    let windows = [];
+    try {
+      windows = proc.windows();
+    } catch (_) {
+      continue;
+    }
+
+    for (let index = 0; index < windows.length; index += 1) {
+      const win = windows[index];
+      let title = "";
+      try {
+        title = String(win.name());
+      } catch (_) {
+        title = "";
+      }
+
+      try {
+        const position = win.position();
+        const size = win.size();
+        rows.push({
+          app,
+          title,
+          index: index + 1,
+          position: [Number(position[0]), Number(position[1])],
+          size: [Number(size[0]), Number(size[1])],
+        });
+      } catch (_) {
+        // Some windows expose metadata but deny bounds; skip them.
+      }
+    }
+  }
+
+  return JSON.stringify(rows);
+}
+JXA
+    then
+      printf "0\n" >"$prefix.bounds.rc"
+    else
+      rc="$?"
+      printf "%s\n" "$rc" >"$prefix.bounds.rc"
+      printf "[]\n" >"$prefix.bounds.json"
+    fi
   else
     printf "[]\n" >"$prefix.bounds.json"
     printf "bounds collection disabled\n" >"$prefix.bounds.err"
+    printf "0\n" >"$prefix.bounds.rc"
   fi
   if [[ "$index" -lt "$samples" ]]; then
     sleep "$interval"
@@ -144,13 +169,28 @@ const sampleIds = [...new Set(files.map((file) => file.match(/^sample-(\d+)\./)?
 const read = (name) => {
   try { return fs.readFileSync(path.join(run, name), "utf8"); } catch { return ""; }
 };
+const collectBounds = read("collect-bounds.txt").trim() === "1";
+const readSampleFile = (id, name) => {
+  try { return fs.readFileSync(path.join(sampleDir, `sample-${id}.${name}`), "utf8"); } catch { return ""; }
+};
 const readSampleJson = (id, suffix) => {
   try {
     const parsed = JSON.parse(fs.readFileSync(path.join(sampleDir, `sample-${id}.${suffix}.json`), "utf8"));
-    return Array.isArray(parsed) ? parsed : [];
+    const rows = Array.isArray(parsed) ? parsed : [];
+    return { rows, parse_ok: Array.isArray(parsed) };
   } catch {
-    return [];
+    return { rows: [], parse_ok: false };
   }
+};
+const readBoundsSample = (id) => {
+  const parsed = readSampleJson(id, "bounds");
+  const rc = readSampleFile(id, "bounds.rc").trim();
+  return {
+    ...parsed,
+    rc,
+    capture_ok: !collectBounds || rc === "0",
+    stderr: readSampleFile(id, "bounds.err").trim().slice(0, 500),
+  };
 };
 const normalizeTitle = (value) => String(value ?? "").replace(/\s+/g, " ").trim().slice(0, 160);
 const aerospaceSignature = (win) => JSON.stringify({
@@ -190,8 +230,10 @@ const countChanges = (samples, keyFn, sigFn) => {
     .sort((a, b) => b.changes - a.changes || a.key.localeCompare(b.key));
 };
 
-const aerospaceSamples = sampleIds.map((id) => readSampleJson(id, "aerospace"));
-const boundsSamples = sampleIds.map((id) => readSampleJson(id, "bounds"));
+const aerospaceReads = sampleIds.map((id) => readSampleJson(id, "aerospace"));
+const boundsReads = sampleIds.map(readBoundsSample);
+const aerospaceSamples = aerospaceReads.map((sample) => sample.rows);
+const boundsSamples = boundsReads.map((sample) => sample.rows);
 const aerospaceChanges = countChanges(
   aerospaceSamples,
   (win) => String(win["window-id"] ?? win.id ?? ""),
@@ -201,10 +243,15 @@ const boundsChanges = countChanges(boundsSamples, boundsKey, boundsSignature);
 const totalAerospaceChanges = aerospaceChanges.reduce((sum, item) => sum + item.changes, 0);
 const totalBoundsChanges = boundsChanges.reduce((sum, item) => sum + item.changes, 0);
 const maxSingleWindowChanges = Math.max(0, ...aerospaceChanges.map((item) => item.changes), ...boundsChanges.map((item) => item.changes));
+const boundsNonempty = boundsSamples.some((sample) => sample.length > 0);
+const boundsCaptureSuccessCount = boundsReads.filter((sample) => sample.capture_ok).length;
+const boundsCaptureRequiredCount = collectBounds ? Math.max(1, Math.ceil(sampleIds.length * 0.8)) : 0;
 const checks = {
   enough_samples: sampleIds.length >= 2,
-  aerospace_samples_parse: aerospaceSamples.every(Array.isArray),
-  bounds_samples_parse: boundsSamples.every(Array.isArray),
+  aerospace_samples_parse: aerospaceReads.every((sample) => sample.parse_ok),
+  bounds_samples_parse: boundsReads.every((sample) => sample.parse_ok),
+  bounds_capture_ok: !collectBounds || boundsCaptureSuccessCount >= boundsCaptureRequiredCount,
+  bounds_samples_nonempty: !collectBounds || boundsNonempty,
   max_single_window_changes_ok: maxSingleWindowChanges <= maxChanges,
   total_bounds_changes_ok: totalBoundsChanges <= maxChanges * 2,
 };
@@ -220,9 +267,12 @@ const manifest = {
   max_allowed_changes_per_window: maxChanges,
   sample_count: sampleIds.length,
   interval_seconds: Number(read("sample-interval.txt").trim()),
-  collect_bounds: read("collect-bounds.txt").trim() === "1",
+  collect_bounds: collectBounds,
+  bounds_timeout_seconds: Number(read("bounds-timeout.txt").trim()),
   checks,
   failed_checks: failedChecks,
+  bounds_capture_success_count: boundsCaptureSuccessCount,
+  bounds_capture_required_count: boundsCaptureRequiredCount,
   totals: {
     aerospace_changes: totalAerospaceChanges,
     bounds_changes: totalBoundsChanges,
@@ -230,6 +280,9 @@ const manifest = {
   },
   top_aerospace_changes: aerospaceChanges.slice(0, 10),
   top_bounds_changes: boundsChanges.slice(0, 10),
+  bounds_capture_errors: boundsReads
+    .map((sample, index) => ({ sample: sampleIds[index], rc: sample.rc, stderr: sample.stderr }))
+    .filter((sample) => sample.rc && sample.rc !== "0" || sample.stderr),
   artifacts: {
     samples: "samples/",
   },
