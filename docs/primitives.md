@@ -25,7 +25,8 @@ has a `self_tests` command, and the shared primitive operation-helper test
 proves typed helper coverage for every cataloged HTTP route.
 `bin/primitives-self-test-runner` executes the cataloged self-test commands
 once per unique command and records a manifest that maps each proof back to the
-primitive ids it covers.
+primitive ids it covers. Builders can run a subset with repeated
+`--primitive <id>` flags when they only want to verify one reusable surface.
 The catalog audit also verifies every catalog schema has a matching
 `@eventloopos/shared` Zod schema, TypeScript type, and ContractSchemas registry
 entry, and that cataloged HTTP routes cannot silently drift back to freeform

@@ -10,10 +10,11 @@ const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/primitives-self-test-runner [--catalog PATH] [--manifest PATH] [--timeout-ms N] [--list] [--json]
+  console.log(`Usage: bin/primitives-self-test-runner [--catalog PATH] [--manifest PATH] [--timeout-ms N] [--primitive ID]... [--list] [--json]
 
 Runs every self_tests command from docs/primitives.catalog.json once, grouped by
 command, and writes a manifest with per-command logs and primitive coverage.
+Use --primitive to run only the self-tests covering one or more primitive ids.
 `);
   process.exit(0);
 }
@@ -40,6 +41,7 @@ function parseArgs(argv) {
     catalogPath: readArg(argv, "--catalog") ?? "docs/primitives.catalog.json",
     manifestPath: readArg(argv, "--manifest") ?? path.join("artifacts", "primitives-self-tests", runId, "manifest.json"),
     timeoutMs: positiveInt(readArg(argv, "--timeout-ms"), 120_000),
+    primitiveIds: readArgs(argv, "--primitive"),
     listOnly: argv.includes("--list"),
     json: argv.includes("--json"),
     repoRoot,
@@ -53,7 +55,9 @@ async function runPrimitiveSelfTests(options, deps = {}) {
   const artifactDir = path.dirname(manifestPath);
   const catalogPath = path.resolve(resolvedRepoRoot, options.catalogPath);
   const catalog = JSON.parse(readFileSync(catalogPath, "utf8"));
-  const commands = selfTestCommands(catalog);
+  const primitiveIds = Array.isArray(options.primitiveIds) ? options.primitiveIds.filter(Boolean) : [];
+  const primitiveSelection = selectPrimitiveIds(catalog, primitiveIds);
+  const commands = selfTestCommands(catalog, primitiveSelection.selectedSet);
   mkdirSync(artifactDir, { recursive: true });
   const runner = deps.runner ?? runCommand;
   const manifest = {
@@ -69,6 +73,8 @@ async function runPrimitiveSelfTests(options, deps = {}) {
     artifact_dir: path.relative(resolvedRepoRoot, artifactDir),
     repo: gitMetadata(resolvedRepoRoot),
     primitive_count: Array.isArray(catalog.primitives) ? catalog.primitives.length : 0,
+    selected_primitive_ids: primitiveSelection.selected,
+    missing_primitive_ids: primitiveSelection.missing,
     expected_command_count: commands.length,
     completed_command_count: 0,
     failed_command_count: 0,
@@ -91,7 +97,9 @@ async function runPrimitiveSelfTests(options, deps = {}) {
   };
   writeManifest(manifestPath, manifest);
 
-  if (!options.listOnly) {
+  if (primitiveSelection.missing.length > 0) {
+    manifest.failed_command_count = primitiveSelection.missing.length;
+  } else if (!options.listOnly) {
     for (const command of manifest.commands) {
       let result;
       try {
@@ -123,19 +131,35 @@ async function runPrimitiveSelfTests(options, deps = {}) {
   const finishedAt = new Date().toISOString();
   manifest.finished_at = finishedAt;
   manifest.duration_ms = Date.parse(finishedAt) - Date.parse(startedAt);
-  manifest.ok = options.listOnly
+  manifest.ok = primitiveSelection.missing.length === 0 && (options.listOnly
     ? commands.length > 0
-    : manifest.commands.length > 0 && manifest.commands.every((command) => command.status === "passed");
+    : manifest.commands.length > 0 && manifest.commands.every((command) => command.status === "passed"));
   manifest.passed = manifest.ok;
-  manifest.failed_command_count = manifest.commands.filter((command) => !["passed", "listed"].includes(command.status)).length;
+  manifest.failed_command_count = primitiveSelection.missing.length
+    + manifest.commands.filter((command) => !["passed", "listed"].includes(command.status)).length;
   writeManifest(manifestPath, manifest);
   return manifest;
 }
 
-function selfTestCommands(catalog) {
+function selectPrimitiveIds(catalog, primitiveIds) {
+  const catalogIds = new Set((Array.isArray(catalog.primitives) ? catalog.primitives : [])
+    .map((primitive) => readString(primitive?.id))
+    .filter(Boolean));
+  const requested = Array.from(new Set(primitiveIds));
+  const missing = requested.filter((id) => !catalogIds.has(id));
+  const selected = requested.length > 0 ? requested.filter((id) => catalogIds.has(id)) : Array.from(catalogIds).sort();
+  return {
+    selected,
+    missing,
+    selectedSet: new Set(selected),
+  };
+}
+
+function selfTestCommands(catalog, selectedPrimitiveIds = undefined) {
   const grouped = new Map();
   for (const primitive of Array.isArray(catalog.primitives) ? catalog.primitives : []) {
     const primitiveId = readString(primitive?.id) ?? "unknown";
+    if (selectedPrimitiveIds && !selectedPrimitiveIds.has(primitiveId)) continue;
     for (const rawCommand of Array.isArray(primitive?.self_tests) ? primitive.self_tests : []) {
       if (typeof rawCommand !== "string" || !rawCommand.trim()) continue;
       const command = rawCommand.trim();
@@ -265,6 +289,8 @@ function summaryOutput(manifest) {
     manifest: manifest.manifest_path,
     ok: manifest.ok,
     primitive_count: manifest.primitive_count,
+    selected_primitive_ids: manifest.selected_primitive_ids,
+    missing_primitive_ids: manifest.missing_primitive_ids,
     expected_command_count: manifest.expected_command_count,
     completed_command_count: manifest.completed_command_count,
     failed_command_count: manifest.failed_command_count,
@@ -292,6 +318,17 @@ function utcStamp() {
 function readArg(argv, name) {
   const index = argv.indexOf(name);
   return index === -1 ? undefined : argv[index + 1];
+}
+
+function readArgs(argv, name) {
+  const values = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    if (argv[index] === name && argv[index + 1]) {
+      values.push(argv[index + 1]);
+      index += 1;
+    }
+  }
+  return values;
 }
 
 function positiveInt(value, fallback) {
@@ -347,6 +384,7 @@ async function runSelfTest() {
   });
   assert.equal(good.ok, true);
   assert.equal(good.primitive_count, 2);
+  assert.deepEqual(good.selected_primitive_ids, ["runtime_spine", "workspace_control"]);
   assert.equal(good.expected_command_count, 1);
   assert.deepEqual(good.commands[0].primitive_ids, ["runtime_spine", "workspace_control"]);
   assert.equal(existsSync(good.commands[0].stdout_path), true);
@@ -360,6 +398,27 @@ async function runSelfTest() {
   });
   assert.equal(listed.ok, true);
   assert.equal(listed.commands[0].status, "listed");
+
+  const filtered = await runPrimitiveSelfTests({
+    catalogPath,
+    manifestPath: path.join(root, "artifacts/filtered.json"),
+    timeoutMs: 5_000,
+    primitiveIds: ["runtime_spine"],
+    repoRoot: root,
+  });
+  assert.equal(filtered.ok, true);
+  assert.deepEqual(filtered.selected_primitive_ids, ["runtime_spine"]);
+  assert.deepEqual(filtered.commands[0].primitive_ids, ["runtime_spine"]);
+
+  const missing = await runPrimitiveSelfTests({
+    catalogPath,
+    manifestPath: path.join(root, "artifacts/missing.json"),
+    timeoutMs: 5_000,
+    primitiveIds: ["missing_primitive"],
+    repoRoot: root,
+  });
+  assert.equal(missing.ok, false);
+  assert.deepEqual(missing.missing_primitive_ids, ["missing_primitive"]);
 
   writeFileSync(catalogPath, JSON.stringify({
     primitives: [{
