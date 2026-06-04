@@ -226,6 +226,14 @@ struct QueueWindowView: View {
                     .help("See recent system activity: fan-outs, terminal sends, voice reranks, restores.")
                     .accessibilityIdentifier("queue-activity-button")
 
+                    Button {
+                        viewModel.presentFollowsRules()
+                    } label: {
+                        Label("Follows Rules", systemImage: "rectangle.3.group.bubble.left")
+                    }
+                    .help("Manage windows that should not follow every paper.")
+                    .accessibilityIdentifier("queue-follows-rules-button")
+
                     Menu {
                         Button("Auto-bind once") {
                             Task { await viewModel.runCodexAutoBindOnce() }
@@ -439,6 +447,20 @@ struct QueueWindowView: View {
                 ActivityFeedSheet(events: viewModel.activityEvents) {
                     Task { await viewModel.refreshActivity() }
                 }
+            case .followsRules:
+                FollowsRulesSheet(
+                    exclusions: viewModel.followsWindowExclusions,
+                    state: viewModel.followsRulesState,
+                    refresh: {
+                        Task { await viewModel.refreshFollowsRules() }
+                    },
+                    add: { appBundle, titleSubstring in
+                        Task { await viewModel.addFollowsRule(appBundle: appBundle, titleSubstring: titleSubstring) }
+                    },
+                    delete: { id in
+                        Task { await viewModel.deleteFollowsRule(id: id) }
+                    }
+                )
             }
         }
         .sheet(isPresented: showPaperBinding) {

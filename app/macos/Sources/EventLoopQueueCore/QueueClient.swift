@@ -32,6 +32,9 @@ public protocol QueueClient: Sendable {
     func bumpQueueItemPriority(packetId: String, delta: Int?, score: Int?, reason: String?) async throws -> QueueActionResult
     func masterFanOut(message: String, taskHintSubstring: String?, taskIdPattern: String?, taskIds: [String], dryRun: Bool, idempotencyKey: String) async throws -> MasterFanOutResult
     func fetchActivity(limit: Int) async throws -> ActivityFeedResult
+    func fetchFollowsWindowExclusions() async throws -> FollowsWindowExclusionsListResult
+    func addFollowsWindowExclusion(appBundle: String?, titleSubstring: String?) async throws -> FollowsWindowExclusionMutationResult
+    func deleteFollowsWindowExclusion(id: String) async throws -> FollowsWindowExclusionMutationResult
     func runCodexAutoBind() async throws -> CodexAutoBindResult
     func createTask(primaryAnchor: TaskAnchor, capturedLayout: WorkspaceSnapshot, autoPaperIdleSeconds: Int?, idempotencyKey: String) async throws -> CreateTaskResult
     func getCurrentTask() async throws -> CurrentTaskState
@@ -489,6 +492,37 @@ public struct HTTPQueueClient: QueueClient {
         return try decoder.decode(ActivityFeedResult.self, from: data)
     }
 
+    public func fetchFollowsWindowExclusions() async throws -> FollowsWindowExclusionsListResult {
+        let url = baseURL.appending(path: "follows-windows/exclusions")
+        let (data, response) = try await session.data(from: url)
+        try validate(data: data, response: response)
+        return try decoder.decode(FollowsWindowExclusionsListResult.self, from: data)
+    }
+
+    public func addFollowsWindowExclusion(appBundle: String?, titleSubstring: String?) async throws -> FollowsWindowExclusionMutationResult {
+        let url = baseURL.appending(path: "follows-windows/exclude")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try encoder.encode(FollowsWindowExclusionCreateRequest(
+            appBundle: appBundle,
+            titleSubstring: titleSubstring
+        ))
+        let (data, response) = try await session.data(for: request)
+        try validate(data: data, response: response)
+        return try decoder.decode(FollowsWindowExclusionMutationResult.self, from: data)
+    }
+
+    public func deleteFollowsWindowExclusion(id: String) async throws -> FollowsWindowExclusionMutationResult {
+        let encodedId = id.addingPercentEncoding(withAllowedCharacters: Self.pathSegmentAllowedCharacters) ?? id
+        let url = rawPathURL("follows-windows/exclusions/\(encodedId)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        let (data, response) = try await session.data(for: request)
+        try validate(data: data, response: response)
+        return try decoder.decode(FollowsWindowExclusionMutationResult.self, from: data)
+    }
+
     public func runCodexAutoBind() async throws -> CodexAutoBindResult {
         let url = baseURL.appending(path: "agents/codex/auto-bind")
         var request = URLRequest(url: url)
@@ -586,6 +620,21 @@ public struct HTTPQueueClient: QueueClient {
             }
             throw QueueClientError.httpStatus(httpResponse.statusCode)
         }
+    }
+
+    private static let pathSegmentAllowedCharacters: CharacterSet = {
+        CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+    }()
+
+    private func rawPathURL(_ path: String) -> URL {
+        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
+            return baseURL.appending(path: path)
+        }
+        let basePath = components.percentEncodedPath.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        components.percentEncodedPath = "/" + ([basePath, path]
+            .filter { !$0.isEmpty }
+            .joined(separator: "/"))
+        return components.url ?? baseURL.appending(path: path)
     }
 }
 

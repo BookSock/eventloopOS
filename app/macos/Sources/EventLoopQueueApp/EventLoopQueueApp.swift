@@ -200,6 +200,12 @@ struct EventLoopQueueApp: App {
                     }
                 }
                 .accessibilityIdentifier("queue-command-scan-desk")
+
+                Button("Follows Rules") {
+                    openQueueWindow()
+                    viewModel.presentFollowsRules()
+                }
+                .accessibilityIdentifier("queue-command-follows-rules")
             }
         }
     }

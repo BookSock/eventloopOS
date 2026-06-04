@@ -310,6 +310,7 @@ Code:
 
 - `app/orchestrator/src/agents/follows_window_orchestrator.ts`
 - `app/orchestrator/src/routes/follows_windows.ts`
+- `app/macos/Sources/EventLoopQueueApp/FollowsRulesSheet.swift`
 - `bin/follows-window-rules`
 
 Exports current sticky-window exclusion rules over `GET /follows-windows/exclusions` so a demo, support script, or release proof can show why a shared app is no longer following every paper.
@@ -344,8 +345,9 @@ Useful standalone uses:
 - pin a notes window or browser doc across several task workspaces
 - make "shared context" follow focus without manual dragging
 
-Known gap: user-facing controls for follow/unfollow are still thin. Current API
-has a checked CLI and export/import format, not a polished macOS rule editor.
+macOS UI: Queue toolbar and command menu expose a follows-rules editor for
+adding, refreshing, and removing sticky-window exclusions. The checked CLI and
+export/import format remain available for scripted movement between machines.
 
 Proof:
 
@@ -790,7 +792,5 @@ Highest-leverage steps before calling this a real primitives library:
    `aerospace`/`osascript` command union while keeping the adapter guide green.
 5. Extend task-session controllers to expose stable root pids by default, so
    process-tree window claims work without custom session metadata.
-6. Add polished macOS UI for follows/unfollows rules on top of
-   `bin/follows-window-rules` and the existing HTTP API.
-7. Grow `examples/primitives/` from tiny CLI examples into richer starter apps
+6. Grow `examples/primitives/` from tiny CLI examples into richer starter apps
    with screenshots and fixture-backed walkthroughs.

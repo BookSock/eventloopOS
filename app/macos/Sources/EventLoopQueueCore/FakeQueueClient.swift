@@ -42,6 +42,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var readDelayNanoseconds: UInt64 = 0
     private var readingQueueContexts: [ReadingQueueContext] = []
     private var fakeActivityEvents: [ActivityEvent] = []
+    private var followsWindowExclusions: [FollowsWindowExclusion] = []
     private var fakeAutoBindRunCount: Int = 0
     private let masterCommandResult: MasterCommandResult?
     private var tasks: [TaskRecord] = []
@@ -780,6 +781,39 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public func setFakeActivity(_ events: [ActivityEvent]) {
         lock.withLock { fakeActivityEvents = events }
+    }
+
+    public func fetchFollowsWindowExclusions() async throws -> FollowsWindowExclusionsListResult {
+        lock.withLock {
+            FollowsWindowExclusionsListResult(exclusions: followsWindowExclusions)
+        }
+    }
+
+    public func addFollowsWindowExclusion(appBundle: String?, titleSubstring: String?) async throws -> FollowsWindowExclusionMutationResult {
+        lock.withLock {
+            let exclusion = FollowsWindowExclusion(
+                exclusionId: "fwex_fake_\(followsWindowExclusions.count + 1)",
+                appBundle: appBundle,
+                titleSubstring: titleSubstring,
+                createdAt: Date(timeIntervalSince1970: Double(followsWindowExclusions.count))
+            )
+            followsWindowExclusions.append(exclusion)
+            return FollowsWindowExclusionMutationResult(exclusion: exclusion)
+        }
+    }
+
+    public func deleteFollowsWindowExclusion(id: String) async throws -> FollowsWindowExclusionMutationResult {
+        try lock.withLock {
+            guard let index = followsWindowExclusions.firstIndex(where: { $0.exclusionId == id }) else {
+                throw QueueClientError.httpStatus(404)
+            }
+            let removed = followsWindowExclusions.remove(at: index)
+            return FollowsWindowExclusionMutationResult(exclusion: removed)
+        }
+    }
+
+    public func setFakeFollowsWindowExclusions(_ exclusions: [FollowsWindowExclusion]) {
+        lock.withLock { followsWindowExclusions = exclusions }
     }
 
     public func runCodexAutoBind() async throws -> CodexAutoBindResult {

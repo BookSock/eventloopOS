@@ -133,6 +133,8 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var readingQueueUnboundCount: Int = 0
     @Published public var pendingTerminalSendConfirmation: PendingTerminalSendConfirmation?
     @Published public private(set) var activityEvents: [ActivityEvent] = []
+    @Published public private(set) var followsWindowExclusions: [FollowsWindowExclusion] = []
+    @Published public private(set) var followsRulesState: FollowsRulesState = .idle
     @Published public private(set) var autoBindContinuousEnabled: Bool = false
     @Published public private(set) var lastAutoBindResult: CodexAutoBindResult?
     @Published public private(set) var advanceToast: AdvanceToast?
@@ -1271,6 +1273,48 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    public func refreshFollowsRules() async {
+        followsRulesState = .loading
+        do {
+            let result = try await client.fetchFollowsWindowExclusions()
+            followsWindowExclusions = result.exclusions
+            followsRulesState = .loaded
+        } catch {
+            followsRulesState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func addFollowsRule(appBundle: String?, titleSubstring: String?) async {
+        let normalizedAppBundle = normalizedOptional(appBundle)
+        let normalizedTitleSubstring = normalizedOptional(titleSubstring)
+        guard normalizedAppBundle != nil || normalizedTitleSubstring != nil else {
+            followsRulesState = .failed("App bundle or title substring is required")
+            return
+        }
+
+        followsRulesState = .saving
+        do {
+            _ = try await client.addFollowsWindowExclusion(
+                appBundle: normalizedAppBundle,
+                titleSubstring: normalizedTitleSubstring
+            )
+            await refreshFollowsRules()
+        } catch {
+            followsRulesState = .failed(error.localizedDescription)
+        }
+    }
+
+    public func deleteFollowsRule(id: String) async {
+        followsRulesState = .saving
+        do {
+            _ = try await client.deleteFollowsWindowExclusion(id: id)
+            followsWindowExclusions.removeAll { $0.exclusionId == id }
+            followsRulesState = .loaded
+        } catch {
+            followsRulesState = .failed(error.localizedDescription)
+        }
+    }
+
     public func refreshReadingQueueCount() async {
         do {
             let result = try await client.fetchReadingQueue()
@@ -1359,6 +1403,11 @@ public final class QueueViewModel: ObservableObject {
         startAutomaticActivityRefresh()
     }
 
+    public func presentFollowsRules() {
+        auxiliarySheet = .followsRules
+        Task { await refreshFollowsRules() }
+    }
+
     public func dismissActivitySheetIfNeeded() {
         stopAutomaticActivityRefresh()
     }
@@ -1421,6 +1470,11 @@ public final class QueueViewModel: ObservableObject {
     public func dismissAuxiliarySheet() {
         auxiliarySheet = nil
         stopAutomaticActivityRefresh()
+    }
+
+    private func normalizedOptional(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     public func scanOnboarding() async {

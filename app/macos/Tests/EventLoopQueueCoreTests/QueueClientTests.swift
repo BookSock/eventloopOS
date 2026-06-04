@@ -1015,6 +1015,87 @@ final class QueueClientTests: XCTestCase {
         XCTAssertFalse(result.promoted.first?.idempotent ?? true)
     }
 
+    func testHTTPQueueClientFetchesFollowsWindowExclusions() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/follows-windows/exclusions")
+            return """
+            {
+              "ok": true,
+              "exclusions": [
+                {
+                  "exclusion_id": "fwex_slack",
+                  "app_bundle": "com.tinyspeck.slackmacgap",
+                  "title_substring": "Screen Sharing",
+                  "created_at": "2026-06-04T10:00:00Z"
+                }
+              ],
+              "count": 1,
+              "request_id": "req_follows_list"
+            }
+            """
+        }
+
+        let result = try await client.fetchFollowsWindowExclusions()
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result.exclusions.first?.exclusionId, "fwex_slack")
+        XCTAssertEqual(result.exclusions.first?.appBundle, "com.tinyspeck.slackmacgap")
+        XCTAssertEqual(result.exclusions.first?.titleSubstring, "Screen Sharing")
+    }
+
+    func testHTTPQueueClientAddsFollowsWindowExclusion() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "POST")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/follows-windows/exclude")
+            let body = try XCTUnwrap(JSONSerialization.jsonObject(with: self.requestBodyData(request)) as? [String: String])
+            XCTAssertEqual(body["app_bundle"], "com.google.Chrome")
+            XCTAssertEqual(body["title_substring"], "Playwright")
+            return """
+            {
+              "ok": true,
+              "exclusion": {
+                "exclusion_id": "fwex_chrome",
+                "app_bundle": "com.google.Chrome",
+                "title_substring": "Playwright",
+                "created_at": "2026-06-04T10:00:00Z"
+              },
+              "request_id": "req_follows_add"
+            }
+            """
+        }
+
+        let result = try await client.addFollowsWindowExclusion(appBundle: "com.google.Chrome", titleSubstring: "Playwright")
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.exclusion.exclusionId, "fwex_chrome")
+    }
+
+    func testHTTPQueueClientDeletesFollowsWindowExclusion() async throws {
+        let (client, recorder) = makeHTTPClient { request in
+            XCTAssertEqual(request.httpMethod, "DELETE")
+            XCTAssertEqual(request.url?.absoluteString, "http://127.0.0.1:4377/follows-windows/exclusions/fwex%2Fspace")
+            return """
+            {
+              "ok": true,
+              "exclusion": {
+                "exclusion_id": "fwex/space",
+                "title_substring": "Screen Sharing",
+                "created_at": "2026-06-04T10:00:00Z"
+              },
+              "request_id": "req_follows_delete"
+            }
+            """
+        }
+
+        let result = try await client.deleteFollowsWindowExclusion(id: "fwex/space")
+
+        XCTAssertEqual(recorder.requests.count, 1)
+        XCTAssertEqual(result.exclusion.exclusionId, "fwex/space")
+    }
+
     func testHTTPQueueClientDefersPacket() async throws {
         let dueAt = Date(timeIntervalSince1970: 1_778_074_500)
         let (client, recorder) = makeHTTPClient { request in

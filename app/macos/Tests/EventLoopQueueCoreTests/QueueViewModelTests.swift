@@ -1211,6 +1211,44 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.activityEvents[1].taskId, "task_blog")
     }
 
+    func testFollowsRulesRefreshAddAndDelete() async {
+        let client = FakeQueueClient(packets: [])
+        client.setFakeFollowsWindowExclusions([
+            FollowsWindowExclusion(
+                exclusionId: "fwex_existing",
+                appBundle: "com.tinyspeck.slackmacgap",
+                titleSubstring: nil
+            )
+        ])
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.refreshFollowsRules()
+
+        XCTAssertEqual(viewModel.followsRulesState, .loaded)
+        XCTAssertEqual(viewModel.followsWindowExclusions.map(\.exclusionId), ["fwex_existing"])
+
+        await viewModel.addFollowsRule(appBundle: "  ", titleSubstring: " Playwright ")
+
+        XCTAssertEqual(viewModel.followsRulesState, .loaded)
+        XCTAssertEqual(viewModel.followsWindowExclusions.count, 2)
+        XCTAssertEqual(viewModel.followsWindowExclusions.last?.titleSubstring, "Playwright")
+        XCTAssertNil(viewModel.followsWindowExclusions.last?.appBundle)
+
+        await viewModel.deleteFollowsRule(id: "fwex_existing")
+
+        XCTAssertEqual(viewModel.followsRulesState, .loaded)
+        XCTAssertEqual(viewModel.followsWindowExclusions.map(\.exclusionId), ["fwex_fake_2"])
+    }
+
+    func testAddFollowsRuleRequiresMatcher() async {
+        let viewModel = QueueViewModel(client: FakeQueueClient(packets: []))
+
+        await viewModel.addFollowsRule(appBundle: " ", titleSubstring: "")
+
+        XCTAssertEqual(viewModel.followsRulesState, .failed("App bundle or title substring is required"))
+        XCTAssertEqual(viewModel.followsWindowExclusions, [])
+    }
+
     func testFirstTerminalSendShowsConfirmModalAndDoesNotExecute() async {
         let suiteName = "eventLoopOSTerminalSendTest_\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
@@ -1539,6 +1577,9 @@ final class QueueViewModelTests: XCTestCase {
 
         viewModel.presentOnboarding()
         XCTAssertEqual(viewModel.auxiliarySheet, .onboarding)
+
+        viewModel.presentFollowsRules()
+        XCTAssertEqual(viewModel.auxiliarySheet, .followsRules)
 
         viewModel.dismissAuxiliarySheet()
         XCTAssertNil(viewModel.auxiliarySheet)
