@@ -970,6 +970,13 @@ private struct WorkspaceRestoreBanner: View {
                 .background(.blue.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityIdentifier("workspace-restore-running")
+        case .alreadyRestoring:
+            Text("Workspace restore already running")
+                .font(.caption)
+                .padding(8)
+                .background(.blue.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("workspace-restore-already-running")
         case let .planned(plan):
             Text("Workspace plan: \(plan.commands.count) commands")
                 .font(.caption)
@@ -984,6 +991,13 @@ private struct WorkspaceRestoreBanner: View {
                 .background(.green.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityIdentifier("workspace-restore-executed")
+        case let .alreadyRestored(receipt):
+            Text("Workspace already restored: \(receipt.commands.count) commands")
+                .font(.caption)
+                .padding(8)
+                .background(.green.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("workspace-restore-already-restored")
         case let .savedTaskLayout(taskId):
             Text("Task layout saved: \(taskId)")
                 .font(.caption)

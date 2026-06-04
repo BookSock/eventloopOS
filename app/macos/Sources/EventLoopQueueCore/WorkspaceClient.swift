@@ -244,8 +244,10 @@ public enum WorkspaceRestoreState: Equatable, Sendable {
     case idle
     case skippedManualMode
     case restoring
+    case alreadyRestoring
     case planned(WorkspaceRestorePlan)
     case executed(WorkspaceRestoreReceipt)
+    case alreadyRestored(WorkspaceRestoreReceipt)
     case savedTaskLayout(String)
     case keptCurrentLayout
     case failed(String)

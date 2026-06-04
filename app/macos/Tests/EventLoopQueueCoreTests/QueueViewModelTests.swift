@@ -2548,11 +2548,14 @@ final class QueueViewModelTests: XCTestCase {
             await viewModel.confirmSelectedWorkspaceRestore()
         }
 
-        await firstRestore.value
         await secondRestore.value
 
-        XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
+        XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestoring)
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+
+        await firstRestore.value
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
     }
 
     func testImmediateSelectedWorkspaceRestoreRepeatReusesRecentReceipt() async {
@@ -2593,7 +2596,7 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.confirmSelectedWorkspaceRestore()
         await viewModel.confirmSelectedWorkspaceRestore()
 
-        XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
+        XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestored(receipt))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }
 

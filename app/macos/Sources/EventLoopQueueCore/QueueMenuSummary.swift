@@ -71,10 +71,14 @@ public struct QueueMenuSummary: Equatable, Sendable {
             return "Workspace restore paused"
         case .restoring:
             return "Restoring workspace..."
+        case .alreadyRestoring:
+            return "Workspace restore already running"
         case let .planned(plan):
             return "Workspace plan: \(plan.commands.count) commands"
         case let .executed(receipt):
             return "Workspace restored: \(receipt.commands.count) commands"
+        case let .alreadyRestored(receipt):
+            return "Workspace already restored: \(receipt.commands.count) commands"
         case let .savedTaskLayout(taskId):
             return "Task layout saved: \(taskId)"
         case .keptCurrentLayout:

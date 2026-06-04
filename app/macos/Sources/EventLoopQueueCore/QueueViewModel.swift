@@ -1712,7 +1712,7 @@ public final class QueueViewModel: ObservableObject {
 
     private func executeWorkspaceRestore(snapshot: WorkspaceSnapshot, idempotencyPrefix: String) async {
         guard !workspaceRestoreInFlight else {
-            workspaceRestoreState = .restoring
+            workspaceRestoreState = .alreadyRestoring
             return
         }
 
@@ -1720,7 +1720,7 @@ public final class QueueViewModel: ObservableObject {
            recent.idempotencyPrefix == idempotencyPrefix,
            recent.snapshot == snapshot,
            Date().timeIntervalSince(recent.completedAt) < workspaceRestoreRepeatWindow {
-            workspaceRestoreState = .executed(recent.receipt)
+            workspaceRestoreState = .alreadyRestored(recent.receipt)
             return
         }
 
