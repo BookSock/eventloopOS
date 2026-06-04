@@ -259,6 +259,61 @@ describe("isolated AeroSpace smoke", () => {
     assert.equal(controller.window(11)?.workspace, "dev");
   });
 
+  it("re-resolves the smoke window when AeroSpace reports a stale id during layout", async () => {
+    const controller = new FakeWorkspaceController([{ id: 11, app: "Ghostty", title: "codex", workspace: "dev" }]);
+    controller.churnOnFirstLayout = {
+      staleId: 12,
+      replacement: { id: 13, app: "TextEdit", title: "eventloopOS-isolated-smoke-test.txt", workspace: "main" },
+    };
+    const cleanupCalls: string[] = [];
+
+    const result = await runIsolatedAerospaceSmoke({
+      enabled: true,
+      runId: "test",
+      controller,
+      launchWindow: async (): Promise<SmokeWindowHandle> => {
+        controller.addWindow({ id: 12, app: "TextEdit", title: "eventloopOS-isolated-smoke-test.txt", workspace: "main" });
+        return {
+          title: "eventloopOS-isolated-smoke-test.txt",
+          appName: "TextEdit",
+          cleanup: async () => {
+            cleanupCalls.push("cleanup");
+            controller.removeWindow(12);
+            controller.removeWindow(13);
+            return { attempted: true, ok: true };
+          },
+        };
+      },
+      exec: fakeAerospaceLayoutExec(controller),
+      proveForceFloating: true,
+      scratchWorkspace: "eventloop-smoke",
+      waitTimeoutMs: 20,
+      pollIntervalMs: 1,
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.skipped, false);
+    if (result.ok && !result.skipped) {
+      assert.equal(result.target_window_id, 13);
+      assert.deepEqual(
+        result.commands.map((command) => command.args),
+        [
+          ["layout", "--window-id", "13", "floating"],
+          ["move-node-to-workspace", "--window-id", "13", "eventloop-smoke"],
+          ["layout", "--window-id", "13", "h_tiles"],
+          ["move-node-to-workspace", "--window-id", "13", "main"],
+          ["layout", "--window-id", "13", "floating"],
+        ],
+      );
+      assert.equal(result.force_floating_proof?.initial_layout_after_force_floating, "floating");
+      assert.equal(result.force_floating_proof?.scratch_layout_after_force_tile, "h_tiles");
+      assert.equal(result.force_floating_proof?.restored_layout_after_move_back, "floating");
+    }
+    assert.deepEqual(cleanupCalls, ["cleanup"]);
+    assert.equal(controller.window(11)?.workspace, "dev");
+    assert.equal(controller.window(13), undefined);
+  });
+
   it("cleans up if smoke window never appears", async () => {
     const cleanupCalls: string[] = [];
     const result = await runIsolatedAerospaceSmoke({
@@ -337,10 +392,23 @@ function fakeLauncher(
   };
 }
 
+function fakeAerospaceLayoutExec(controller: FakeWorkspaceController) {
+  return async () => ({
+    stdout: JSON.stringify(
+      controller.snapshotWindows().map((window) => ({
+        "window-id": window.id,
+        "window-layout": window.layout,
+      })),
+    ),
+  });
+}
+
 class FakeWorkspaceController implements WorkspaceController {
   afterFirstMove?: () => void;
   failOnMoveCount?: number;
+  churnOnFirstLayout?: { staleId: number; replacement: AerospaceWindow };
   private moveCount = 0;
+  private layoutCount = 0;
 
   constructor(private readonly windows: AerospaceWindow[]) {}
 
@@ -354,7 +422,7 @@ class FakeWorkspaceController implements WorkspaceController {
   capture(): WorkspaceSnapshot {
     return {
       backend: "aerospace",
-      windows: this.windows.map((window) => ({ ...window })),
+      windows: this.snapshotWindows(),
     };
   }
 
@@ -370,15 +438,26 @@ class FakeWorkspaceController implements WorkspaceController {
 
   executeRestorePlan(plan: RestorePlan): RestoreExecutionReceipt {
     for (const command of plan.commands) {
+      const subcommand = command.args[0];
       const windowId = Number(command.args[2]);
-      const workspace = command.args[3] ?? "";
-      this.moveCount += 1;
-      if (this.failOnMoveCount === this.moveCount) {
-        throw new Error("AeroSpace server unavailable during restore");
-      }
-      this.moveWindow(windowId, workspace);
-      if (this.moveCount === 1) {
-        this.afterFirstMove?.();
+      if (subcommand === "layout") {
+        this.layoutCount += 1;
+        if (this.layoutCount === 1 && this.churnOnFirstLayout?.staleId === windowId) {
+          this.removeWindow(windowId);
+          this.addWindow(this.churnOnFirstLayout.replacement);
+          throw new Error(`Command failed: aerospace layout --window-id ${windowId} ${command.args[3] ?? ""}\nexit: 2\nstderr: Invalid <window-id> ${windowId} passed to --window-id`);
+        }
+        this.layoutWindow(windowId, command.args[3] ?? "");
+      } else {
+        const workspace = command.args[3] ?? "";
+        this.moveCount += 1;
+        if (this.failOnMoveCount === this.moveCount) {
+          throw new Error("AeroSpace server unavailable during restore");
+        }
+        this.moveWindow(windowId, workspace);
+        if (this.moveCount === 1) {
+          this.afterFirstMove?.();
+        }
       }
     }
     return {
@@ -406,7 +485,19 @@ class FakeWorkspaceController implements WorkspaceController {
     window.workspace = workspace;
   }
 
+  layoutWindow(windowId: number, layout: string): void {
+    const window = this.windows.find((item) => item.id === windowId);
+    if (!window) {
+      throw new Error(`missing fake window ${windowId}`);
+    }
+    window.layout = layout as AerospaceWindow["layout"];
+  }
+
   window(windowId: number): AerospaceWindow | undefined {
     return this.windows.find((item) => item.id === windowId);
+  }
+
+  snapshotWindows(): AerospaceWindow[] {
+    return this.windows.map((window) => ({ ...window }));
   }
 }

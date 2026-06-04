@@ -44,9 +44,11 @@ cd "$remote_repo"
 
 run="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-codex-completion-workspace-proof"
 mkdir -p "$run"
+set +e
 EVENTLOOPOS_CODEX_COMPLETION_WORKSPACE_ARTIFACT_DIR="$PWD/$run" \
   pnpm test:e2e:event-loop:codex-completion-workspace >"$run/proof.out" 2>"$run/proof.err"
 code=$?
+set -e
 echo "$run"
 exit "$code"
 REMOTE

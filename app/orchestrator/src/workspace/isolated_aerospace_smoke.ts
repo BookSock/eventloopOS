@@ -159,15 +159,25 @@ export async function runIsolatedAerospaceSmoke(options: {
       excludedWindowIds: baseline,
       fallbackAppName: launchedHandle.appName,
     });
-    const target = launched.target;
+    let target = launched.target;
     smokeWindowId = target.id;
     const targetScratchWorkspace = target.workspace === scratchWorkspace ? `${scratchWorkspace}-2` : scratchWorkspace;
 
     if (options.proveForceFloating) {
-      const forceFloatingCommand = layoutWindowPlan(target.id, "floating");
-      assertOnlyTargetsSmokeWindow([forceFloatingCommand], target.id);
-      await executeCommands(controller, [forceFloatingCommand]);
-      commands.push(forceFloatingCommand);
+      const currentLayout = await readAerospaceWindowLayout(options.exec ?? execAerospace, target.id);
+      if (currentLayout !== "floating") {
+        const forceFloating = await executeSmokeWindowCommand(controller, {
+          target,
+          handle: launchedHandle,
+          baseline,
+          waitTimeoutMs,
+          pollIntervalMs,
+          buildCommand: (windowId) => layoutWindowPlan(windowId, "floating"),
+        });
+        target = forceFloating.target;
+        smokeWindowId = target.id;
+        commands.push(forceFloating.command);
+      }
       const initialFloatingLayout = await readAerospaceWindowLayout(options.exec ?? execAerospace, target.id);
       forceFloatingProof = {
         attempted: true,
@@ -180,9 +190,17 @@ export async function runIsolatedAerospaceSmoke(options: {
       }
     }
 
-    const disturbCommand = moveToWorkspacePlan(target.id, targetScratchWorkspace);
-    assertOnlyTargetsSmokeWindow([disturbCommand], target.id);
-    await executeCommands(controller, [disturbCommand]);
+    const disturb = await executeSmokeWindowCommand(controller, {
+      target,
+      handle: launchedHandle,
+      baseline,
+      waitTimeoutMs,
+      pollIntervalMs,
+      buildCommand: (windowId) => moveToWorkspacePlan(windowId, targetScratchWorkspace),
+    });
+    target = disturb.target;
+    smokeWindowId = target.id;
+    const disturbCommand = disturb.command;
     commands.push(disturbCommand);
 
     const disturbed = await controller.capture();
@@ -211,11 +229,20 @@ export async function runIsolatedAerospaceSmoke(options: {
     }
 
     if (options.proveForceFloating) {
-      const forceTileCommand = layoutWindowPlan(target.id, "h_tiles");
-      assertOnlyTargetsSmokeWindow([forceTileCommand], target.id);
-      commands.push(forceTileCommand);
+      let forceTileCommand = layoutWindowPlan(target.id, "h_tiles");
       try {
-        await executeCommands(controller, [forceTileCommand]);
+        const forceTile = await executeSmokeWindowCommand(controller, {
+          target,
+          handle: launchedHandle,
+          baseline,
+          waitTimeoutMs,
+          pollIntervalMs,
+          buildCommand: (windowId) => layoutWindowPlan(windowId, "h_tiles"),
+        });
+        target = forceTile.target;
+        smokeWindowId = target.id;
+        forceTileCommand = forceTile.command;
+        commands.push(forceTileCommand);
         const scratchLayout = await readAerospaceWindowLayout(options.exec ?? execAerospace, target.id);
         forceFloatingProof = {
           ...forceFloatingProof,
@@ -260,9 +287,17 @@ export async function runIsolatedAerospaceSmoke(options: {
       }
     }
 
-    const restoreCommand = moveToWorkspacePlan(target.id, target.workspace);
-    assertOnlyTargetsSmokeWindow([restoreCommand], target.id);
-    await executeCommands(controller, [restoreCommand]);
+    const restore = await executeSmokeWindowCommand(controller, {
+      target,
+      handle: launchedHandle,
+      baseline,
+      waitTimeoutMs,
+      pollIntervalMs,
+      buildCommand: (windowId) => moveToWorkspacePlan(windowId, target.workspace),
+    });
+    target = restore.target;
+    smokeWindowId = target.id;
+    const restoreCommand = restore.command;
     commands.push(restoreCommand);
 
     const restored = await controller.capture();
@@ -273,6 +308,20 @@ export async function runIsolatedAerospaceSmoke(options: {
       );
     }
     if (forceFloatingProof?.attempted) {
+      const currentLayout = await readAerospaceWindowLayout(options.exec ?? execAerospace, target.id);
+      if (currentLayout !== "floating") {
+        const restoreFloating = await executeSmokeWindowCommand(controller, {
+          target,
+          handle: launchedHandle,
+          baseline,
+          waitTimeoutMs,
+          pollIntervalMs,
+          buildCommand: (windowId) => layoutWindowPlan(windowId, "floating"),
+        });
+        target = restoreFloating.target;
+        smokeWindowId = target.id;
+        commands.push(restoreFloating.command);
+      }
       const restoredLayout = await readAerospaceWindowLayout(options.exec ?? execAerospace, target.id);
       forceFloatingProof = {
         ...forceFloatingProof,
@@ -360,6 +409,37 @@ async function executeCommands(controller: WorkspaceController, commands: Aerosp
     throw new Error("workspace controller cannot execute restore plan");
   }
   await controller.executeRestorePlan({ commands, skipped: [] });
+}
+
+async function executeSmokeWindowCommand(
+  controller: WorkspaceController,
+  input: {
+    target: AerospaceWindow;
+    handle: SmokeWindowHandle;
+    baseline: Map<number, AerospaceWindow>;
+    waitTimeoutMs: number;
+    pollIntervalMs: number;
+    buildCommand: (windowId: number) => AerospaceCommand;
+  },
+): Promise<{ target: AerospaceWindow; command: AerospaceCommand }> {
+  const firstCommand = input.buildCommand(input.target.id);
+  assertOnlyTargetsSmokeWindow([firstCommand], input.target.id);
+  try {
+    await executeCommands(controller, [firstCommand]);
+    return { target: input.target, command: firstCommand };
+  } catch (error) {
+    if (!isInvalidAerospaceWindowIdError(error)) throw error;
+    const replacement = await waitForSmokeWindow(controller, input.handle.title, {
+      timeoutMs: input.waitTimeoutMs,
+      pollIntervalMs: input.pollIntervalMs,
+      excludedWindowIds: input.baseline,
+      fallbackAppName: input.handle.appName,
+    });
+    const retryCommand = input.buildCommand(replacement.target.id);
+    assertOnlyTargetsSmokeWindow([retryCommand], replacement.target.id);
+    await executeCommands(controller, [retryCommand]);
+    return { target: replacement.target, command: retryCommand };
+  }
 }
 
 async function waitForSmokeWindow(
@@ -523,7 +603,15 @@ async function readAerospaceWindowLayout(exec: ExecFunction, windowId: number): 
 
 function isNonTilingLayoutError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return message.includes("The window is non-tiling") || /^Command failed: aerospace layout --window-id \d+ .*\nexit: 2$/m.test(message);
+  return message.includes("The window is non-tiling") || (
+    /^Command failed: aerospace layout --window-id \d+ .*\nexit: 2$/m.test(message)
+    && !isInvalidAerospaceWindowIdError(error)
+  );
+}
+
+function isInvalidAerospaceWindowIdError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /Invalid <window-id> \d+ passed to --window-id/.test(message);
 }
 
 async function launchDefaultSmokeWindow(runId: string): Promise<SmokeWindowHandle> {
