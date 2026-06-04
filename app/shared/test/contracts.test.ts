@@ -33,6 +33,7 @@ import {
   PrimitiveResponseValidationError,
   primitiveRoutes,
   routeHasRequestBody,
+  selectPrimitiveCapabilities,
   summarizePrimitiveCatalog,
   validatePrimitiveResponse
 } from "../src/primitives.js";
@@ -289,6 +290,39 @@ describe("primitive catalog SDK boundary", () => {
     const noBodyRoute = getPrimitiveRoute(catalog, "POST", "/agents/codex/auto-bind");
     expect(noBodyRoute?.no_request_body).toBe(true);
     expect(noBodyRoute ? routeHasRequestBody(noBodyRoute) : undefined).toBe(false);
+  });
+
+  it("selects primitive capabilities by builder-facing status and category filters", () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+
+    const stableOsControl = selectPrimitiveCapabilities(catalog, {
+      statuses: ["stable_enough"],
+      categories: ["os_control"],
+      requireSelfTests: true,
+      requireProofs: true
+    });
+    expect(stableOsControl.map((primitive) => primitive.id)).toEqual(["task_workspace_memory", "manual_mode"]);
+
+    const routeBackedAgentContext = selectPrimitiveCapabilities(catalog, {
+      categories: ["agent_context"],
+      minRouteCount: 4
+    });
+    expect(routeBackedAgentContext.map((primitive) => primitive.id)).toEqual([
+      "task_session_control",
+      "context_capture_restore",
+      "agent_source_hooks",
+      "agent_focus_binding"
+    ]);
+
+    const cliBackedWindowPrimitives = selectPrimitiveCapabilities(catalog, {
+      categories: ["os_control"],
+      requireCli: true
+    });
+    expect(cliBackedWindowPrimitives.map((primitive) => primitive.id)).toEqual(["task_window_claims", "follows_windows"]);
+
+    expect(selectPrimitiveCapabilities(catalog, { ids: ["workspace_control"] })).toEqual([
+      expect.objectContaining({ id: "workspace_control", routeCount: 4 })
+    ]);
   });
 
   it("rejects primitive routes that drift back to freeform mutating bodies", () => {

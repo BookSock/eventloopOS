@@ -15,6 +15,9 @@ the orchestrator server package.
 The shared summary helper now returns both global totals and per-primitive
 capability rows with status, category, route count, CLI command count,
 self-test count, proof count, and request/response schema coverage.
+`selectPrimitiveCapabilities` filters that matrix by id, status, category,
+minimum route count, CLI availability, self-test coverage, and proof coverage
+so builder tools can choose reusable surfaces without parsing prose docs.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.

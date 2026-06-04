@@ -31,6 +31,7 @@ import {
   PrimitiveResponseParseError,
   PrimitiveResponseValidationError,
   routeHasRequestBody,
+  selectPrimitiveCapabilities,
   summarizePrimitiveCatalog
 } from "@eventloopos/shared/primitives";
 
@@ -41,6 +42,12 @@ const summary = summarizePrimitiveCatalog(catalog);
 console.log(summary.statusCounts);
 console.log(summary.categoryCounts);
 console.log(summary.primitives.find((primitive) => primitive.id === "workspace_control"));
+console.log(selectPrimitiveCapabilities(catalog, {
+  categories: ["os_control"],
+  statuses: ["stable_enough", "dogfood"],
+  requireSelfTests: true,
+  requireProofs: true
+}));
 console.log(route?.request_schema);
 console.log(route ? routeHasRequestBody(route) : false);
 
@@ -92,7 +99,9 @@ request/response schemas through the exported Zod contract registry.
 `summarizePrimitiveCatalog` returns both global totals and per-primitive
 capability rows, including status/category, route count, CLI command count,
 self-test count, proof count, and request/response schema coverage, so tools can
-pick stable surfaces without parsing prose docs.
+pick stable surfaces without parsing prose docs. `selectPrimitiveCapabilities`
+filters those rows by primitive id, status, category, minimum route count, CLI
+availability, self-test coverage, and proof coverage.
 `createPrimitiveOperationsClient` layers small typed convenience methods over
 the same validated routes for common master-command, manual-mode,
 task-workspace, queue, workspace, task-session, Codex/Claude agent,

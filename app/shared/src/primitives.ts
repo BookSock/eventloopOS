@@ -224,6 +224,16 @@ export type PrimitiveCapabilitySummary = {
   noRequestBodyRouteCount: number;
 };
 
+export type PrimitiveCapabilityFilter = {
+  ids?: string[];
+  statuses?: string[];
+  categories?: string[];
+  minRouteCount?: number;
+  requireCli?: boolean;
+  requireSelfTests?: boolean;
+  requireProofs?: boolean;
+};
+
 export type PrimitiveRequestBuildInput = {
   catalog: PrimitiveCatalog;
   method: PrimitiveHttpMethod | Lowercase<PrimitiveHttpMethod>;
@@ -1024,6 +1034,26 @@ export function summarizePrimitiveCatalog(catalog: PrimitiveCatalog): PrimitiveC
     categoryCounts: countBy(primitives, (primitive) => primitive.category),
     primitives
   };
+}
+
+export function selectPrimitiveCapabilities(
+  catalog: PrimitiveCatalog,
+  filter: PrimitiveCapabilityFilter = {}
+): PrimitiveCapabilitySummary[] {
+  const idSet = filter.ids ? new Set(filter.ids) : undefined;
+  const statusSet = filter.statuses ? new Set(filter.statuses) : undefined;
+  const categorySet = filter.categories ? new Set(filter.categories) : undefined;
+  const minRouteCount = filter.minRouteCount ?? 0;
+  return summarizePrimitiveCatalog(catalog).primitives.filter((primitive) => {
+    if (idSet && !idSet.has(primitive.id)) return false;
+    if (statusSet && !statusSet.has(primitive.status)) return false;
+    if (categorySet && !categorySet.has(primitive.category)) return false;
+    if (primitive.routeCount < minRouteCount) return false;
+    if (filter.requireCli === true && primitive.cliCommandCount === 0) return false;
+    if (filter.requireSelfTests === true && primitive.selfTestCount === 0) return false;
+    if (filter.requireProofs === true && primitive.proofRefCount === 0) return false;
+    return true;
+  });
 }
 
 function summarizePrimitiveCapability(primitive: PrimitiveDefinition): PrimitiveCapabilitySummary {
