@@ -264,15 +264,19 @@
           "response_schema": "FollowsWindowExclusionResponse"
         }
       ],
+      "cli": ["bin/follows-window-rules"],
       "code": [
         "app/orchestrator/src/agents/follows_window_orchestrator.ts",
         "app/orchestrator/src/routes/follows_windows.ts",
+        "bin/follows-window-rules",
         "examples/primitives/window-hotkey-router.mjs"
       ],
       "proofs": [
         "app/orchestrator/src/agents/follows_window_orchestrator.test.ts",
+        "bin/follows-window-rules",
         "examples/primitives/window-hotkey-router.mjs"
-      ]
+      ],
+      "self_tests": ["bin/follows-window-rules --self-test"]
     },
     {
       "id": "queue_paper_routing",

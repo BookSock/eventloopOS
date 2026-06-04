@@ -1,0 +1,175 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+const args = process.argv.slice(2);
+
+if (args.includes("--self-test")) {
+  await runSelfTest();
+  console.log("follows-window-rules self-test passed");
+  process.exit(0);
+}
+
+if (args.includes("-h") || args.includes("--help") || args.length === 0) {
+  console.log(`Usage:
+  bin/follows-window-rules list [--url http://127.0.0.1:4377]
+  bin/follows-window-rules exclude [--app-bundle com.app] [--title-substring Slack]
+  bin/follows-window-rules remove --id fwex_x
+  bin/follows-window-rules export --file follows-rules.json
+  bin/follows-window-rules import --file follows-rules.json
+
+Manage follows-window exclusion rules. Export/import format:
+  { "schema_version": 1, "exclusions": [{ "app_bundle": "...", "title_substring": "..." }] }
+`);
+  process.exit(0);
+}
+
+const options = parseArgs(args);
+const baseUrl = options.url ?? process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377";
+const result = await runCommand(options, { baseUrl, fetchFn: fetch, fsApi: fs });
+console.log(JSON.stringify(result, null, 2));
+
+async function runCommand(options, deps) {
+  if (options.command === "list") {
+    return await requestJson(deps.baseUrl, { method: "GET", path: "/follows-windows/exclusions" }, deps.fetchFn);
+  }
+
+  if (options.command === "exclude") {
+    const body = exclusionBody(options);
+    return await requestJson(deps.baseUrl, { method: "POST", path: "/follows-windows/exclude", body }, deps.fetchFn);
+  }
+
+  if (options.command === "remove") {
+    if (!options.id) die("remove requires --id");
+    return await requestJson(deps.baseUrl, {
+      method: "DELETE",
+      path: `/follows-windows/exclusions/${encodeURIComponent(options.id)}`,
+    }, deps.fetchFn);
+  }
+
+  if (options.command === "export") {
+    if (!options.file) die("export requires --file");
+    const listed = await requestJson(deps.baseUrl, { method: "GET", path: "/follows-windows/exclusions" }, deps.fetchFn);
+    const artifact = {
+      schema_version: 1,
+      exported_at: new Date().toISOString(),
+      exclusions: Array.isArray(listed.exclusions)
+        ? listed.exclusions.map(serializableExclusionRule)
+        : [],
+    };
+    await deps.fsApi.mkdir(path.dirname(path.resolve(options.file)), { recursive: true });
+    await deps.fsApi.writeFile(options.file, `${JSON.stringify(artifact, null, 2)}\n`, "utf8");
+    return { ok: true, file: options.file, count: artifact.exclusions.length };
+  }
+
+  if (options.command === "import") {
+    if (!options.file) die("import requires --file");
+    const artifact = JSON.parse(await deps.fsApi.readFile(options.file, "utf8"));
+    const rules = Array.isArray(artifact.exclusions) ? artifact.exclusions : [];
+    const imported = [];
+    for (const rule of rules) {
+      const body = exclusionBody({
+        appBundle: rule.app_bundle,
+        titleSubstring: rule.title_substring,
+      });
+      imported.push(await requestJson(deps.baseUrl, { method: "POST", path: "/follows-windows/exclude", body }, deps.fetchFn));
+    }
+    return { ok: true, file: options.file, count: imported.length, imported };
+  }
+
+  die(`unknown command: ${options.command}`);
+}
+
+function exclusionBody(options) {
+  const appBundle = optionalString(options.appBundle);
+  const titleSubstring = optionalString(options.titleSubstring);
+  if (!appBundle && !titleSubstring) die("exclude/import requires --app-bundle or --title-substring");
+  return {
+    ...(appBundle ? { app_bundle: appBundle } : {}),
+    ...(titleSubstring ? { title_substring: titleSubstring } : {}),
+  };
+}
+
+function serializableExclusionRule(rule) {
+  return {
+    ...(optionalString(rule.app_bundle) ? { app_bundle: optionalString(rule.app_bundle) } : {}),
+    ...(optionalString(rule.title_substring) ? { title_substring: optionalString(rule.title_substring) } : {}),
+  };
+}
+
+function parseArgs(argv) {
+  const options = { command: argv[0] };
+  for (let index = 1; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === "--id") options.id = readValue(argv, ++index, arg);
+    else if (arg === "--file") options.file = readValue(argv, ++index, arg);
+    else if (arg === "--url") options.url = readValue(argv, ++index, arg);
+    else if (arg === "--app-bundle") options.appBundle = readValue(argv, ++index, arg);
+    else if (arg === "--title-substring") options.titleSubstring = readValue(argv, ++index, arg);
+    else die(`unknown option: ${arg}`);
+  }
+  return options;
+}
+
+async function requestJson(baseUrl, plan, fetchFn) {
+  const response = await fetchFn(new URL(plan.path, baseUrl), {
+    method: plan.method,
+    headers: plan.body ? { "content-type": "application/json" } : undefined,
+    body: plan.body ? JSON.stringify(plan.body) : undefined,
+  });
+  const payload = await response.json();
+  if (!response.ok) throw new Error(`${plan.method} ${plan.path} failed: HTTP ${response.status} ${JSON.stringify(payload)}`);
+  return payload;
+}
+
+function optionalString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readValue(argv, index, flag) {
+  const value = argv[index];
+  if (!value || value.startsWith("--")) die(`missing value for ${flag}`);
+  return value;
+}
+
+function die(message) {
+  console.error(message);
+  process.exit(2);
+}
+
+async function runSelfTest() {
+  assert.deepEqual(parseArgs(["exclude", "--app-bundle", "com.demo", "--title-substring", "Slack"]), {
+    command: "exclude",
+    appBundle: "com.demo",
+    titleSubstring: "Slack",
+  });
+  assert.deepEqual(exclusionBody({ titleSubstring: " Slack " }), { title_substring: "Slack" });
+  const calls = [];
+  const files = new Map();
+  const fetchFn = async (url, request) => {
+    calls.push({ path: new URL(url).pathname, method: request.method, body: request.body ? JSON.parse(request.body) : undefined });
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { ok: true, exclusions: [{ app_bundle: "com.demo", title_substring: "Slack" }] };
+      },
+    };
+  };
+  const fsApi = {
+    async mkdir() {},
+    async writeFile(file, value) { files.set(file, value); },
+    async readFile() {
+      return JSON.stringify({ schema_version: 1, exclusions: [{ title_substring: "Chrome" }] });
+    },
+  };
+  await runCommand({ command: "export", file: "/tmp/rules.json" }, { baseUrl: "http://example.test", fetchFn, fsApi });
+  assert.match(files.get("/tmp/rules.json"), /"title_substring": "Slack"/);
+  await runCommand({ command: "import", file: "/tmp/rules.json" }, { baseUrl: "http://example.test", fetchFn, fsApi });
+  assert.deepEqual(calls.at(-1), {
+    path: "/follows-windows/exclude",
+    method: "POST",
+    body: { title_substring: "Chrome" },
+  });
+}
