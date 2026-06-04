@@ -318,6 +318,48 @@ describe("primitive catalog SDK boundary", () => {
     expect(lineage.body).toBeUndefined();
   });
 
+  it("validates declared primitive query parameter schemas", () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+
+    const lineage = buildPrimitiveRequest({
+      catalog,
+      method: "GET",
+      path: "/queue/:id/lineage",
+      pathParams: { id: "qit_feedback_001" },
+      query: { limit: "500" }
+    });
+    expect(lineage.url).toBe("http://127.0.0.1:4377/queue/qit_feedback_001/lineage?limit=500");
+
+    expect(() =>
+      buildPrimitiveRequest({
+        catalog,
+        method: "GET",
+        path: "/queue",
+        query: { state: "archived" }
+      })
+    ).toThrow(/must be one of: ready, leased, deferred, done, dead/);
+
+    expect(() =>
+      buildPrimitiveRequest({
+        catalog,
+        method: "GET",
+        path: "/queue/:id/lineage",
+        pathParams: { id: "qit_feedback_001" },
+        query: { limit: 501 }
+      })
+    ).toThrow(/must be <= 500/);
+
+    expect(() =>
+      buildPrimitiveRequest({
+        catalog,
+        method: "GET",
+        path: "/queue/:id/lineage",
+        pathParams: { id: "qit_feedback_001" },
+        query: { limit: "many" }
+      })
+    ).toThrow(/must be an integer/);
+  });
+
   it("rejects request bodies for no-body primitives and validates primitive responses", () => {
     const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
     const noBodyRoute = getPrimitiveRoute(catalog, "POST", "/agents/codex/auto-bind");

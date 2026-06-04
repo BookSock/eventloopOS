@@ -285,6 +285,7 @@ function encodePrimitiveQuery(route: PrimitiveHttpRoute, query: Record<string, s
       }
       continue;
     }
+    validatePrimitiveQueryValue(route, parameter, value);
     search.set(parameter.name, String(value));
   }
   for (const [name, value] of Object.entries(query)) {
@@ -293,6 +294,51 @@ function encodePrimitiveQuery(route: PrimitiveHttpRoute, query: Record<string, s
     search.set(name, String(value));
   }
   return search.toString();
+}
+
+function validatePrimitiveQueryValue(
+  route: PrimitiveHttpRoute,
+  parameter: PrimitiveQueryParameter,
+  value: string | number | boolean
+): void {
+  const schema = parameter.schema;
+  if (!schema) return;
+  const label = `${route.method} ${route.path} query parameter ${parameter.name}`;
+
+  const enumValues = schema.enum;
+  if (Array.isArray(enumValues) && !enumValues.some((enumValue) => String(enumValue) === String(value))) {
+    throw new Error(`${label} must be one of: ${enumValues.map(String).join(", ")}`);
+  }
+
+  const type = typeof schema.type === "string" ? schema.type : undefined;
+  if (type === "integer") {
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (!Number.isInteger(parsed)) {
+      throw new Error(`${label} must be an integer`);
+    }
+    validateNumericBounds(label, parsed, schema);
+    return;
+  }
+  if (type === "number") {
+    const parsed = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(parsed)) {
+      throw new Error(`${label} must be a number`);
+    }
+    validateNumericBounds(label, parsed, schema);
+    return;
+  }
+  if (type === "boolean" && typeof value !== "boolean") {
+    throw new Error(`${label} must be a boolean`);
+  }
+}
+
+function validateNumericBounds(label: string, value: number, schema: Record<string, unknown>): void {
+  if (typeof schema.minimum === "number" && value < schema.minimum) {
+    throw new Error(`${label} must be >= ${schema.minimum}`);
+  }
+  if (typeof schema.maximum === "number" && value > schema.maximum) {
+    throw new Error(`${label} must be <= ${schema.maximum}`);
+  }
 }
 
 function parseWithSchemaReference<T>(
