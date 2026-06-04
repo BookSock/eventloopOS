@@ -1,0 +1,23 @@
+{
+  "schema": "TaskWorkspaceSnapshotRecord",
+  "data": {
+    "task_id": "task_demo_customer",
+    "snapshot": {
+      "backend": "aerospace",
+      "windows": [
+        {
+          "id": 9,
+          "app": "Ghostty",
+          "title": "codex",
+          "workspace": "demo-customer"
+        }
+      ],
+      "activeWorkspace": "demo-customer",
+      "focusedWindowId": 9
+    },
+    "captured_at": "2026-05-06T17:13:00Z",
+    "updated_at": "2026-05-06T17:13:00Z",
+    "source_queue_item_id": "qit_demo_customer",
+    "actor_id": "human_demo"
+  }
+}

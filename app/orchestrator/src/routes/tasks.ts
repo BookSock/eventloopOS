@@ -106,6 +106,17 @@ export async function handleTasksRoute(input: {
       return ok(200, { task: record, layout: layout ?? null, request_id: input.requestId });
     }
 
+    if (input.method === "GET" && taskIdMatch.suffix === "/layout") {
+      const record = await store.getTask(taskIdMatch.taskId);
+      if (!record) return notFound(`task ${taskIdMatch.taskId} not found`);
+      const layout = await store.getTaskLayout(record.task_id);
+      return ok(200, {
+        task_id: record.task_id,
+        layout: layout ?? null,
+        request_id: input.requestId,
+      });
+    }
+
     if (input.method === "POST" && taskIdMatch.suffix === "/wake") {
       const task = await store.wakeTask(taskIdMatch.taskId, input.now);
       if (!task) return notFound(`task ${taskIdMatch.taskId} not found`);

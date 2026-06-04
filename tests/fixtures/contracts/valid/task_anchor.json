@@ -1,0 +1,7 @@
+{
+  "schema": "TaskAnchor",
+  "data": {
+    "kind": "codex_thread",
+    "id": "thread_demo_customer"
+  }
+}

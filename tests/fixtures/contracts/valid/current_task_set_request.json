@@ -1,0 +1,6 @@
+{
+  "schema": "CurrentTaskSetRequest",
+  "data": {
+    "task_id": "task_demo_customer"
+  }
+}

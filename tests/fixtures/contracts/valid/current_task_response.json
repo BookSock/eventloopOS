@@ -1,0 +1,8 @@
+{
+  "schema": "CurrentTaskResponse",
+  "data": {
+    "task": null,
+    "updated_at": "2026-05-06T17:13:00Z",
+    "request_id": "req_current_task"
+  }
+}

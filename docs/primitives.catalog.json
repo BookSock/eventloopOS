@@ -482,6 +482,197 @@
         "request_id": { "type": "string", "minLength": 1 }
       }
     },
+    "TaskAnchorKind": {
+      "type": "string",
+      "enum": ["codex_thread", "ghostty_window"]
+    },
+    "TaskAnchor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "$ref": "#/components/schemas/TaskAnchorKind" },
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_id",
+        "primary_anchor_kind",
+        "primary_anchor_id",
+        "created_at",
+        "updated_at",
+        "auto_paper_idle_seconds"
+      ],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "primary_anchor_kind": { "$ref": "#/components/schemas/TaskAnchorKind" },
+        "primary_anchor_id": { "type": "string", "minLength": 1 },
+        "aerospace_workspace_id": { "type": "string", "minLength": 1 },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "last_paper_emitted_at": { "type": "string", "format": "date-time" },
+        "dormant_at": { "type": "string", "format": "date-time" },
+        "auto_paper_idle_seconds": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "TaskLayoutRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "layout", "updated_at"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "layout": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "TaskWorkspaceSnapshotRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "snapshot", "captured_at", "updated_at"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "snapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "captured_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "source_queue_item_id": { "type": "string", "minLength": 1 },
+        "actor_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "CreateTaskRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["primary_anchor", "captured_layout"],
+      "properties": {
+        "primary_anchor": { "$ref": "#/components/schemas/TaskAnchor" },
+        "captured_layout": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "auto_paper_idle_seconds": { "type": "number" },
+        "aerospace_workspace_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "CreateTaskResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "layout", "created", "current", "request_id"],
+      "properties": {
+        "task": { "$ref": "#/components/schemas/TaskRecord" },
+        "layout": { "$ref": "#/components/schemas/TaskLayoutRecord" },
+        "created": { "type": "boolean" },
+        "current": { "type": "boolean" },
+        "binding": { "type": "object", "additionalProperties": true },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tasks", "request_id"],
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/TaskRecord" }
+        },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskGetResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "layout", "request_id"],
+      "properties": {
+        "task": { "$ref": "#/components/schemas/TaskRecord" },
+        "layout": {
+          "anyOf": [
+            { "$ref": "#/components/schemas/TaskLayoutRecord" },
+            { "type": "null" }
+          ]
+        },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskLayoutResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "layout", "request_id"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "layout": {
+          "anyOf": [
+            { "$ref": "#/components/schemas/TaskLayoutRecord" },
+            { "type": "null" }
+          ]
+        },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskLayoutUpdateResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "task", "layout", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "task": { "$ref": "#/components/schemas/TaskRecord" },
+        "layout": {
+          "anyOf": [
+            { "$ref": "#/components/schemas/TaskLayoutRecord" },
+            { "type": "null" }
+          ]
+        },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskWorkspaceSnapshotSaveRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "workspace_snapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "workspaceSnapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "source_queue_item_id": { "type": "string", "minLength": 1 },
+        "actor_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "TaskWorkspaceSnapshotSaveResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "workspace_snapshot", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "workspace_snapshot": { "$ref": "#/components/schemas/TaskWorkspaceSnapshotRecord" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "CurrentTaskSetRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["task_id"],
+      "properties": {
+        "task_id": {
+          "anyOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "CurrentTaskResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task", "updated_at", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "task": {
+          "anyOf": [
+            { "$ref": "#/components/schemas/TaskRecord" },
+            { "type": "null" }
+          ]
+        },
+        "entered_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "ManualModeState": {
       "type": "object",
       "additionalProperties": false,
@@ -590,13 +781,58 @@
       "status": "stable_enough",
       "summary": "Persist task-specific workspace snapshots so later papers inherit task desk state.",
       "http": [
-        { "method": "POST", "path": "/tasks", "route_file": "app/orchestrator/src/routes/tasks.ts" },
-        { "method": "GET", "path": "/tasks", "route_file": "app/orchestrator/src/routes/tasks.ts" },
-        { "method": "GET", "path": "/tasks/:id/layout", "route_file": "app/orchestrator/src/routes/tasks.ts" },
-        { "method": "PUT", "path": "/tasks/:id/layout", "route_file": "app/orchestrator/src/routes/tasks.ts" },
-        { "method": "POST", "path": "/tasks/:id/workspace-snapshot", "route_file": "app/orchestrator/src/routes/tasks.ts" },
-        { "method": "GET", "path": "/tasks/current", "route_file": "app/orchestrator/src/routes/tasks.ts" },
-        { "method": "POST", "path": "/tasks/current", "route_file": "app/orchestrator/src/routes/tasks.ts" }
+        {
+          "method": "POST",
+          "path": "/tasks",
+          "route_file": "app/orchestrator/src/routes/tasks.ts",
+          "request_schema": "CreateTaskRequest",
+          "response_schema": "CreateTaskResponse"
+        },
+        {
+          "method": "GET",
+          "path": "/tasks",
+          "route_file": "app/orchestrator/src/routes/tasks.ts",
+          "response_schema": "TaskListResponse"
+        },
+        {
+          "method": "GET",
+          "path": "/tasks/:id",
+          "route_file": "app/orchestrator/src/routes/tasks.ts",
+          "response_schema": "TaskGetResponse"
+        },
+        {
+          "method": "GET",
+          "path": "/tasks/:id/layout",
+          "route_file": "app/orchestrator/src/routes/tasks.ts",
+          "response_schema": "TaskLayoutResponse"
+        },
+        {
+          "method": "PUT",
+          "path": "/tasks/:id/layout",
+          "route_file": "app/orchestrator/src/routes/tasks.ts",
+          "request_schema": "WorkspaceSnapshot",
+          "response_schema": "TaskLayoutUpdateResponse"
+        },
+        {
+          "method": "POST",
+          "path": "/tasks/:id/workspace-snapshot",
+          "route_file": "app/orchestrator/src/routes/tasks.ts",
+          "request_schema": "TaskWorkspaceSnapshotSaveRequest",
+          "response_schema": "TaskWorkspaceSnapshotSaveResponse"
+        },
+        {
+          "method": "GET",
+          "path": "/tasks/current",
+          "route_file": "app/orchestrator/src/routes/tasks.ts",
+          "response_schema": "CurrentTaskResponse"
+        },
+        {
+          "method": "POST",
+          "path": "/tasks/current",
+          "route_file": "app/orchestrator/src/routes/tasks.ts",
+          "request_schema": "CurrentTaskSetRequest",
+          "response_schema": "CurrentTaskResponse"
+        }
       ],
       "code": ["app/orchestrator/src/routes/tasks.ts", "app/orchestrator/src/agents/ambient_workspace_saver.ts"],
       "proofs": [

@@ -1,0 +1,19 @@
+{
+  "schema": "TaskWorkspaceSnapshotSaveRequest",
+  "data": {
+    "workspace_snapshot": {
+      "backend": "aerospace",
+      "windows": [
+        {
+          "id": 9,
+          "app": "Ghostty",
+          "title": "codex",
+          "workspace": "demo-customer"
+        }
+      ],
+      "activeWorkspace": "demo-customer"
+    },
+    "source_queue_item_id": "qit_demo_customer",
+    "actor_id": "human_demo"
+  }
+}

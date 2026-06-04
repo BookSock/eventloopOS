@@ -176,6 +176,13 @@ describe("tasks route — phase 2 of hotkey state machine", () => {
     };
     assert.equal(fetched.layout?.layout.backend, "fake");
     assert.equal(fetched.layout?.layout.activeWorkspace, "fake-main");
+
+    const fetchedLayout = await fetch(`${baseUrl}/tasks/${created.task.task_id}/layout`).then((r) => r.json()) as {
+      task_id: string;
+      layout: { layout: WorkspaceSnapshot } | null;
+    };
+    assert.equal(fetchedLayout.task_id, created.task.task_id);
+    assert.equal(fetchedLayout.layout?.layout.backend, "fake");
   });
 
   it("POST /tasks/current sets the singleton, GET reflects it, null clears it", async () => {

@@ -1,0 +1,24 @@
+{
+  "schema": "CreateTaskRequest",
+  "data": {
+    "primary_anchor": {
+      "kind": "codex_thread",
+      "id": "thread_demo_customer"
+    },
+    "captured_layout": {
+      "backend": "aerospace",
+      "windows": [
+        {
+          "id": 9,
+          "app": "Ghostty",
+          "title": "codex",
+          "workspace": "demo-customer"
+        }
+      ],
+      "activeWorkspace": "demo-customer",
+      "focusedWindowId": 9
+    },
+    "auto_paper_idle_seconds": 60,
+    "aerospace_workspace_id": "demo-customer"
+  }
+}

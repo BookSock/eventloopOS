@@ -1,0 +1,27 @@
+{
+  "schema": "TaskLayoutRecord",
+  "data": {
+    "task_id": "task_demo_customer",
+    "layout": {
+      "backend": "aerospace",
+      "windows": [
+        {
+          "id": 9,
+          "app": "Ghostty",
+          "title": "codex",
+          "workspace": "demo-customer",
+          "layout": "floating",
+          "frame": {
+            "x": 120,
+            "y": 80,
+            "width": 1440,
+            "height": 900
+          }
+        }
+      ],
+      "activeWorkspace": "demo-customer",
+      "focusedWindowId": 9
+    },
+    "updated_at": "2026-05-06T17:13:00Z"
+  }
+}

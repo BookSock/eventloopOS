@@ -504,6 +504,157 @@ export const TaskWindowClaimsListResponseSchema = z
   .strict();
 export type TaskWindowClaimsListResponse = z.infer<typeof TaskWindowClaimsListResponseSchema>;
 
+export const TaskAnchorKindSchema = z.enum(["codex_thread", "ghostty_window"]);
+export type TaskAnchorKind = z.infer<typeof TaskAnchorKindSchema>;
+
+export const TaskAnchorSchema = z
+  .object({
+    kind: TaskAnchorKindSchema,
+    id
+  })
+  .strict();
+export type TaskAnchor = z.infer<typeof TaskAnchorSchema>;
+
+export const TaskRecordSchema = z
+  .object({
+    task_id: id,
+    primary_anchor_kind: TaskAnchorKindSchema,
+    primary_anchor_id: id,
+    aerospace_workspace_id: nonEmpty.optional(),
+    created_at: isoDateTime,
+    updated_at: isoDateTime,
+    last_paper_emitted_at: isoDateTime.optional(),
+    dormant_at: isoDateTime.optional(),
+    auto_paper_idle_seconds: z.number().int().positive()
+  })
+  .strict();
+export type TaskRecord = z.infer<typeof TaskRecordSchema>;
+
+export const TaskLayoutRecordSchema = z
+  .object({
+    task_id: id,
+    layout: WorkspaceSnapshotSchema,
+    updated_at: isoDateTime
+  })
+  .strict();
+export type TaskLayoutRecord = z.infer<typeof TaskLayoutRecordSchema>;
+
+export const TaskWorkspaceSnapshotRecordSchema = z
+  .object({
+    task_id: id,
+    snapshot: WorkspaceSnapshotSchema,
+    captured_at: isoDateTime,
+    updated_at: isoDateTime,
+    source_queue_item_id: id.optional(),
+    actor_id: id.optional()
+  })
+  .strict();
+export type TaskWorkspaceSnapshotRecord = z.infer<typeof TaskWorkspaceSnapshotRecordSchema>;
+
+export const CreateTaskRequestSchema = z
+  .object({
+    primary_anchor: TaskAnchorSchema,
+    captured_layout: WorkspaceSnapshotSchema,
+    auto_paper_idle_seconds: z.number().optional(),
+    aerospace_workspace_id: nonEmpty.optional()
+  })
+  .passthrough();
+export type CreateTaskRequest = z.infer<typeof CreateTaskRequestSchema>;
+
+export const CreateTaskResponseSchema = z
+  .object({
+    task: TaskRecordSchema,
+    layout: TaskLayoutRecordSchema,
+    created: z.boolean(),
+    current: z.boolean(),
+    binding: unknownRecord.optional(),
+    request_id: id
+  })
+  .strict();
+export type CreateTaskResponse = z.infer<typeof CreateTaskResponseSchema>;
+
+export const TaskListResponseSchema = z
+  .object({
+    tasks: z.array(TaskRecordSchema),
+    request_id: id
+  })
+  .strict();
+export type TaskListResponse = z.infer<typeof TaskListResponseSchema>;
+
+export const TaskGetResponseSchema = z
+  .object({
+    task: TaskRecordSchema,
+    layout: TaskLayoutRecordSchema.nullable(),
+    request_id: id
+  })
+  .strict();
+export type TaskGetResponse = z.infer<typeof TaskGetResponseSchema>;
+
+export const TaskLayoutResponseSchema = z
+  .object({
+    task_id: id,
+    layout: TaskLayoutRecordSchema.nullable(),
+    request_id: id
+  })
+  .strict();
+export type TaskLayoutResponse = z.infer<typeof TaskLayoutResponseSchema>;
+
+export const TaskLayoutUpdateResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    task: TaskRecordSchema,
+    layout: TaskLayoutRecordSchema.nullable(),
+    request_id: id
+  })
+  .strict();
+export type TaskLayoutUpdateResponse = z.infer<typeof TaskLayoutUpdateResponseSchema>;
+
+export const TaskWorkspaceSnapshotSaveRequestSchema = z
+  .object({
+    workspace_snapshot: WorkspaceSnapshotSchema.optional(),
+    workspaceSnapshot: WorkspaceSnapshotSchema.optional(),
+    source_queue_item_id: id.optional(),
+    actor_id: id.optional()
+  })
+  .passthrough()
+  .superRefine((request, ctx) => {
+    if (!request.workspace_snapshot && !request.workspaceSnapshot) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "workspace_snapshot is required",
+        path: ["workspace_snapshot"]
+      });
+    }
+  });
+export type TaskWorkspaceSnapshotSaveRequest = z.infer<typeof TaskWorkspaceSnapshotSaveRequestSchema>;
+
+export const TaskWorkspaceSnapshotSaveResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    workspace_snapshot: TaskWorkspaceSnapshotRecordSchema,
+    request_id: id
+  })
+  .strict();
+export type TaskWorkspaceSnapshotSaveResponse = z.infer<typeof TaskWorkspaceSnapshotSaveResponseSchema>;
+
+export const CurrentTaskSetRequestSchema = z
+  .object({
+    task_id: id.nullable()
+  })
+  .passthrough();
+export type CurrentTaskSetRequest = z.infer<typeof CurrentTaskSetRequestSchema>;
+
+export const CurrentTaskResponseSchema = z
+  .object({
+    ok: z.literal(true).optional(),
+    task: TaskRecordSchema.nullable(),
+    entered_at: isoDateTime.optional(),
+    updated_at: isoDateTime,
+    request_id: id
+  })
+  .strict();
+export type CurrentTaskResponse = z.infer<typeof CurrentTaskResponseSchema>;
+
 export const FollowsWindowExclusionRecordSchema = z
   .object({
     exclusion_id: id,
@@ -1016,6 +1167,21 @@ export const ContractSchemas = {
   TaskWindowClaimCreateRequest: TaskWindowClaimCreateRequestSchema,
   TaskWindowClaimResponse: TaskWindowClaimResponseSchema,
   TaskWindowClaimsListResponse: TaskWindowClaimsListResponseSchema,
+  TaskAnchorKind: TaskAnchorKindSchema,
+  TaskAnchor: TaskAnchorSchema,
+  TaskRecord: TaskRecordSchema,
+  TaskLayoutRecord: TaskLayoutRecordSchema,
+  TaskWorkspaceSnapshotRecord: TaskWorkspaceSnapshotRecordSchema,
+  CreateTaskRequest: CreateTaskRequestSchema,
+  CreateTaskResponse: CreateTaskResponseSchema,
+  TaskListResponse: TaskListResponseSchema,
+  TaskGetResponse: TaskGetResponseSchema,
+  TaskLayoutResponse: TaskLayoutResponseSchema,
+  TaskLayoutUpdateResponse: TaskLayoutUpdateResponseSchema,
+  TaskWorkspaceSnapshotSaveRequest: TaskWorkspaceSnapshotSaveRequestSchema,
+  TaskWorkspaceSnapshotSaveResponse: TaskWorkspaceSnapshotSaveResponseSchema,
+  CurrentTaskSetRequest: CurrentTaskSetRequestSchema,
+  CurrentTaskResponse: CurrentTaskResponseSchema,
   FollowsWindowExclusionRecord: FollowsWindowExclusionRecordSchema,
   FollowsWindowExclusionCreateRequest: FollowsWindowExclusionCreateRequestSchema,
   FollowsWindowExclusionResponse: FollowsWindowExclusionResponseSchema,

@@ -2842,7 +2842,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskListResponse"
                 }
               }
             },
@@ -2874,18 +2874,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/CreateTaskRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/CreateTaskResponse"
                 }
               }
             },
@@ -2920,7 +2920,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/CurrentTaskResponse"
                 }
               }
             },
@@ -2952,18 +2952,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/CurrentTaskSetRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/CurrentTaskResponse"
                 }
               }
             },
@@ -2981,6 +2981,51 @@
           }
         },
         "summary": "Task Workspace Memory POST /tasks/current",
+        "tags": [
+          "task_workspace_memory"
+        ],
+        "x-eventloopos-primitive": "task_workspace_memory",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/tasks.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/tasks/{id}": {
+      "get": {
+        "description": "Persist task-specific workspace snapshots so later papers inherit task desk state.",
+        "operationId": "task_workspace_memory_get_tasks_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskGetResponse"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Workspace Memory GET /tasks/:id",
         "tags": [
           "task_workspace_memory"
         ],
@@ -3008,7 +3053,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskLayoutResponse"
                 }
               }
             },
@@ -3050,18 +3095,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/WorkspaceSnapshot"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskLayoutUpdateResponse"
                 }
               }
             },
@@ -3105,18 +3150,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/TaskWorkspaceSnapshotSaveRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskWorkspaceSnapshotSaveResponse"
                 }
               }
             },
@@ -3620,6 +3665,119 @@
         "required": [
           "command",
           "args"
+        ],
+        "type": "object"
+      },
+      "CreateTaskRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "aerospace_workspace_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "auto_paper_idle_seconds": {
+            "type": "number"
+          },
+          "captured_layout": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          },
+          "primary_anchor": {
+            "$ref": "#/components/schemas/TaskAnchor"
+          }
+        },
+        "required": [
+          "primary_anchor",
+          "captured_layout"
+        ],
+        "type": "object"
+      },
+      "CreateTaskResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "binding": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "created": {
+            "type": "boolean"
+          },
+          "current": {
+            "type": "boolean"
+          },
+          "layout": {
+            "$ref": "#/components/schemas/TaskLayoutRecord"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task": {
+            "$ref": "#/components/schemas/TaskRecord"
+          }
+        },
+        "required": [
+          "task",
+          "layout",
+          "created",
+          "current",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "CurrentTaskResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "entered_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task",
+          "updated_at",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "CurrentTaskSetRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "task_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "task_id"
         ],
         "type": "object"
       },
@@ -4235,6 +4393,211 @@
         ],
         "type": "object"
       },
+      "TaskAnchor": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskAnchorKind"
+          }
+        },
+        "required": [
+          "kind",
+          "id"
+        ],
+        "type": "object"
+      },
+      "TaskAnchorKind": {
+        "enum": [
+          "codex_thread",
+          "ghostty_window"
+        ],
+        "type": "string"
+      },
+      "TaskGetResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "layout": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskLayoutRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task": {
+            "$ref": "#/components/schemas/TaskRecord"
+          }
+        },
+        "required": [
+          "task",
+          "layout",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "TaskLayoutRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "layout": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "layout",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "TaskLayoutResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "layout": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskLayoutRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "layout",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "TaskLayoutUpdateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "layout": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TaskLayoutRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task": {
+            "$ref": "#/components/schemas/TaskRecord"
+          }
+        },
+        "required": [
+          "ok",
+          "task",
+          "layout",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "TaskListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "tasks": {
+            "items": {
+              "$ref": "#/components/schemas/TaskRecord"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "tasks",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "TaskRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "aerospace_workspace_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "auto_paper_idle_seconds": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "dormant_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_paper_emitted_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "primary_anchor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "primary_anchor_kind": {
+            "$ref": "#/components/schemas/TaskAnchorKind"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "primary_anchor_kind",
+          "primary_anchor_id",
+          "created_at",
+          "updated_at",
+          "auto_paper_idle_seconds"
+        ],
+        "type": "object"
+      },
       "TaskWindowClaimCreateRequest": {
         "additionalProperties": true,
         "allOf": [
@@ -4446,6 +4809,83 @@
           "ok",
           "claims",
           "count",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "TaskWorkspaceSnapshotRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "actor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "captured_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          },
+          "source_queue_item_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "snapshot",
+          "captured_at",
+          "updated_at"
+        ],
+        "type": "object"
+      },
+      "TaskWorkspaceSnapshotSaveRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "actor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source_queue_item_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspaceSnapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          },
+          "workspace_snapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          }
+        },
+        "type": "object"
+      },
+      "TaskWorkspaceSnapshotSaveResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace_snapshot": {
+            "$ref": "#/components/schemas/TaskWorkspaceSnapshotRecord"
+          }
+        },
+        "required": [
+          "ok",
+          "workspace_snapshot",
           "request_id"
         ],
         "type": "object"
