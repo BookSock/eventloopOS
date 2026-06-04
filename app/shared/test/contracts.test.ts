@@ -24,7 +24,9 @@ import {
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
   createPrimitiveOperationsClient,
+  isPrimitiveHttpError,
   parsePrimitiveCatalog,
+  primitiveErrorSummary,
   PrimitiveHttpError,
   PrimitiveResponseParseError,
   PrimitiveResponseValidationError,
@@ -426,7 +428,7 @@ describe("primitive catalog SDK boundary", () => {
   it("exposes typed primitive HTTP failures with status, route, and payload", async () => {
     const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
     const fakeFetch: typeof fetch = async () =>
-      new Response(JSON.stringify({ ok: false, error: "duplicate idempotency key" }), {
+      new Response(JSON.stringify({ ok: false, code: "idempotency_conflict", error: "duplicate idempotency key" }), {
         status: 409,
         statusText: "Conflict",
         headers: { "content-type": "application/json" }
@@ -447,9 +449,21 @@ describe("primitive catalog SDK boundary", () => {
       const primitiveError = error as PrimitiveHttpError;
       expect(primitiveError.status).toBe(409);
       expect(primitiveError.statusText).toBe("Conflict");
+      expect(primitiveError.code).toBe("idempotency_conflict");
+      expect(primitiveError.detail).toBe("duplicate idempotency key");
       expect(primitiveError.route?.path).toBe("/onboarding/approvals/batch");
       expect(primitiveError.payload).toMatchObject({ error: "duplicate idempotency key" });
       expect(primitiveError.responseText).toContain("duplicate idempotency key");
+      expect(isPrimitiveHttpError(error, { status: 409, code: "idempotency_conflict", method: "post" })).toBe(true);
+      expect(isPrimitiveHttpError(error, { status: 409, code: "manual_mode_active" })).toBe(false);
+      expect(primitiveErrorSummary(error)).toMatchObject({
+        name: "PrimitiveHttpError",
+        method: "POST",
+        path: "/onboarding/approvals/batch",
+        status: 409,
+        code: "idempotency_conflict",
+        detail: "duplicate idempotency key"
+      });
     }
   });
 

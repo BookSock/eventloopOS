@@ -34,7 +34,10 @@ envelopes.
 The shared primitive HTTP client validates request and response bodies and
 throws typed errors for non-2xx responses, invalid JSON, and response-schema
 mismatches so builders can recover from conflicts, dependency failures, and
-server drift without string-matching generic exceptions.
+server drift without string-matching generic exceptions. HTTP errors expose
+`status`, server `code`, server detail text, route metadata, and exported guard
+helpers for branching on recoverable cases like manual-mode pauses or stale
+task-session bindings.
 It also exposes `createPrimitiveOperationsClient`, a small typed convenience
 layer for common master-command, manual-mode, task-workspace, queue,
 workspace, task-session, Codex/Claude agent, task-window-claim,

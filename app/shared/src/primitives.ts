@@ -392,6 +392,8 @@ export class PrimitiveError extends Error {
 export class PrimitiveHttpError extends PrimitiveError {
   readonly status: number;
   readonly statusText: string;
+  readonly code?: string;
+  readonly detail?: string;
   readonly payload: unknown;
   readonly responseText: string;
 
@@ -410,6 +412,8 @@ export class PrimitiveHttpError extends PrimitiveError {
     this.statusText = details.statusText;
     this.payload = details.payload;
     this.responseText = details.responseText;
+    this.code = primitiveHttpPayloadCode(details.payload);
+    this.detail = primitiveHttpPayloadMessage(details.payload);
   }
 }
 
@@ -431,6 +435,64 @@ export class PrimitiveResponseValidationError extends PrimitiveError {
     this.name = "PrimitiveResponseValidationError";
     this.payload = details.payload;
   }
+}
+
+export type PrimitiveHttpErrorMatch = {
+  status?: number;
+  code?: string;
+  path?: string;
+  method?: PrimitiveHttpMethod | Lowercase<PrimitiveHttpMethod>;
+};
+
+export type PrimitiveErrorSummary = {
+  name: string;
+  message: string;
+  method?: PrimitiveHttpMethod;
+  path?: string;
+  status?: number;
+  code?: string;
+  detail?: string;
+};
+
+export function isPrimitiveHttpError(error: unknown, match: PrimitiveHttpErrorMatch = {}): error is PrimitiveHttpError {
+  if (!(error instanceof PrimitiveHttpError)) return false;
+  if (match.status !== undefined && error.status !== match.status) return false;
+  if (match.code !== undefined && error.code !== match.code) return false;
+  if (match.path !== undefined && error.path !== match.path) return false;
+  if (match.method !== undefined && error.method !== normalizePrimitiveMethod(match.method)) return false;
+  return true;
+}
+
+export function primitiveErrorSummary(error: unknown): PrimitiveErrorSummary {
+  if (error instanceof PrimitiveHttpError) {
+    return {
+      name: error.name,
+      message: error.message,
+      method: error.method,
+      path: error.path,
+      status: error.status,
+      code: error.code,
+      detail: error.detail
+    };
+  }
+  if (error instanceof PrimitiveError) {
+    return {
+      name: error.name,
+      message: error.message,
+      method: error.method,
+      path: error.path
+    };
+  }
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message
+    };
+  }
+  return {
+    name: "UnknownError",
+    message: String(error)
+  };
 }
 
 export function parsePrimitiveCatalog(value: unknown): PrimitiveCatalog {
@@ -958,6 +1020,22 @@ function parsePrimitiveResponsePayload(request: PrimitiveRequest, text: string):
       cause: error
     });
   }
+}
+
+function primitiveHttpPayloadCode(payload: unknown): string | undefined {
+  if (!isRecord(payload)) return undefined;
+  const value = payload.code ?? payload.error_code ?? payload.errorCode;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function primitiveHttpPayloadMessage(payload: unknown): string | undefined {
+  if (!isRecord(payload)) return undefined;
+  const value = payload.message ?? payload.error ?? payload.detail;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseWithSchemaReference<T>(
