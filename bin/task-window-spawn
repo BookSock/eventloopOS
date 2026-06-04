@@ -39,7 +39,7 @@ Options:
   --task-id ID          Required task id, e.g. task_checkout
   --settle-ms MS        Wait after command exits before after-capture. Default 1500
   --wait-ms MS          Poll for matching new windows after settle. Default 5000
-  --poll-ms MS          Workspace capture poll interval during wait. Default 250
+  --poll-ms MS          Workspace capture poll interval during wait. Default 100
   --ttl-ms MS           Claim TTL. Default 1800000
   --source NAME         Claim source. Default task-window-spawn
   --app CONTAINS        Optional app/app_bundle substring filter for new windows
@@ -59,7 +59,7 @@ function parseArgs(argv) {
     taskId: undefined,
     settleMs: 1_500,
     waitMs: 5_000,
-    pollMs: 250,
+    pollMs: 100,
     ttlMs: 30 * 60 * 1_000,
     source: "task-window-spawn",
     appContains: undefined,
@@ -219,14 +219,14 @@ async function watchNewWindows({ options, beforeWindows, taskWorkspace, focusWor
       }
       if (taskWorkspace && window.workspace !== taskWorkspace) {
         try {
-          await runAerospace(["move-node-to-workspace", "--window-id", String(window.id), taskWorkspace]);
+          await runAerospaceCommand(options, ["move-node-to-workspace", "--window-id", String(window.id), taskWorkspace]);
           moved.push({
             window_id: String(window.id),
             from_workspace: window.workspace,
             to_workspace: taskWorkspace,
           });
           if (focusWorkspace && focusWorkspace !== taskWorkspace) {
-            await runAerospace(["workspace", focusWorkspace]).catch(() => undefined);
+            await runAerospaceCommand(options, ["workspace", focusWorkspace]).catch(() => undefined);
           }
         } catch (error) {
           errors.push({
@@ -379,12 +379,18 @@ async function runAerospace(args) {
   await execFileAsync("aerospace", args, { timeout: 5_000 });
 }
 
+async function runAerospaceCommand(options, args) {
+  const runner = options.runAerospace ?? runAerospace;
+  await runner(args);
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function runSelfTest() {
   const claims = [];
+  const aerospaceCommands = [];
   let captureCount = 0;
   const server = http.createServer(async (request, response) => {
     const send = (status, body) => {
@@ -406,6 +412,16 @@ async function runSelfTest() {
           backend: "aerospace",
           activeWorkspace: "main",
           windows: captureCount < 3 ? [baseWindow] : [baseWindow, spawnedWindow],
+        },
+      });
+      return;
+    }
+    if (request.method === "GET" && request.url === "/tasks/task_checkout") {
+      send(200, {
+        ok: true,
+        task: {
+          task_id: "task_checkout",
+          aerospace_workspace_id: "task-checkout",
         },
       });
       return;
@@ -433,6 +449,9 @@ async function runSelfTest() {
       source: "self-test",
       appContains: "chrome",
       titleContains: "checkout",
+      runAerospace: async (commandArgs) => {
+        aerospaceCommands.push(commandArgs);
+      },
       command: process.execPath,
       args: ["-e", ""],
     });
@@ -447,6 +466,15 @@ async function runSelfTest() {
     if (claims[1]?.task_id !== "task_checkout") throw new Error(`window claim task mismatch: ${JSON.stringify(claims[1])}`);
     if (claims[1]?.window_id !== "99") throw new Error(`claim window mismatch: ${JSON.stringify(claims[1])}`);
     if (claims[1]?.app_bundle !== "com.google.Chrome") throw new Error(`claim app bundle mismatch: ${JSON.stringify(claims[1])}`);
+    if (result.moved_count !== 1) throw new Error(`expected one moved window, got ${result.moved_count}`);
+    if (result.moved[0]?.to_workspace !== "task-checkout") throw new Error(`move target mismatch: ${JSON.stringify(result.moved)}`);
+    const commandJson = JSON.stringify(aerospaceCommands);
+    if (commandJson !== JSON.stringify([
+      ["move-node-to-workspace", "--window-id", "99", "task-checkout"],
+      ["workspace", "main"],
+    ])) {
+      throw new Error(`expected move then focus restore, got ${commandJson}`);
+    }
     console.log("task-window-spawn self-test passed");
   } finally {
     await new Promise((resolve, reject) => {

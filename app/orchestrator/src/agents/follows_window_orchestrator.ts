@@ -7,7 +7,7 @@ import { focusWorkspacePlan, moveToWorkspacePlan } from "../workspace/aerospace.
 import type { TaskWindowClaimRecord } from "../store.js";
 import { normalizeTitlePrefix } from "../store.js";
 
-export const DEFAULT_FOLLOWS_POLL_MS = 1_000;
+export const DEFAULT_FOLLOWS_POLL_MS = 500;
 export const DEFAULT_FOLLOWS_TTL_HOURS = 24;
 export const DEFAULT_FOLLOWS_PRUNE_MS = 60 * 60 * 1_000;
 

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { createAmbientWorkspaceSaverFromRuntime, type AmbientWorkspaceSaver } from "./agents/ambient_workspace_saver.js";
 import {
+  DEFAULT_FOLLOWS_POLL_MS,
   createFollowsWindowOrchestratorFromRuntime,
   type FollowsWindowOrchestrator,
 } from "./agents/follows_window_orchestrator.js";
@@ -169,7 +170,7 @@ if (process.env.EVENTLOOPOS_FOLLOWS_WINDOWS === "1" && workspace) {
   followsWindowOrchestrator?.start();
   if (followsWindowOrchestrator) {
     console.log(
-      `follows-window orchestrator enabled (poll=${pollIntervalMs ?? 1000}ms, ttl=${ttlMs ?? 24 * 60 * 60 * 1000}ms)`,
+      `follows-window orchestrator enabled (poll=${pollIntervalMs ?? DEFAULT_FOLLOWS_POLL_MS}ms, ttl=${ttlMs ?? 24 * 60 * 60 * 1000}ms)`,
     );
   }
 }
