@@ -547,9 +547,8 @@ public final class QueueViewModel: ObservableObject {
     }
 
     private func isQueueConflict(_ error: Error) -> Bool {
-        if let queueError = error as? QueueClientError,
-           case let .httpStatus(status) = queueError {
-            return status == 409
+        if let queueError = error as? QueueClientError {
+            return queueError.statusCode == 409
         }
         return false
     }
@@ -1531,14 +1530,10 @@ public final class QueueViewModel: ObservableObject {
 
     private func isTransientBatchError(_ error: Error) -> Bool {
         if let queueError = error as? QueueClientError {
-            switch queueError {
-            case let .httpStatus(status):
+            if let status = queueError.statusCode {
                 return status == 408 || status == 425 || status == 429 || (500...599).contains(status)
-            case .invalidResponse:
-                return true
-            case .packetNotFound:
-                return false
             }
+            return queueError == .invalidResponse
         }
         let nsError = error as NSError
         if nsError.domain == NSURLErrorDomain {

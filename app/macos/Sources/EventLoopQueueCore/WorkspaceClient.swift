@@ -267,7 +267,7 @@ public struct HTTPWorkspaceClient: WorkspaceClient {
     public func status() async throws -> WorkspaceStatusEnvelope {
         let url = baseURL.appending(path: "workspace/status")
         let (data, response) = try await session.data(from: url)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(WorkspaceStatusEnvelope.self, from: data)
     }
 
@@ -277,7 +277,7 @@ public struct HTTPWorkspaceClient: WorkspaceClient {
         request.httpMethod = "POST"
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(WorkspaceCaptureEnvelope.self, from: data).snapshot
     }
 
@@ -292,7 +292,7 @@ public struct HTTPWorkspaceClient: WorkspaceClient {
         request.httpBody = try encoder.encode(WorkspaceRestorePlanRequest(snapshot: snapshot, currentWindows: currentWindows))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(WorkspaceRestorePlanEnvelope.self, from: data)
     }
 
@@ -309,15 +309,19 @@ public struct HTTPWorkspaceClient: WorkspaceClient {
         request.httpBody = try encoder.encode(WorkspaceRestoreRequest(snapshot: snapshot, currentWindows: currentWindows))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(WorkspaceRestoreExecutionEnvelope.self, from: data)
     }
 
-    private func validate(response: URLResponse) throws {
+    private func validate(data: Data, response: URLResponse) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw QueueClientError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
+            let detail = HTTPErrorEnvelope.decodeMessage(from: data, decoder: decoder)
+            if let detail {
+                throw QueueClientError.httpStatusMessage(httpResponse.statusCode, detail)
+            }
             throw QueueClientError.httpStatus(httpResponse.statusCode)
         }
     }

@@ -115,6 +115,58 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(config.clientMode, .http(URL(string: "http://127.0.0.1:9999")!))
     }
 
+    func testHTTPQueueClientIncludesServerErrorMessage() async throws {
+        MockURLProtocol.registry.setHandler { request in
+            let data = """
+            {"code":"manual_mode_active","message":"queue is paused while manual mode is active"}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 409,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, data)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = HTTPQueueClient(baseURL: URL(string: "http://127.0.0.1:4377")!, session: session)
+
+        do {
+            _ = try await client.next(after: nil)
+            XCTFail("expected 409 to throw")
+        } catch QueueClientError.httpStatusMessage(409, let message) {
+            XCTAssertEqual(message, "manual_mode_active: queue is paused while manual mode is active")
+        }
+    }
+
+    func testHTTPWorkspaceClientIncludesServerErrorMessage() async throws {
+        MockURLProtocol.registry.setHandler { request in
+            let data = """
+            {"code":"schema_error","message":"snapshot is required"}
+            """.data(using: .utf8)!
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 422,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, data)
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        let client = HTTPWorkspaceClient(baseURL: URL(string: "http://127.0.0.1:4377")!, session: session)
+
+        do {
+            _ = try await client.capture()
+            XCTFail("expected 422 to throw")
+        } catch QueueClientError.httpStatusMessage(422, let message) {
+            XCTAssertEqual(message, "schema_error: snapshot is required")
+        }
+    }
+
     func testWorkspaceStatusEnvelopeDecodesExecuteFlag() throws {
         let data = """
         {

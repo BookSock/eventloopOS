@@ -82,6 +82,7 @@ public extension QueueClient {
 public enum QueueClientError: Error, Equatable, LocalizedError {
     case invalidResponse
     case httpStatus(Int)
+    case httpStatusMessage(Int, String)
     case packetNotFound(String)
 
     public var errorDescription: String? {
@@ -90,8 +91,19 @@ public enum QueueClientError: Error, Equatable, LocalizedError {
             "Invalid queue response"
         case let .httpStatus(status):
             "Queue request failed with HTTP \(status)"
+        case let .httpStatusMessage(status, message):
+            "Queue request failed with HTTP \(status): \(message)"
         case let .packetNotFound(packetId):
             "Queue packet not found: \(packetId)"
+        }
+    }
+
+    public var statusCode: Int? {
+        switch self {
+        case let .httpStatus(status), let .httpStatusMessage(status, _):
+            status
+        case .invalidResponse, .packetNotFound:
+            nil
         }
     }
 }
@@ -112,7 +124,7 @@ public struct HTTPQueueClient: QueueClient {
     public func fetchQueue() async throws -> [ReviewPacket] {
         let url = baseURL.appending(path: "queue")
         let (data, response) = try await session.data(from: url)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(QueueEnvelope.self, from: data).packets
     }
 
@@ -128,7 +140,7 @@ public struct HTTPQueueClient: QueueClient {
         ))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(QueueActionResult.self, from: data)
     }
 
@@ -145,7 +157,7 @@ public struct HTTPQueueClient: QueueClient {
         ))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(QueueActionResult.self, from: data)
     }
 
@@ -161,7 +173,7 @@ public struct HTTPQueueClient: QueueClient {
         ))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(QueueActionResult.self, from: data)
     }
 
@@ -176,7 +188,7 @@ public struct HTTPQueueClient: QueueClient {
         ))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(QueueActionResult.self, from: data)
     }
 
@@ -188,7 +200,7 @@ public struct HTTPQueueClient: QueueClient {
         request.httpBody = try encoder.encode(LeaseNextRequest(leaseOwner: "mac_queue_app", leaseMs: 60_000))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(QueueActionResult.self, from: data)
     }
 
@@ -200,7 +212,7 @@ public struct HTTPQueueClient: QueueClient {
         request.httpBody = try encoder.encode(LeaseNextRequest(leaseOwner: "mac_queue_app", leaseMs: 60_000, excludeQueueItemId: packetId))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(QueueNextEnvelope.self, from: data).packet
     }
 
@@ -212,7 +224,7 @@ public struct HTTPQueueClient: QueueClient {
         request.httpBody = try encoder.encode(ContextRestorePlanRequest(resource: resource))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(ContextRestorePlanEnvelope.self, from: data).restorePlan
     }
 
@@ -228,14 +240,14 @@ public struct HTTPQueueClient: QueueClient {
         request.httpBody = try encoder.encode(ContextRestorePlanRequest(resource: resource))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(ContextRestoreRequestEnvelope.self, from: data).restoreRequest
     }
 
     public func contextRestoreRequest(id: String) async throws -> ContextRestoreRequest {
         let url = baseURL.appending(path: "contexts/restore-requests/\(id)")
         let (data, response) = try await session.data(from: url)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(ContextRestoreRequestEnvelope.self, from: data).restoreRequest
     }
 
@@ -246,14 +258,14 @@ public struct HTTPQueueClient: QueueClient {
             throw QueueClientError.invalidResponse
         }
         let (data, response) = try await session.data(from: url)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(QueueLineageEnvelope.self, from: data).lineage
     }
 
     public func fetchTaskSessions() async throws -> [TaskSession] {
         let url = baseURL.appending(path: "task-sessions")
         let (data, response) = try await session.data(from: url)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(TaskSessionsEnvelope.self, from: data).sessions
     }
 
@@ -265,7 +277,7 @@ public struct HTTPQueueClient: QueueClient {
         request.httpBody = try encoder.encode(TaskBindingRequest(taskId: taskId, terminalRef: terminalRef))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(TaskBindingEnvelope.self, from: data).binding
     }
 
@@ -285,7 +297,7 @@ public struct HTTPQueueClient: QueueClient {
         ))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(TaskWorkspaceSnapshotSaveResult.self, from: data)
     }
 
@@ -304,7 +316,7 @@ public struct HTTPQueueClient: QueueClient {
         ))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(MasterCommandResult.self, from: data)
     }
 
@@ -335,14 +347,14 @@ public struct HTTPQueueClient: QueueClient {
         ))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(TaskSessionStartEnvelope.self, from: data).started
     }
 
     public func fetchOnboardingScan() async throws -> OnboardingScan {
         let url = baseURL.appending(path: "onboarding/scan")
         let (data, response) = try await session.data(from: url)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(OnboardingScan.self, from: data)
     }
 
@@ -362,7 +374,7 @@ public struct HTTPQueueClient: QueueClient {
         request.httpBody = try encoder.encode(approval)
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(OnboardingApprovalResult.self, from: data)
     }
 
@@ -381,7 +393,7 @@ public struct HTTPQueueClient: QueueClient {
         ))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(OnboardingApprovalBatchResult.self, from: data)
     }
 
@@ -393,14 +405,14 @@ public struct HTTPQueueClient: QueueClient {
         request.httpBody = try encoder.encode(ManualModeRequestBody(active: active, reason: reason))
 
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(ManualModeStateEnvelope.self, from: data).manualMode
     }
 
     public func getManualMode() async throws -> ManualModeState {
         let url = baseURL.appending(path: "modes/manual")
         let (data, response) = try await session.data(from: url)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(ManualModeStateEnvelope.self, from: data).manualMode
     }
 
@@ -427,7 +439,7 @@ public struct HTTPQueueClient: QueueClient {
             idempotencyKey: idempotencyKey
         ))
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(MasterFanOutResult.self, from: data)
     }
 
@@ -443,14 +455,14 @@ public struct HTTPQueueClient: QueueClient {
             actorId: "mac_queue_app"
         ))
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(QueueActionResult.self, from: data)
     }
 
     public func fetchReadingQueue() async throws -> ReadingQueueListResult {
         let url = baseURL.appending(path: "reading-queue")
         let (data, response) = try await session.data(from: url)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(ReadingQueueListResult.self, from: data)
     }
 
@@ -464,7 +476,7 @@ public struct HTTPQueueClient: QueueClient {
             actorId: "mac_queue_app"
         ))
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(ReadingQueuePromoteResult.self, from: data)
     }
 
@@ -473,7 +485,7 @@ public struct HTTPQueueClient: QueueClient {
         components?.queryItems = [URLQueryItem(name: "limit", value: String(limit))]
         guard let url = components?.url else { throw QueueClientError.invalidResponse }
         let (data, response) = try await session.data(from: url)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(ActivityFeedResult.self, from: data)
     }
 
@@ -484,7 +496,7 @@ public struct HTTPQueueClient: QueueClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = "{}".data(using: .utf8)
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(CodexAutoBindResult.self, from: data)
     }
 
@@ -505,14 +517,14 @@ public struct HTTPQueueClient: QueueClient {
             autoPaperIdleSeconds: autoPaperIdleSeconds
         ))
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(CreateTaskResult.self, from: data)
     }
 
     public func getCurrentTask() async throws -> CurrentTaskState {
         let url = baseURL.appending(path: "tasks/current")
         let (data, response) = try await session.data(from: url)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(CurrentTaskState.self, from: data)
     }
 
@@ -523,21 +535,21 @@ public struct HTTPQueueClient: QueueClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(SetCurrentTaskRequest(taskId: taskId))
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(CurrentTaskState.self, from: data)
     }
 
     public func listTasks() async throws -> [TaskRecord] {
         let url = baseURL.appending(path: "tasks")
         let (data, response) = try await session.data(from: url)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(TasksListEnvelope.self, from: data).tasks
     }
 
     public func getTaskWithLayout(taskId: String) async throws -> TaskGetEnvelope {
         let url = baseURL.appending(path: "tasks/\(taskId)")
         let (data, response) = try await session.data(from: url)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(TaskGetEnvelope.self, from: data)
     }
 
@@ -548,7 +560,7 @@ public struct HTTPQueueClient: QueueClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(layout)
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(TaskLayoutUpdateEnvelope.self, from: data).task
     }
 
@@ -559,17 +571,48 @@ public struct HTTPQueueClient: QueueClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try encoder.encode(["min_age_seconds": minAgeSeconds])
         let (data, response) = try await session.data(for: request)
-        try validate(response: response)
+        try validate(data: data, response: response)
         return try decoder.decode(ReadingQueuePromoteResult.self, from: data)
     }
 
-    private func validate(response: URLResponse) throws {
+    private func validate(data: Data, response: URLResponse) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw QueueClientError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
+            let detail = HTTPErrorEnvelope.decodeMessage(from: data, decoder: decoder)
+            if let detail {
+                throw QueueClientError.httpStatusMessage(httpResponse.statusCode, detail)
+            }
             throw QueueClientError.httpStatus(httpResponse.statusCode)
         }
+    }
+}
+
+struct HTTPErrorEnvelope: Decodable {
+    let code: String?
+    let message: String?
+    let error: String?
+
+    static func decodeMessage(from data: Data, decoder: JSONDecoder) -> String? {
+        guard !data.isEmpty,
+              let envelope = try? decoder.decode(HTTPErrorEnvelope.self, from: data) else {
+            return nil
+        }
+        let message = envelope.message ?? envelope.error
+        let trimmedMessage = message?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedCode = envelope.code?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedCode, !trimmedCode.isEmpty,
+           let trimmedMessage, !trimmedMessage.isEmpty {
+            return "\(trimmedCode): \(trimmedMessage)"
+        }
+        if let trimmedMessage, !trimmedMessage.isEmpty {
+            return trimmedMessage
+        }
+        if let trimmedCode, !trimmedCode.isEmpty {
+            return trimmedCode
+        }
+        return nil
     }
 }
 
