@@ -1,0 +1,10 @@
+{
+  "schema": "OnboardingWindow",
+  "data": {
+    "id": 42,
+    "app": "Ghostty",
+    "title": "codex [task:blog_launch]",
+    "workspace": "demo-blog",
+    "task_hint": "blog_launch"
+  }
+}

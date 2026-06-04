@@ -1,0 +1,8 @@
+{
+  "schema": "OnboardingRejectionRecord",
+  "data": {
+    "proposal_key": "proposal_skip_music",
+    "reason": "not work",
+    "rejected_at": "2026-05-06T17:13:00Z"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "schema": "OnboardingApprovalBatchEntry",
+  "data": {
+    "ok": true,
+    "proposal_id": "proposal_blog_launch",
+    "task_id": "task_blog_launch"
+  }
+}

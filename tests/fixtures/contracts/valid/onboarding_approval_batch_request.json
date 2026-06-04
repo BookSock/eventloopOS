@@ -1,0 +1,13 @@
+{
+  "schema": "OnboardingApprovalBatchRequest",
+  "data": {
+    "idempotency_key": "idem_onboarding_batch",
+    "approvals": [
+      {
+        "proposal_id": "proposal_blog_launch",
+        "queue_paper": true,
+        "actor_id": "human_demo"
+      }
+    ]
+  }
+}

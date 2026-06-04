@@ -1,0 +1,8 @@
+{
+  "schema": "OnboardingBrowserContextBinding",
+  "data": {
+    "browser_context_id": "browser_tab_blog",
+    "event_id": "evt_onboarding_context_bind_blog",
+    "task_id": "task_blog_launch"
+  }
+}

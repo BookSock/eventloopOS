@@ -1,0 +1,13 @@
+{
+  "schema": "OnboardingBrowserContext",
+  "data": {
+    "id": "browser_tab_blog",
+    "title": "Blog draft",
+    "url": "https://example.test/blog",
+    "task_id": "task_blog_launch",
+    "window_id": "42",
+    "tab_id": "7",
+    "captured_at": "2026-05-06T17:13:00Z",
+    "restore_confidence": "high"
+  }
+}

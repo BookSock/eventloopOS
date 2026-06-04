@@ -1,0 +1,8 @@
+{
+  "schema": "OnboardingApprovalRequest",
+  "data": {
+    "proposal_id": "proposal_blog_launch",
+    "queue_paper": true,
+    "actor_id": "human_demo"
+  }
+}

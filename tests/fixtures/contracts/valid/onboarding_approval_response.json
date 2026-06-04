@@ -1,0 +1,19 @@
+{
+  "schema": "OnboardingApprovalResponse",
+  "data": {
+    "ok": true,
+    "task_id": "task_blog_launch",
+    "proposal_id": "proposal_blog_launch",
+    "bindings": [],
+    "browser_context_bindings": [
+      {
+        "browser_context_id": "browser_tab_blog",
+        "event_id": "evt_onboarding_context_bind_blog",
+        "task_id": "task_blog_launch"
+      }
+    ],
+    "task_created": true,
+    "warnings": [],
+    "request_id": "req_onboarding_approval"
+  }
+}

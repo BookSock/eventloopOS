@@ -551,6 +551,194 @@ export const TaskWorkspaceSnapshotRecordSchema = z
   .strict();
 export type TaskWorkspaceSnapshotRecord = z.infer<typeof TaskWorkspaceSnapshotRecordSchema>;
 
+export const OnboardingWindowSchema = z
+  .object({
+    id: z.number().int().positive(),
+    app: nonEmpty,
+    title: z.string(),
+    workspace: z.string(),
+    task_hint: id.optional()
+  })
+  .strict();
+export type OnboardingWindow = z.infer<typeof OnboardingWindowSchema>;
+
+export const OnboardingBrowserContextSchema = z
+  .object({
+    id,
+    title: nonEmpty,
+    url: z.string().optional(),
+    task_id: id.optional(),
+    window_id: z.string().optional(),
+    tab_id: z.string().optional(),
+    captured_at: isoDateTime,
+    restore_confidence: z.enum(["high", "medium", "low"])
+  })
+  .strict();
+export type OnboardingBrowserContext = z.infer<typeof OnboardingBrowserContextSchema>;
+
+export const OnboardingScanSummarySchema = z
+  .object({
+    window_count: z.number().int().nonnegative(),
+    grouped_window_count: z.number().int().nonnegative(),
+    ungrouped_window_count: z.number().int().nonnegative(),
+    task_session_count: z.number().int().nonnegative(),
+    browser_context_count: z.number().int().nonnegative(),
+    proposal_count: z.number().int().nonnegative()
+  })
+  .strict();
+export type OnboardingScanSummary = z.infer<typeof OnboardingScanSummarySchema>;
+
+export const OnboardingTaskProposalSchema = z
+  .object({
+    id,
+    task_id: id,
+    title: nonEmpty,
+    confidence: z.enum(["high", "medium", "low"]),
+    reason: nonEmpty,
+    windows: z.array(OnboardingWindowSchema),
+    browser_contexts: z.array(OnboardingBrowserContextSchema),
+    task_sessions: z.array(z.lazy(() => TaskRuntimeSessionSchema)),
+    suggested_next_action: nonEmpty
+  })
+  .strict();
+export type OnboardingTaskProposal = z.infer<typeof OnboardingTaskProposalSchema>;
+
+export const OnboardingScanResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    captured_at: isoDateTime,
+    active_workspace: z.string().optional(),
+    focused_window_id: z.number().int().positive().optional(),
+    summary: OnboardingScanSummarySchema,
+    proposals: z.array(OnboardingTaskProposalSchema),
+    ungrouped_windows: z.array(OnboardingWindowSchema),
+    browser_contexts: z.array(OnboardingBrowserContextSchema),
+    task_sessions: z.array(z.lazy(() => TaskRuntimeSessionSchema)),
+    warnings: z.array(z.string()),
+    rejected_proposal_keys: z.array(id),
+    request_id: id
+  })
+  .strict();
+export type OnboardingScanResponse = z.infer<typeof OnboardingScanResponseSchema>;
+
+export const OnboardingApprovalRequestSchema = z
+  .object({
+    proposal_id: id.optional(),
+    task_id: id.optional(),
+    task_hint: id.optional(),
+    window_ids: z.array(z.number().int().positive()).optional(),
+    window_id: z.number().int().positive().optional(),
+    task_session_ids: z.array(id).optional(),
+    task_session_id: id.optional(),
+    browser_context_ids: z.array(id).optional(),
+    browser_context_id: id.optional(),
+    queue_paper: z.boolean().optional(),
+    actor_id: id.optional(),
+    idempotency_key: id.optional()
+  })
+  .passthrough()
+  .superRefine((value, ctx) => {
+    if (!value.proposal_id && !value.task_id && !value.task_hint) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "proposal_id, task_id, or task_hint is required",
+        path: ["proposal_id"]
+      });
+    }
+  });
+export type OnboardingApprovalRequest = z.infer<typeof OnboardingApprovalRequestSchema>;
+
+export const OnboardingBrowserContextBindingSchema = z
+  .object({
+    browser_context_id: id,
+    event_id: id,
+    task_id: id
+  })
+  .strict();
+export type OnboardingBrowserContextBinding = z.infer<typeof OnboardingBrowserContextBindingSchema>;
+
+export const OnboardingApprovalResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    task_id: id,
+    proposal_id: id.optional(),
+    workspace_snapshot: TaskWorkspaceSnapshotRecordSchema.optional(),
+    bindings: z.array(unknownRecord),
+    browser_context_bindings: z.array(OnboardingBrowserContextBindingSchema),
+    task: TaskRecordSchema.optional(),
+    task_layout: TaskLayoutRecordSchema.optional(),
+    task_created: z.boolean().optional(),
+    queue_item: z.lazy(() => QueueItemWithPacketSchema).optional(),
+    review_packet: z.lazy(() => ReviewPacketSchema).optional(),
+    warnings: z.array(z.string()),
+    request_id: id
+  })
+  .strict();
+export type OnboardingApprovalResponse = z.infer<typeof OnboardingApprovalResponseSchema>;
+
+export const OnboardingApprovalBatchRequestSchema = z
+  .object({
+    approvals: z.array(OnboardingApprovalRequestSchema).min(1),
+    idempotency_key: id.optional()
+  })
+  .passthrough();
+export type OnboardingApprovalBatchRequest = z.infer<typeof OnboardingApprovalBatchRequestSchema>;
+
+export const OnboardingApprovalBatchEntrySchema = z
+  .object({
+    ok: z.boolean(),
+    proposal_id: id.optional(),
+    task_id: id.optional(),
+    queue_item: z.lazy(() => QueueItemWithPacketSchema).optional(),
+    review_packet: z.lazy(() => ReviewPacketSchema).optional(),
+    error: z
+      .object({
+        code: nonEmpty,
+        message: nonEmpty,
+        details: unknownRecord.optional()
+      })
+      .passthrough()
+      .optional()
+  })
+  .passthrough();
+export type OnboardingApprovalBatchEntry = z.infer<typeof OnboardingApprovalBatchEntrySchema>;
+
+export const OnboardingApprovalBatchResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    results: z.array(OnboardingApprovalBatchEntrySchema),
+    idempotent_replay: z.boolean().optional(),
+    request_id: id
+  })
+  .strict();
+export type OnboardingApprovalBatchResponse = z.infer<typeof OnboardingApprovalBatchResponseSchema>;
+
+export const OnboardingRejectionRequestSchema = z
+  .object({
+    proposal_key: id,
+    reason: z.string().optional()
+  })
+  .passthrough();
+export type OnboardingRejectionRequest = z.infer<typeof OnboardingRejectionRequestSchema>;
+
+export const OnboardingRejectionRecordSchema = z
+  .object({
+    proposal_key: id,
+    reason: z.string().optional(),
+    rejected_at: isoDateTime
+  })
+  .strict();
+export type OnboardingRejectionRecord = z.infer<typeof OnboardingRejectionRecordSchema>;
+
+export const OnboardingRejectionResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    rejection: OnboardingRejectionRecordSchema,
+    request_id: id
+  })
+  .strict();
+export type OnboardingRejectionResponse = z.infer<typeof OnboardingRejectionResponseSchema>;
+
 export const CreateTaskRequestSchema = z
   .object({
     primary_anchor: TaskAnchorSchema,
@@ -2088,6 +2276,20 @@ export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   TaskRecord: TaskRecordSchema,
   TaskLayoutRecord: TaskLayoutRecordSchema,
   TaskWorkspaceSnapshotRecord: TaskWorkspaceSnapshotRecordSchema,
+  OnboardingWindow: OnboardingWindowSchema,
+  OnboardingBrowserContext: OnboardingBrowserContextSchema,
+  OnboardingScanSummary: OnboardingScanSummarySchema,
+  OnboardingTaskProposal: OnboardingTaskProposalSchema,
+  OnboardingScanResponse: OnboardingScanResponseSchema,
+  OnboardingApprovalRequest: OnboardingApprovalRequestSchema,
+  OnboardingBrowserContextBinding: OnboardingBrowserContextBindingSchema,
+  OnboardingApprovalResponse: OnboardingApprovalResponseSchema,
+  OnboardingApprovalBatchRequest: OnboardingApprovalBatchRequestSchema,
+  OnboardingApprovalBatchEntry: OnboardingApprovalBatchEntrySchema,
+  OnboardingApprovalBatchResponse: OnboardingApprovalBatchResponseSchema,
+  OnboardingRejectionRequest: OnboardingRejectionRequestSchema,
+  OnboardingRejectionRecord: OnboardingRejectionRecordSchema,
+  OnboardingRejectionResponse: OnboardingRejectionResponseSchema,
   CreateTaskRequest: CreateTaskRequestSchema,
   CreateTaskResponse: CreateTaskResponseSchema,
   TaskListResponse: TaskListResponseSchema,

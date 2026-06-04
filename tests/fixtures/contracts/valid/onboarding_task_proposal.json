@@ -1,0 +1,40 @@
+{
+  "schema": "OnboardingTaskProposal",
+  "data": {
+    "id": "proposal_blog_launch",
+    "task_id": "task_blog_launch",
+    "title": "Blog Launch",
+    "confidence": "high",
+    "reason": "window title contains [task:...]",
+    "windows": [
+      {
+        "id": 42,
+        "app": "Ghostty",
+        "title": "codex [task:blog_launch]",
+        "workspace": "demo-blog",
+        "task_hint": "blog_launch"
+      }
+    ],
+    "browser_contexts": [
+      {
+        "id": "browser_tab_blog",
+        "title": "Blog draft",
+        "url": "https://example.test/blog",
+        "task_id": "task_blog_launch",
+        "window_id": "42",
+        "tab_id": "7",
+        "captured_at": "2026-05-06T17:13:00Z",
+        "restore_confidence": "high"
+      }
+    ],
+    "task_sessions": [
+      {
+        "id": "codex_session_blog",
+        "task_id": "task_blog_launch",
+        "provider": "codex",
+        "status": "idle"
+      }
+    ],
+    "suggested_next_action": "Approve task workbench"
+  }
+}

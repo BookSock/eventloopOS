@@ -1,0 +1,87 @@
+{
+  "schema": "OnboardingScanResponse",
+  "data": {
+    "ok": true,
+    "captured_at": "2026-05-06T17:13:00Z",
+    "active_workspace": "demo-blog",
+    "focused_window_id": 42,
+    "summary": {
+      "window_count": 2,
+      "grouped_window_count": 1,
+      "ungrouped_window_count": 1,
+      "task_session_count": 1,
+      "browser_context_count": 1,
+      "proposal_count": 1
+    },
+    "proposals": [
+      {
+        "id": "proposal_blog_launch",
+        "task_id": "task_blog_launch",
+        "title": "Blog Launch",
+        "confidence": "high",
+        "reason": "window title contains [task:...]",
+        "windows": [
+          {
+            "id": 42,
+            "app": "Ghostty",
+            "title": "codex [task:blog_launch]",
+            "workspace": "demo-blog",
+            "task_hint": "blog_launch"
+          }
+        ],
+        "browser_contexts": [
+          {
+            "id": "browser_tab_blog",
+            "title": "Blog draft",
+            "url": "https://example.test/blog",
+            "task_id": "task_blog_launch",
+            "window_id": "42",
+            "tab_id": "7",
+            "captured_at": "2026-05-06T17:13:00Z",
+            "restore_confidence": "high"
+          }
+        ],
+        "task_sessions": [
+          {
+            "id": "codex_session_blog",
+            "task_id": "task_blog_launch",
+            "provider": "codex",
+            "status": "idle"
+          }
+        ],
+        "suggested_next_action": "Approve task workbench"
+      }
+    ],
+    "ungrouped_windows": [
+      {
+        "id": 43,
+        "app": "TextEdit",
+        "title": "Scratch",
+        "workspace": "demo-blog"
+      }
+    ],
+    "browser_contexts": [
+      {
+        "id": "browser_tab_blog",
+        "title": "Blog draft",
+        "url": "https://example.test/blog",
+        "task_id": "task_blog_launch",
+        "window_id": "42",
+        "tab_id": "7",
+        "captured_at": "2026-05-06T17:13:00Z",
+        "restore_confidence": "high"
+      }
+    ],
+    "task_sessions": [
+      {
+        "id": "codex_session_blog",
+        "task_id": "task_blog_launch",
+        "provider": "codex",
+        "status": "idle"
+      }
+    ],
+    "warnings": [],
+    "rejected_proposal_keys": [],
+    "request_id": "req_onboarding_scan"
+  }
+}

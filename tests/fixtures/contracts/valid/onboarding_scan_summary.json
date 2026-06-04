@@ -1,0 +1,11 @@
+{
+  "schema": "OnboardingScanSummary",
+  "data": {
+    "window_count": 2,
+    "grouped_window_count": 1,
+    "ungrouped_window_count": 1,
+    "task_session_count": 1,
+    "browser_context_count": 1,
+    "proposal_count": 1
+  }
+}

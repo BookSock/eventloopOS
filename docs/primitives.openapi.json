@@ -1554,18 +1554,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/OnboardingApprovalRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/OnboardingApprovalResponse"
                 }
               }
             },
@@ -1599,18 +1599,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/OnboardingApprovalBatchRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/OnboardingApprovalBatchResponse"
                 }
               }
             },
@@ -1644,18 +1644,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/OnboardingRejectionRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/OnboardingRejectionResponse"
                 }
               }
             },
@@ -1690,7 +1690,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/OnboardingScanResponse"
                 }
               }
             },
@@ -5612,6 +5612,565 @@
         "required": [
           "counters",
           "activity_count"
+        ],
+        "type": "object"
+      },
+      "OnboardingApprovalBatchEntry": {
+        "additionalProperties": true,
+        "properties": {
+          "error": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "ok": {
+            "type": "boolean"
+          },
+          "proposal_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "queue_item": {
+            "$ref": "#/components/schemas/QueueItemWithPacket"
+          },
+          "review_packet": {
+            "$ref": "#/components/schemas/ReviewPacket"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "type": "object"
+      },
+      "OnboardingApprovalBatchRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "approvals": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingApprovalRequest"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "idempotency_key": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "approvals"
+        ],
+        "type": "object"
+      },
+      "OnboardingApprovalBatchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "idempotent_replay": {
+            "type": "boolean"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingApprovalBatchEntry"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "results",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "OnboardingApprovalRequest": {
+        "additionalProperties": true,
+        "anyOf": [
+          {
+            "required": [
+              "proposal_id"
+            ]
+          },
+          {
+            "required": [
+              "task_id"
+            ]
+          },
+          {
+            "required": [
+              "task_hint"
+            ]
+          }
+        ],
+        "properties": {
+          "actor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "browser_context_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "browser_context_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "idempotency_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "proposal_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "queue_paper": {
+            "type": "boolean"
+          },
+          "task_hint": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_session_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "window_id": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "window_ids": {
+            "items": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "OnboardingApprovalResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "bindings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "browser_context_bindings": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingBrowserContextBinding"
+            },
+            "type": "array"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "proposal_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "queue_item": {
+            "$ref": "#/components/schemas/QueueItemWithPacket"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "review_packet": {
+            "$ref": "#/components/schemas/ReviewPacket"
+          },
+          "task": {
+            "$ref": "#/components/schemas/TaskRecord"
+          },
+          "task_created": {
+            "type": "boolean"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_layout": {
+            "$ref": "#/components/schemas/TaskLayoutRecord"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "workspace_snapshot": {
+            "$ref": "#/components/schemas/TaskWorkspaceSnapshotRecord"
+          }
+        },
+        "required": [
+          "ok",
+          "task_id",
+          "bindings",
+          "browser_context_bindings",
+          "warnings",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "OnboardingBrowserContext": {
+        "additionalProperties": false,
+        "properties": {
+          "captured_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "restore_confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "type": "string"
+          },
+          "tab_id": {
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "captured_at",
+          "restore_confidence"
+        ],
+        "type": "object"
+      },
+      "OnboardingBrowserContextBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "browser_context_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "event_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "browser_context_id",
+          "event_id",
+          "task_id"
+        ],
+        "type": "object"
+      },
+      "OnboardingRejectionRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "proposal_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "rejected_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposal_key",
+          "rejected_at"
+        ],
+        "type": "object"
+      },
+      "OnboardingRejectionRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "proposal_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "proposal_key"
+        ],
+        "type": "object"
+      },
+      "OnboardingRejectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "rejection": {
+            "$ref": "#/components/schemas/OnboardingRejectionRecord"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "rejection",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "OnboardingScanResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "active_workspace": {
+            "type": "string"
+          },
+          "browser_contexts": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingBrowserContext"
+            },
+            "type": "array"
+          },
+          "captured_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "focused_window_id": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "proposals": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingTaskProposal"
+            },
+            "type": "array"
+          },
+          "rejected_proposal_keys": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/OnboardingScanSummary"
+          },
+          "task_sessions": {
+            "items": {
+              "$ref": "#/components/schemas/TaskRuntimeSession"
+            },
+            "type": "array"
+          },
+          "ungrouped_windows": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingWindow"
+            },
+            "type": "array"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "captured_at",
+          "summary",
+          "proposals",
+          "ungrouped_windows",
+          "browser_contexts",
+          "task_sessions",
+          "warnings",
+          "rejected_proposal_keys",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "OnboardingScanSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "browser_context_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "grouped_window_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "proposal_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "task_session_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ungrouped_window_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "window_count": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_count",
+          "grouped_window_count",
+          "ungrouped_window_count",
+          "task_session_count",
+          "browser_context_count",
+          "proposal_count"
+        ],
+        "type": "object"
+      },
+      "OnboardingTaskProposal": {
+        "additionalProperties": false,
+        "properties": {
+          "browser_contexts": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingBrowserContext"
+            },
+            "type": "array"
+          },
+          "confidence": {
+            "enum": [
+              "high",
+              "medium",
+              "low"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "suggested_next_action": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_sessions": {
+            "items": {
+              "$ref": "#/components/schemas/TaskRuntimeSession"
+            },
+            "type": "array"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/OnboardingWindow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "task_id",
+          "title",
+          "confidence",
+          "reason",
+          "windows",
+          "browser_contexts",
+          "task_sessions",
+          "suggested_next_action"
+        ],
+        "type": "object"
+      },
+      "OnboardingWindow": {
+        "additionalProperties": false,
+        "properties": {
+          "app": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "task_hint": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "workspace": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "app",
+          "title",
+          "workspace"
         ],
         "type": "object"
       },

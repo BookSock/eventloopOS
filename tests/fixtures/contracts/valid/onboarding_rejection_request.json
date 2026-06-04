@@ -1,0 +1,7 @@
+{
+  "schema": "OnboardingRejectionRequest",
+  "data": {
+    "proposal_key": "proposal_skip_music",
+    "reason": "not work"
+  }
+}

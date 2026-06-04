@@ -1,0 +1,14 @@
+{
+  "schema": "OnboardingApprovalBatchResponse",
+  "data": {
+    "ok": true,
+    "results": [
+      {
+        "ok": true,
+        "proposal_id": "proposal_blog_launch",
+        "task_id": "task_blog_launch"
+      }
+    ],
+    "request_id": "req_onboarding_batch"
+  }
+}
