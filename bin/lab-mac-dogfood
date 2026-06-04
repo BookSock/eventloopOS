@@ -326,7 +326,7 @@ while read -r window_id; do
   [[ -z \"\$window_id\" ]] && continue
   aerospace close --window-id \"\$window_id\" >/dev/null 2>&1
   closed=\$((closed + 1))
-done < <(jq -r \".[] | select((.\\\"app-name\\\" == \\\"eventloopOS Queue\\\") or (.\\\"app-name\\\" == \\\"Ghostty\\\" and (.\\\"window-title\\\" | test(\\\"eventloopOS|codex|dogfood|completion-workspace\\\"; \\\"i\\\"))) or (.\\\"app-name\\\" == \\\"TextEdit\\\" and (.\\\"window-title\\\" | test(\\\"eventloopOS-task-(switch|memory)-\\\"; \\\"i\\\")))) | .\\\"window-id\\\"\" /tmp/eventloopos-lab-cleanup-windows.json 2>/dev/null)
+done < <(jq -r \".[] | select((.\\\"app-name\\\" == \\\"eventloopOS Queue\\\") or (.\\\"app-name\\\" == \\\"Ghostty\\\" and (.\\\"window-title\\\" | test(\\\"eventloopOS|codex|dogfood|completion-workspace\\\"; \\\"i\\\"))) or ((.\\\"app-name\\\" == \\\"TextEdit\\\" or .\\\"app-name\\\" == \\\"Google Chrome\\\") and (.\\\"window-title\\\" | test(\\\"eventloopOS (Human Demo|Demo|task-)\\\"; \\\"i\\\")))) | .\\\"window-id\\\"\" /tmp/eventloopos-lab-cleanup-windows.json 2>/dev/null)
 osascript <<'\"'\"'APPLESCRIPT'\"'\"' >/tmp/eventloopos-lab-cleanup-queue.out 2>/tmp/eventloopos-lab-cleanup-queue.err || true
 set closedQueueWindows to 0
 tell application \"System Events\"

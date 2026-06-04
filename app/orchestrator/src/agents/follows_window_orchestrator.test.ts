@@ -254,6 +254,51 @@ describe("follows_window_orchestrator", () => {
     assert.deepEqual(ranCommands[0]?.args, ["move-node-to-workspace", "--window-id", "300", "ws-b"]);
   });
 
+  it("moves a detached agent-claimed browser window away from the user's current paper", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "ws-a",
+      windows: [
+        { id: 100, app: "Ghostty", title: "paper A", workspace: "ws-a", pid: 100 },
+        {
+          id: 301,
+          app: "Google Chrome",
+          appBundleId: "com.google.Chrome",
+          title: "Task B checkout smoke - Google Chrome",
+          workspace: "ws-a",
+        },
+      ],
+    };
+    const { deps, ranCommands } = makeDeps({
+      focusedWorkspace: "ws-a",
+      follows: [],
+      snapshot,
+      claims: [
+        {
+          claim_id: "twc_b_browser_title",
+          task_id: "task_b",
+          app_bundle: "com.google.chrome",
+          title_prefix: "task b checkout smoke",
+          created_at: "2026-05-06T12:00:00.000Z",
+        },
+      ],
+      taskWorkspaces: { task_b: "ws-b" },
+    });
+
+    const orch = createFollowsWindowOrchestrator(deps);
+    await orch.tick();
+    ranCommands.length = 0;
+
+    const result = await orch.tick();
+
+    assert.equal(result.decision, "no_change");
+    if (result.decision !== "no_change") return;
+    assert.equal(result.foreignClaimedMoved, 1);
+    assert.deepEqual(ranCommands.map((command) => command.args), [
+      ["move-node-to-workspace", "--window-id", "301", "ws-b"],
+    ]);
+  });
+
   it("skips system windows in the blocklist", async () => {
     const snapshot: WorkspaceSnapshot = {
       backend: "aerospace",

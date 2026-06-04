@@ -3,6 +3,11 @@ import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
 
+if (process.argv.includes("--self-test")) {
+  runSelfTest();
+  process.exit(0);
+}
+
 const profile = sanitizeProfile(process.env.EVENTLOOPOS_DOGFOOD_PROFILE ?? "default");
 const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? defaultOrchestratorUrl(profile);
 const orchestratorEndpoint = parseHttpEndpoint(orchestratorUrl);
@@ -12,10 +17,14 @@ const usePostgres = process.env.EVENTLOOPOS_DOGFOOD_POSTGRES !== "0";
 const providedDatabaseUrl = process.env.DATABASE_URL;
 const launchQueueApp = process.env.EVENTLOOPOS_DOGFOOD_QUEUE_APP !== "0";
 const smokeMs = parseOptionalPositiveInteger(process.env.EVENTLOOPOS_DOGFOOD_SMOKE_MS);
+const queueAppMaxRestarts = parseOptionalNonnegativeInteger(process.env.EVENTLOOPOS_DOGFOOD_QUEUE_APP_MAX_RESTARTS) ?? 3;
+const queueAppRestartDelayMs = parseOptionalPositiveInteger(process.env.EVENTLOOPOS_DOGFOOD_QUEUE_APP_RESTART_DELAY_MS) ?? 1_000;
 const emptySeedFixture = "fixtures/empty-review-packets.json";
 const children = [];
 let startedPostgres = false;
 let cleaningUp = false;
+let queueAppRestartCount = 0;
+let queueAppRestartTimer;
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, async () => {
@@ -53,13 +62,9 @@ try {
 
   maybeStartPollLoop();
 
-  const app = launchQueueApp
-    ? spawnChild("pnpm", ["run", "run:queue-app"], {
-      EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl,
-      EVENTLOOPOS_QUEUE_APP_RUN_SMOKE_MS: smokeMs === undefined ? undefined : String(smokeMs),
-      EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW: process.env.EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW,
-    })
-    : undefined;
+  if (launchQueueApp) {
+    startQueueApp(orchestrator);
+  }
 
   process.stdout.write(`eventloopOS dogfood stack ready at ${orchestratorUrl}\n`);
   process.stdout.write(`Dogfood profile: ${profile}\n`);
@@ -78,7 +83,9 @@ try {
     process.stdout.write("Queue app disabled for this stack. Ctrl-C here stops orchestrator, poll loop, and dev Postgres.\n");
   }
   // `open -W` can return even while the LSUIElement Queue app remains alive, so
-  // the orchestrator is the durable lifecycle owner for dogfood mode.
+  // the orchestrator is the durable lifecycle owner for dogfood mode. If the
+  // Queue app exits early during lab proof, restart it so GUI assertions are not
+  // invalidated by a vanished harness window.
   const appCode = await waitForExit(orchestrator);
   await cleanup();
   process.exitCode = appCode ?? 0;
@@ -133,6 +140,51 @@ function maybeStartPollLoop() {
     EVENTLOOPOS_MCP_POLL_INTERVAL_MS: process.env.EVENTLOOPOS_MCP_POLL_INTERVAL_MS ?? "30000",
     EVENTLOOPOS_MCP_SOURCE_IDS: process.env.EVENTLOOPOS_MCP_SOURCE_IDS,
   });
+}
+
+function startQueueApp(orchestrator) {
+  const child = spawnChild("pnpm", ["run", "run:queue-app"], {
+    EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl,
+    EVENTLOOPOS_QUEUE_APP_RUN_SMOKE_MS: smokeMs === undefined ? undefined : String(smokeMs),
+    EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW: process.env.EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW,
+  });
+  child.once("exit", (code, signal) => {
+    handleQueueAppExit(orchestrator, code, signal);
+  });
+  return child;
+}
+
+function handleQueueAppExit(orchestrator, code, signal) {
+  if (!shouldRestartQueueApp({
+    launchQueueApp,
+    cleaningUp,
+    orchestratorExitCode: orchestrator.exitCode,
+    restartCount: queueAppRestartCount,
+    maxRestarts: queueAppMaxRestarts,
+  })) {
+    if (!cleaningUp && launchQueueApp && orchestrator.exitCode === null && queueAppMaxRestarts === queueAppRestartCount) {
+      process.stderr.write(`Queue app exited with ${signal ?? code ?? 0}; restart limit reached (${queueAppMaxRestarts}).\n`);
+    }
+    return;
+  }
+
+  queueAppRestartCount += 1;
+  process.stderr.write(
+    `Queue app exited with ${signal ?? code ?? 0}; restarting (${queueAppRestartCount}/${queueAppMaxRestarts}).\n`,
+  );
+  queueAppRestartTimer = setTimeout(() => {
+    queueAppRestartTimer = undefined;
+    if (cleaningUp || orchestrator.exitCode !== null) return;
+    startQueueApp(orchestrator);
+  }, queueAppRestartDelayMs);
+  if (typeof queueAppRestartTimer.unref === "function") queueAppRestartTimer.unref();
+}
+
+function shouldRestartQueueApp(input) {
+  return input.launchQueueApp
+    && !input.cleaningUp
+    && input.orchestratorExitCode === null
+    && input.restartCount < input.maxRestarts;
 }
 
 function defaultMcpSourcesMode() {
@@ -262,6 +314,10 @@ async function waitForExit(child) {
 async function cleanup() {
   if (cleaningUp) return;
   cleaningUp = true;
+  if (queueAppRestartTimer) {
+    clearTimeout(queueAppRestartTimer);
+    queueAppRestartTimer = undefined;
+  }
   for (const child of children.toReversed()) {
     if (child.exitCode === null) {
       child.kill("SIGTERM");
@@ -349,4 +405,55 @@ function parseOptionalPositiveInteger(value) {
   if (!value) return undefined;
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function parseOptionalNonnegativeInteger(value) {
+  if (value === undefined || value === "") return undefined;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function runSelfTest() {
+  assertSelf(shouldRestartQueueApp({
+    launchQueueApp: true,
+    cleaningUp: false,
+    orchestratorExitCode: null,
+    restartCount: 0,
+    maxRestarts: 1,
+  }), "queue app should restart while orchestrator is alive");
+  assertSelf(!shouldRestartQueueApp({
+    launchQueueApp: false,
+    cleaningUp: false,
+    orchestratorExitCode: null,
+    restartCount: 0,
+    maxRestarts: 1,
+  }), "disabled queue app should not restart");
+  assertSelf(!shouldRestartQueueApp({
+    launchQueueApp: true,
+    cleaningUp: true,
+    orchestratorExitCode: null,
+    restartCount: 0,
+    maxRestarts: 1,
+  }), "cleanup should not restart queue app");
+  assertSelf(!shouldRestartQueueApp({
+    launchQueueApp: true,
+    cleaningUp: false,
+    orchestratorExitCode: 0,
+    restartCount: 0,
+    maxRestarts: 1,
+  }), "stopped orchestrator should not restart queue app");
+  assertSelf(!shouldRestartQueueApp({
+    launchQueueApp: true,
+    cleaningUp: false,
+    orchestratorExitCode: null,
+    restartCount: 1,
+    maxRestarts: 1,
+  }), "restart limit should be respected");
+  assertSelf(parseOptionalNonnegativeInteger("0") === 0, "zero restart limit should parse");
+  assertSelf(parseOptionalNonnegativeInteger("-1") === undefined, "negative restart limit should be ignored");
+  console.log("dev-dogfood self-test passed");
+}
+
+function assertSelf(condition, message) {
+  if (!condition) throw new Error(message);
 }
