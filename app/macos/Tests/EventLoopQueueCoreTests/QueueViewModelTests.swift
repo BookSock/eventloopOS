@@ -34,12 +34,32 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.loadQueue()
         viewModel.select(packetId: "packet-blog-feedback")
         client.setNextLeaseError(QueueClientError.httpStatus(409))
+        let beforeFeedbackSequence = viewModel.feedbackSequence
 
         await viewModel.pullNextPaper()
 
         XCTAssertEqual(viewModel.state, .loaded)
         XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Queue paused. Try again."))
+        XCTAssertGreaterThan(viewModel.feedbackSequence, beforeFeedbackSequence)
+    }
+
+    func testRepeatedAdvanceToastAssignmentsIncrementFeedbackSequence() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-blog-feedback")
+
+        client.setNextLeaseError(QueueClientError.httpStatus(409))
+        await viewModel.pullNextPaper()
+        let firstFeedbackSequence = viewModel.feedbackSequence
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Queue paused. Try again."))
+
+        client.setNextLeaseError(QueueClientError.httpStatus(409))
+        await viewModel.pullNextPaper()
+
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Queue paused. Try again."))
+        XCTAssertGreaterThan(viewModel.feedbackSequence, firstFeedbackSequence)
     }
 
     func testPullNextPaperTreatsLeaseNextConflictAsNonFatalWithoutSelection() async {

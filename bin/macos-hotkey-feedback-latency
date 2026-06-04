@@ -69,17 +69,21 @@ async function measureHotkeyFeedbackLatency({ processName, hotkey, expectedText,
     try {
       const before = await readHarnessStatus(processName);
       const beforeFeedback = feedbackValue(before);
+      const beforeFeedbackSequence = feedbackSequenceValue(before);
       const start = performance.now();
       await pressHotkey(hotkey);
       const after = await waitForHarnessFeedback({
         processName,
         beforeFeedback,
+        beforeFeedbackSequence,
         expectedText,
         timeoutMs: Math.max(2_500, budgetMs * 3),
       });
       sample.timings_ms.hotkey_to_feedback = roundMs(performance.now() - start);
       sample.before_feedback = beforeFeedback;
+      sample.before_feedback_seq = beforeFeedbackSequence;
       sample.after_feedback = feedbackValue(after);
+      sample.after_feedback_seq = feedbackSequenceValue(after);
     } catch (error) {
       sample.ok = false;
       sample.errors.push(error instanceof Error ? error.message : String(error));
@@ -108,15 +112,18 @@ async function measureHotkeyFeedbackLatency({ processName, hotkey, expectedText,
   };
 }
 
-async function waitForHarnessFeedback({ processName, beforeFeedback, expectedText, timeoutMs }) {
+async function waitForHarnessFeedback({ processName, beforeFeedback, beforeFeedbackSequence, expectedText, timeoutMs }) {
   const deadline = performance.now() + timeoutMs;
   let lastStatus = "";
   while (performance.now() < deadline) {
     lastStatus = await readHarnessStatus(processName);
     const feedback = feedbackValue(lastStatus);
+    const feedbackSequence = feedbackSequenceValue(lastStatus);
     if (expectedText) {
       if (feedback.includes(expectedText) || lastStatus.includes(expectedText)) return lastStatus;
     } else if (feedback && feedback !== beforeFeedback) {
+      return lastStatus;
+    } else if (feedbackSequence !== undefined && beforeFeedbackSequence !== undefined && feedbackSequence > beforeFeedbackSequence) {
       return lastStatus;
     }
     await sleep(50);
@@ -219,6 +226,11 @@ function feedbackValue(status) {
   return normalizeSpace(String(status).match(/feedback=([^|]+)/)?.[1] ?? "");
 }
 
+function feedbackSequenceValue(status) {
+  const match = String(status).match(/feedback_seq=(\d+)/);
+  return match ? Number(match[1]) : undefined;
+}
+
 function summarize(samples) {
   const values = samples
     .map((sample) => sample.timings_ms.hotkey_to_feedback)
@@ -283,8 +295,9 @@ function runSelfTest() {
   if (hotkey.modifiers.join(",") !== "control down,option down,shift down") {
     throw new Error(`modifier parse failed: ${hotkey.modifiers.join(",")}`);
   }
-  const status = "eventloopOS harness status | feedback=Showing paper: qit_demo | state=loaded";
+  const status = "eventloopOS harness status | feedback=Showing paper: qit_demo | feedback_seq=42 | state=loaded";
   if (feedbackValue(status) !== "Showing paper: qit_demo") throw new Error("feedback parse failed");
+  if (feedbackSequenceValue(status) !== 42) throw new Error("feedback sequence parse failed");
   const summary = summarize([
     { timings_ms: { hotkey_to_feedback: 120 } },
     { timings_ms: { hotkey_to_feedback: 80 } },

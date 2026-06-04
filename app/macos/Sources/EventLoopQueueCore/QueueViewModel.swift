@@ -138,7 +138,12 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var followsRulesState: FollowsRulesState = .idle
     @Published public private(set) var autoBindContinuousEnabled: Bool = false
     @Published public private(set) var lastAutoBindResult: CodexAutoBindResult?
-    @Published public private(set) var advanceToast: AdvanceToast?
+    @Published public private(set) var advanceToast: AdvanceToast? {
+        didSet {
+            feedbackSequence += 1
+        }
+    }
+    @Published public private(set) var feedbackSequence: Int = 0
     @Published public private(set) var currentTask: TaskRecord?
 
     private static let terminalSendConfirmedDefaultsKey = "eventLoopOS.terminalSendConfirmed.v1"

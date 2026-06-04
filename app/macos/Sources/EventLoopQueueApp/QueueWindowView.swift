@@ -92,7 +92,8 @@ struct QueueWindowView: View {
             selectedTaskId: viewModel.selectedTaskId,
             taskSessionCount: viewModel.taskSessions.count,
             summary: queueSummary,
-            advanceToast: viewModel.advanceToast
+            advanceToast: viewModel.advanceToast,
+            feedbackSequence: viewModel.feedbackSequence
         )
     }
 
@@ -533,11 +534,13 @@ struct QueueHarnessStatusText {
         selectedTaskId: String?,
         taskSessionCount: Int,
         summary: QueueMenuSummary,
-        advanceToast: AdvanceToast?
+        advanceToast: AdvanceToast?,
+        feedbackSequence: Int = 0
     ) -> String {
         var parts = [
             "eventloopOS harness status",
             "feedback=\(feedbackText(summary: summary, advanceToast: advanceToast))",
+            "feedback_seq=\(feedbackSequence)",
             "state=\(stateLabel(queueState))",
             "queue_count=\(queueCount)",
             "selected_task=\(selectedTaskId ?? "none")",

@@ -10,10 +10,12 @@ final class QueueHarnessStatusTextTests: XCTestCase {
             selectedTaskId: nil,
             taskSessionCount: 0,
             summary: makeSummary(),
-            advanceToast: nil
+            advanceToast: nil,
+            feedbackSequence: 7
         )
 
         XCTAssertTrue(text.contains("feedback=ready"))
+        XCTAssertTrue(text.contains("feedback_seq=7"))
         XCTAssertTrue(text.contains("state=loaded"))
         XCTAssertTrue(text.contains("queue_count=2"))
         XCTAssertTrue(text.contains("selected_task=none"))
