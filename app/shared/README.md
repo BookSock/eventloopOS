@@ -93,6 +93,8 @@ task-window-claim, follows-window, reading-queue, onboarding, context-restore,
 trigger, MCP/source-hook, voice-command, agent-run, and observability
 operations. Shared tests compare those operation helpers against every
 cataloged HTTP route so route/helper drift is visible.
+The catalog uses `pnpm --filter @eventloopos/shared run test:primitive-ops` as
+the command-level self-test for HTTP/API primitives.
 
 The HTTP client exposes catchable error classes for builder-facing tools:
 

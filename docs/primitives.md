@@ -18,6 +18,9 @@ Validate both with
 Generate a builder-facing coverage/readiness summary with
 `bin/primitives-readiness-report docs/primitives.catalog.json` or use
 `--json` for machine-readable audit output.
+Strict readiness is expected to stay green: every cataloged HTTP/CLI primitive
+has a `self_tests` command, and the shared primitive operation-helper test
+proves typed helper coverage for every cataloged HTTP route.
 The catalog audit also verifies every catalog schema has a matching
 `@eventloopos/shared` Zod schema, TypeScript type, and ContractSchemas registry
 entry, and that cataloged HTTP routes cannot silently drift back to freeform

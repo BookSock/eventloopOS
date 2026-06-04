@@ -22,6 +22,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "test:primitive-ops": "vitest run test/contracts.test.ts -t \"primitive operation helpers\"",
     "test:contracts": "pnpm test && pnpm test:fixtures",
     "test:fixtures": "tsx src/cli.ts validate-fixtures ../../tests/fixtures/contracts",
     "contracts:json-schema": "tsx src/cli.ts print-json-schema",
