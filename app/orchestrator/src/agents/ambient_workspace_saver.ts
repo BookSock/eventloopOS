@@ -45,6 +45,15 @@ export type TaskWindowClaim = {
   title_prefix?: string;
 };
 export type TaskWindowClaimReader = () => Promise<Iterable<TaskWindowClaim>> | Iterable<TaskWindowClaim>;
+export type TaskWindowClaimWriter = (input: {
+  taskId: string;
+  windowId?: string;
+  appBundle?: string;
+  titlePrefix?: string;
+  source?: string;
+  now: Date;
+  ttlMs?: number;
+}) => Promise<unknown> | unknown;
 
 export type AmbientWorkspaceSaverDeps = {
   workspace: Pick<WorkspaceController, "capture">;
@@ -54,6 +63,7 @@ export type AmbientWorkspaceSaverDeps = {
   recordWindowObservation?: WindowWorkspaceObservationWriter;
   getFollowsWindowIds?: FollowsWindowIdReader;
   getTaskWindowClaims?: TaskWindowClaimReader;
+  claimTaskWindow?: TaskWindowClaimWriter;
   observability?: Observability;
   pollIntervalMs?: number;
   debounceMs?: number;
@@ -117,6 +127,7 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
 
       const rawSnapshot = await deps.workspace.capture();
       await recordWindowObservations(deps, rawSnapshot, currentTaskId, tickNow);
+      await autoClaimTaggedTaskWindows(deps, rawSnapshot, tickNow);
       const snapshot = filterSnapshotForTaskSave(
         rawSnapshot,
         await readFollowsWindowIds(deps),
@@ -239,6 +250,53 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
     stop,
     isRunning: () => timer !== undefined,
   };
+}
+
+async function autoClaimTaggedTaskWindows(
+  deps: AmbientWorkspaceSaverDeps,
+  snapshot: WorkspaceSnapshot,
+  now: Date,
+): Promise<void> {
+  if (!deps.claimTaskWindow) return;
+  const existingClaims = await readTaskWindowClaims(deps);
+  let claimed = 0;
+  for (const window of snapshot.windows) {
+    const taggedTaskId = taskIdFromTaggedWindow(window);
+    if (!taggedTaskId) continue;
+    if (existingClaims.some((claim) => claim.task_id === taggedTaskId && taskWindowClaimMatches(window, claim))) continue;
+    const appBundle =
+      typeof window.appBundleId === "string" && window.appBundleId.length > 0
+        ? window.appBundleId
+        : typeof window.app === "string" && window.app.length > 0
+          ? window.app
+          : undefined;
+    try {
+      await deps.claimTaskWindow({
+        taskId: taggedTaskId,
+        windowId: String(window.id),
+        appBundle,
+        titlePrefix: normalizeTitlePrefix(window.title),
+        source: "ambient_tagged_window",
+        now,
+        ttlMs: 30 * 60 * 1_000,
+      });
+      claimed += 1;
+    } catch {
+      // Claims are attribution hints. Never block workspace saving if a task
+      // was removed or storage rejects a stale tag.
+    }
+  }
+  if (claimed > 0 && deps.observability) {
+    await deps.observability.incrementCounter("task_window_claims_inferred_total", claimed);
+    await deps.observability.recordActivity({
+      type: "task_window_claims_inferred",
+      occurred_at: now.toISOString(),
+      actor: "system",
+      status: "ok",
+      summary: `Inferred ${claimed} task window claim(s) from tagged windows.`,
+      details: sanitizeActivityDetails({ count: claimed, source: "ambient_tagged_window" }),
+    });
+  }
 }
 
 async function recordWindowObservations(
@@ -411,6 +469,15 @@ export function createAmbientWorkspaceSaverFromRuntime(
     }) => Promise<unknown>;
     listFollowsWindows?: (input: { now: Date; ttlMs: number; minWorkspaceCount: number }) => Promise<Array<{ window_id: string }>>;
     listTaskWindowClaims?: (input: { now: Date }) => Promise<TaskWindowClaim[]>;
+    claimTaskWindow?: (input: {
+      taskId: string;
+      windowId?: string;
+      appBundle?: string;
+      titlePrefix?: string;
+      source?: string;
+      now: Date;
+      ttlMs?: number;
+    }) => Promise<unknown>;
   };
 
   const getCurrentTaskState: CurrentTaskStateReader = async () => {
@@ -471,6 +538,18 @@ export function createAmbientWorkspaceSaverFromRuntime(
     typeof store.listTaskWindowClaims === "function"
       ? async () => store.listTaskWindowClaims!({ now: runtime.now() })
       : undefined;
+  const claimTaskWindow: TaskWindowClaimWriter | undefined =
+    typeof store.claimTaskWindow === "function"
+      ? (input) => store.claimTaskWindow!({
+          taskId: input.taskId,
+          windowId: input.windowId,
+          appBundle: input.appBundle,
+          titlePrefix: input.titlePrefix,
+          source: input.source,
+          now: input.now,
+          ttlMs: input.ttlMs,
+        })
+      : undefined;
 
   return createAmbientWorkspaceSaver({
     workspace,
@@ -480,6 +559,7 @@ export function createAmbientWorkspaceSaverFromRuntime(
     recordWindowObservation,
     getFollowsWindowIds,
     getTaskWindowClaims,
+    claimTaskWindow,
     observability: runtime.observability,
     pollIntervalMs: overrides.pollIntervalMs,
     debounceMs: overrides.debounceMs,

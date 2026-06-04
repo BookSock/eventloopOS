@@ -439,6 +439,76 @@ describe("ambient_workspace_saver", () => {
     assert.equal(filtered.focusedWindowId, 2);
   });
 
+  it("infers task-window claims from tagged windows during ambient capture", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 2,
+      windows: [
+        { id: 1, app: "TextEdit", title: "[task:paper a] reply", workspace: "paper-a" },
+        { id: 2, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "[task:paper b] Playwright report", workspace: "paper-a" },
+      ],
+    };
+    const workspace = makeFakeWorkspace(snapshot);
+    const obs = makeFakeObservability();
+    const claims: Array<{
+      taskId: string;
+      windowId?: string;
+      appBundle?: string;
+      titlePrefix?: string;
+      source?: string;
+      ttlMs?: number;
+    }> = [];
+    const saver = createAmbientWorkspaceSaver({
+      workspace,
+      getCurrentTaskState: async () => ({ currentTaskId: "task_paper_a" }),
+      updateTaskLayout: async () => {},
+      isManualModeActive: () => false,
+      claimTaskWindow: async (input) => {
+        claims.push({
+          taskId: input.taskId,
+          windowId: input.windowId,
+          appBundle: input.appBundle,
+          titlePrefix: input.titlePrefix,
+          source: input.source,
+          ttlMs: input.ttlMs,
+        });
+      },
+      getTaskWindowClaims: () => claims.map((claim) => ({
+        task_id: claim.taskId,
+        window_id: claim.windowId,
+        app_bundle: claim.appBundle,
+        title_prefix: claim.titlePrefix,
+      })),
+      observability: obs.recorder,
+      now: () => new Date("2026-05-10T15:00:00.000Z"),
+    });
+
+    const result = await saver.tick();
+
+    assert.equal(result.decision, "debounced");
+    assert.deepEqual(claims, [
+      {
+        taskId: "task_paper_a",
+        windowId: "1",
+        appBundle: "TextEdit",
+        titlePrefix: "[task:paper a] reply",
+        source: "ambient_tagged_window",
+        ttlMs: 1_800_000,
+      },
+      {
+        taskId: "task_paper_b",
+        windowId: "2",
+        appBundle: "com.google.Chrome",
+        titlePrefix: "[task:paper b] playwright report",
+        source: "ambient_tagged_window",
+        ttlMs: 1_800_000,
+      },
+    ]);
+    assert.equal(obs.counters.get("task_window_claims_inferred_total"), 2);
+    assert.ok(obs.activities.some((activity) => activity.type === "task_window_claims_inferred"));
+  });
+
   it("recovers from updateTaskLayout error and emits an error event", async () => {
     const workspace = makeFakeWorkspace(makeSnapshot([1]));
     const obs = makeFakeObservability();
@@ -529,9 +599,13 @@ describe("ambient_workspace_saver", () => {
     const obs = makeFakeObservability();
     const layoutWrites: Array<{ taskId: string; snapshot: WorkspaceSnapshot; now: Date }> = [];
     const taskSnapshotWrites: Array<{ taskId: string; snapshot: WorkspaceSnapshot; actorId?: string }> = [];
+    const claims: Array<{ taskId: string; windowId?: string; source?: string }> = [];
     let nowMs = Date.parse("2026-05-10T15:00:00.000Z");
     const runtime = {
-      workspace,
+      workspace: makeFakeWorkspace({
+        ...snapshot,
+        windows: [{ id: 1, app: "Ghostty", title: "[task:alpha] codex", workspace: "paper-a" }],
+      }),
       observability: obs.recorder,
       now: () => new Date(nowMs),
       store: {
@@ -545,6 +619,15 @@ describe("ambient_workspace_saver", () => {
           taskSnapshotWrites.push({ taskId: input.taskId, snapshot: input.snapshot, actorId: input.actorId });
           return { task_id: input.taskId, snapshot: input.snapshot };
         },
+        claimTaskWindow: async (input: { taskId: string; windowId?: string; source?: string }) => {
+          claims.push({ taskId: input.taskId, windowId: input.windowId, source: input.source });
+          return { task_id: input.taskId };
+        },
+        listTaskWindowClaims: async () => claims.map((claim) => ({
+          task_id: claim.taskId,
+          window_id: claim.windowId,
+          source: claim.source,
+        })),
         getManualModeState: async () => ({ active: false }),
       },
     } as unknown as Runtime;
@@ -561,5 +644,6 @@ describe("ambient_workspace_saver", () => {
     assert.equal(taskSnapshotWrites[0].taskId, "task_alpha");
     assert.equal(taskSnapshotWrites[0].actorId, "ambient-workspace-saver");
     assert.deepEqual(taskSnapshotWrites[0].snapshot, layoutWrites[0].snapshot);
+    assert.deepEqual(claims, [{ taskId: "task_alpha", windowId: "1", source: "ambient_tagged_window" }]);
   });
 });

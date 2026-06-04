@@ -158,12 +158,14 @@ Guarantees today:
 - excludes eventloopOS/AeroSpace/Tailscale system windows
 - excludes windows explicitly tagged for a different `[task:...]`
 - excludes windows claimed by another task through `POST /task-window-claims`
+- infers task-window claims from any captured window tagged `[task:<slug>]`
 
 Why it matters: this is the primitive that makes window layout memory feel
 automatic instead of like a manual "save workspace" button.
 
-Known gap: routed events can now auto-claim attached window resources, but
-Codex/Claude process-spawn tooling still needs first-class OS-side emitters.
+Known gap: tagged windows are inferred from OS snapshots and routed events can
+auto-claim attached window resources, but truly untagged arbitrary
+Codex/Claude-spawned windows still need first-class process/window emitters.
 
 Proof:
 
@@ -195,6 +197,9 @@ Useful standalone uses:
 - background Codex/Claude test opens Chrome, emits a routed `app_window` or
   `spawned_window` resource, and ambient autosave avoids polluting the human's
   active paper
+- a test command opens a window titled `[task:checkout] Playwright report`, and
+  the ambient saver claims it for `task_checkout` from the OS snapshot even if
+  the window appeared on the human's current workspace
 - browser automation can claim Playwright/Chrome report windows before the
   user sees them
 - browser context capture auto-claims Chrome windows when the event attaches to
@@ -212,8 +217,8 @@ Proof:
 - `app/orchestrator/test/gateway_store_conformance.test.ts`
 
 Status: dogfood. Browser context capture has an automatic emitter; generic
-routed window resources are auto-claimed; Codex/Claude OS process/window
-emitters are next.
+routed window resources are auto-claimed; tagged windows are inferred from OS
+snapshots; untagged Codex/Claude OS process/window emitters are next.
 
 ## Follows Windows
 
@@ -551,7 +556,8 @@ Highest-leverage steps before calling this a real primitives library:
 3. Extend latency budgets from workspace HTTP proof to queue lease and Mac
    hotkey-to-feedback path.
 4. Add a public "workspace backend adapter" guide with a fake backend example.
-5. Add automatic claim emitters for Codex/Claude-spawned foreign windows.
+5. Add automatic claim emitters for untagged Codex/Claude-spawned foreign
+   windows.
 6. Add user-facing follows/unfollows rules and durable rule export/import.
 7. Publish example apps: "restore my desk," "agent attention queue," and
    "window hotkey router."
