@@ -10,13 +10,14 @@ final class AdvanceCoordinatorTests: XCTestCase {
     func testLimboWithCodexThreadCreatesCodexAnchorTask() {
         let snapshot = makeSnapshot(
             currentWorkspaceId: "limbo",
-            foreground: AdvanceForegroundContext(codexThreadId: "thr_abc")
+            foreground: AdvanceForegroundContext(codexThreadId: "thr_abc", ghosttyWindowId: "ghost-abc")
         )
         XCTAssertEqual(
             AdvanceCoordinator.nextAction(snapshot: snapshot),
             .createTaskFromForeground(
                 anchor: TaskAnchor(kind: .codexThread, id: "thr_abc"),
-                workspaceId: "limbo"
+                workspaceId: "limbo",
+                terminalRef: "ghostty:win-ghost-abc"
             )
         )
     }
@@ -24,13 +25,14 @@ final class AdvanceCoordinatorTests: XCTestCase {
     func testLimboWithGhosttyOnlyCreatesGhosttyAnchorTask() {
         let snapshot = makeSnapshot(
             currentWorkspaceId: "1",
-            foreground: AdvanceForegroundContext(ghosttyWindowId: "win_42")
+            foreground: AdvanceForegroundContext(ghosttyWindowId: "front-id")
         )
         XCTAssertEqual(
             AdvanceCoordinator.nextAction(snapshot: snapshot),
             .createTaskFromForeground(
-                anchor: TaskAnchor(kind: .ghosttyWindow, id: "win_42"),
-                workspaceId: "1"
+                anchor: TaskAnchor(kind: .ghosttyWindow, id: "front-id"),
+                workspaceId: "1",
+                terminalRef: "ghostty:win-front-id"
             )
         )
     }

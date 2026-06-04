@@ -751,7 +751,8 @@ export const CreateTaskRequestSchema = z
     primary_anchor: TaskAnchorSchema,
     captured_layout: WorkspaceSnapshotSchema,
     auto_paper_idle_seconds: z.number().optional(),
-    aerospace_workspace_id: nonEmpty.optional()
+    aerospace_workspace_id: nonEmpty.optional(),
+    terminal_ref: nonEmpty.optional()
   })
   .passthrough();
 export type CreateTaskRequest = z.infer<typeof CreateTaskRequestSchema>;

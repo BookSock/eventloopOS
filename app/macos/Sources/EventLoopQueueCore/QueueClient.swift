@@ -36,7 +36,7 @@ public protocol QueueClient: Sendable {
     func addFollowsWindowExclusion(appBundle: String?, titleSubstring: String?) async throws -> FollowsWindowExclusionMutationResult
     func deleteFollowsWindowExclusion(id: String) async throws -> FollowsWindowExclusionMutationResult
     func runCodexAutoBind() async throws -> CodexAutoBindResult
-    func createTask(primaryAnchor: TaskAnchor, capturedLayout: WorkspaceSnapshot, autoPaperIdleSeconds: Int?, idempotencyKey: String) async throws -> CreateTaskResult
+    func createTask(primaryAnchor: TaskAnchor, capturedLayout: WorkspaceSnapshot, autoPaperIdleSeconds: Int?, terminalRef: String?, idempotencyKey: String) async throws -> CreateTaskResult
     func getCurrentTask() async throws -> CurrentTaskState
     func setCurrentTask(taskId: String?) async throws -> CurrentTaskState
     func listTasks() async throws -> [TaskRecord]
@@ -538,6 +538,7 @@ public struct HTTPQueueClient: QueueClient {
         primaryAnchor: TaskAnchor,
         capturedLayout: WorkspaceSnapshot,
         autoPaperIdleSeconds: Int? = nil,
+        terminalRef: String? = nil,
         idempotencyKey: String
     ) async throws -> CreateTaskResult {
         let url = baseURL.appending(path: "tasks")
@@ -548,7 +549,8 @@ public struct HTTPQueueClient: QueueClient {
         request.httpBody = try encoder.encode(CreateTaskRequest(
             primaryAnchor: primaryAnchor,
             capturedLayout: capturedLayout,
-            autoPaperIdleSeconds: autoPaperIdleSeconds
+            autoPaperIdleSeconds: autoPaperIdleSeconds,
+            terminalRef: terminalRef
         ))
         let (data, response) = try await session.data(for: request)
         try validate(data: data, response: response)
@@ -892,11 +894,13 @@ private struct CreateTaskRequest: Encodable {
     let primaryAnchor: TaskAnchor
     let capturedLayout: WorkspaceSnapshot
     let autoPaperIdleSeconds: Int?
+    let terminalRef: String?
 
     enum CodingKeys: String, CodingKey {
         case primaryAnchor = "primary_anchor"
         case capturedLayout = "captured_layout"
         case autoPaperIdleSeconds = "auto_paper_idle_seconds"
+        case terminalRef = "terminal_ref"
     }
 
     func encode(to encoder: Encoder) throws {
@@ -905,6 +909,9 @@ private struct CreateTaskRequest: Encodable {
         try container.encode(capturedLayout, forKey: .capturedLayout)
         if let autoPaperIdleSeconds {
             try container.encode(autoPaperIdleSeconds, forKey: .autoPaperIdleSeconds)
+        }
+        if let terminalRef {
+            try container.encode(terminalRef, forKey: .terminalRef)
         }
     }
 }

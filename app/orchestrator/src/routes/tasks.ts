@@ -84,6 +84,7 @@ export async function handleTasksRoute(input: {
       runtime: input.runtime,
       task: result.task,
       anchor: validated.primaryAnchor,
+      terminalRef: validated.terminalRef,
       now: input.now,
     });
     const current = await store.getCurrentTaskState();
@@ -157,6 +158,7 @@ async function bindTaskSessionForCreatedTask(input: {
   runtime: Runtime;
   task: TaskRecord;
   anchor: { kind: TaskAnchorKind; id: string };
+  terminalRef?: string;
   now: Date;
 }): Promise<Record<string, unknown> | undefined> {
   if (input.anchor.kind !== "codex_thread") return undefined;
@@ -182,6 +184,7 @@ async function bindTaskSessionForCreatedTask(input: {
   const binding = await Promise.resolve(taskSessions.bindTaskSession({
     task_session_id: sessionId,
     task_id: input.task.task_id,
+    ...(input.terminalRef ? { terminal_ref: input.terminalRef } : {}),
   })).catch((error) => ({
     ok: false,
     task_session_id: sessionId,
@@ -208,6 +211,7 @@ type ValidatedCreateTaskRequest = {
   capturedLayout: WorkspaceSnapshot;
   autoPaperIdleSeconds?: number;
   aerospaceWorkspaceId?: string;
+  terminalRef?: string;
 };
 
 function validateCreateTaskRequest(value: unknown): ValidatedCreateTaskRequest | { ok: false; message: string } {
@@ -238,12 +242,20 @@ function validateCreateTaskRequest(value: unknown): ValidatedCreateTaskRequest |
     }
     aerospaceWorkspaceId = value.aerospace_workspace_id.trim();
   }
+  let terminalRef: string | undefined;
+  if (value.terminal_ref !== undefined && value.terminal_ref !== null) {
+    if (typeof value.terminal_ref !== "string" || !value.terminal_ref.trim()) {
+      return { ok: false, message: "terminal_ref must be a non-empty string" };
+    }
+    terminalRef = value.terminal_ref.trim();
+  }
   return {
     ok: true,
     primaryAnchor: { kind, id: id.trim() },
     capturedLayout: layout.snapshot,
     autoPaperIdleSeconds,
     aerospaceWorkspaceId,
+    terminalRef,
   };
 }
 

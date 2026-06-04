@@ -685,11 +685,15 @@ Useful standalone uses:
 - bind an existing agent terminal/window to the current paper
 - detect which Codex thread is in the foreground
 - inspect agent session state before routing followups or human papers
+- create a task from the foreground Codex/Ghostty window and synchronously bind
+  its `terminal_ref`, so Send-to-Agent is available immediately instead of
+  waiting for the auto-bind polling interval
 
 Proof:
 
 - `app/orchestrator/test/auto_bind_integration.test.ts`
 - `app/orchestrator/test/resolve_foreground_route.test.ts`
+- `app/orchestrator/test/tasks_route.test.ts`
 - Codex/Claude session inspector tests
 
 Status: dogfood.

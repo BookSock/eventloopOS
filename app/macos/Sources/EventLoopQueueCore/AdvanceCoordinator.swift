@@ -50,7 +50,7 @@ public struct AdvanceServerSnapshot: Equatable, Sendable {
 public enum AdvanceAction: Equatable, Sendable {
     case toastManualModeActive
     case toastNoForegroundCodex
-    case createTaskFromForeground(anchor: TaskAnchor, workspaceId: String)
+    case createTaskFromForeground(anchor: TaskAnchor, workspaceId: String, terminalRef: String?)
     case saveLayoutAndPullPaper(currentTaskId: String, nextPacketId: String, nextWorkspaceId: String)
     case saveLayoutAndEnterLimbo(currentTaskId: String, limboWorkspaceId: String)
     case markPaperDoneAndPullNext(packetId: String, nextPacketId: String, nextWorkspaceId: String)
@@ -84,13 +84,15 @@ public enum AdvanceCoordinator {
             if let codexThreadId = snapshot.foreground.codexThreadId {
                 return .createTaskFromForeground(
                     anchor: TaskAnchor(kind: .codexThread, id: codexThreadId),
-                    workspaceId: workspaceId
+                    workspaceId: workspaceId,
+                    terminalRef: terminalRef(fromGhosttyWindowId: snapshot.foreground.ghosttyWindowId)
                 )
             }
             if let ghosttyWindowId = snapshot.foreground.ghosttyWindowId {
                 return .createTaskFromForeground(
                     anchor: TaskAnchor(kind: .ghosttyWindow, id: ghosttyWindowId),
-                    workspaceId: workspaceId
+                    workspaceId: workspaceId,
+                    terminalRef: terminalRef(fromGhosttyWindowId: ghosttyWindowId)
                 )
             }
             return .toastNoForegroundCodex
@@ -131,5 +133,18 @@ public enum AdvanceCoordinator {
             return workspace
         }
         return nil
+    }
+
+    private static func terminalRef(fromGhosttyWindowId id: String?) -> String? {
+        guard let id = id?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty else {
+            return nil
+        }
+        if id.hasPrefix("ghostty:") {
+            return id
+        }
+        if id.hasPrefix("win-") {
+            return "ghostty:\(id)"
+        }
+        return "ghostty:win-\(id)"
     }
 }

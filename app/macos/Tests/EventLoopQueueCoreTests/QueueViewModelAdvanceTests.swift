@@ -13,7 +13,7 @@ final class QueueViewModelAdvanceTests: XCTestCase {
             )
         )
         let aero = FakeAeroSpaceWorkspaceClient(focused: "1")
-        let resolver = FakeCodexForegroundResolver(AdvanceForegroundContext(codexThreadId: "thr_xyz"))
+        let resolver = FakeCodexForegroundResolver(AdvanceForegroundContext(codexThreadId: "thr_xyz", ghosttyWindowId: "front-id"))
         let viewModel = QueueViewModel(
             client: client,
             workspaceClient: workspaceClient,
@@ -25,6 +25,7 @@ final class QueueViewModelAdvanceTests: XCTestCase {
 
         XCTAssertEqual(client.createTaskRequests.count, 1)
         XCTAssertEqual(client.createTaskRequests.first?.primaryAnchor, TaskAnchor(kind: .codexThread, id: "thr_xyz"))
+        XCTAssertEqual(client.createTaskRequests.first?.terminalRef, "ghostty:win-front-id")
         XCTAssertEqual(client.createTaskRequests.first?.capturedLayout.activeWorkspace, "1")
         XCTAssertEqual(client.setCurrentTaskRequests, ["task_fake_1"])
         XCTAssertNotNil(viewModel.currentTask)

@@ -777,8 +777,8 @@ public final class QueueViewModel: ObservableObject {
                 return
             }
             advanceToast = .noForegroundCodex
-        case let .createTaskFromForeground(anchor, workspaceId):
-            await runCreateTaskFromForeground(anchor: anchor, workspaceId: workspaceId)
+        case let .createTaskFromForeground(anchor, workspaceId, terminalRef):
+            await runCreateTaskFromForeground(anchor: anchor, workspaceId: workspaceId, terminalRef: terminalRef)
         case let .saveLayoutAndPullPaper(currentTaskId, nextPacketId, nextWorkspaceId):
             await runSaveLayoutAndSwitch(
                 currentTaskId: currentTaskId,
@@ -823,7 +823,7 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
-    private func runCreateTaskFromForeground(anchor: TaskAnchor, workspaceId: String) async {
+    private func runCreateTaskFromForeground(anchor: TaskAnchor, workspaceId: String, terminalRef: String?) async {
         do {
             let captured = try await workspaceClient.capture()
             let layout = WorkspaceSnapshot(
@@ -837,6 +837,7 @@ public final class QueueViewModel: ObservableObject {
                 primaryAnchor: anchor,
                 capturedLayout: layout,
                 autoPaperIdleSeconds: nil,
+                terminalRef: terminalRef,
                 idempotencyKey: key
             )
             _ = try await client.setCurrentTask(taskId: result.task.taskId)

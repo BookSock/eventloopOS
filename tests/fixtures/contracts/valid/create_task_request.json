@@ -19,6 +19,7 @@
       "focusedWindowId": 9
     },
     "auto_paper_idle_seconds": 60,
-    "aerospace_workspace_id": "demo-customer"
+    "aerospace_workspace_id": "demo-customer",
+    "terminal_ref": "ghostty:win-demo-customer"
   }
 }

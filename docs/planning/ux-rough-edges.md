@@ -21,9 +21,16 @@ You're scrolling through a long Codex response. Codex is "idle" (waiting for you
 
 ---
 
-### 1.2 Send-to-Agent gray for ~30s after task creation
+### 1.2 Send-to-Agent gray for ~30s after task creation — resolved 2026-06-04
 
 You press `⌘⌥⇧J`, task created, Codex thread becomes the anchor. But the auto-bind timer (V10) only ticks every 30s — so for up to 30s, `terminal_ref` is empty and Send-to-Agent stays disabled. First-task-ever frustration.
+
+**Resolution:** foreground create-task now carries the Ghostty `terminal_ref` from
+the Mac foreground resolver into `POST /tasks`; the orchestrator forwards it
+when synchronously binding the matching task session. Evidence:
+`app/orchestrator/test/tasks_route.test.ts`,
+`app/macos/Tests/EventLoopQueueCoreTests/AdvanceCoordinatorTests.swift`, and
+`app/macos/Tests/EventLoopQueueCoreTests/QueueViewModelAdvanceTests.swift`.
 
 **Mitigations:**
 - On task creation, immediately resolve the Ghostty window-id and write `terminal_ref` synchronously, instead of waiting for the next tick.

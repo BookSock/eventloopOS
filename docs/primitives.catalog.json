@@ -1276,7 +1276,8 @@
         "primary_anchor": { "$ref": "#/components/schemas/TaskAnchor" },
         "captured_layout": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
         "auto_paper_idle_seconds": { "type": "number" },
-        "aerospace_workspace_id": { "type": "string", "minLength": 1 }
+        "aerospace_workspace_id": { "type": "string", "minLength": 1 },
+        "terminal_ref": { "type": "string", "minLength": 1 }
       }
     },
     "CreateTaskResponse": {

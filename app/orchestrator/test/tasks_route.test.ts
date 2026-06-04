@@ -71,7 +71,7 @@ describe("tasks route — phase 2 of hotkey state machine", () => {
     assert.equal(body.current, false);
   });
 
-  it("binds a matching Codex task session synchronously when creating a task", async () => {
+  it("binds a matching Codex task session with terminal_ref synchronously when creating a task", async () => {
     const bindCalls: Array<{ task_session_id: string; task_id: string; terminal_ref?: string }> = [];
     const taskSessions: TaskSessionController = {
       listSessions(): TaskRuntimeSession[] {
@@ -112,6 +112,7 @@ describe("tasks route — phase 2 of hotkey state machine", () => {
         body: JSON.stringify({
           primary_anchor: { kind: "codex_thread", id: "thread-route-sync-bind" },
           captured_layout: layoutA,
+          terminal_ref: "ghostty:win-route-sync",
         }),
       });
       assert.equal(response.status, 200);
@@ -122,7 +123,7 @@ describe("tasks route — phase 2 of hotkey state machine", () => {
       assert.equal(bindCalls.length, 1);
       assert.equal(bindCalls[0]?.task_session_id, "codex_thread_route_sync");
       assert.equal(bindCalls[0]?.task_id, body.task.task_id);
-      assert.equal(bindCalls[0]?.terminal_ref, undefined);
+      assert.equal(bindCalls[0]?.terminal_ref, "ghostty:win-route-sync");
       assert.equal(body.binding?.ok, true);
       assert.equal(body.binding?.task_session_id, "codex_thread_route_sync");
     } finally {

@@ -49,7 +49,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var taskLayouts: [String: WorkspaceSnapshot] = [:]
     private var currentTaskId: String?
     private var currentTaskEnteredAt: Date?
-    private var createTaskCalls: [(primaryAnchor: TaskAnchor, capturedLayout: WorkspaceSnapshot, idempotencyKey: String)] = []
+    private var createTaskCalls: [(primaryAnchor: TaskAnchor, capturedLayout: WorkspaceSnapshot, terminalRef: String?, idempotencyKey: String)] = []
     private var setCurrentTaskCalls: [String?] = []
     private var updateTaskLayoutCalls: [(taskId: String, layout: WorkspaceSnapshot)] = []
     private var fakeNow: Date = Date(timeIntervalSince1970: 1_778_070_000)
@@ -832,7 +832,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         lock.withLock { fakeAutoBindRunCount }
     }
 
-    public var createTaskRequests: [(primaryAnchor: TaskAnchor, capturedLayout: WorkspaceSnapshot, idempotencyKey: String)] {
+    public var createTaskRequests: [(primaryAnchor: TaskAnchor, capturedLayout: WorkspaceSnapshot, terminalRef: String?, idempotencyKey: String)] {
         lock.withLock { createTaskCalls }
     }
 
@@ -863,10 +863,11 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         primaryAnchor: TaskAnchor,
         capturedLayout: WorkspaceSnapshot,
         autoPaperIdleSeconds: Int?,
+        terminalRef: String?,
         idempotencyKey: String
     ) async throws -> CreateTaskResult {
         lock.withLock {
-            createTaskCalls.append((primaryAnchor: primaryAnchor, capturedLayout: capturedLayout, idempotencyKey: idempotencyKey))
+            createTaskCalls.append((primaryAnchor: primaryAnchor, capturedLayout: capturedLayout, terminalRef: terminalRef, idempotencyKey: idempotencyKey))
             let now = Date()
             let existing = tasks.first { $0.primaryAnchorKind == primaryAnchor.kind && $0.primaryAnchorId == primaryAnchor.id }
             if let existing {
