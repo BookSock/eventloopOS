@@ -1,0 +1,7 @@
+{
+  "schema": "MasterFanOutSkipped",
+  "data": {
+    "task_id": "task_docs",
+    "reason": "no_bound_session"
+  }
+}

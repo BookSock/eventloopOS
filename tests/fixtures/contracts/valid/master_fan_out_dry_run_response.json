@@ -1,0 +1,18 @@
+{
+  "schema": "MasterFanOutResponse",
+  "data": {
+    "ok": true,
+    "dry_run": true,
+    "matched_count": 1,
+    "preview": [
+      {
+        "task_id": "task_demo_polish",
+        "task_session_id": "task_session_demo",
+        "matched_packet_id": "qit_demo_review",
+        "matched_packet_title": "Review demo feedback",
+        "idle_seconds": 128
+      }
+    ],
+    "request_id": "req_master_fan_dry_001"
+  }
+}

@@ -1558,6 +1558,76 @@
         "cwd_hint": { "type": "string" },
         "request_id": { "type": "string", "minLength": 1 }
       }
+    },
+    "MasterFanOutSelector": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "task_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "task_id_pattern": { "type": "string", "minLength": 1 },
+        "task_hint_substring": { "type": "string", "minLength": 1 },
+        "idle_min_seconds": { "type": "number", "minimum": 0 }
+      }
+    },
+    "MasterFanOutRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["message", "selector"],
+      "properties": {
+        "message": { "type": "string", "minLength": 1, "maxLength": 4000 },
+        "selector": { "$ref": "#/components/schemas/MasterFanOutSelector" },
+        "dry_run": { "type": "boolean" },
+        "target": { "type": "string", "minLength": 1 },
+        "idempotency_key": { "type": "string", "minLength": 1 }
+      }
+    },
+    "MasterFanOutMatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "task_session_id": { "type": "string", "minLength": 1 },
+        "matched_packet_id": { "type": "string", "minLength": 1 },
+        "matched_packet_title": { "type": "string" },
+        "idle_seconds": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "MasterFanOutDelivered": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "task_session_id", "task_message"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "task_session_id": { "type": "string", "minLength": 1 },
+        "task_message": { "$ref": "#/components/schemas/TaskMessageApi" }
+      }
+    },
+    "MasterFanOutSkipped": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "reason"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "MasterFanOutResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "dry_run", "matched_count", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "dry_run": { "type": "boolean" },
+        "fan_out_id": { "type": "string", "minLength": 1 },
+        "matched_count": { "type": "integer", "minimum": 0 },
+        "preview": { "type": "array", "items": { "$ref": "#/components/schemas/MasterFanOutMatch" } },
+        "delivered_count": { "type": "integer", "minimum": 0 },
+        "delivered": { "type": "array", "items": { "$ref": "#/components/schemas/MasterFanOutDelivered" } },
+        "skipped": { "type": "array", "items": { "$ref": "#/components/schemas/MasterFanOutSkipped" } },
+        "missing_task_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
     }
   },
   "primitives": [
@@ -1907,7 +1977,15 @@
       "title": "Master Command Router",
       "status": "dogfood",
       "summary": "Route one universal command to tasks, idle sessions, fan-out targets, or queue prioritization.",
-      "http": [{ "method": "POST", "path": "/master/fan-out", "route_file": "app/orchestrator/src/routes/master.ts" }],
+      "http": [
+        {
+          "method": "POST",
+          "path": "/master/fan-out",
+          "route_file": "app/orchestrator/src/routes/master.ts",
+          "request_schema": "MasterFanOutRequest",
+          "response_schema": "MasterFanOutResponse"
+        }
+      ],
       "cli": ["pnpm master:send"],
       "hotkeys": ["Ctrl-Option-K"],
       "code": [

@@ -1061,18 +1061,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/MasterFanOutRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/MasterFanOutResponse"
                 }
               }
             },
@@ -4649,6 +4649,188 @@
         "required": [
           "active",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "MasterFanOutDelivered": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_message": {
+            "$ref": "#/components/schemas/TaskMessageApi"
+          },
+          "task_session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "task_session_id",
+          "task_message"
+        ],
+        "type": "object"
+      },
+      "MasterFanOutMatch": {
+        "additionalProperties": false,
+        "properties": {
+          "idle_seconds": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "matched_packet_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "matched_packet_title": {
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      },
+      "MasterFanOutRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "dry_run": {
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "message": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/MasterFanOutSelector"
+          },
+          "target": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "selector"
+        ],
+        "type": "object"
+      },
+      "MasterFanOutResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "delivered": {
+            "items": {
+              "$ref": "#/components/schemas/MasterFanOutDelivered"
+            },
+            "type": "array"
+          },
+          "delivered_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "dry_run": {
+            "type": "boolean"
+          },
+          "fan_out_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "matched_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "missing_task_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "preview": {
+            "items": {
+              "$ref": "#/components/schemas/MasterFanOutMatch"
+            },
+            "type": "array"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/MasterFanOutSkipped"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "dry_run",
+          "matched_count",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "MasterFanOutSelector": {
+        "additionalProperties": true,
+        "properties": {
+          "idle_min_seconds": {
+            "minimum": 0,
+            "type": "number"
+          },
+          "task_hint_substring": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id_pattern": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "MasterFanOutSkipped": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "reason"
         ],
         "type": "object"
       },

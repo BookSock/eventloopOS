@@ -1,0 +1,40 @@
+{
+  "schema": "MasterFanOutResponse",
+  "data": {
+    "ok": true,
+    "dry_run": false,
+    "fan_out_id": "master_fan_550e8400-e29b-41d4-a716-446655440000",
+    "matched_count": 2,
+    "delivered_count": 1,
+    "delivered": [
+      {
+        "task_id": "task_demo_polish",
+        "task_session_id": "task_session_demo",
+        "task_message": {
+          "id": "task_msg_001",
+          "durable_id": "task_msg_001",
+          "task_session_id": "task_session_demo",
+          "task_id": "task_demo_polish",
+          "origin": "master_fan_out",
+          "mode": "followup",
+          "event_ids": [],
+          "idempotency_key": "master_fan_demo_001:task_demo_polish",
+          "status": "sent",
+          "sent_at": "2026-05-06T17:40:00Z",
+          "text_hash": "sha256:abc123",
+          "text_length": 92,
+          "created_at": "2026-05-06T17:40:00Z",
+          "updated_at": "2026-05-06T17:40:00Z",
+          "durable": true
+        }
+      }
+    ],
+    "skipped": [
+      {
+        "task_id": "task_docs",
+        "reason": "no_bound_session"
+      }
+    ],
+    "request_id": "req_master_fan_001"
+  }
+}

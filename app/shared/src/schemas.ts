@@ -1664,6 +1664,71 @@ export const ClaudeSessionInspectionResponseSchema = z
   .strict();
 export type ClaudeSessionInspectionResponse = z.infer<typeof ClaudeSessionInspectionResponseSchema>;
 
+export const MasterFanOutSelectorSchema = z
+  .object({
+    task_ids: z.array(id).optional(),
+    task_id_pattern: nonEmpty.optional(),
+    task_hint_substring: nonEmpty.optional(),
+    idle_min_seconds: z.number().nonnegative().optional()
+  })
+  .passthrough();
+export type MasterFanOutSelector = z.infer<typeof MasterFanOutSelectorSchema>;
+
+export const MasterFanOutRequestSchema = z
+  .object({
+    message: nonEmpty.max(4000),
+    selector: MasterFanOutSelectorSchema,
+    dry_run: z.boolean().optional(),
+    target: nonEmpty.optional(),
+    idempotency_key: id.optional()
+  })
+  .passthrough();
+export type MasterFanOutRequest = z.infer<typeof MasterFanOutRequestSchema>;
+
+export const MasterFanOutMatchSchema = z
+  .object({
+    task_id: id,
+    task_session_id: id.optional(),
+    matched_packet_id: id.optional(),
+    matched_packet_title: z.string().optional(),
+    idle_seconds: z.number().int().nonnegative().optional()
+  })
+  .strict();
+export type MasterFanOutMatch = z.infer<typeof MasterFanOutMatchSchema>;
+
+export const MasterFanOutDeliveredSchema = z
+  .object({
+    task_id: id,
+    task_session_id: id,
+    task_message: TaskMessageApiSchema
+  })
+  .strict();
+export type MasterFanOutDelivered = z.infer<typeof MasterFanOutDeliveredSchema>;
+
+export const MasterFanOutSkippedSchema = z
+  .object({
+    task_id: id,
+    reason: nonEmpty
+  })
+  .strict();
+export type MasterFanOutSkipped = z.infer<typeof MasterFanOutSkippedSchema>;
+
+export const MasterFanOutResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    dry_run: z.boolean(),
+    fan_out_id: id.optional(),
+    matched_count: z.number().int().nonnegative(),
+    preview: z.array(MasterFanOutMatchSchema).optional(),
+    delivered_count: z.number().int().nonnegative().optional(),
+    delivered: z.array(MasterFanOutDeliveredSchema).optional(),
+    skipped: z.array(MasterFanOutSkippedSchema).optional(),
+    missing_task_ids: z.array(id).optional(),
+    request_id: id
+  })
+  .strict();
+export type MasterFanOutResponse = z.infer<typeof MasterFanOutResponseSchema>;
+
 export const OwnershipLockSchema = z
   .object({
     id,
@@ -1919,6 +1984,12 @@ export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   CodexForegroundResolveResponse: CodexForegroundResolveResponseSchema,
   CodexSessionInspectionResponse: CodexSessionInspectionResponseSchema,
   ClaudeSessionInspectionResponse: ClaudeSessionInspectionResponseSchema,
+  MasterFanOutSelector: MasterFanOutSelectorSchema,
+  MasterFanOutRequest: MasterFanOutRequestSchema,
+  MasterFanOutMatch: MasterFanOutMatchSchema,
+  MasterFanOutDelivered: MasterFanOutDeliveredSchema,
+  MasterFanOutSkipped: MasterFanOutSkippedSchema,
+  MasterFanOutResponse: MasterFanOutResponseSchema,
   OwnershipLock: OwnershipLockSchema,
   HookDecision: HookDecisionSchema,
   EvidenceReceipt: EvidenceReceiptSchema,

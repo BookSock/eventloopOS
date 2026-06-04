@@ -1,0 +1,13 @@
+{
+  "schema": "MasterFanOutRequest",
+  "data": {
+    "message": "Please check the latest demo feedback and report any blockers.",
+    "selector": {
+      "task_hint_substring": "demo",
+      "idle_min_seconds": 60
+    },
+    "dry_run": true,
+    "target": "demo tasks",
+    "idempotency_key": "master_fan_demo_001"
+  }
+}
