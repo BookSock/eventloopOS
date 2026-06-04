@@ -54,9 +54,10 @@ operations, plus MCP/source-hook, voice-command, agent-run, and observability
 routes. Shared tests compare operation-helper route coverage against every
 cataloged HTTP route so SDK drift is caught by `pnpm typecheck`.
 
-Runnable examples live in `examples/primitives/`: restore a saved desk, inspect
-and rerank an attention queue, and wire external hotkeys to task-window/follows
-rules. Root `pnpm typecheck` runs their self-tests.
+Runnable examples live in `examples/primitives/`: discover reusable primitive
+surfaces, restore a saved desk, inspect and rerank an attention queue, and wire
+external hotkeys to task-window/follows rules. Root `pnpm typecheck` runs their
+self-tests.
 
 Status labels:
 
