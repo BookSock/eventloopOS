@@ -62,6 +62,10 @@ Contract:
 Current backend: AeroSpace + macOS System Events in
 `app/orchestrator/src/workspace/aerospace.ts`.
 
+Adapter guide: `docs/workspace-backend-adapter.md`. Current non-AeroSpace
+backends must emit AeroSpace-compatible snapshots until the public snapshot
+schema is generalized.
+
 Captured data:
 
 - window id
@@ -103,6 +107,7 @@ Proof:
 
 - `app/orchestrator/src/workspace/aerospace.test.ts`
 - `app/orchestrator/src/workspace/controller.test.ts`
+- `docs/workspace-backend-adapter.md`
 - `bin/lab-mac-geometry-proof`
 - `bin/task-workspace-memory-proof-smoke`
 - latest Mac Studio human demo manifest under `artifacts/lab-runs/*-human-demo/manifest.json`
@@ -569,7 +574,8 @@ Highest-leverage steps before calling this a real primitives library:
    implementation packages.
 3. Extend latency budgets from workspace/queue HTTP proofs to the Mac
    hotkey-to-feedback path.
-4. Add a public "workspace backend adapter" guide with a fake backend example.
+4. Generalize the public workspace snapshot schema beyond
+   `backend: "aerospace"` while keeping the adapter guide green.
 5. Add automatic claim emitters for unwrapped untagged Codex/Claude-spawned
    foreign windows.
 6. Add user-facing follows/unfollows rules and durable rule export/import.

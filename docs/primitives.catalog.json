@@ -23,7 +23,11 @@
         { "method": "POST", "path": "/workspace/restore-plan", "route_file": "app/orchestrator/src/routes/workspace.ts" },
         { "method": "POST", "path": "/workspace/restore", "route_file": "app/orchestrator/src/routes/workspace.ts" }
       ],
-      "code": ["app/orchestrator/src/workspace/aerospace.ts", "app/orchestrator/src/workspace/controller.ts"],
+      "code": [
+        "app/orchestrator/src/workspace/aerospace.ts",
+        "app/orchestrator/src/workspace/controller.ts",
+        "docs/workspace-backend-adapter.md"
+      ],
       "proofs": [
         "app/orchestrator/src/workspace/aerospace.test.ts",
         "app/orchestrator/src/workspace/controller.test.ts",
