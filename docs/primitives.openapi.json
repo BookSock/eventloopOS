@@ -15,7 +15,7 @@
     },
     {
       "name": "ambient_autosave",
-      "description": "Ambient Autosave: Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, task-window claim filtering, tagged-window inference, process-tree claim inference, and process-root claim expansion."
+      "description": "Ambient Autosave: Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, task-window claim filtering, tagged-window inference, process-tree claim inference, process-root claim expansion, and foreign claimed-window cleanup."
     },
     {
       "name": "context_capture_restore",
@@ -23,7 +23,7 @@
     },
     {
       "name": "follows_windows",
-      "description": "Follows Windows: Detect windows seen across several workspaces and move them with focused task workspace unless excluded."
+      "description": "Follows Windows: Detect windows seen across several workspaces and move them with focused task workspace unless excluded; redirect claimed foreign-task windows back home."
     },
     {
       "name": "mac_app_hotkeys",
@@ -55,7 +55,7 @@
     },
     {
       "name": "task_window_claims",
-      "description": "Task Window Claims: Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots."
+      "description": "Task Window Claims: Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots and can be redirected home."
     },
     {
       "name": "task_workspace_memory",
@@ -364,7 +364,7 @@
     },
     "/follows-windows/exclude": {
       "post": {
-        "description": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded.",
+        "description": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded; redirect claimed foreign-task windows back home.",
         "operationId": "follows_windows_post_follows_windows_exclude",
         "requestBody": {
           "content": {
@@ -409,7 +409,7 @@
     },
     "/follows-windows/exclusions": {
       "get": {
-        "description": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded.",
+        "description": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded; redirect claimed foreign-task windows back home.",
         "operationId": "follows_windows_get_follows_windows_exclusions",
         "responses": {
           "200": {
@@ -444,7 +444,7 @@
     },
     "/follows-windows/exclusions/{id}": {
       "delete": {
-        "description": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded.",
+        "description": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded; redirect claimed foreign-task windows back home.",
         "operationId": "follows_windows_delete_follows_windows_exclusions_by_id",
         "parameters": [
           {
@@ -1285,7 +1285,7 @@
     },
     "/task-window-claims": {
       "get": {
-        "description": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots.",
+        "description": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots and can be redirected home.",
         "operationId": "task_window_claims_get_task_window_claims",
         "parameters": [
           {
@@ -1329,7 +1329,7 @@
         "x-eventloopos-status": "dogfood"
       },
       "post": {
-        "description": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots.",
+        "description": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots and can be redirected home.",
         "operationId": "task_window_claims_post_task_window_claims",
         "requestBody": {
           "content": {

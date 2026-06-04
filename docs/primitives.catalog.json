@@ -190,16 +190,16 @@
       "id": "ambient_autosave",
       "title": "Ambient Autosave",
       "status": "dogfood",
-      "summary": "Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, task-window claim filtering, tagged-window inference, process-tree claim inference, and process-root claim expansion.",
+      "summary": "Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, task-window claim filtering, tagged-window inference, process-tree claim inference, process-root claim expansion, and foreign claimed-window cleanup.",
       "code": ["app/orchestrator/src/agents/ambient_workspace_saver.ts"],
       "proofs": ["app/orchestrator/src/agents/ambient_workspace_saver.test.ts"],
-      "gaps": ["Task-session controllers should expose stable root pids by default; LaunchServices-detached apps still need wrappers to claim process_root_pid, tags, or routed resources."]
+      "gaps": ["Task-session controllers should expose stable root pids by default; unclaimed LaunchServices-detached apps still need wrappers to claim process_root_pid, tags, or routed resources."]
     },
     {
       "id": "task_window_claims",
       "title": "Task Window Claims",
       "status": "dogfood",
-      "summary": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots.",
+      "summary": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots and can be redirected home.",
       "http": [
         {
           "method": "POST",
@@ -227,12 +227,15 @@
         "app/orchestrator/src/routes/task_window_claims.ts",
         "app/orchestrator/src/routes/events.ts",
         "app/orchestrator/src/agents/ambient_workspace_saver.ts",
+        "app/orchestrator/src/agents/follows_window_orchestrator.ts",
         "examples/primitives/window-hotkey-router.mjs"
       ],
       "proofs": [
         "app/orchestrator/src/routes/task_window_claims.test.ts",
         "app/orchestrator/src/routes/events_task_window_claims.test.ts",
         "app/orchestrator/src/agents/ambient_workspace_saver.test.ts",
+        "app/orchestrator/src/agents/follows_window_orchestrator.test.ts",
+        "app/orchestrator/test/follows_window_orchestrator_integration.test.ts",
         "app/orchestrator/test/gateway_store_conformance.test.ts",
         "examples/primitives/window-hotkey-router.mjs"
       ],
@@ -242,7 +245,7 @@
       "id": "follows_windows",
       "title": "Follows Windows",
       "status": "dogfood",
-      "summary": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded.",
+      "summary": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded; redirect claimed foreign-task windows back home.",
       "http": [
         {
           "method": "POST",
@@ -273,6 +276,7 @@
       ],
       "proofs": [
         "app/orchestrator/src/agents/follows_window_orchestrator.test.ts",
+        "app/orchestrator/test/follows_window_orchestrator_integration.test.ts",
         "bin/follows-window-rules",
         "examples/primitives/window-hotkey-router.mjs"
       ],

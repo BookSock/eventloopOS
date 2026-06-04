@@ -187,21 +187,24 @@ Guarantees today:
   background agent launch produces descendant app windows
 - if task B's agent opens a visible Chrome window while the human is reviewing
   task A, the task B claim keeps that Chrome window out of task A's saved
-  paper, then keeps it when task B becomes current
+  paper, and the follows-window orchestrator moves it back to task B's
+  workspace when task B has a known workspace
 
 Why it matters: this is the primitive that makes window layout memory feel
 automatic instead of like a manual "save workspace" button.
 
-Known gap: LaunchServices-detached apps may lose useful parent-process ancestry,
-so wrappers should claim `process_root_pid`, tag the window, or emit routed
-resources for those launches.
+Known gap: unclaimed LaunchServices-detached apps may lose useful
+parent-process ancestry, so wrappers should claim `process_root_pid`, tag the
+window, or emit routed resources for those launches.
 
 Proof:
 
 - `app/orchestrator/src/agents/ambient_workspace_saver.test.ts`
 - Mac Studio human demo `proofs.ambient_autosave.ok=true`
 
-Status: dogfood; needs better foreign-window attribution before public API.
+Status: dogfood. Claimed foreign windows are filtered from active-paper saves
+and rehomed when their owner task has a known workspace. Unclaimed detached app
+launches still need wrappers, tags, or routed resources before public API.
 
 ## Task Window Claims
 
@@ -258,12 +261,16 @@ Useful standalone uses:
   `aerospace_window`, `window`, and `spawned_window` resources when they attach
   to a task
 - tools can inspect current claims to explain why a window was ignored
+- follows-window orchestration moves claimed foreign windows off the user's
+  active paper and back to the owning task workspace when possible
 
 Proof:
 
 - `app/orchestrator/src/routes/task_window_claims.test.ts`
 - `app/orchestrator/src/routes/events_task_window_claims.test.ts`
 - `app/orchestrator/src/agents/ambient_workspace_saver.test.ts`
+- `app/orchestrator/src/agents/follows_window_orchestrator.test.ts`
+- `app/orchestrator/test/follows_window_orchestrator_integration.test.ts`
 - `app/orchestrator/test/gateway_store_conformance.test.ts`
 - `app/shared/test/contracts.test.ts`
 - `bin/task-window-spawn --self-test`
@@ -272,7 +279,8 @@ Status: dogfood. Browser context capture has an automatic emitter; generic
 routed window resources are auto-claimed; tagged windows are inferred from OS
 snapshots; process-tree launches are claimed when session pid metadata exists;
 command-wrapped untagged launches can be claimed by window id, title/bundle, or
-process root pid.
+process root pid; claimed windows that appear on the active paper are redirected
+to the owning task workspace when possible.
 
 ## Follows Windows
 
@@ -307,6 +315,8 @@ Important behavior:
 
 - uses window id path and app-bundle/title-prefix slot path
 - moves follows windows to the newly focused task workspace
+- redirects claimed foreign-task windows away from the focused task workspace
+  instead of treating them as user-following windows
 - skips manual mode
 - supports exclusions for things that should not follow
 
@@ -321,6 +331,7 @@ has a checked CLI and export/import format, not a polished macOS rule editor.
 Proof:
 
 - `app/orchestrator/src/agents/follows_window_orchestrator.test.ts`
+- `app/orchestrator/test/follows_window_orchestrator_integration.test.ts`
 - store follows-window conformance tests
 - `app/shared/test/contracts.test.ts`
 - Mac Studio human demo shared TextEdit proof
