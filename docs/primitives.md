@@ -18,7 +18,9 @@ Validate both with
 Generate a builder-facing coverage/readiness summary with
 `bin/primitives-readiness-report docs/primitives.catalog.json` or use
 `--json` for machine-readable audit output.
-Strict readiness is expected to stay green: every cataloged HTTP/CLI primitive
+Current catalog summary: 18 primitives, 79 HTTP routes, 8 CLI commands, 18
+self-tests, 62 proof refs.
+Strict readiness is expected to stay green: every cataloged primitive
 has a `self_tests` command, and the shared primitive operation-helper test
 proves typed helper coverage for every cataloged HTTP route.
 The catalog audit also verifies every catalog schema has a matching

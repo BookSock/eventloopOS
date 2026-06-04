@@ -1,0 +1,154 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/primitives-docs-audit [--self-test] [catalog.json] [primitives.md]
+
+Checks builder-facing primitive docs against docs/primitives.catalog.json so
+the human-readable library index cannot drift from cataloged primitives and
+coverage totals.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  process.exit(0);
+}
+
+const positional = args.filter((arg) => !arg.startsWith("-"));
+const catalogPath = positional[0] ?? "docs/primitives.catalog.json";
+const docsPath = positional[1] ?? "docs/primitives.md";
+const result = auditPrimitiveDocs(catalogPath, docsPath, process.cwd());
+if (!result.ok) {
+  for (const error of result.errors) console.error(error);
+  process.exit(1);
+}
+console.log(`primitives docs audit passed: ${docsPath} (${result.primitive_count} primitives)`);
+
+function auditPrimitiveDocs(catalogPath, docsPath, repoRoot) {
+  const errors = [];
+  const catalog = readJson(path.resolve(repoRoot, catalogPath), errors, "catalog");
+  const docs = readText(path.resolve(repoRoot, docsPath), errors, "docs");
+  if (!catalog || docs === undefined) {
+    return { ok: false, primitive_count: 0, errors };
+  }
+  if (!Array.isArray(catalog.primitives) || catalog.primitives.length === 0) {
+    errors.push("catalog primitives must be a non-empty array");
+    return { ok: false, primitive_count: 0, errors };
+  }
+
+  requireIncludes(docs, "# eventloopOS Primitives", "missing primitives document title", errors);
+  requireIncludes(docs, catalogPath, `missing catalog path ${catalogPath}`, errors);
+  requireIncludes(docs, "docs/primitives.openapi.json", "missing OpenAPI artifact path", errors);
+  requireIncludes(docs, "every cataloged primitive has a `self_tests` command", "missing strict self-test invariant wording", errors);
+
+  const totals = {
+    primitives: catalog.primitives.length,
+    http: sum(catalog.primitives, (primitive) => Array.isArray(primitive.http) ? primitive.http.length : 0),
+    cli: sum(catalog.primitives, (primitive) => Array.isArray(primitive.cli) ? primitive.cli.length : 0),
+    selfTests: sum(catalog.primitives, (primitive) => Array.isArray(primitive.self_tests) ? primitive.self_tests.length : 0),
+    proofs: sum(catalog.primitives, (primitive) => Array.isArray(primitive.proofs) ? primitive.proofs.length : 0),
+  };
+  requireIncludes(
+    docs,
+    `${totals.primitives} primitives, ${totals.http} HTTP routes, ${totals.cli} CLI commands, ${totals.selfTests} self-tests, ${totals.proofs} proof refs`,
+    "missing or stale primitive totals",
+    errors,
+  );
+
+  for (const primitive of catalog.primitives) {
+    if (!isRecord(primitive)) continue;
+    const title = readString(primitive.title);
+    if (!title) {
+      errors.push(`primitive missing title: ${JSON.stringify(primitive.id)}`);
+      continue;
+    }
+    requireIncludes(docs, `## ${title}`, `missing section heading for primitive ${title}`, errors);
+  }
+
+  return { ok: errors.length === 0, primitive_count: catalog.primitives.length, errors };
+}
+
+function readJson(filePath, errors, label) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    errors.push(`${label} read/parse failed: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
+}
+
+function readText(filePath, errors, label) {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch (error) {
+    errors.push(`${label} read failed: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
+}
+
+function requireIncludes(text, needle, error, errors) {
+  if (!normalizeSpace(text).includes(normalizeSpace(needle))) errors.push(error);
+}
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function readString(value) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function sum(items, valueFn) {
+  return items.reduce((total, item) => total + Number(valueFn(item) ?? 0), 0);
+}
+
+function normalizeSpace(value) {
+  return String(value).replace(/\s+/g, " ").trim();
+}
+
+function runSelfTest() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-primitives-docs-"));
+  const catalogPath = path.join(root, "catalog.json");
+  const docsPath = path.join(root, "primitives.md");
+  fs.writeFileSync(catalogPath, JSON.stringify({
+    primitives: [{
+      id: "runtime_spine",
+      title: "Runtime Spine",
+      proofs: ["proof.test.ts"],
+      self_tests: ["pnpm test:runtime-spine"],
+    }, {
+      id: "workspace_control",
+      title: "Workspace Control",
+      http: [{ path: "/workspace/status" }],
+      cli: ["bin/workspace-proof"],
+      proofs: ["proof.test.ts", "proof-smoke"],
+      self_tests: ["bin/workspace-proof --self-test"],
+    }],
+  }));
+  fs.writeFileSync(docsPath, `# eventloopOS Primitives
+
+Machine-readable catalog: ${catalogPath}. Builder-facing HTTP OpenAPI artifact: docs/primitives.openapi.json.
+Strict readiness is expected to stay green: every cataloged primitive has a \`self_tests\` command.
+Current catalog summary: 2 primitives, 1 HTTP routes, 1 CLI commands, 2 self-tests, 3 proof refs.
+
+## Runtime Spine
+
+## Workspace Control
+`);
+  const good = auditPrimitiveDocs(catalogPath, docsPath, root);
+  assert.equal(good.ok, true);
+  fs.writeFileSync(docsPath, "# eventloopOS Primitives\n\n## Runtime Spine\n");
+  const bad = auditPrimitiveDocs(catalogPath, docsPath, root);
+  assert.equal(bad.ok, false);
+  assert.ok(bad.errors.some((error) => error.includes("missing section heading")));
+  assert.ok(bad.errors.some((error) => error.includes("missing or stale primitive totals")));
+  fs.rmSync(root, { recursive: true, force: true });
+  console.log("primitives-docs-audit self-test passed");
+}
