@@ -23,6 +23,8 @@ HTTP route, and each mutating route must either declare a request schema or
 ```ts
 import {
   parsePrimitiveCatalog,
+  buildPrimitiveRequest,
+  createPrimitiveHttpClient,
   getPrimitiveRoute,
   routeHasRequestBody,
   summarizePrimitiveCatalog
@@ -34,10 +36,29 @@ const route = getPrimitiveRoute(catalog, "POST", "/onboarding/approvals/batch");
 console.log(summarizePrimitiveCatalog(catalog));
 console.log(route?.request_schema);
 console.log(route ? routeHasRequestBody(route) : false);
+
+const request = buildPrimitiveRequest({
+  catalog,
+  method: "GET",
+  path: "/queue/:id/lineage",
+  pathParams: { id: "qit_feedback_001" },
+  query: { limit: 25 }
+});
+
+const client = createPrimitiveHttpClient({
+  catalog,
+  baseUrl: "http://127.0.0.1:4377"
+});
+const lineage = await client.request("GET", "/queue/:id/lineage", {
+  pathParams: { id: "qit_feedback_001" },
+  query: { limit: 25 }
+});
 ```
 
 Use this when building tools on top of eventloopOS primitives without importing
-or running the orchestrator server package.
+or running the orchestrator server package. Request helpers interpolate route
+templates, encode query strings, enforce `no_request_body`, and validate known
+request/response schemas through the exported Zod contract registry.
 
 ## Local Commands
 

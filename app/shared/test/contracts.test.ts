@@ -19,7 +19,14 @@ import {
   getPrimitiveRoute,
   getContractSchema
 } from "../src/index.js";
-import { parsePrimitiveCatalog, routeHasRequestBody, summarizePrimitiveCatalog } from "../src/primitives.js";
+import {
+  buildPrimitiveRequest,
+  createPrimitiveHttpClient,
+  parsePrimitiveCatalog,
+  routeHasRequestBody,
+  summarizePrimitiveCatalog,
+  validatePrimitiveResponse
+} from "../src/primitives.js";
 import { validateFixtures } from "../src/cli.js";
 
 type FixtureEnvelope = {
@@ -275,6 +282,97 @@ describe("primitive catalog SDK boundary", () => {
     };
 
     expect(PrimitiveCatalogSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it("builds typed primitive requests with path params, query, and validated JSON bodies", () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const requestBody = readFixture(join(fixturesDir, "valid/onboarding_approval_batch_request.json")).data;
+
+    const request = buildPrimitiveRequest({
+      catalog,
+      method: "post",
+      path: "/onboarding/approvals/batch",
+      baseUrl: "http://127.0.0.1:4480",
+      body: requestBody,
+      headers: { "x-agent": "codex" }
+    });
+
+    expect(request.method).toBe("POST");
+    expect(request.url).toBe("http://127.0.0.1:4480/onboarding/approvals/batch");
+    expect(request.headers["content-type"]).toBe("application/json");
+    expect(request.headers["x-agent"]).toBe("codex");
+    expect(JSON.parse(request.body ?? "{}")).toMatchObject({
+      idempotency_key: "idem_onboarding_batch"
+    });
+
+    const lineage = buildPrimitiveRequest({
+      catalog,
+      method: "GET",
+      path: "/queue/:id/lineage",
+      baseUrl: "http://localhost:4377/root/",
+      pathParams: { id: "qit_feedback_001" },
+      query: { limit: 25, ignored_future_filter: "yes" }
+    });
+
+    expect(lineage.url).toBe("http://localhost:4377/queue/qit_feedback_001/lineage?limit=25&ignored_future_filter=yes");
+    expect(lineage.body).toBeUndefined();
+  });
+
+  it("rejects request bodies for no-body primitives and validates primitive responses", () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const noBodyRoute = getPrimitiveRoute(catalog, "POST", "/agents/codex/auto-bind");
+    expect(noBodyRoute).toBeTruthy();
+
+    expect(() =>
+      buildPrimitiveRequest({
+        catalog,
+        method: "POST",
+        path: "/agents/codex/auto-bind",
+        body: {}
+      })
+    ).toThrow(/does not accept request body/);
+
+    const response = validatePrimitiveResponse(
+      noBodyRoute!,
+      readFixture(join(fixturesDir, "valid/codex_auto_bind_response.json")).data
+    );
+    expect((response as { ok: boolean }).ok).toBe(true);
+  });
+
+  it("creates a primitive HTTP client that validates successful JSON responses", async () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const responseBody = readFixture(join(fixturesDir, "valid/onboarding_approval_batch_response.json")).data;
+    const calls: Array<{ url: string; method?: string; body?: string }> = [];
+    const fakeFetch: typeof fetch = async (url, init) => {
+      calls.push({
+        url: String(url),
+        method: init?.method,
+        body: typeof init?.body === "string" ? init.body : undefined
+      });
+      return new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    };
+    const client = createPrimitiveHttpClient({
+      catalog,
+      baseUrl: "http://127.0.0.1:4480",
+      fetch: fakeFetch,
+      headers: { authorization: "Bearer local" }
+    });
+
+    const result = await client.request("POST", "/onboarding/approvals/batch", {
+      body: readFixture(join(fixturesDir, "valid/onboarding_approval_batch_request.json")).data
+    });
+
+    expect(result).toMatchObject({ ok: true, request_id: "req_onboarding_batch" });
+    expect(calls).toEqual([
+      {
+        url: "http://127.0.0.1:4480/onboarding/approvals/batch",
+        method: "POST",
+        body: expect.stringContaining("idem_onboarding_batch")
+      }
+    ]);
   });
 });
 
