@@ -17,6 +17,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var leasedIds: Set<String> = []
     private var leaseOrder: [String] = []
     private var renewedIds: [String] = []
+    private var nextLeaseError: Error?
     private var contextRestoreResources: [ReviewContextResource] = []
     private var contextRestoreRequestResources: [ReviewContextResource] = []
     private var contextRestoreRequestIdempotencyKeys: [String] = []
@@ -219,6 +220,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         lock.withLock { manualModeFakeError = error }
     }
 
+    public func setNextLeaseError(_ error: Error?) {
+        lock.withLock { nextLeaseError = error }
+    }
+
     public func setBatchApprovalFailureCount(_ count: Int) {
         lock.withLock { batchApprovalFailureCount = count }
     }
@@ -307,7 +312,11 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func next(after packetId: String?) async throws -> ReviewPacket? {
-        lock.withLock {
+        try lock.withLock {
+            if let error = nextLeaseError {
+                nextLeaseError = nil
+                throw error
+            }
             let candidates: [ReviewPacket]
             if let packetId, let index = packets.firstIndex(where: { $0.id == packetId }) {
                 candidates = Array(packets.dropFirst(index + 1)) + Array(packets.prefix(index + 1))

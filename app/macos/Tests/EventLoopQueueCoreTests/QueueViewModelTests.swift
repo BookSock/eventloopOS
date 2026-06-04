@@ -28,6 +28,17 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state, .loaded)
     }
 
+    func testRenewSelectedLeaseIgnoresLeaseConflict() async {
+        let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-blog-feedback")
+
+        await viewModel.renewSelectedLease()
+
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+    }
+
     func testRapidDoneNextDeduplicatesWhileInFlight() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let workspaceClient = FakeWorkspaceClient(
@@ -726,6 +737,31 @@ final class QueueViewModelTests: XCTestCase {
         let client = FakeQueueClient(packets: [packet])
         let viewModel = QueueViewModel(client: client)
         await viewModel.pullNextPaper()
+
+        await viewModel.executeRecommendedActionAndNext()
+
+        XCTAssertEqual(client.executedRecommendedActions, ["packet-route"])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.packets, [])
+        XCTAssertNil(viewModel.selectedPacketID)
+    }
+
+    func testExecuteRecommendedActionTreatsNextLeaseConflictAsNonFatal() async {
+        let packet = ReviewPacket(
+            id: "packet-route",
+            taskId: "task_blog_feedback",
+            title: "Route feedback",
+            summary: "Human approved agent handoff.",
+            source: "manual://review",
+            priority: 90,
+            recommendedAction: "Route to task agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(packets: [packet])
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+        client.setNextLeaseError(QueueClientError.httpStatus(409))
 
         await viewModel.executeRecommendedActionAndNext()
 

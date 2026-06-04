@@ -546,6 +546,14 @@ public final class QueueViewModel: ObservableObject {
         paperActionInFlight = false
     }
 
+    private func isQueueConflict(_ error: Error) -> Bool {
+        if let queueError = error as? QueueClientError,
+           case let .httpStatus(status) = queueError {
+            return status == 409
+        }
+        return false
+    }
+
     public func pullNextPaper() async {
         guard beginPaperAction("Switching papers...") else { return }
         defer { finishPaperAction() }
@@ -957,7 +965,22 @@ public final class QueueViewModel: ObservableObject {
     }
 
     private func loadNextAfterQueueAction(emptyToast: AdvanceToast) async throws {
-        let leasedPacket = try await client.next(after: nil)
+        let leasedPacket: ReviewPacket?
+        do {
+            leasedPacket = try await client.next(after: nil)
+        } catch {
+            guard isQueueConflict(error) else {
+                throw error
+            }
+            packets = (try? await client.fetchQueue()) ?? packets
+            selectedPacketID = packets.first?.id
+            state = .loaded
+            advanceToast = packets.isEmpty ? emptyToast : .actionComplete("Queue paused. Try again.")
+            await loadTaskSessionsForSelectedPacketIfNeeded()
+            await prepareSelectedWorkspaceRestore()
+            await requestSelectedBrowserContextRestoresIfNeeded()
+            return
+        }
         packets = try await client.fetchQueue()
         selectedPacketID = leasedPacket?.id ?? packets.first?.id
         state = .loaded
@@ -1511,6 +1534,9 @@ public final class QueueViewModel: ObservableObject {
         do {
             _ = try await client.renewLease(packetId: packetId)
         } catch {
+            if isQueueConflict(error) {
+                return
+            }
             state = .failed(error.localizedDescription)
         }
     }
