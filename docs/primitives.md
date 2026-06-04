@@ -5,16 +5,17 @@ operating-system control primitives. This document catalogs the primitives that
 other tools could build on without taking the whole queue app.
 
 Machine-readable catalog: `docs/primitives.catalog.json`. Builder-facing HTTP
-OpenAPI artifact: `docs/primitives.openapi.json`. It includes concrete schemas
-for task-window claims, follows-window exclusion rules, and manual mode; those
-schemas are also exported from `@eventloopos/shared`. Broader routes still use
-conservative freeform envelopes until their validators are exported.
+OpenAPI artifact: `docs/primitives.openapi.json`. The catalog now requires a
+response schema for every HTTP route and either a request schema or
+`no_request_body: true` for every mutating route. Those schemas are exported
+from `@eventloopos/shared` and validated against contract fixtures.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.
 The catalog audit also verifies every catalog schema has a matching
 `@eventloopos/shared` Zod schema, TypeScript type, and ContractSchemas registry
-entry.
+entry, and that cataloged HTTP routes cannot silently drift back to freeform
+envelopes.
 
 Runnable examples live in `examples/primitives/`: restore a saved desk, inspect
 and rerank an attention queue, and wire external hotkeys to task-window/follows
@@ -375,8 +376,8 @@ Proof:
 - `bin/master-priority-proof-smoke`
 - `bin/event-loop-proof-smoke`
 
-Status: stable enough internally; public API needs schema docs generated from
-types/tests.
+Status: stable enough internally. Queue/paper route envelopes are exported as
+shared schemas and generated OpenAPI; public SDK packaging is still missing.
 
 ## Task Intake Onboarding
 
@@ -404,7 +405,8 @@ Proof:
 - `app/orchestrator/src/onboarding/onboarding_scan_cli.test.ts`
 - `bin/onboarding-live-proof-smoke`
 
-Status: dogfood.
+Status: dogfood. Onboarding scan, approval, batch approval, and rejection
+routes are exported as shared schemas and generated OpenAPI.
 
 ## Reading Queue
 
@@ -750,10 +752,9 @@ entrypoint.
 
 Highest-leverage steps before calling this a real primitives library:
 
-1. Continue replacing conservative OpenAPI freeform envelopes with schemas
-   generated from route validators and fixtures. Workspace control,
-   task-window claims, follows-window exclusions, and manual mode are already
-   covered.
+1. Generate a small public SDK/package boundary from `@eventloopos/shared` and
+   `docs/primitives.openapi.json`, rather than asking builders to import from
+   the monorepo directly.
 2. Split `@eventloopos/orchestrator` into public contracts and private server
    implementation packages.
 3. Keep `bin/human-demo-ready`'s default macOS hotkey-latency gate green before
