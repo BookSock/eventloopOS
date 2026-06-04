@@ -605,6 +605,11 @@ public final class QueueViewModel: ObservableObject {
     public func advance() async {
         guard beginPaperAction("Switching papers...") else { return }
         defer { finishPaperAction() }
+
+        if currentTask == nil, !packets.isEmpty, await fastAdvanceToQueuedPaperFromLimbo() {
+            return
+        }
+
         let snapshot: AdvanceServerSnapshot
         do {
             snapshot = try await loadAdvanceSnapshot()
@@ -615,6 +620,35 @@ public final class QueueViewModel: ObservableObject {
 
         let action = AdvanceCoordinator.nextAction(snapshot: snapshot)
         await execute(advanceAction: action, snapshot: snapshot)
+    }
+
+    private func fastAdvanceToQueuedPaperFromLimbo() async -> Bool {
+        do {
+            async let manualModeStateTask = client.getManualMode()
+            async let currentTaskStateTask = client.getCurrentTask()
+            async let queueTask = client.fetchQueue()
+
+            let manualModeState = try await manualModeStateTask
+            if manualModeState.active {
+                advanceToast = .manualModeActive
+                return true
+            }
+
+            let currentTaskState = try await currentTaskStateTask
+            let queue = try await queueTask
+            guard currentTaskState.task == nil, !queue.isEmpty else {
+                currentTask = currentTaskState.task
+                packets = queue
+                return false
+            }
+
+            currentTask = nil
+            packets = queue
+            await pullNextPaperUnguarded()
+            return true
+        } catch {
+            return false
+        }
     }
 
     private func loadAdvanceSnapshot() async throws -> AdvanceServerSnapshot {

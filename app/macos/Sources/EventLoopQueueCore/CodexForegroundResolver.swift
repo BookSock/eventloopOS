@@ -11,6 +11,7 @@ public final class FakeCodexForegroundResolver: CodexForegroundResolver, @unchec
     private let lock = NSLock()
     private var nextResult: AdvanceForegroundContext
     private var readDelayNanoseconds: UInt64
+    private var resolveCountValue: Int = 0
 
     public init(_ initial: AdvanceForegroundContext = .none, readDelayNanoseconds: UInt64 = 0) {
         self.nextResult = initial
@@ -25,8 +26,15 @@ public final class FakeCodexForegroundResolver: CodexForegroundResolver, @unchec
         lock.withLock { readDelayNanoseconds = delay }
     }
 
+    public var resolveCount: Int {
+        lock.withLock { resolveCountValue }
+    }
+
     public func resolveForeground() async -> AdvanceForegroundContext {
-        let delay = lock.withLock { readDelayNanoseconds }
+        let delay = lock.withLock {
+            resolveCountValue += 1
+            return readDelayNanoseconds
+        }
         if delay > 0 {
             try? await Task.sleep(nanoseconds: delay)
         }
