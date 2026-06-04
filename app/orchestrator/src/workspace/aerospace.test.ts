@@ -113,6 +113,39 @@ describe("Aerospace workspace adapter", () => {
     assert.equal(windows[1]?.frame, undefined);
   });
 
+  it("uses a longer timeout for System Events frame capture", async () => {
+    const calls: Array<{ command: string; timeoutMs?: number }> = [];
+    const adapter = new AerospaceWorkspaceAdapter(async (command, args, options) => {
+      calls.push({ command, timeoutMs: options?.timeoutMs });
+      if (command === "aerospace" && args[0] === "list-windows" && args.includes("--focused")) {
+        return { stdout: JSON.stringify([{ "window-id": 21, workspace: "paper-a" }]) };
+      }
+      if (command === "aerospace" && args[0] === "list-workspaces") {
+        return { stdout: "paper-a\n" };
+      }
+      if (command === "aerospace") {
+        return {
+          stdout: JSON.stringify([
+            {
+              "window-id": 21,
+              "app-name": "TextEdit",
+              "app-bundle-id": "com.apple.TextEdit",
+              "window-title": "Shared Note",
+              workspace: "paper-a",
+              "window-layout": "floating",
+            },
+          ]),
+        };
+      }
+      return { stdout: "TextEdit\tcom.apple.TextEdit\tShared Note\t10\t20\t500\t300\n" };
+    });
+
+    const snapshot = await adapter.capture();
+
+    assert.deepEqual(snapshot.windows[0]?.frame, { x: 10, y: 20, width: 500, height: 300 });
+    assert.equal(calls.find((call) => call.command === "osascript")?.timeoutMs, 15_000);
+  });
+
   it("reports missing aerospace binary from injected exec", async () => {
     const adapter = new AerospaceWorkspaceAdapter(async () => {
       const error = new Error("spawn aerospace ENOENT") as Error & { code: string };

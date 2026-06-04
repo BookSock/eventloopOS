@@ -64,7 +64,7 @@ let windows = resolveDemoWindows(snapshot);
 const customerSnapshot = buildSnapshot(windows, "customer");
 await restore(customerSnapshot, "initial-customer-layout");
 await sleep(1_200);
-snapshot = await capture();
+snapshot = await captureWithDemoFrames("initial customer restore");
 const customerProof = assertRestoredSnapshot(snapshot, customerSnapshot, "initial customer restore");
 windows = resolveDemoWindows(snapshot);
 
@@ -76,7 +76,7 @@ await queuePaper(paperCustomer, "Customer asks whether eventloopOS is ready for 
 const metricsSnapshot = buildSnapshot(windows, "metrics");
 await restore(metricsSnapshot, "initial-metrics-layout");
 await sleep(1_200);
-snapshot = await capture();
+snapshot = await captureWithDemoFrames("initial metrics restore");
 const metricsProof = assertRestoredSnapshot(snapshot, metricsSnapshot, "initial metrics restore");
 windows = resolveDemoWindows(snapshot);
 
@@ -98,18 +98,18 @@ await setCurrentTask(paperCustomer.taskId);
 const readySnapshotTarget = buildReadySnapshot(customerSnapshot, metricsSnapshot, windows);
 await restore(readySnapshotTarget, "ready-customer-layout");
 await sleep(1_200);
-const readySnapshot = await capture();
+const readySnapshot = await captureWithDemoFrames("ready customer restore");
 const readyCustomerProof = assertRestoredSnapshot(readySnapshot, customerSnapshot, "ready customer restore");
 const ambientAutosaveProof = await proveAmbientAutosave(paperCustomer, customerSnapshot);
 await restore(readySnapshotTarget, "ready-customer-layout-after-ambient-proof");
 await sleep(1_200);
 await putTaskLayout(paperCustomer.taskId, customerSnapshot);
 await saveTaskWorkspaceSnapshot(paperCustomer.taskId, customerSnapshot);
-const finalReadySnapshot = await capture();
+const finalReadySnapshot = await captureWithDemoFrames("final ready customer restore");
 const finalReadyCustomerProof = assertRestoredSnapshot(finalReadySnapshot, customerSnapshot, "final ready customer restore");
 const queueWindow = positionQueueWindow();
 await sleep(600);
-const finalSnapshot = await capture();
+const finalSnapshot = await captureWithDemoFrames("final demo snapshot");
 const finalWindows = resolveDemoWindows(finalSnapshot);
 
 const manifest = {
@@ -359,16 +359,18 @@ async function waitForOrchestrator() {
 
 async function waitForWindows() {
   let lastSnapshot;
+  let lastError;
   for (let attempt = 1; attempt <= 30; attempt += 1) {
     lastSnapshot = await capture();
     try {
-      resolveDemoWindows(lastSnapshot);
+      assertDemoFramesPresent(resolveDemoWindows(lastSnapshot));
       return lastSnapshot;
-    } catch {
+    } catch (error) {
+      lastError = error;
       await sleep(1_000);
     }
   }
-  throw new Error(`demo windows were not captured: ${JSON.stringify(lastSnapshot?.windows?.map(compactWindow) ?? [])}`);
+  throw new Error(`demo windows were not captured: ${lastError instanceof Error ? lastError.message : String(lastError)} ${JSON.stringify(lastSnapshot?.windows?.map(compactWindow) ?? [])}`);
 }
 
 async function capture() {
@@ -381,6 +383,22 @@ async function capture() {
   return (await response.json()).snapshot;
 }
 
+async function captureWithDemoFrames(label) {
+  let lastSnapshot;
+  let lastError;
+  for (let attempt = 1; attempt <= 12; attempt += 1) {
+    lastSnapshot = await capture();
+    try {
+      assertDemoFramesPresent(resolveDemoWindows(lastSnapshot));
+      return lastSnapshot;
+    } catch (error) {
+      lastError = error;
+      await sleep(500);
+    }
+  }
+  throw new Error(`${label}: demo window frames unavailable: ${lastError instanceof Error ? lastError.message : String(lastError)} ${JSON.stringify(lastSnapshot?.windows?.map(compactWindow) ?? [])}`);
+}
+
 function resolveDemoWindows(snapshot) {
   const customerChrome = findWindow(snapshot, "Google Chrome", paperCustomer.chromeTitle);
   const metricsChrome = findWindow(snapshot, "Google Chrome", paperMetrics.chromeTitle);
@@ -389,6 +407,14 @@ function resolveDemoWindows(snapshot) {
     throw new Error(`missing demo windows: ${JSON.stringify(snapshot.windows.map(compactWindow))}`);
   }
   return { customerChrome, metricsChrome, sharedText };
+}
+
+function assertDemoFramesPresent(windows) {
+  for (const [label, window] of Object.entries(windows)) {
+    if (!window.frame || typeof window.frame.x !== "number") {
+      throw new Error(`${label} frame missing`);
+    }
+  }
 }
 
 function findWindow(snapshot, app, titlePart) {

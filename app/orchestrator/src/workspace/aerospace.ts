@@ -3,7 +3,7 @@ export type ExecResult = {
   stderr?: string;
 };
 
-export type ExecFunction = (command: string, args: string[]) => Promise<ExecResult>;
+export type ExecFunction = (command: string, args: string[], options?: { timeoutMs?: number; cwd?: string }) => Promise<ExecResult>;
 
 export type AerospaceCommand =
   | {
@@ -136,7 +136,7 @@ export class AerospaceWorkspaceAdapter {
   }
 
   private async captureWindowFrames(): Promise<MacOSWindowFrameObservation[]> {
-    const result = await this.exec("osascript", ["-e", captureWindowFramesAppleScript()]);
+    const result = await this.exec("osascript", ["-e", captureWindowFramesAppleScript()], { timeoutMs: 15_000 });
     return parseWindowFrameObservations(result.stdout);
   }
 }
