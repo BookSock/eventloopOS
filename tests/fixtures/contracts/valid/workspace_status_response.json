@@ -1,0 +1,12 @@
+{
+  "schema": "WorkspaceStatusResponse",
+  "data": {
+    "status": {
+      "available": true,
+      "backend": "aerospace",
+      "monitorCount": 2
+    },
+    "execute_supported": true,
+    "request_id": "req_workspace_status"
+  }
+}

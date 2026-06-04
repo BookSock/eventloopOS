@@ -1,0 +1,8 @@
+{
+  "schema": "RestoreSkip",
+  "data": {
+    "reason": "stale_window_id",
+    "windowId": 99,
+    "workspace": "eventloop-blog"
+  }
+}

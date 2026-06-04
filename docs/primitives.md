@@ -125,8 +125,9 @@ Proof:
 - `bin/task-workspace-memory-proof-smoke`
 - latest Mac Studio human demo manifest under `artifacts/lab-runs/*-human-demo/manifest.json`
 
-Status: dogfood on macOS; public API needs versioned schema and stronger
-cross-host story.
+Status: dogfood on macOS. Core status/capture/restore route envelopes now have
+shared contract schemas and generated OpenAPI; non-AeroSpace adapter docs still
+need a second backend implementation before calling the adapter API stable.
 
 ## Task Workspace Memory
 
@@ -750,7 +751,9 @@ entrypoint.
 Highest-leverage steps before calling this a real primitives library:
 
 1. Continue replacing conservative OpenAPI freeform envelopes with schemas
-   generated from route validators and fixtures.
+   generated from route validators and fixtures. Workspace control,
+   task-window claims, follows-window exclusions, and manual mode are already
+   covered.
 2. Split `@eventloopos/orchestrator` into public contracts and private server
    implementation packages.
 3. Keep `bin/human-demo-ready`'s default macOS hotkey-latency gate green before

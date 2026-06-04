@@ -4,6 +4,211 @@
   "license": "AGPL-3.0-only",
   "status_labels": ["stable_enough", "dogfood", "experimental", "mixed"],
   "schemas": {
+    "WindowFrame": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "minimum": 1 },
+        "height": { "type": "number", "minimum": 1 }
+      }
+    },
+    "WorkspaceWindow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "app", "title", "workspace"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 1 },
+        "app": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "workspace": { "type": "string", "minLength": 1 },
+        "monitorId": { "type": "integer" },
+        "pid": { "type": "integer", "minimum": 1 },
+        "appBundleId": { "type": "string", "minLength": 1 },
+        "layout": {
+          "type": "string",
+          "enum": ["h_tiles", "v_tiles", "h_accordion", "v_accordion", "tiles", "accordion", "floating"]
+        },
+        "frame": { "$ref": "#/components/schemas/WindowFrame" }
+      }
+    },
+    "WorkspaceFrameCaptureStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "timeoutMs", "observed"],
+      "properties": {
+        "status": { "type": "string", "enum": ["captured", "failed", "skipped"] },
+        "timeoutMs": { "type": "integer", "minimum": 0 },
+        "observed": { "type": "integer", "minimum": 0 },
+        "error": { "type": "string" }
+      }
+    },
+    "WorkspaceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["backend", "windows"],
+      "properties": {
+        "backend": { "type": "string", "minLength": 1 },
+        "windows": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/WorkspaceWindow" }
+        },
+        "activeWorkspace": { "type": "string", "minLength": 1 },
+        "focusedWindowId": { "type": "integer", "minimum": 1 },
+        "frameCapture": { "$ref": "#/components/schemas/WorkspaceFrameCaptureStatus" }
+      }
+    },
+    "WorkspaceCapabilityStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["available", "backend"],
+      "properties": {
+        "available": { "type": "boolean" },
+        "backend": { "type": "string", "minLength": 1 },
+        "reason": {
+          "type": "string",
+          "enum": ["binary_missing", "permission_denied", "server_unavailable", "invalid_response", "unknown_error"]
+        },
+        "detail": { "type": "string" },
+        "monitorCount": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "WorkspaceStatusResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "execute_supported", "request_id"],
+      "properties": {
+        "status": { "$ref": "#/components/schemas/WorkspaceCapabilityStatus" },
+        "execute_supported": { "type": "boolean" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "WorkspaceCaptureResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot", "request_id"],
+      "properties": {
+        "snapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "WorkspaceRestorePlanRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["snapshot"],
+      "properties": {
+        "snapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "current_windows": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/WorkspaceWindow" }
+        }
+      }
+    },
+    "AerospaceCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "args"],
+      "properties": {
+        "command": { "type": "string", "enum": ["aerospace", "osascript"] },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "RestoreSkip": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "windowId", "workspace"],
+      "properties": {
+        "reason": { "type": "string", "const": "stale_window_id" },
+        "windowId": { "type": "integer", "minimum": 1 },
+        "workspace": { "type": "string", "minLength": 1 }
+      }
+    },
+    "WorkspaceRestorePlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commands", "skipped"],
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/AerospaceCommand" }
+        },
+        "skipped": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/RestoreSkip" }
+        }
+      }
+    },
+    "WorkspaceRestorePlanResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["plan", "execute_supported", "request_id"],
+      "properties": {
+        "plan": { "$ref": "#/components/schemas/WorkspaceRestorePlan" },
+        "execute_supported": { "type": "boolean" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "WorkspaceRestoreRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["snapshot", "confirm_execute"],
+      "properties": {
+        "snapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "current_windows": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/WorkspaceWindow" }
+        },
+        "confirm_execute": { "type": "boolean", "const": true }
+      }
+    },
+    "WorkspaceRestoreCommandReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "args", "stdout"],
+      "properties": {
+        "command": { "type": "string", "enum": ["aerospace", "osascript"] },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "stdout": { "type": "string" },
+        "stderr": { "type": "string" }
+      }
+    },
+    "WorkspaceRestoreReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commands", "skipped"],
+      "properties": {
+        "commands": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/WorkspaceRestoreCommandReceipt" }
+        },
+        "skipped": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/RestoreSkip" }
+        }
+      }
+    },
+    "WorkspaceRestoreResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "plan", "receipt", "execute_supported", "idempotency_key", "idempotency_replayed", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "plan": { "$ref": "#/components/schemas/WorkspaceRestorePlan" },
+        "receipt": { "$ref": "#/components/schemas/WorkspaceRestoreReceipt" },
+        "execute_supported": { "type": "boolean", "const": true },
+        "idempotency_key": { "type": "string", "minLength": 1 },
+        "idempotency_replayed": { "type": "boolean" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "FollowsWindowExclusionCreateRequest": {
       "type": "object",
       "additionalProperties": true,
@@ -186,10 +391,37 @@
       "status": "dogfood",
       "summary": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
       "http": [
-        { "method": "GET", "path": "/workspace/status", "route_file": "app/orchestrator/src/routes/workspace.ts" },
-        { "method": "POST", "path": "/workspace/capture", "route_file": "app/orchestrator/src/routes/workspace.ts" },
-        { "method": "POST", "path": "/workspace/restore-plan", "route_file": "app/orchestrator/src/routes/workspace.ts" },
-        { "method": "POST", "path": "/workspace/restore", "route_file": "app/orchestrator/src/routes/workspace.ts" }
+        {
+          "method": "GET",
+          "path": "/workspace/status",
+          "route_file": "app/orchestrator/src/routes/workspace.ts",
+          "response_schema": "WorkspaceStatusResponse"
+        },
+        {
+          "method": "POST",
+          "path": "/workspace/capture",
+          "route_file": "app/orchestrator/src/routes/workspace.ts",
+          "request_schema": {
+            "type": "object",
+            "additionalProperties": false
+          },
+          "request_body_required": false,
+          "response_schema": "WorkspaceCaptureResponse"
+        },
+        {
+          "method": "POST",
+          "path": "/workspace/restore-plan",
+          "route_file": "app/orchestrator/src/routes/workspace.ts",
+          "request_schema": "WorkspaceRestorePlanRequest",
+          "response_schema": "WorkspaceRestorePlanResponse"
+        },
+        {
+          "method": "POST",
+          "path": "/workspace/restore",
+          "route_file": "app/orchestrator/src/routes/workspace.ts",
+          "request_schema": "WorkspaceRestoreRequest",
+          "response_schema": "WorkspaceRestoreResponse"
+        }
       ],
       "code": [
         "app/orchestrator/src/workspace/aerospace.ts",

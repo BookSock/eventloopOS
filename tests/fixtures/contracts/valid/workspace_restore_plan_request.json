@@ -1,0 +1,25 @@
+{
+  "schema": "WorkspaceRestorePlanRequest",
+  "data": {
+    "snapshot": {
+      "backend": "aerospace",
+      "windows": [
+        {
+          "id": 9,
+          "app": "Ghostty",
+          "title": "codex",
+          "workspace": "eventloop-blog"
+        }
+      ],
+      "activeWorkspace": "eventloop-blog"
+    },
+    "current_windows": [
+      {
+        "id": 9,
+        "app": "Ghostty",
+        "title": "codex",
+        "workspace": "manual"
+      }
+    ]
+  }
+}

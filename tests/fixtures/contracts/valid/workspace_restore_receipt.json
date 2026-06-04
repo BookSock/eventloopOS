@@ -1,0 +1,13 @@
+{
+  "schema": "WorkspaceRestoreReceipt",
+  "data": {
+    "commands": [
+      {
+        "command": "aerospace",
+        "args": ["workspace", "eventloop-blog"],
+        "stdout": "eventloop-blog\n"
+      }
+    ],
+    "skipped": []
+  }
+}

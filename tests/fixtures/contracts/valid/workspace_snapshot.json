@@ -1,0 +1,31 @@
+{
+  "schema": "WorkspaceSnapshot",
+  "data": {
+    "backend": "aerospace",
+    "windows": [
+      {
+        "id": 9,
+        "app": "Ghostty",
+        "title": "codex",
+        "workspace": "eventloop-blog",
+        "monitorId": 1,
+        "pid": 4242,
+        "appBundleId": "com.mitchellh.ghostty",
+        "layout": "floating",
+        "frame": {
+          "x": 120,
+          "y": 80,
+          "width": 1440,
+          "height": 900
+        }
+      }
+    ],
+    "activeWorkspace": "eventloop-blog",
+    "focusedWindowId": 9,
+    "frameCapture": {
+      "status": "captured",
+      "timeoutMs": 1200,
+      "observed": 1
+    }
+  }
+}

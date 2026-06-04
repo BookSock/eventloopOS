@@ -1,0 +1,19 @@
+{
+  "schema": "WorkspaceCaptureResponse",
+  "data": {
+    "snapshot": {
+      "backend": "aerospace",
+      "windows": [
+        {
+          "id": 9,
+          "app": "Ghostty",
+          "title": "codex",
+          "workspace": "eventloop-blog"
+        }
+      ],
+      "activeWorkspace": "eventloop-blog",
+      "focusedWindowId": 9
+    },
+    "request_id": "req_workspace_capture"
+  }
+}

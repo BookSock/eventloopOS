@@ -1,0 +1,8 @@
+{
+  "schema": "WorkspaceFrameCaptureStatus",
+  "data": {
+    "status": "captured",
+    "timeoutMs": 1200,
+    "observed": 1
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "schema": "WorkspaceWindow",
+  "data": {
+    "id": 9,
+    "app": "Ghostty",
+    "title": "codex",
+    "workspace": "eventloop-blog",
+    "monitorId": 1,
+    "pid": 4242,
+    "appBundleId": "com.mitchellh.ghostty",
+    "layout": "floating",
+    "frame": {
+      "x": 120,
+      "y": 80,
+      "width": 1440,
+      "height": 900
+    }
+  }
+}

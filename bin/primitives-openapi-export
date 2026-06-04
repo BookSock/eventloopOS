@@ -162,7 +162,7 @@ function operationForRoute(input) {
   const requestSchema = schemaRef(input.route.request_schema);
   if (["post", "put", "patch"].includes(input.method)) {
     operation.requestBody = {
-      required: requestSchema ? true : false,
+      required: input.route.request_body_required === true || (requestSchema ? input.route.request_body_required !== false : false),
       content: {
         "application/json": {
           schema: requestSchema ?? { $ref: "#/components/schemas/FreeformJsonObject" },
@@ -276,6 +276,7 @@ function runSelfTest() {
           path: "/tasks",
           route_file: "routes/tasks.ts",
           request_schema: "CreateTaskRequest",
+          request_body_required: false,
           response_schema: "CreateTaskResponse",
           query_parameters: [{ name: "dry_run", schema: { type: "boolean" } }],
         },
@@ -313,6 +314,9 @@ function runSelfTest() {
   }
   if (postTasks.requestBody.content["application/json"].schema.$ref !== "#/components/schemas/CreateTaskRequest") {
     throw new Error("self-test did not wire request schema ref");
+  }
+  if (postTasks.requestBody.required !== false) {
+    throw new Error("self-test did not allow optional request body");
   }
   if (postTasks.responses["200"].content["application/json"].schema.$ref !== "#/components/schemas/CreateTaskResponse") {
     throw new Error("self-test did not wire response schema ref");

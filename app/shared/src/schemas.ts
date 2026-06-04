@@ -110,25 +110,156 @@ export const AppWindowResourceSchema = ContextResourceBaseSchema.extend({
     .optional()
 }).strict();
 
+export const WindowFrameSchema = z
+  .object({
+    x: z.number(),
+    y: z.number(),
+    width: z.number().positive(),
+    height: z.number().positive()
+  })
+  .strict();
+export type WindowFrame = z.infer<typeof WindowFrameSchema>;
+
+export const AerospaceLayoutSchema = z.enum(["h_tiles", "v_tiles", "h_accordion", "v_accordion", "tiles", "accordion", "floating"]);
+export type AerospaceLayout = z.infer<typeof AerospaceLayoutSchema>;
+
 export const WorkspaceWindowSchema = z
   .object({
     id: z.number().int().positive(),
     app: nonEmpty,
     title: nonEmpty,
-    workspace: nonEmpty
+    workspace: nonEmpty,
+    monitorId: z.number().int().optional(),
+    pid: z.number().int().positive().optional(),
+    appBundleId: nonEmpty.optional(),
+    layout: AerospaceLayoutSchema.optional(),
+    frame: WindowFrameSchema.optional()
   })
   .strict();
 export type WorkspaceWindow = z.infer<typeof WorkspaceWindowSchema>;
 
+export const WorkspaceFrameCaptureStatusSchema = z
+  .object({
+    status: z.enum(["captured", "failed", "skipped"]),
+    timeoutMs: z.number().int().nonnegative(),
+    observed: z.number().int().nonnegative(),
+    error: z.string().optional()
+  })
+  .strict();
+export type WorkspaceFrameCaptureStatus = z.infer<typeof WorkspaceFrameCaptureStatusSchema>;
+
 export const WorkspaceSnapshotSchema = z
   .object({
-    backend: z.literal("aerospace"),
+    backend: nonEmpty,
     windows: z.array(WorkspaceWindowSchema),
     activeWorkspace: nonEmpty.optional(),
-    focusedWindowId: z.number().int().positive().optional()
+    focusedWindowId: z.number().int().positive().optional(),
+    frameCapture: WorkspaceFrameCaptureStatusSchema.optional()
   })
   .strict();
 export type WorkspaceSnapshot = z.infer<typeof WorkspaceSnapshotSchema>;
+
+export const WorkspaceCapabilityStatusSchema = z
+  .object({
+    available: z.boolean(),
+    backend: nonEmpty,
+    reason: z.enum(["binary_missing", "permission_denied", "server_unavailable", "invalid_response", "unknown_error"]).optional(),
+    detail: z.string().optional(),
+    monitorCount: z.number().int().nonnegative().optional()
+  })
+  .strict();
+export type WorkspaceCapabilityStatus = z.infer<typeof WorkspaceCapabilityStatusSchema>;
+
+export const WorkspaceStatusResponseSchema = z
+  .object({
+    status: WorkspaceCapabilityStatusSchema,
+    execute_supported: z.boolean(),
+    request_id: id
+  })
+  .strict();
+export type WorkspaceStatusResponse = z.infer<typeof WorkspaceStatusResponseSchema>;
+
+export const WorkspaceCaptureResponseSchema = z
+  .object({
+    snapshot: WorkspaceSnapshotSchema,
+    request_id: id
+  })
+  .strict();
+export type WorkspaceCaptureResponse = z.infer<typeof WorkspaceCaptureResponseSchema>;
+
+export const WorkspaceRestorePlanRequestSchema = z
+  .object({
+    snapshot: WorkspaceSnapshotSchema,
+    current_windows: z.array(WorkspaceWindowSchema).optional()
+  })
+  .passthrough();
+export type WorkspaceRestorePlanRequest = z.infer<typeof WorkspaceRestorePlanRequestSchema>;
+
+export const AerospaceCommandSchema = z
+  .object({
+    command: z.enum(["aerospace", "osascript"]),
+    args: z.array(z.string())
+  })
+  .strict();
+export type AerospaceCommand = z.infer<typeof AerospaceCommandSchema>;
+
+export const RestoreSkipSchema = z
+  .object({
+    reason: z.literal("stale_window_id"),
+    windowId: z.number().int().positive(),
+    workspace: nonEmpty
+  })
+  .strict();
+export type RestoreSkip = z.infer<typeof RestoreSkipSchema>;
+
+export const WorkspaceRestorePlanSchema = z
+  .object({
+    commands: z.array(AerospaceCommandSchema),
+    skipped: z.array(RestoreSkipSchema)
+  })
+  .strict();
+export type WorkspaceRestorePlan = z.infer<typeof WorkspaceRestorePlanSchema>;
+
+export const WorkspaceRestorePlanResponseSchema = z
+  .object({
+    plan: WorkspaceRestorePlanSchema,
+    execute_supported: z.boolean(),
+    request_id: id
+  })
+  .strict();
+export type WorkspaceRestorePlanResponse = z.infer<typeof WorkspaceRestorePlanResponseSchema>;
+
+export const WorkspaceRestoreRequestSchema = WorkspaceRestorePlanRequestSchema.extend({
+  confirm_execute: z.literal(true)
+}).passthrough();
+export type WorkspaceRestoreRequest = z.infer<typeof WorkspaceRestoreRequestSchema>;
+
+export const WorkspaceRestoreCommandReceiptSchema = AerospaceCommandSchema.extend({
+  stdout: z.string(),
+  stderr: z.string().optional()
+}).strict();
+export type WorkspaceRestoreCommandReceipt = z.infer<typeof WorkspaceRestoreCommandReceiptSchema>;
+
+export const WorkspaceRestoreReceiptSchema = z
+  .object({
+    commands: z.array(WorkspaceRestoreCommandReceiptSchema),
+    skipped: z.array(RestoreSkipSchema)
+  })
+  .strict();
+export type WorkspaceRestoreReceipt = z.infer<typeof WorkspaceRestoreReceiptSchema>;
+
+export const WorkspaceRestoreResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    plan: WorkspaceRestorePlanSchema,
+    receipt: WorkspaceRestoreReceiptSchema,
+    execute_supported: z.literal(true),
+    idempotency_key: id,
+    idempotency_replayed: z.boolean(),
+    request_id: id
+  })
+  .strict();
+export type WorkspaceRestoreResponse = z.infer<typeof WorkspaceRestoreResponseSchema>;
 
 export const WorkspaceSnapshotResourceSchema = ContextResourceBaseSchema.extend({
   kind: z.literal("workspace_snapshot"),
@@ -732,6 +863,22 @@ export const ContractSchemas = {
   EvidenceRef: EvidenceRefSchema,
   RiskTag: RiskTagSchema,
   ContextResource: ContextResourceSchema,
+  WorkspaceWindow: WorkspaceWindowSchema,
+  WindowFrame: WindowFrameSchema,
+  WorkspaceFrameCaptureStatus: WorkspaceFrameCaptureStatusSchema,
+  WorkspaceSnapshot: WorkspaceSnapshotSchema,
+  WorkspaceCapabilityStatus: WorkspaceCapabilityStatusSchema,
+  WorkspaceStatusResponse: WorkspaceStatusResponseSchema,
+  WorkspaceCaptureResponse: WorkspaceCaptureResponseSchema,
+  WorkspaceRestorePlanRequest: WorkspaceRestorePlanRequestSchema,
+  AerospaceCommand: AerospaceCommandSchema,
+  RestoreSkip: RestoreSkipSchema,
+  WorkspaceRestorePlan: WorkspaceRestorePlanSchema,
+  WorkspaceRestorePlanResponse: WorkspaceRestorePlanResponseSchema,
+  WorkspaceRestoreRequest: WorkspaceRestoreRequestSchema,
+  WorkspaceRestoreCommandReceipt: WorkspaceRestoreCommandReceiptSchema,
+  WorkspaceRestoreReceipt: WorkspaceRestoreReceiptSchema,
+  WorkspaceRestoreResponse: WorkspaceRestoreResponseSchema,
   ContextRestorePlan: ContextRestorePlanSchema,
   ContextRestoreRequest: ContextRestoreRequestSchema,
   ManualModeState: ManualModeStateSchema,

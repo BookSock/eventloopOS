@@ -1,0 +1,7 @@
+{
+  "schema": "AerospaceCommand",
+  "data": {
+    "command": "aerospace",
+    "args": ["move-node-to-workspace", "--window-id", "9", "eventloop-blog"]
+  }
+}

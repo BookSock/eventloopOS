@@ -1,0 +1,16 @@
+{
+  "schema": "WorkspaceRestorePlanResponse",
+  "data": {
+    "plan": {
+      "commands": [
+        {
+          "command": "aerospace",
+          "args": ["workspace", "eventloop-blog"]
+        }
+      ],
+      "skipped": []
+    },
+    "execute_supported": false,
+    "request_id": "req_workspace_plan"
+  }
+}

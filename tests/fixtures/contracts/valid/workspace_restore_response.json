@@ -1,0 +1,29 @@
+{
+  "schema": "WorkspaceRestoreResponse",
+  "data": {
+    "ok": true,
+    "plan": {
+      "commands": [
+        {
+          "command": "aerospace",
+          "args": ["workspace", "eventloop-blog"]
+        }
+      ],
+      "skipped": []
+    },
+    "receipt": {
+      "commands": [
+        {
+          "command": "aerospace",
+          "args": ["workspace", "eventloop-blog"],
+          "stdout": "eventloop-blog\n"
+        }
+      ],
+      "skipped": []
+    },
+    "execute_supported": true,
+    "idempotency_key": "idem_workspace_restore_001",
+    "idempotency_replayed": false,
+    "request_id": "req_workspace_restore"
+  }
+}

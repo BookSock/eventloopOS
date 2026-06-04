@@ -3414,7 +3414,8 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "additionalProperties": false,
+                "type": "object"
               }
             }
           },
@@ -3425,7 +3426,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/WorkspaceCaptureResponse"
                 }
               }
             },
@@ -3459,18 +3460,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/WorkspaceRestoreRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/WorkspaceRestoreResponse"
                 }
               }
             },
@@ -3504,18 +3505,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/WorkspaceRestorePlanRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/WorkspaceRestorePlanResponse"
                 }
               }
             },
@@ -3550,7 +3551,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/WorkspaceStatusResponse"
                 }
               }
             },
@@ -3598,6 +3599,29 @@
             "type": "string"
           }
         }
+      },
+      "AerospaceCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "enum": [
+              "aerospace",
+              "osascript"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "command",
+          "args"
+        ],
+        "type": "object"
       },
       "FollowsWindowExclusionCreateRequest": {
         "additionalProperties": true,
@@ -3800,6 +3824,29 @@
         "required": [
           "active",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "RestoreSkip": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "const": "stale_window_id",
+            "type": "string"
+          },
+          "windowId": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "workspace": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "windowId",
+          "workspace"
         ],
         "type": "object"
       },
@@ -4015,6 +4062,395 @@
           "claims",
           "count",
           "request_id"
+        ],
+        "type": "object"
+      },
+      "WindowFrame": {
+        "additionalProperties": false,
+        "properties": {
+          "height": {
+            "minimum": 1,
+            "type": "number"
+          },
+          "width": {
+            "minimum": 1,
+            "type": "number"
+          },
+          "x": {
+            "type": "number"
+          },
+          "y": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y",
+          "width",
+          "height"
+        ],
+        "type": "object"
+      },
+      "WorkspaceCapabilityStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "type": "boolean"
+          },
+          "backend": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "monitorCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reason": {
+            "enum": [
+              "binary_missing",
+              "permission_denied",
+              "server_unavailable",
+              "invalid_response",
+              "unknown_error"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "available",
+          "backend"
+        ],
+        "type": "object"
+      },
+      "WorkspaceCaptureResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          }
+        },
+        "required": [
+          "snapshot",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "WorkspaceFrameCaptureStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "observed": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "captured",
+              "failed",
+              "skipped"
+            ],
+            "type": "string"
+          },
+          "timeoutMs": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status",
+          "timeoutMs",
+          "observed"
+        ],
+        "type": "object"
+      },
+      "WorkspaceRestoreCommandReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "command": {
+            "enum": [
+              "aerospace",
+              "osascript"
+            ],
+            "type": "string"
+          },
+          "stderr": {
+            "type": "string"
+          },
+          "stdout": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command",
+          "args",
+          "stdout"
+        ],
+        "type": "object"
+      },
+      "WorkspaceRestorePlan": {
+        "additionalProperties": false,
+        "properties": {
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/AerospaceCommand"
+            },
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/RestoreSkip"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "commands",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "WorkspaceRestorePlanRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "current_windows": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceWindow"
+            },
+            "type": "array"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          }
+        },
+        "required": [
+          "snapshot"
+        ],
+        "type": "object"
+      },
+      "WorkspaceRestorePlanResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "execute_supported": {
+            "type": "boolean"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/WorkspaceRestorePlan"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "plan",
+          "execute_supported",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "WorkspaceRestoreReceipt": {
+        "additionalProperties": false,
+        "properties": {
+          "commands": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceRestoreCommandReceipt"
+            },
+            "type": "array"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/RestoreSkip"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "commands",
+          "skipped"
+        ],
+        "type": "object"
+      },
+      "WorkspaceRestoreRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "confirm_execute": {
+            "const": true,
+            "type": "boolean"
+          },
+          "current_windows": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceWindow"
+            },
+            "type": "array"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          }
+        },
+        "required": [
+          "snapshot",
+          "confirm_execute"
+        ],
+        "type": "object"
+      },
+      "WorkspaceRestoreResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "execute_supported": {
+            "const": true,
+            "type": "boolean"
+          },
+          "idempotency_key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "idempotency_replayed": {
+            "type": "boolean"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "plan": {
+            "$ref": "#/components/schemas/WorkspaceRestorePlan"
+          },
+          "receipt": {
+            "$ref": "#/components/schemas/WorkspaceRestoreReceipt"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "plan",
+          "receipt",
+          "execute_supported",
+          "idempotency_key",
+          "idempotency_replayed",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "WorkspaceSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "activeWorkspace": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "backend": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "focusedWindowId": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "frameCapture": {
+            "$ref": "#/components/schemas/WorkspaceFrameCaptureStatus"
+          },
+          "windows": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceWindow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "backend",
+          "windows"
+        ],
+        "type": "object"
+      },
+      "WorkspaceStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "execute_supported": {
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkspaceCapabilityStatus"
+          }
+        },
+        "required": [
+          "status",
+          "execute_supported",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "WorkspaceWindow": {
+        "additionalProperties": false,
+        "properties": {
+          "app": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "appBundleId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "frame": {
+            "$ref": "#/components/schemas/WindowFrame"
+          },
+          "id": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "layout": {
+            "enum": [
+              "h_tiles",
+              "v_tiles",
+              "h_accordion",
+              "v_accordion",
+              "tiles",
+              "accordion",
+              "floating"
+            ],
+            "type": "string"
+          },
+          "monitorId": {
+            "type": "integer"
+          },
+          "pid": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "app",
+          "title",
+          "workspace"
         ],
         "type": "object"
       }
