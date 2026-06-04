@@ -3,7 +3,7 @@
   "info": {
     "title": "eventloopOS Primitive API",
     "version": "1",
-    "description": "Conservative OpenAPI skeleton generated from docs/primitives.catalog.json.",
+    "description": "OpenAPI 3.1 export generated from docs/primitives.catalog.json with shared request and response schema coverage.",
     "license": {
       "name": "AGPL-3.0-only"
     }

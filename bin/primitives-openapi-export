@@ -96,7 +96,7 @@ function openapiFromCatalog(catalog) {
     info: {
       title: "eventloopOS Primitive API",
       version: String(catalog.schema_version ?? 1),
-      description: "Conservative OpenAPI skeleton generated from docs/primitives.catalog.json.",
+      description: "OpenAPI 3.1 export generated from docs/primitives.catalog.json with shared request and response schema coverage.",
       license: catalog.license ? { name: String(catalog.license) } : undefined,
     },
     tags: Array.from(tagsByName.values()).sort((a, b) => a.name.localeCompare(b.name)),

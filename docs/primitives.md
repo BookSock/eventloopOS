@@ -757,9 +757,9 @@ entrypoint.
 
 Highest-leverage steps before calling this a real primitives library:
 
-1. Turn the initial `@eventloopos/shared/primitives` helper boundary into a
-   polished published SDK, including typed convenience clients generated from
-   `docs/primitives.openapi.json`.
+1. Polish `@eventloopos/shared/primitives` from local request builders and a
+   validating HTTP client into a published SDK, including typed convenience
+   clients generated from `docs/primitives.openapi.json`.
 2. Split `@eventloopos/orchestrator` into public contracts and private server
    implementation packages.
 3. Keep `bin/human-demo-ready`'s default macOS hotkey-latency gate green before
