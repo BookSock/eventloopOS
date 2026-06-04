@@ -1099,6 +1099,7 @@ final class QueueViewModelTests: XCTestCase {
         }
         XCTAssertEqual(result.targetTaskId, "task_blog_feedback")
         XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Master command routed to task_blog_feedback."))
     }
 
     func testSendMasterCommandSelectsQueuedPaperWhenHumanReviewCreated() async {
@@ -1134,6 +1135,7 @@ final class QueueViewModelTests: XCTestCase {
             return XCTFail("expected routed state")
         }
         XCTAssertEqual(result.queuedPacket, queuedPacket)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Master command queued: Review master note"))
     }
 
     func testStartMasterTaskCreatesTaskSessionAndRefreshesSessions() async {
@@ -1175,6 +1177,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedPacket?.taskId, "task_launch_partners")
         XCTAssertEqual(viewModel.selectedPacket?.workspaceSnapshot, snapshot)
         XCTAssertEqual(workspaceClient.restorePlanSnapshots, [snapshot])
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Started task task_launch_partners."))
     }
 
     func testBumpQueuePaperPriorityCallsClientAndRefreshes() async {
@@ -1198,6 +1201,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.masterCommandState, .idle)
         XCTAssertEqual(viewModel.selectedPacket?.priority, 750)
         XCTAssertTrue(viewModel.selectedPacket?.priorityReasons.contains("user_priority_bump") ?? false)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Priority updated."))
     }
 
     func testPromoteReadingQueueAddsQueuePapers() async {
@@ -1220,6 +1224,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.masterCommandState, .idle)
         XCTAssertTrue(viewModel.packets.contains(where: { $0.taskId == "task_reading_queue" }))
         XCTAssertEqual(viewModel.selectedPacket?.taskId, "task_reading_queue")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Promoted 1 reading papers."))
     }
 
     func testBindSelectedTerminalRefForwardsToClient() async {
@@ -1630,6 +1635,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertNotNil(result)
         XCTAssertEqual(result?.dryRun, true)
         XCTAssertEqual(result?.matchedCount, 2)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Fan-out preview: 2 matches."))
         XCTAssertEqual(client.sentMasterCommands.count, 0, "preview should not send any followups")
     }
 
@@ -1652,6 +1658,7 @@ final class QueueViewModelTests: XCTestCase {
         )
 
         XCTAssertEqual(result?.deliveredCount, 2)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Fan-out delivered to 2 sessions."))
         XCTAssertEqual(client.sentMasterCommands.count, 2)
         XCTAssertTrue(client.sentMasterCommands.allSatisfy { $0.text.contains("Pause all blog work") })
     }
@@ -1709,6 +1716,7 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.sendMasterCommand(text: "   ")
 
         XCTAssertEqual(viewModel.masterCommandState, .failed("Master command text is required"))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Master command text is required."))
     }
 
     func testAuxiliarySheetsCanBePresentedFromMenuCommands() {

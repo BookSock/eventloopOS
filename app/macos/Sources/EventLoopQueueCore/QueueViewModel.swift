@@ -1147,16 +1147,19 @@ public final class QueueViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             masterCommandState = .failed("Master command text is required")
+            advanceToast = .actionComplete("Master command text is required.")
             return
         }
 
         masterCommandState = .sending
+        advanceToast = .actionComplete("Routing master command...")
         do {
             let result = try await client.sendMasterCommand(
                 text: trimmed,
                 taskHint: normalizedTaskHint(taskHint) ?? selectedTaskId
             )
             masterCommandState = .routed(result)
+            advanceToast = .actionComplete(Self.masterCommandRoutedStatus(result))
             await refreshQueue()
             await loadTaskSessions()
             if let queuedPacket = result.queuedPacket {
@@ -1171,6 +1174,7 @@ public final class QueueViewModel: ObservableObject {
             }
         } catch {
             masterCommandState = .failed(error.localizedDescription)
+            advanceToast = .actionComplete("Master command failed: \(Self.shortStatusMessage(error.localizedDescription))")
         }
     }
 
@@ -1183,10 +1187,12 @@ public final class QueueViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             masterCommandState = .failed("Master task prompt is required")
+            advanceToast = .actionComplete("Master task prompt is required.")
             return
         }
 
         masterCommandState = .sending
+        advanceToast = .actionComplete("Starting task...")
         var workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot()
         if workspaceSnapshot == nil {
             workspaceSnapshot = try? await workspaceClient.capture()
@@ -1200,6 +1206,7 @@ public final class QueueViewModel: ObservableObject {
                 workspaceSnapshot: workspaceSnapshot
             )
             masterCommandState = .started(started)
+            advanceToast = .actionComplete("Started task \(started.taskId).")
             await loadTaskSessions()
             await refreshQueue()
             if let startedPaper = packets.first(where: { $0.taskId == started.taskId }) {
@@ -1209,6 +1216,7 @@ public final class QueueViewModel: ObservableObject {
             await requestSelectedBrowserContextRestoresIfNeeded()
         } catch {
             masterCommandState = .failed(error.localizedDescription)
+            advanceToast = .actionComplete("Start task failed: \(Self.shortStatusMessage(error.localizedDescription))")
         }
     }
 
@@ -1224,9 +1232,11 @@ public final class QueueViewModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             masterCommandState = .idle
+            advanceToast = .actionComplete("Fan-out preview: \(result.matchedCount) matches.")
             return result
         } catch {
             masterCommandState = .failed(error.localizedDescription)
+            advanceToast = .actionComplete("Fan-out preview failed: \(Self.shortStatusMessage(error.localizedDescription))")
             return nil
         }
     }
@@ -1243,11 +1253,13 @@ public final class QueueViewModel: ObservableObject {
                 idempotencyKey: idempotencyKey
             )
             masterCommandState = .idle
+            advanceToast = .actionComplete("Fan-out delivered to \(result.deliveredCount) sessions.")
             await refreshQueue()
             await loadTaskSessions()
             return result
         } catch {
             masterCommandState = .failed(error.localizedDescription)
+            advanceToast = .actionComplete("Fan-out failed: \(Self.shortStatusMessage(error.localizedDescription))")
             return nil
         }
     }
@@ -1262,10 +1274,12 @@ public final class QueueViewModel: ObservableObject {
                 reason: reason ?? "manual_priority_bump"
             )
             masterCommandState = .idle
+            advanceToast = .actionComplete("Priority updated.")
             await refreshQueue()
             selectedPacketID = packetId
         } catch {
             masterCommandState = .failed(error.localizedDescription)
+            advanceToast = .actionComplete("Priority update failed: \(Self.shortStatusMessage(error.localizedDescription))")
         }
     }
 
@@ -1336,12 +1350,14 @@ public final class QueueViewModel: ObservableObject {
         do {
             let result = try await client.promoteReadingQueueContexts(ids: contextIds)
             masterCommandState = .idle
+            advanceToast = .actionComplete("Promoted \(result.promoted.count) reading papers.")
             await refreshQueue()
             if let firstNew = result.promoted.first(where: { !$0.idempotent && $0.queueItemId != nil })?.queueItemId {
                 selectedPacketID = firstNew
             }
         } catch {
             masterCommandState = .failed(error.localizedDescription)
+            advanceToast = .actionComplete("Reading queue promote failed: \(Self.shortStatusMessage(error.localizedDescription))")
         }
     }
 
@@ -2038,6 +2054,19 @@ public final class QueueViewModel: ObservableObject {
         }
         let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
         return "\(normalized[..<index])..."
+    }
+
+    private static func masterCommandRoutedStatus(_ result: MasterCommandResult) -> String {
+        if let queuedPacket = result.queuedPacket {
+            return "Master command queued: \(queuedPacket.title)"
+        }
+        if let targetTaskId = result.targetTaskId {
+            return "Master command routed to \(targetTaskId)."
+        }
+        if let routeAction = result.routeAction {
+            return "Master command routed: \(routeAction)."
+        }
+        return "Master command routed."
     }
 }
 

@@ -512,6 +512,8 @@ Useful standalone uses:
 - "Tell every idle agent to summarize."
 - "Route this instruction to the current task."
 - "Start a new task session from a universal command box."
+- leave a visible queue-level confirmation after a command routes, starts a
+  task, previews fan-out, delivers fan-out, reranks, or promotes reading papers
 
 Proof:
 
@@ -519,8 +521,9 @@ Proof:
 - `app/orchestrator/test/master_fan_out_idle_filter.test.ts`
 - `app/orchestrator/src/master/master_command_cli.test.ts`
 - `bin/master-priority-proof-smoke`
+- Swift `QueueViewModelTests` cover queue-level master-command feedback
 
-Status: dogfood; routing UX needs more visible confirmation and lower latency.
+Status: dogfood; routing latency still needs broader live-host proof coverage.
 
 ## Task Session Control
 
