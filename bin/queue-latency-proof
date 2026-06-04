@@ -1,0 +1,236 @@
+#!/usr/bin/env node
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { performance } from "node:perf_hooks";
+
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/queue-latency-proof [--url URL] [--runs N] [--manifest PATH]
+
+Measures eventloopOS queue/master responsiveness against local budget defaults.
+
+Environment:
+  EVENTLOOPOS_ORCHESTRATOR_URL   default: http://127.0.0.1:4377
+  EVENTLOOPOS_QUEUE_LATENCY_RUNS default: 10
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  await runSelfTest();
+  process.exit(0);
+}
+
+const url = readArg("--url") ?? process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377";
+const runs = positiveInteger(readArg("--runs") ?? process.env.EVENTLOOPOS_QUEUE_LATENCY_RUNS, 10);
+const runId = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+const manifestPath = readArg("--manifest") ?? path.join("artifacts", "queue-latency", runId, "manifest.json");
+
+const manifest = await measureQueueLatency({ baseUrl: url, runs });
+writeJson(manifestPath, manifest);
+console.log(`queue latency manifest: ${manifestPath}`);
+console.log(JSON.stringify({
+  ok: manifest.ok,
+  runs: manifest.runs,
+  failed_budgets: manifest.failed_budgets,
+  summary: manifest.summary,
+}, null, 2));
+process.exit(manifest.ok ? 0 : 1);
+
+async function measureQueueLatency({ baseUrl, runs }) {
+  const startedAt = new Date().toISOString();
+  const budgetsMs = {
+    health: 500,
+    queue_list: 800,
+    queue_next: 800,
+    queue_lease_next: 1_000,
+    master_fan_out_dry_run: 1_200,
+  };
+  const samples = [];
+
+  for (let index = 0; index < runs; index += 1) {
+    const sample = { run: index + 1, ok: true, timings_ms: {}, errors: [] };
+    try {
+      await timed(sample, "health", () => requestJson(baseUrl, "/health"));
+      await timed(sample, "queue_list", () => requestJson(baseUrl, "/queue"));
+      await timed(sample, "queue_next", () => requestJson(baseUrl, "/queue/next"));
+      await timed(sample, "queue_lease_next", () => requestJson(baseUrl, "/queue/lease-next", {
+        method: "POST",
+        body: {
+          lease_owner: `queue-latency-proof-${process.pid}`,
+          lease_ms: 1,
+        },
+      }));
+      await timed(sample, "master_fan_out_dry_run", () => requestJson(baseUrl, "/master/fan-out", {
+        method: "POST",
+        body: {
+          message: "latency proof dry run",
+          selector: { task_ids: [`task_latency_proof_missing_${index}`] },
+          dry_run: true,
+          idempotency_key: `queue_latency_${Date.now()}_${index}`,
+        },
+      }));
+    } catch (error) {
+      sample.ok = false;
+      sample.errors.push(error instanceof Error ? error.message : String(error));
+    }
+    samples.push(sample);
+  }
+
+  const summary = summarize(samples);
+  const failedBudgets = [];
+  for (const [name, budget] of Object.entries(budgetsMs)) {
+    const p95 = summary[name]?.p95_ms;
+    if (typeof p95 === "number" && p95 > budget) {
+      failedBudgets.push({ name, p95_ms: p95, budget_ms: budget });
+    }
+  }
+  const finishedAt = new Date().toISOString();
+  return {
+    ok: samples.every((sample) => sample.ok) && failedBudgets.length === 0,
+    kind: "eventloopos.queue_latency_proof",
+    started_at: startedAt,
+    finished_at: finishedAt,
+    orchestrator_url: baseUrl,
+    runs,
+    budgets_ms: budgetsMs,
+    failed_budgets: failedBudgets,
+    summary,
+    samples,
+  };
+}
+
+async function timed(sample, name, fn) {
+  const start = performance.now();
+  try {
+    const value = await fn();
+    sample.timings_ms[name] = roundMs(performance.now() - start);
+    return value;
+  } catch (error) {
+    sample.timings_ms[name] = roundMs(performance.now() - start);
+    throw error;
+  }
+}
+
+async function requestJson(baseUrl, route, options = {}) {
+  const headers = { ...(options.headers ?? {}) };
+  let body;
+  if (options.body !== undefined) {
+    headers["content-type"] = "application/json";
+    body = JSON.stringify(options.body);
+  }
+  const response = await fetch(new URL(route, baseUrl), {
+    method: options.method ?? "GET",
+    headers,
+    body,
+  });
+  const text = await response.text();
+  let parsed;
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch {
+    parsed = { raw: text };
+  }
+  if (!response.ok) throw new Error(`${route} HTTP ${response.status}: ${JSON.stringify(parsed)}`);
+  return parsed;
+}
+
+function summarize(samples) {
+  const names = new Set(samples.flatMap((sample) => Object.keys(sample.timings_ms)));
+  const result = {};
+  for (const name of names) {
+    const values = samples
+      .map((sample) => sample.timings_ms[name])
+      .filter((value) => typeof value === "number" && Number.isFinite(value))
+      .sort((left, right) => left - right);
+    if (values.length === 0) continue;
+    result[name] = {
+      count: values.length,
+      min_ms: roundMs(values[0]),
+      median_ms: percentile(values, 0.5),
+      p95_ms: percentile(values, 0.95),
+      max_ms: roundMs(values[values.length - 1]),
+    };
+  }
+  return result;
+}
+
+function percentile(values, p) {
+  if (values.length === 0) return undefined;
+  const index = Math.min(values.length - 1, Math.ceil(values.length * p) - 1);
+  return roundMs(values[index]);
+}
+
+function roundMs(value) {
+  return Math.round(value * 10) / 10;
+}
+
+function readArg(name) {
+  const index = args.indexOf(name);
+  if (index < 0) return undefined;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${name} requires a value`);
+  return value;
+}
+
+function positiveInteger(value, fallback) {
+  if (value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`expected positive integer, got ${value}`);
+  return parsed;
+}
+
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function runSelfTest() {
+  const server = http.createServer(async (request, response) => {
+    const send = (status, body) => {
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify(body));
+    };
+
+    if (request.method === "GET" && request.url === "/health") {
+      send(200, { ok: true });
+      return;
+    }
+    if (request.method === "GET" && request.url === "/queue") {
+      send(200, { items: [], count: 0 });
+      return;
+    }
+    if (request.method === "GET" && request.url === "/queue/next") {
+      send(200, { item: null });
+      return;
+    }
+    if (request.method === "POST" && request.url === "/queue/lease-next") {
+      send(200, { item: null });
+      return;
+    }
+    if (request.method === "POST" && request.url === "/master/fan-out") {
+      send(200, { ok: true, dry_run: true, matched_count: 0, delivered: [], skipped: [] });
+      return;
+    }
+    send(404, { ok: false, error: "not_found" });
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    const manifest = await measureQueueLatency({
+      baseUrl: `http://127.0.0.1:${port}`,
+      runs: 2,
+    });
+    if (!manifest.ok) throw new Error(`self-test manifest not ok: ${JSON.stringify(manifest)}`);
+    if (manifest.samples.length !== 2) throw new Error("self-test did not run twice");
+    if (!manifest.summary.queue_lease_next) throw new Error("self-test missing queue lease summary");
+    if (!manifest.summary.master_fan_out_dry_run) throw new Error("self-test missing master fan-out summary");
+    console.log("queue-latency-proof self-test passed");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}

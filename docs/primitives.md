@@ -546,12 +546,14 @@ Proof scripts:
 - `bin/lab-mac-dogfood`
 - `bin/lab-mac-human-demo-setup`
 - `bin/workspace-latency-proof`
+- `bin/queue-latency-proof`
 - `bin/task-workspace-memory-proof-smoke`
 - `bin/workspace-task-switch-proof-smoke`
 
 Useful standalone uses:
 
 - repeat flaky OS proofs until confidence is high
+- track queue/master HTTP p95 latency against local budgets
 - prove app startup/recovery before handing a Mac to a human
 - generate artifacts that another agent can audit
 
@@ -565,7 +567,7 @@ Highest-leverage steps before calling this a real primitives library:
 1. Generate OpenAPI or JSON Schema docs from route validators and fixtures.
 2. Split `@eventloopos/orchestrator` into public contracts and private server
    implementation packages.
-3. Extend latency budgets from workspace HTTP proof to queue lease and Mac
+3. Extend latency budgets from workspace/queue HTTP proofs to the Mac
    hotkey-to-feedback path.
 4. Add a public "workspace backend adapter" guide with a fake backend example.
 5. Add automatic claim emitters for unwrapped untagged Codex/Claude-spawned

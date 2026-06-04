@@ -221,7 +221,8 @@
         "bin/proof-agent",
         "bin/proof-repeat",
         "bin/product-readiness-proof",
-        "bin/workspace-latency-proof"
+        "bin/workspace-latency-proof",
+        "bin/queue-latency-proof"
       ]
     }
   ]
