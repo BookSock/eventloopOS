@@ -13,6 +13,10 @@
     "./json-schema": {
       "types": "./dist/json-schema.d.ts",
       "import": "./dist/json-schema.js"
+    },
+    "./primitives": {
+      "types": "./dist/primitives.d.ts",
+      "import": "./dist/primitives.js"
     }
   },
   "scripts": {

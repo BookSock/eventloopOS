@@ -11,11 +11,15 @@ import {
   EventSchema,
   FollowsWindowExclusionCreateRequestSchema,
   ManualModeSetRequestSchema,
+  PrimitiveCatalogSchema,
   ReviewPacketSchema,
   TaskWindowClaimCreateRequestSchema,
   WorkspaceSnapshotResourceSchema,
+  getPrimitive,
+  getPrimitiveRoute,
   getContractSchema
 } from "../src/index.js";
+import { parsePrimitiveCatalog, routeHasRequestBody, summarizePrimitiveCatalog } from "../src/primitives.js";
 import { validateFixtures } from "../src/cli.js";
 
 type FixtureEnvelope = {
@@ -222,6 +226,55 @@ describe("contract schemas", () => {
       expect(schemaName in ContractSchemas, `${schemaName} must be an exported shared contract`).toBe(true);
       expectCatalogSchemaCoversGeneratedShape(schemaName, schema as Record<string, unknown>);
     }
+  });
+});
+
+describe("primitive catalog SDK boundary", () => {
+  it("parses the real primitive catalog and exposes route helpers", () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const summary = summarizePrimitiveCatalog(catalog);
+
+    expect(summary.primitiveCount).toBe(18);
+    expect(summary.routeCount).toBeGreaterThan(70);
+    expect(summary.responseSchemaCount).toBe(summary.routeCount);
+    expect(summary.requestSchemaCount + summary.noRequestBodyCount).toBeGreaterThan(40);
+    expect(summary.schemaCount).toBeGreaterThan(100);
+
+    const onboarding = getPrimitive(catalog, "task_intake_onboarding");
+    expect(onboarding?.title).toBe("Task Intake Onboarding");
+
+    const route = getPrimitiveRoute(catalog, "post", "/onboarding/approvals/batch");
+    expect(route?.request_schema).toBe("OnboardingApprovalBatchRequest");
+    expect(route?.response_schema).toBe("OnboardingApprovalBatchResponse");
+    expect(route ? routeHasRequestBody(route) : undefined).toBe(true);
+
+    const noBodyRoute = getPrimitiveRoute(catalog, "POST", "/agents/codex/auto-bind");
+    expect(noBodyRoute?.no_request_body).toBe(true);
+    expect(noBodyRoute ? routeHasRequestBody(noBodyRoute) : undefined).toBe(false);
+  });
+
+  it("rejects primitive routes that drift back to freeform mutating bodies", () => {
+    const catalog = readJsonObject(primitiveCatalogPath);
+    const primitive = ((catalog.primitives as unknown[])?.[0] ?? {}) as Record<string, unknown>;
+    const route = (((primitive.http as unknown[])?.[0] ?? {}) as Record<string, unknown>);
+    const invalid = {
+      ...catalog,
+      primitives: [
+        {
+          ...primitive,
+          http: [
+            {
+              ...route,
+              method: "POST",
+              request_schema: undefined,
+              no_request_body: undefined
+            }
+          ]
+        }
+      ]
+    };
+
+    expect(PrimitiveCatalogSchema.safeParse(invalid).success).toBe(false);
   });
 });
 

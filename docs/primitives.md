@@ -8,7 +8,10 @@ Machine-readable catalog: `docs/primitives.catalog.json`. Builder-facing HTTP
 OpenAPI artifact: `docs/primitives.openapi.json`. The catalog now requires a
 response schema for every HTTP route and either a request schema or
 `no_request_body: true` for every mutating route. Those schemas are exported
-from `@eventloopos/shared` and validated against contract fixtures.
+from `@eventloopos/shared` and validated against contract fixtures. The shared
+package also exports `@eventloopos/shared/primitives` helpers for parsing the
+catalog, finding routes, and summarizing primitive coverage without importing
+the orchestrator server package.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.
@@ -377,7 +380,8 @@ Proof:
 - `bin/event-loop-proof-smoke`
 
 Status: stable enough internally. Queue/paper route envelopes are exported as
-shared schemas and generated OpenAPI; public SDK packaging is still missing.
+shared schemas and generated OpenAPI; the initial shared-package catalog helper
+boundary exists, but a polished published SDK is still missing.
 
 ## Task Intake Onboarding
 
@@ -752,9 +756,9 @@ entrypoint.
 
 Highest-leverage steps before calling this a real primitives library:
 
-1. Generate a small public SDK/package boundary from `@eventloopos/shared` and
-   `docs/primitives.openapi.json`, rather than asking builders to import from
-   the monorepo directly.
+1. Turn the initial `@eventloopos/shared/primitives` helper boundary into a
+   polished published SDK, including typed convenience clients generated from
+   `docs/primitives.openapi.json`.
 2. Split `@eventloopos/orchestrator` into public contracts and private server
    implementation packages.
 3. Keep `bin/human-demo-ready`'s default macOS hotkey-latency gate green before
