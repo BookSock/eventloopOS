@@ -204,6 +204,7 @@ export type GatewayStore = {
     windowId?: string;
     appBundle?: string;
     titlePrefix?: string;
+    processRootPid?: number;
     source?: string;
     now: Date;
     ttlMs?: number;

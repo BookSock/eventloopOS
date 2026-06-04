@@ -46,6 +46,7 @@ export type TaskWindowClaim = {
   window_id?: string;
   app_bundle?: string;
   title_prefix?: string;
+  process_root_pid?: number;
 };
 export type TaskWindowClaimReader = () => Promise<Iterable<TaskWindowClaim>> | Iterable<TaskWindowClaim>;
 export type TaskWindowClaimWriter = (input: {
@@ -53,6 +54,7 @@ export type TaskWindowClaimWriter = (input: {
   windowId?: string;
   appBundle?: string;
   titlePrefix?: string;
+  processRootPid?: number;
   source?: string;
   now: Date;
   ttlMs?: number;
@@ -307,14 +309,20 @@ async function autoClaimProcessTreeTaskWindows(
   snapshot: WorkspaceSnapshot,
   now: Date,
 ): Promise<void> {
-  if (!deps.claimTaskWindow || !deps.listTaskSessions) return;
-  const sessions = Array.from(await deps.listTaskSessions());
-  const sessionOwners = sessions
-    .map(sessionOwnerFromRuntimeSession)
-    .filter((owner): owner is TaskSessionOwner => owner !== undefined && owner.pids.size > 0);
-  if (sessionOwners.length === 0) return;
+  if (!deps.claimTaskWindow) return;
 
   const existingClaims = await readTaskWindowClaims(deps);
+  const sessions = deps.listTaskSessions ? Array.from(await deps.listTaskSessions()) : [];
+  const sessionOwners = [
+    ...sessions
+      .map(sessionOwnerFromRuntimeSession)
+      .filter((owner): owner is TaskSessionOwner => owner !== undefined && owner.pids.size > 0),
+    ...existingClaims
+      .map(taskSessionOwnerFromProcessRootClaim)
+      .filter((owner): owner is TaskSessionOwner => owner !== undefined && owner.pids.size > 0),
+  ];
+  if (sessionOwners.length === 0) return;
+
   const readAncestors = deps.getProcessAncestorPids ?? defaultReadProcessAncestorPids;
   let claimed = 0;
   let ambiguous = 0;
@@ -484,6 +492,7 @@ function taskIdFromWindowClaims(window: AerospaceWindow, claims: readonly TaskWi
 
 function taskWindowClaimMatches(window: AerospaceWindow, claim: TaskWindowClaim): boolean {
   if (claim.window_id && String(window.id) === claim.window_id) return true;
+  if (isPositiveInteger(claim.process_root_pid) && window.pid === claim.process_root_pid) return true;
   const claimBundle = claim.app_bundle?.trim().toLowerCase();
   const windowBundle = window.appBundleId?.trim().toLowerCase() || window.app.trim().toLowerCase();
   const claimTitlePrefix = normalizeTitlePrefix(claim.title_prefix);
@@ -511,6 +520,11 @@ function sessionOwnerFromRuntimeSession(session: TaskRuntimeSession): TaskSessio
     }
   }
   return { taskId: session.task_id, pids };
+}
+
+function taskSessionOwnerFromProcessRootClaim(claim: TaskWindowClaim): TaskSessionOwner | undefined {
+  if (!isPositiveInteger(claim.process_root_pid)) return undefined;
+  return { taskId: claim.task_id, pids: new Set([claim.process_root_pid]) };
 }
 
 function addPid(output: Set<number>, value: unknown): void {
@@ -610,6 +624,7 @@ export function createAmbientWorkspaceSaverFromRuntime(
       windowId?: string;
       appBundle?: string;
       titlePrefix?: string;
+      processRootPid?: number;
       source?: string;
       now: Date;
       ttlMs?: number;
@@ -681,6 +696,7 @@ export function createAmbientWorkspaceSaverFromRuntime(
           windowId: input.windowId,
           appBundle: input.appBundle,
           titlePrefix: input.titlePrefix,
+          processRootPid: input.processRootPid,
           source: input.source,
           now: input.now,
           ttlMs: input.ttlMs,

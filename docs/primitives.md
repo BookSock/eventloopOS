@@ -169,13 +169,15 @@ Guarantees today:
 - infers task-window claims from any captured window tagged `[task:<slug>]`
 - infers task-window claims from process ancestry when bound task sessions
   expose `pid`, `agent_pid`, `terminal_pid`, or `pids`
+- expands process-root task-window claims into concrete window claims when a
+  background agent launch produces descendant app windows
 
 Why it matters: this is the primitive that makes window layout memory feel
 automatic instead of like a manual "save workspace" button.
 
 Known gap: LaunchServices-detached apps may lose useful parent-process ancestry,
-so wrappers, tags, or routed resources are still needed for those untagged
-launches.
+so wrappers should claim `process_root_pid`, tag the window, or emit routed
+resources for those launches.
 
 Proof:
 
@@ -203,6 +205,7 @@ Claim identity:
 - exact `window_id`
 - `app_bundle`
 - `title_prefix`
+- `process_root_pid`
 - optional `ttl_ms`
 - optional `source`
 
@@ -220,6 +223,9 @@ Useful standalone uses:
 - a bound Codex/Claude task session exposes `pid`/`agent_pid`/`terminal_pid`,
   and ambient autosave claims descendant app windows even when the window pops
   onto the human's current paper
+- a launch wrapper claims `process_root_pid` before starting a visible browser
+  test, then ambient autosave converts the descendant Chrome window into a
+  concrete claim for that background task
 - browser automation can claim Playwright/Chrome report windows before the
   user sees them
 - browser context capture auto-claims Chrome windows when the event attaches to
@@ -240,7 +246,8 @@ Proof:
 Status: dogfood. Browser context capture has an automatic emitter; generic
 routed window resources are auto-claimed; tagged windows are inferred from OS
 snapshots; process-tree launches are claimed when session pid metadata exists;
-command-wrapped untagged launches can be claimed.
+command-wrapped untagged launches can be claimed by window id, title/bundle, or
+process root pid.
 
 ## Follows Windows
 

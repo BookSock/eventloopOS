@@ -28,6 +28,7 @@ describe("Postgres migrations", () => {
       "0018_tasks_dormant_at.sql",
       "0019_follows_window_exclusions.sql",
       "0020_task_window_claims.sql",
+      "0021_task_window_claim_process_root_pid.sql",
     ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
@@ -85,5 +86,7 @@ describe("Postgres migrations", () => {
     assert.match(sql, /CREATE TABLE IF NOT EXISTS task_window_claims/);
     assert.match(sql, /REFERENCES tasks\(task_id\) ON DELETE CASCADE/);
     assert.match(sql, /idx_task_window_claims_identity/);
+    assert.match(sql, /process_root_pid integer/);
+    assert.match(sql, /idx_task_window_claims_process_root_pid/);
   });
 });

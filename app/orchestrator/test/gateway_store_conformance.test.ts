@@ -1243,6 +1243,14 @@ function runGatewayStoreContract(
           now: new Date("2026-05-06T12:01:01.000Z"),
         });
         assert.deepEqual(expired, []);
+
+        const processRootClaim = await harness.store.claimTaskWindow({
+          taskId: "task_claims_b",
+          processRootPid: 4242,
+          source: "spawn-wrapper",
+          now: new Date("2026-05-06T12:02:00.000Z"),
+        });
+        assert.equal(processRootClaim.process_root_pid, 4242);
       } finally {
         await harness.cleanup();
       }

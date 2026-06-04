@@ -1015,6 +1015,7 @@ export class PostgresQueueStore {
     windowId?: string;
     appBundle?: string;
     titlePrefix?: string;
+    processRootPid?: number;
     source?: string;
     now: Date;
     ttlMs?: number;
@@ -1022,10 +1023,14 @@ export class PostgresQueueStore {
     const windowId = normalizeOptionalText(input.windowId) ?? null;
     const appBundle = normalizeOptionalText(input.appBundle)?.toLowerCase() ?? null;
     const titlePrefix = normalizeOptionalText(input.titlePrefix)?.toLowerCase().slice(0, 40) ?? null;
-    if (!windowId && !appBundle && !titlePrefix) {
-      throw new Error("task window claim needs windowId, appBundle, or titlePrefix");
+    const rawProcessRootPid = input.processRootPid;
+    const processRootPid = Number.isInteger(rawProcessRootPid) && rawProcessRootPid !== undefined && rawProcessRootPid > 0
+      ? rawProcessRootPid
+      : null;
+    if (!windowId && !appBundle && !titlePrefix && processRootPid === null) {
+      throw new Error("task window claim needs windowId, appBundle, titlePrefix, or processRootPid");
     }
-    const claimId = `twc_${stableId(`${input.taskId}_${windowId ?? ""}_${appBundle ?? ""}_${titlePrefix ?? ""}`)}`;
+    const claimId = `twc_${stableId(`${input.taskId}_${windowId ?? ""}_${appBundle ?? ""}_${titlePrefix ?? ""}_${processRootPid ?? ""}`)}`;
     const timestamp = input.now.toISOString();
     const expiresAt = input.ttlMs && input.ttlMs > 0 ? new Date(input.now.getTime() + input.ttlMs).toISOString() : null;
     const result = await this.pool.query(
@@ -1036,17 +1041,18 @@ export class PostgresQueueStore {
           window_id,
           app_bundle,
           title_prefix,
+          process_root_pid,
           source,
           created_at,
           expires_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8::timestamptz)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9::timestamptz)
         ON CONFLICT (claim_id) DO UPDATE SET
           source = COALESCE(EXCLUDED.source, task_window_claims.source),
           expires_at = EXCLUDED.expires_at
-        RETURNING claim_id, task_id, window_id, app_bundle, title_prefix, source, created_at, expires_at
+        RETURNING claim_id, task_id, window_id, app_bundle, title_prefix, process_root_pid, source, created_at, expires_at
       `,
-      [claimId, input.taskId, windowId, appBundle, titlePrefix, normalizeOptionalText(input.source) ?? null, timestamp, expiresAt],
+      [claimId, input.taskId, windowId, appBundle, titlePrefix, processRootPid, normalizeOptionalText(input.source) ?? null, timestamp, expiresAt],
     );
     return rowToTaskWindowClaimRecord(result.rows[0]);
   }
@@ -1057,7 +1063,7 @@ export class PostgresQueueStore {
     if (input.taskId) values.push(input.taskId);
     const result = await this.pool.query(
       `
-        SELECT claim_id, task_id, window_id, app_bundle, title_prefix, source, created_at, expires_at
+        SELECT claim_id, task_id, window_id, app_bundle, title_prefix, process_root_pid, source, created_at, expires_at
         FROM task_window_claims
         WHERE (expires_at IS NULL OR expires_at >= $1::timestamptz)
           ${taskFilter}
@@ -2445,6 +2451,7 @@ function rowToTaskWindowClaimRecord(row: Record<string, unknown>): TaskWindowCla
   const windowId = row.window_id;
   const appBundle = row.app_bundle;
   const titlePrefix = row.title_prefix;
+  const processRootPid = row.process_root_pid;
   const source = row.source;
   const expiresAt = row.expires_at;
   const record: TaskWindowClaimRecord = {
@@ -2455,6 +2462,7 @@ function rowToTaskWindowClaimRecord(row: Record<string, unknown>): TaskWindowCla
   if (typeof windowId === "string" && windowId.length > 0) record.window_id = windowId;
   if (typeof appBundle === "string" && appBundle.length > 0) record.app_bundle = appBundle;
   if (typeof titlePrefix === "string" && titlePrefix.length > 0) record.title_prefix = titlePrefix;
+  if (typeof processRootPid === "number" && Number.isInteger(processRootPid) && processRootPid > 0) record.process_root_pid = processRootPid;
   if (typeof source === "string" && source.length > 0) record.source = source;
   if (expiresAt) record.expires_at = requiredDateToIso(expiresAt);
   return record;

@@ -184,6 +184,7 @@ export type TaskWindowClaimRecord = {
   window_id?: string;
   app_bundle?: string;
   title_prefix?: string;
+  process_root_pid?: number;
   source?: string;
   created_at: string;
   expires_at?: string;
@@ -769,6 +770,7 @@ export function claimTaskWindow(
     windowId?: string;
     appBundle?: string;
     titlePrefix?: string;
+    processRootPid?: number;
     source?: string;
     now: Date;
     ttlMs?: number;
@@ -779,10 +781,11 @@ export function claimTaskWindow(
   const windowId = normalizeOptionalText(input.windowId);
   const appBundle = normalizeOptionalText(input.appBundle)?.toLowerCase();
   const titlePrefix = normalizeTitlePrefix(input.titlePrefix);
-  if (!windowId && !appBundle && !titlePrefix) {
-    throw new Error("task window claim needs windowId, appBundle, or titlePrefix");
+  const processRootPid = normalizeOptionalPositiveInteger(input.processRootPid);
+  if (!windowId && !appBundle && !titlePrefix && processRootPid === undefined) {
+    throw new Error("task window claim needs windowId, appBundle, titlePrefix, or processRootPid");
   }
-  const key = taskWindowClaimKey(input.taskId, windowId, appBundle, titlePrefix);
+  const key = taskWindowClaimKey(input.taskId, windowId, appBundle, titlePrefix, processRootPid);
   const timestamp = input.now.toISOString();
   const expiresAt = input.ttlMs && input.ttlMs > 0 ? new Date(input.now.getTime() + input.ttlMs).toISOString() : undefined;
   const record: TaskWindowClaimRecord = {
@@ -791,6 +794,7 @@ export function claimTaskWindow(
     window_id: windowId,
     app_bundle: appBundle,
     title_prefix: titlePrefix,
+    process_root_pid: processRootPid,
     source: normalizeOptionalText(input.source),
     created_at: timestamp,
     expires_at: expiresAt,
@@ -830,6 +834,11 @@ function normalizeOptionalText(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function normalizeOptionalPositiveInteger(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  return Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
 export function pruneWindowWorkspaceObservations(
   store: InMemoryStore,
   olderThan: Date,
@@ -851,8 +860,14 @@ function observationKey(windowId: string, workspaceId: string): string {
   return `${windowId} ${workspaceId}`;
 }
 
-function taskWindowClaimKey(taskId: string, windowId?: string, appBundle?: string, titlePrefix?: string): string {
-  return `${taskId} ${windowId ?? ""} ${appBundle ?? ""} ${titlePrefix ?? ""}`;
+function taskWindowClaimKey(
+  taskId: string,
+  windowId?: string,
+  appBundle?: string,
+  titlePrefix?: string,
+  processRootPid?: number,
+): string {
+  return `${taskId} ${windowId ?? ""} ${appBundle ?? ""} ${titlePrefix ?? ""} ${processRootPid ?? ""}`;
 }
 
 export function buildReviewArtifactsFromEvent(

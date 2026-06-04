@@ -37,8 +37,14 @@ export async function handleTaskWindowClaimsRoute(input: {
   const windowId = readOptionalString(parsed.value.window_id) ?? readOptionalString(parsed.value.windowId);
   const appBundle = readOptionalString(parsed.value.app_bundle) ?? readOptionalString(parsed.value.appBundle);
   const titlePrefix = readOptionalString(parsed.value.title_prefix) ?? readOptionalString(parsed.value.titlePrefix);
-  if (!windowId && !appBundle && !titlePrefix) {
-    return schemaError("window_id, app_bundle, or title_prefix is required");
+  let processRootPid: number | undefined;
+  try {
+    processRootPid = readOptionalPositiveInteger(parsed.value.process_root_pid ?? parsed.value.processRootPid);
+  } catch (error) {
+    return schemaError(error instanceof Error ? error.message : String(error));
+  }
+  if (!windowId && !appBundle && !titlePrefix && processRootPid === undefined) {
+    return schemaError("window_id, app_bundle, title_prefix, or process_root_pid is required");
   }
   let ttlMs: number | undefined;
   try {
@@ -52,6 +58,7 @@ export async function handleTaskWindowClaimsRoute(input: {
     windowId,
     appBundle,
     titlePrefix,
+    processRootPid,
     source,
     now: input.now,
     ttlMs,
@@ -68,6 +75,7 @@ export async function handleTaskWindowClaimsRoute(input: {
       window_id: claim.window_id,
       app_bundle: claim.app_bundle,
       title_prefix: claim.title_prefix,
+      process_root_pid: claim.process_root_pid,
       source,
       expires_at: claim.expires_at,
     },

@@ -583,6 +583,87 @@ describe("ambient_workspace_saver", () => {
     assert.ok(obs.activities.some((activity) => activity.type === "task_window_claims_process_tree"));
   });
 
+  it("uses process-root claims to keep background agent windows out of the active paper", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 2,
+      windows: [
+        { id: 1, app: "Ghostty", title: "Task A notes", workspace: "paper-a", pid: 100 },
+        { id: 2, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "Background Playwright", workspace: "paper-a", pid: 520 },
+      ],
+    };
+    const workspace = makeFakeWorkspace(snapshot);
+    const obs = makeFakeObservability();
+    const writes: Array<{ taskId: string; snapshot: WorkspaceSnapshot }> = [];
+    const claims: Array<{
+      taskId: string;
+      windowId?: string;
+      appBundle?: string;
+      titlePrefix?: string;
+      processRootPid?: number;
+      source?: string;
+      ttlMs?: number;
+    }> = [
+      {
+        taskId: "task_paper_b",
+        processRootPid: 500,
+        source: "agent_spawn_root",
+        ttlMs: 60_000,
+      },
+    ];
+    let nowMs = Date.parse("2026-05-10T15:00:00.000Z");
+    const saver = createAmbientWorkspaceSaver({
+      workspace,
+      getCurrentTaskState: async () => ({ currentTaskId: "task_paper_a" }),
+      updateTaskLayout: async (taskId, nextSnapshot) => {
+        writes.push({ taskId, snapshot: nextSnapshot });
+      },
+      isManualModeActive: () => false,
+      claimTaskWindow: async (input) => {
+        claims.push({
+          taskId: input.taskId,
+          windowId: input.windowId,
+          appBundle: input.appBundle,
+          titlePrefix: input.titlePrefix,
+          processRootPid: input.processRootPid,
+          source: input.source,
+          ttlMs: input.ttlMs,
+        });
+      },
+      getTaskWindowClaims: () => claims.map((claim) => ({
+        task_id: claim.taskId,
+        window_id: claim.windowId,
+        app_bundle: claim.appBundle,
+        title_prefix: claim.titlePrefix,
+        process_root_pid: claim.processRootPid,
+      })),
+      getProcessAncestorPids: (pid) => pid === 520 ? [510, 500, 1] : [1],
+      observability: obs.recorder,
+      debounceMs: 3_000,
+      now: () => new Date(nowMs),
+    });
+
+    assert.equal((await saver.tick()).decision, "debounced");
+    assert.deepEqual(claims.slice(1), [
+      {
+        taskId: "task_paper_b",
+        windowId: "2",
+        appBundle: "com.google.Chrome",
+        titlePrefix: "background playwright",
+        processRootPid: undefined,
+        source: "ambient_process_tree",
+        ttlMs: 1_800_000,
+      },
+    ]);
+
+    nowMs += 5_000;
+    assert.equal((await saver.tick()).decision, "committed");
+    assert.deepEqual(writes[0]?.snapshot.windows.map((window) => window.id), [1]);
+    assert.equal(writes[0]?.snapshot.focusedWindowId, undefined);
+    assert.equal(obs.counters.get("task_window_claims_process_tree_total"), 1);
+  });
+
   it("recovers from updateTaskLayout error and emits an error event", async () => {
     const workspace = makeFakeWorkspace(makeSnapshot([1]));
     const obs = makeFakeObservability();

@@ -60,16 +60,16 @@
       "id": "ambient_autosave",
       "title": "Ambient Autosave",
       "status": "dogfood",
-      "summary": "Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, task-window claim filtering, tagged-window inference, and process-tree claim inference.",
+      "summary": "Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, task-window claim filtering, tagged-window inference, process-tree claim inference, and process-root claim expansion.",
       "code": ["app/orchestrator/src/agents/ambient_workspace_saver.ts"],
       "proofs": ["app/orchestrator/src/agents/ambient_workspace_saver.test.ts"],
-      "gaps": ["Task-session controllers should expose stable root pids by default; LaunchServices-detached apps may still need wrappers, tags, or routed resources."]
+      "gaps": ["Task-session controllers should expose stable root pids by default; LaunchServices-detached apps still need wrappers to claim process_root_pid, tags, or routed resources."]
     },
     {
       "id": "task_window_claims",
       "title": "Task Window Claims",
       "status": "dogfood",
-      "summary": "Declare or infer that windows belong to tasks so foreign windows do not pollute active paper snapshots.",
+      "summary": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots.",
       "http": [
         { "method": "POST", "path": "/task-window-claims", "route_file": "app/orchestrator/src/routes/task_window_claims.ts" },
         { "method": "GET", "path": "/task-window-claims", "route_file": "app/orchestrator/src/routes/task_window_claims.ts" }
