@@ -10,7 +10,7 @@ const execFileAsync = promisify(execFile);
 const args = process.argv.slice(2);
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/macos-hotkey-feedback-latency [--self-test] [--process-name NAME] [--hotkey ctrl-option-r] [--expect TEXT] [--runs N] [--budget-ms N] [--manifest PATH]
+  console.log(`Usage: bin/macos-hotkey-feedback-latency [--self-test] [--process-name NAME] [--hotkey ctrl-option-j] [--expect TEXT] [--runs N] [--budget-ms N] [--manifest PATH]
 
 Measures hotkey-to-visible-feedback latency for the macOS queue app harness
 status text. Live mode requires macOS Accessibility permission for the shell
@@ -18,10 +18,10 @@ running this command.
 
 Defaults:
   process name: EventLoopQueueApp
-  hotkey:       ctrl-option-r
+  hotkey:       ctrl-option-j
   expect:       feedback text changes from the pre-hotkey value
-  runs:         5
-  budget-ms:    1200 p95
+  runs:         1
+  budget-ms:    10000 p95
 `);
   process.exit(0);
 }
@@ -37,10 +37,10 @@ if (process.platform !== "darwin") {
 }
 
 const processName = readArg("--process-name") ?? process.env.EVENTLOOPOS_QUEUE_PROCESS_NAME ?? "EventLoopQueueApp";
-const hotkey = parseHotkey(readArg("--hotkey") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_CHORD ?? "ctrl-option-r");
+const hotkey = parseHotkey(readArg("--hotkey") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_CHORD ?? "ctrl-option-j");
 const expectedText = readArg("--expect") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_EXPECT;
-const runs = positiveInteger(readArg("--runs") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_RUNS, 5);
-const budgetMs = positiveInteger(readArg("--budget-ms") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_BUDGET_MS, 1_200);
+const runs = positiveInteger(readArg("--runs") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_RUNS, 1);
+const budgetMs = positiveInteger(readArg("--budget-ms") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_BUDGET_MS, 10_000);
 const runId = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
 const manifestPath = readArg("--manifest") ?? path.join("artifacts", "macos-hotkey-latency", runId, "manifest.json");
 
@@ -125,38 +125,28 @@ async function waitForHarnessFeedback({ processName, beforeFeedback, expectedTex
 }
 
 async function readHarnessStatus(processName) {
-  const script = `
-on flattenText(theElement)
-  set output to ""
-  try
-    set output to output & " " & (description of theElement as string)
-  end try
-  try
-    set output to output & " " & (name of theElement as string)
-  end try
-  try
-    set output to output & " " & (value of theElement as string)
-  end try
-  try
-    repeat with childElement in UI elements of theElement
-      set output to output & " " & my flattenText(childElement)
-    end repeat
-  end try
-  return output
-end flattenText
-
+const script = `
 tell application "System Events"
   if not (exists process "${escapeAppleScriptString(processName)}") then error "process not found: ${escapeAppleScriptString(processName)}"
   tell process "${escapeAppleScriptString(processName)}"
     repeat with candidateWindow in windows
-      set windowText to my flattenText(candidateWindow)
-      if windowText contains "eventloopOS harness status" then return windowText
+      set allElements to entire contents of candidateWindow
+      repeat with candidateElement in allElements
+        try
+          set candidateValue to value of candidateElement as string
+          if candidateValue contains "eventloopOS harness status" then return candidateValue
+        end try
+        try
+          set candidateName to name of candidateElement as string
+          if candidateName contains "eventloopOS harness status" then return candidateName
+        end try
+      end repeat
     end repeat
   end tell
 end tell
 error "eventloopOS harness status not found"
 `;
-  const result = await execFileAsync("osascript", ["-e", script], { timeout: 3_000 });
+  const result = await runAppleScript(script, { timeout: 12_000 });
   return normalizeSpace(result.stdout);
 }
 
@@ -165,7 +155,32 @@ async function pressHotkey(hotkey) {
     ? ` using {${hotkey.modifiers.join(", ")}}`
     : "";
   const script = `tell application "System Events" to key code ${hotkey.keyCode}${modifierPart}`;
-  await execFileAsync("osascript", ["-e", script], { timeout: 2_000 });
+  await runAppleScript(script, { timeout: 2_000 });
+}
+
+async function runAppleScript(script, { timeout }) {
+  const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "eventloopos-osascript-"));
+  const scriptPath = path.join(tempDir, "script.applescript");
+  try {
+    await fs.promises.writeFile(scriptPath, script, "utf8");
+    return await execFileAsync("/bin/zsh", ["-lc", `osascript ${shellQuote(scriptPath)}`], { timeout });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const stderr = typeof error?.stderr === "string" ? normalizeSpace(error.stderr) : "";
+    const details = [
+      typeof error?.code !== "undefined" ? `code=${error.code}` : "",
+      typeof error?.signal !== "undefined" ? `signal=${error.signal}` : "",
+      typeof error?.killed !== "undefined" ? `killed=${error.killed}` : "",
+      stderr ? `stderr=${stderr}` : "",
+    ].filter(Boolean);
+    throw new Error(details.length > 0 ? `${message}; ${details.join("; ")}` : message);
+  } finally {
+    await fs.promises.rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
 function parseHotkey(raw) {

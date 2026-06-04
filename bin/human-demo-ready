@@ -10,20 +10,25 @@ process.chdir(repoRoot);
 
 const args = process.argv.slice(2);
 const skipScreenshot = args.includes("--skip-screenshot");
-const hotkeyLatencyEnabled = args.includes("--hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "1";
+const skipHotkeyLatency = args.includes("--skip-hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "0";
+const hotkeyLatencyRequested = args.includes("--hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "1";
+const hotkeyLatencyEnabled = !skipHotkeyLatency && (hotkeyLatencyRequested || process.platform === "darwin");
 const jsonOnly = args.includes("--json");
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--hotkey-latency] [--json]
+  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-hotkey-latency] [--hotkey-latency] [--json]
 
 Check current Mac Studio human-demo readiness without resetting demo state.
-Use --hotkey-latency to include a live macOS queue-app hotkey feedback p95 gate.
+On macOS, includes a live queue-app hotkey feedback p95 gate by default.
+Use --skip-hotkey-latency only while bootstrapping Accessibility permission.
 
 Environment:
   LAB_DOGFOOD_PROFILE  default: lab-human-demo
   LAB_DOGFOOD_URL      default: http://127.0.0.1:4480
   SCREEN_SHARING_TITLE default: Zeus
-  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=1 enables --hotkey-latency
+  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=1 forces hotkey latency on
+  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=0 skips hotkey latency
+  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_TARGET=local runs latency on this Mac instead of the lab Mac
 `);
   process.exit(0);
 }
@@ -57,11 +62,7 @@ if (!skipScreenshot) {
 }
 const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
 const hotkeyLatency = hotkeyLatencyEnabled
-  ? runStep("hotkey feedback latency", "node", [
-      "bin/macos-hotkey-feedback-latency",
-      "--manifest",
-      hotkeyLatencyManifestPath,
-    ], env)
+  ? runHotkeyLatencyStep(hotkeyLatencyManifestPath, env)
   : undefined;
 const hotkeyLatencyManifest = hotkeyLatency ? readJsonIfPresent(hotkeyLatencyManifestPath) : undefined;
 
@@ -86,6 +87,7 @@ const manifest = {
   passed: failedChecks.length === 0,
   profile: env.LAB_DOGFOOD_PROFILE,
   url: env.LAB_DOGFOOD_URL,
+  hotkey_latency_required: hotkeyLatencyEnabled,
   checks,
   failed_checks: failedChecks,
   dogfood_status: dogfoodManifest ? {
@@ -173,6 +175,20 @@ function runStep(name, command, commandArgs, envOverride) {
   };
 }
 
+function runHotkeyLatencyStep(manifestPath, envOverride) {
+  if (process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_TARGET === "local") {
+    return runStep("hotkey feedback latency", "node", [
+      "bin/macos-hotkey-feedback-latency",
+      "--manifest",
+      manifestPath,
+    ], envOverride);
+  }
+  return runStep("hotkey feedback latency", "bin/lab-mac-hotkey-feedback-latency", [
+    "--manifest",
+    manifestPath,
+  ], envOverride);
+}
+
 function extractJsonObject(value) {
   if (!value.trim()) return undefined;
   const starts = [];
@@ -210,7 +226,7 @@ function renderReadyMarkdown(manifest) {
 - Latest proof: ${latest?.manifest_path ?? ""}
 - Latest proof screenshot: ${latest?.screenshot_path ?? ""}
 - Fresh Screen Sharing capture: ${screenshot?.output ?? "skipped"}
-- Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}
+- Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}${manifest.hotkey_latency_required ? " (required)" : ""}
 - Failed checks: ${manifest.failed_checks.length === 0 ? "none" : manifest.failed_checks.join(", ")}
 
 Next: use \`docs/human-demo-walkthrough.md\`, then run \`bin/human-demo-result-template --write\` and fill the generated result after Jason finishes hands-on pass.

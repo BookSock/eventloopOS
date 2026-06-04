@@ -54,6 +54,7 @@ end run
 APPLESCRIPT
 sleep 0.2
 
+set +e
 window_id="$(
   swift - "$owner" "$title" <<'SWIFT'
 import CoreGraphics
@@ -84,10 +85,16 @@ for window in windows {
 exit(2)
 SWIFT
 )"
+lookup_exit=$?
+set -e
 
-if [[ -z "$window_id" ]]; then
-  echo "Screen Sharing window not found; open Screen Sharing and ensure it is not minimized." >&2
-  exit 1
+if [[ "$lookup_exit" -ne 0 || -z "$window_id" ]]; then
+  if [[ -n "$title" ]]; then
+    echo "Screen Sharing window not found for owner '$owner' and title containing '$title'. Open Screen Sharing, ensure it is not minimized, or set SCREEN_SHARING_TITLE to the visible window title substring." >&2
+  else
+    echo "Screen Sharing window not found for owner '$owner'. Open Screen Sharing and ensure it is not minimized." >&2
+  fi
+  exit "$lookup_exit"
 fi
 
 mkdir -p "$(dirname "$output")"

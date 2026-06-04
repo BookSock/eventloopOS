@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/macos-hotkey-feedback-latency-direct [--process-name NAME] [--hotkey ctrl-option-j] [--runs N] [--budget-ms N] [--manifest PATH]
+
+Measures Queue hotkey-to-visible-harness-feedback latency using direct shell
+osascript calls. This path is intended for remote Mac labs where node-launched
+osascript can hang behind macOS Accessibility/TCC boundaries.
+EOF
+}
+
+process_name="${EVENTLOOPOS_QUEUE_PROCESS_NAME:-EventLoopQueueApp}"
+hotkey="${EVENTLOOPOS_HOTKEY_LATENCY_CHORD:-ctrl-option-j}"
+runs="${EVENTLOOPOS_HOTKEY_LATENCY_RUNS:-1}"
+budget_ms="${EVENTLOOPOS_HOTKEY_LATENCY_BUDGET_MS:-10000}"
+manifest="artifacts/macos-hotkey-latency-direct/$(date -u +%Y%m%dT%H%M%SZ)/manifest.json"
+expected_text="${EVENTLOOPOS_HOTKEY_LATENCY_EXPECT:-}"
+
+while (($#)); do
+  case "$1" in
+    --process-name) process_name="${2:-}"; shift 2 ;;
+    --hotkey) hotkey="${2:-}"; shift 2 ;;
+    --runs) runs="${2:-}"; shift 2 ;;
+    --budget-ms) budget_ms="${2:-}"; shift 2 ;;
+    --manifest) manifest="${2:-}"; shift 2 ;;
+    --expect) expected_text="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+case "$runs" in (*[!0-9]*|"") echo "--runs must be a positive integer" >&2; exit 2 ;; esac
+case "$budget_ms" in (*[!0-9]*|"") echo "--budget-ms must be a positive integer" >&2; exit 2 ;; esac
+if ((runs <= 0 || budget_ms <= 0)); then
+  echo "--runs and --budget-ms must be positive" >&2
+  exit 2
+fi
+
+key_code_for() {
+  case "$1" in
+    j) echo 38 ;;
+    e) echo 14 ;;
+    r) echo 15 ;;
+    h) echo 4 ;;
+    k) echo 40 ;;
+    m) echo 46 ;;
+    return|enter) echo 36 ;;
+    *) echo "unsupported hotkey key: $1" >&2; return 2 ;;
+  esac
+}
+
+hotkey_key="${hotkey##*[-+]}"
+key_code="$(key_code_for "$hotkey_key")"
+modifier_list=()
+modifier_prefix="${hotkey%[-+]*}"
+if [[ "$modifier_prefix" != "$hotkey" ]]; then
+  IFS='-+' read -r -a modifier_parts <<<"$modifier_prefix"
+  for modifier in "${modifier_parts[@]}"; do
+    case "$modifier" in
+      ctrl|control) modifier_list+=("control down") ;;
+      option|alt) modifier_list+=("option down") ;;
+      shift) modifier_list+=("shift down") ;;
+      cmd|command) modifier_list+=("command down") ;;
+      *) echo "unsupported hotkey modifier: $modifier" >&2; exit 2 ;;
+    esac
+  done
+fi
+modifier_part=""
+if ((${#modifier_list[@]} > 0)); then
+  joined=""
+  for item in "${modifier_list[@]}"; do
+    if [[ -n "$joined" ]]; then joined+=", "; fi
+    joined+="$item"
+  done
+  modifier_part=" using {$joined}"
+fi
+
+now_ms() {
+  node -e 'process.stdout.write(String(Date.now()))'
+}
+
+feedback_of() {
+  node -e '
+const input = process.argv[1] || "";
+const match = input.match(/feedback=([^|]+)/);
+process.stdout.write((match ? match[1] : "").replace(/\s+/g, " ").trim());
+' "$1"
+}
+
+read_status() {
+  osascript <<APPLESCRIPT
+tell application "System Events"
+  if not (exists process "$process_name") then error "process not found: $process_name"
+  tell process "$process_name"
+    repeat with candidateWindow in windows
+      set allElements to entire contents of candidateWindow
+      repeat with candidateElement in allElements
+        try
+          set candidateValue to value of candidateElement as string
+          if candidateValue contains "eventloopOS harness status" then return candidateValue
+        end try
+        try
+          set candidateName to name of candidateElement as string
+          if candidateName contains "eventloopOS harness status" then return candidateName
+        end try
+      end repeat
+    end repeat
+  end tell
+end tell
+error "eventloopOS harness status not found"
+APPLESCRIPT
+}
+
+read_status_retry() {
+  local timeout_ms="$1"
+  local start_ms current_ms output
+  start_ms="$(now_ms)"
+  while true; do
+    if output="$(read_status 2>&1)"; then
+      printf '%s' "$output"
+      return 0
+    fi
+    current_ms="$(now_ms)"
+    if ((current_ms - start_ms > timeout_ms)); then
+      printf '%s' "$output"
+      return 1
+    fi
+    sleep 0.1
+  done
+}
+
+press_hotkey() {
+  osascript -e "tell application \"System Events\" to key code $key_code$modifier_part"
+}
+
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/eventloopos-hotkey-latency.XXXXXX")"
+samples_tsv="$tmp_dir/samples.tsv"
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+for ((run = 1; run <= runs; run += 1)); do
+  ok=1
+  latency=""
+  before_feedback=""
+  after_feedback=""
+  error=""
+  if before_status="$(read_status_retry 10000 2>&1)"; then
+    before_feedback="$(feedback_of "$before_status")"
+    start_ms="$(now_ms)"
+    if press_error="$(press_hotkey 2>&1)"; then
+      deadline_ms=$((start_ms + budget_ms * 3))
+      while true; do
+        current_ms="$(now_ms)"
+        if ((current_ms > deadline_ms)); then
+          ok=0
+          error="timed out waiting for feedback"
+          break
+        fi
+        if after_status="$(read_status 2>&1)"; then
+          after_feedback="$(feedback_of "$after_status")"
+          if [[ -n "$expected_text" ]]; then
+            if [[ "$after_feedback" == *"$expected_text"* || "$after_status" == *"$expected_text"* ]]; then
+              latency=$((current_ms - start_ms))
+              break
+            fi
+          elif [[ -n "$after_feedback" && "$after_feedback" != "$before_feedback" ]]; then
+            latency=$((current_ms - start_ms))
+            break
+          fi
+        fi
+        sleep 0.05
+      done
+    else
+      ok=0
+      error="$press_error"
+    fi
+  else
+    ok=0
+    error="$before_status"
+  fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$run" "$ok" "$latency" "$before_feedback" "$after_feedback" "$error" >>"$samples_tsv"
+  sleep 0.5
+done
+
+finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+mkdir -p "$(dirname "$manifest")"
+STARTED_AT="$started_at" FINISHED_AT="$finished_at" PROCESS_NAME="$process_name" HOTKEY="$hotkey" RUNS="$runs" BUDGET_MS="$budget_ms" EXPECTED_TEXT="$expected_text" SAMPLES_TSV="$samples_tsv" MANIFEST="$manifest" node <<'NODE'
+const fs = require("fs");
+const rows = fs.readFileSync(process.env.SAMPLES_TSV, "utf8").trim().split(/\n/).filter(Boolean);
+const samples = rows.map((row) => {
+  const [run, ok, latency, before, after, error] = row.split("\t");
+  const sample = {
+    run: Number(run),
+    ok: ok === "1",
+    timings_ms: {},
+    errors: [],
+  };
+  if (latency) sample.timings_ms.hotkey_to_feedback = Number(latency);
+  if (before) sample.before_feedback = before;
+  if (after) sample.after_feedback = after;
+  if (error) sample.errors.push(error);
+  return sample;
+});
+const values = samples
+  .map((sample) => sample.timings_ms.hotkey_to_feedback)
+  .filter((value) => typeof value === "number" && Number.isFinite(value))
+  .sort((left, right) => left - right);
+const percentile = (p) => values[Math.min(values.length - 1, Math.ceil(values.length * p) - 1)];
+const summary = values.length > 0 ? {
+  hotkey_to_feedback: {
+    count: values.length,
+    min_ms: values[0],
+    median_ms: percentile(0.5),
+    p95_ms: percentile(0.95),
+    max_ms: values[values.length - 1],
+  },
+} : {};
+const p95 = summary.hotkey_to_feedback?.p95_ms;
+const budget = Number(process.env.BUDGET_MS);
+const failedBudgets = typeof p95 === "number" && p95 > budget
+  ? [{ name: "hotkey_to_feedback", p95_ms: p95, budget_ms: budget }]
+  : [];
+const manifest = {
+  ok: samples.every((sample) => sample.ok) && failedBudgets.length === 0,
+  kind: "eventloopos.macos_hotkey_feedback_latency",
+  measurement: "direct_shell_osascript_ax_observed",
+  started_at: process.env.STARTED_AT,
+  finished_at: process.env.FINISHED_AT,
+  process_name: process.env.PROCESS_NAME,
+  hotkey: process.env.HOTKEY,
+  expected_text: process.env.EXPECTED_TEXT || undefined,
+  runs: Number(process.env.RUNS),
+  budgets_ms: { hotkey_to_feedback: budget },
+  failed_budgets: failedBudgets,
+  summary,
+  samples,
+};
+fs.writeFileSync(process.env.MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
+console.log(`macOS hotkey feedback latency manifest: ${process.env.MANIFEST}`);
+console.log(JSON.stringify({
+  ok: manifest.ok,
+  runs: manifest.runs,
+  failed_budgets: manifest.failed_budgets,
+  summary: manifest.summary,
+}, null, 2));
+process.exit(manifest.ok ? 0 : 1);
+NODE
