@@ -90,7 +90,9 @@ request/response schemas through the exported Zod contract registry.
 the same validated routes for common master-command, manual-mode,
 task-workspace, queue, workspace, task-session, Codex/Claude agent,
 task-window-claim, follows-window, reading-queue, onboarding, context-restore,
-and trigger operations.
+trigger, MCP/source-hook, voice-command, agent-run, and observability
+operations. Shared tests compare those operation helpers against every
+cataloged HTTP route so route/helper drift is visible.
 
 The HTTP client exposes catchable error classes for builder-facing tools:
 

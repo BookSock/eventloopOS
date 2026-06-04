@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { getContractSchema } from "./schemas.js";
 import type {
+  ActivityResponse,
+  AgentRunGetResponse,
+  AgentRunUpsertRequest,
+  AgentRunUpsertResponse,
   ClaudeSessionInspectionResponse,
   ContextRestoreClaimRequest,
   ContextRestoreFinishRequest,
@@ -16,14 +20,28 @@ import type {
   CreateTaskResponse,
   CurrentTaskResponse,
   CurrentTaskSetRequest,
+  EventGetResponse,
+  EventIngestRequest,
+  EventIngestResponse,
   FollowsWindowExclusionCreateRequest,
   FollowsWindowExclusionResponse,
   FollowsWindowExclusionsListResponse,
+  HealthResponse,
   ManualModeGetResponse,
   ManualModeSetRequest,
   ManualModeSetResponse,
   MasterFanOutRequest,
   MasterFanOutResponse,
+  McpPollAllAndRouteRequest,
+  McpPollAllAndRouteResponse,
+  McpPollAndRouteResponse,
+  McpPollRequest,
+  McpPollResponse,
+  McpPollSourceRequest,
+  McpPreviewResponse,
+  McpSourceGetResponse,
+  McpSourcesListResponse,
+  MetricsResponse,
   OnboardingApprovalBatchRequest,
   OnboardingApprovalBatchResponse,
   OnboardingApprovalRequest,
@@ -55,6 +73,7 @@ import type {
   ReadingQueueListResponse,
   ReadingQueuePromoteRequest,
   ReadingQueuePromoteResponse,
+  ReviewPacketGetResponse,
   TaskGetResponse,
   TaskLayoutResponse,
   TaskLayoutUpdateResponse,
@@ -83,7 +102,9 @@ import type {
   WorkspaceRestorePlanResponse,
   WorkspaceRestoreRequest,
   WorkspaceRestoreResponse,
-  WorkspaceStatusResponse
+  WorkspaceStatusResponse,
+  VoiceCommandRequest,
+  VoiceCommandResponse
 } from "./schemas.js";
 
 const nonEmpty = z.string().min(1);
@@ -239,6 +260,9 @@ export type PrimitiveOperationsClient = {
     setCurrent(body: CurrentTaskSetRequest): Promise<CurrentTaskResponse>;
   };
   queue: {
+    ingestEvent(body: EventIngestRequest): Promise<EventIngestResponse>;
+    getEvent(id: string): Promise<EventGetResponse>;
+    getReviewPacket(id: string): Promise<ReviewPacketGetResponse>;
     list(options?: PrimitiveQueueListOptions): Promise<QueueListResponse>;
     next(): Promise<QueueNextResponse>;
     leaseNext(body?: QueueLeaseRequest): Promise<QueueNextResponse>;
@@ -302,6 +326,23 @@ export type PrimitiveOperationsClient = {
     get(id: string): Promise<PaperTriggerGetResponse>;
     patch(id: string, body: PaperTriggerPatchRequest): Promise<PaperTriggerMutationResponse>;
     delete(id: string): Promise<PaperTriggerMutationResponse>;
+  };
+  agentSources: {
+    poll(body: McpPollRequest): Promise<McpPollResponse>;
+    listMcpSources(): Promise<McpSourcesListResponse>;
+    pollAllAndRoute(body: McpPollAllAndRouteRequest): Promise<McpPollAllAndRouteResponse>;
+    getMcpSource(id: string): Promise<McpSourceGetResponse>;
+    pollMcpSource(id: string, body?: McpPollSourceRequest): Promise<McpPollResponse>;
+    previewMcpSource(id: string, body?: McpPollSourceRequest): Promise<McpPreviewResponse>;
+    pollAndRouteMcpSource(id: string, body?: McpPollSourceRequest): Promise<McpPollAndRouteResponse>;
+    upsertAgentRun(body: AgentRunUpsertRequest): Promise<AgentRunUpsertResponse>;
+    getAgentRun(id: string): Promise<AgentRunGetResponse>;
+    submitVoiceCommand(body: VoiceCommandRequest): Promise<VoiceCommandResponse>;
+  };
+  observability: {
+    health(): Promise<HealthResponse>;
+    metrics(): Promise<MetricsResponse>;
+    activity(): Promise<ActivityResponse>;
   };
   followsWindows: {
     exclude(body: FollowsWindowExclusionCreateRequest): Promise<FollowsWindowExclusionResponse>;
@@ -574,6 +615,15 @@ export function bindPrimitiveOperationsClient(client: PrimitiveHttpClient): Prim
       }
     },
     queue: {
+      ingestEvent(body: EventIngestRequest) {
+        return client.request("POST", "/events", { body });
+      },
+      getEvent(id: string) {
+        return client.request("GET", "/events/:id", { pathParams: { id } });
+      },
+      getReviewPacket(id: string) {
+        return client.request("GET", "/review-packets/:id", { pathParams: { id } });
+      },
       list(options: PrimitiveQueueListOptions = {}) {
         return client.request("GET", "/queue", { query: options });
       },
@@ -726,6 +776,49 @@ export function bindPrimitiveOperationsClient(client: PrimitiveHttpClient): Prim
       },
       delete(id: string) {
         return client.request("DELETE", "/triggers/:id", { pathParams: { id } });
+      }
+    },
+    agentSources: {
+      poll(body: McpPollRequest) {
+        return client.request("POST", "/mcp/poll", { body });
+      },
+      listMcpSources() {
+        return client.request("GET", "/mcp-sources");
+      },
+      pollAllAndRoute(body: McpPollAllAndRouteRequest) {
+        return client.request("POST", "/mcp-sources/poll-all-and-route", { body });
+      },
+      getMcpSource(id: string) {
+        return client.request("GET", "/mcp-sources/:id", { pathParams: { id } });
+      },
+      pollMcpSource(id: string, body: McpPollSourceRequest = {}) {
+        return client.request("POST", "/mcp-sources/:id/poll", { pathParams: { id }, body });
+      },
+      previewMcpSource(id: string, body: McpPollSourceRequest = {}) {
+        return client.request("POST", "/mcp-sources/:id/preview", { pathParams: { id }, body });
+      },
+      pollAndRouteMcpSource(id: string, body: McpPollSourceRequest = {}) {
+        return client.request("POST", "/mcp-sources/:id/poll-and-route", { pathParams: { id }, body });
+      },
+      upsertAgentRun(body: AgentRunUpsertRequest) {
+        return client.request("POST", "/agent-runs", { body });
+      },
+      getAgentRun(id: string) {
+        return client.request("GET", "/agent-runs/:id", { pathParams: { id } });
+      },
+      submitVoiceCommand(body: VoiceCommandRequest) {
+        return client.request("POST", "/voice/commands", { body });
+      }
+    },
+    observability: {
+      health() {
+        return client.request("GET", "/health");
+      },
+      metrics() {
+        return client.request("GET", "/metrics");
+      },
+      activity() {
+        return client.request("GET", "/activity");
       }
     },
     followsWindows: {

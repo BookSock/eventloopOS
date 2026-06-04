@@ -28,6 +28,7 @@ import {
   PrimitiveHttpError,
   PrimitiveResponseParseError,
   PrimitiveResponseValidationError,
+  primitiveRoutes,
   routeHasRequestBody,
   summarizePrimitiveCatalog,
   validatePrimitiveResponse
@@ -561,7 +562,8 @@ describe("primitive catalog SDK boundary", () => {
     expect(calls[10]?.headers["idempotency-key"]).toBe("idem_workspace_restore");
   });
 
-  it("binds primitive operation helpers for master, manual mode, tasks, reading, onboarding, contexts, and triggers", async () => {
+  it("binds primitive operation helpers for every cataloged HTTP route", async () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
     const calls: Array<{ method: string; path: string; input?: unknown }> = [];
     const ops = bindPrimitiveOperationsClient({
       async request(method, path, input) {
@@ -585,6 +587,33 @@ describe("primitive catalog SDK boundary", () => {
     );
     await ops.tasks.current();
     await ops.tasks.setCurrent(readFixture(join(fixturesDir, "valid/current_task_set_request.json")).data);
+    await ops.queue.ingestEvent(readFixture(join(fixturesDir, "valid/event_ingest_request.json")).data);
+    await ops.queue.getEvent("evt_browser_ctx_123");
+    await ops.queue.getReviewPacket("pkt_feedback_001");
+    await ops.queue.list({ state: "ready" });
+    await ops.queue.next();
+    await ops.queue.leaseNext(readFixture(join(fixturesDir, "valid/queue_lease_request.json")).data);
+    await ops.queue.renewLease("qit_feedback_001", readFixture(join(fixturesDir, "valid/queue_lease_renew_request.json")).data);
+    await ops.queue.done("qit_feedback_001", { actor_id: "human_demo" });
+    await ops.queue.defer("qit_feedback_001", { due_at: "2026-05-06T18:00:00Z" });
+    await ops.queue.ignore("qit_feedback_001", { actor_id: "human_demo" });
+    await ops.queue.recommendedAction("qit_feedback_001", readFixture(join(fixturesDir, "valid/queue_recommended_action_request.json")).data);
+    await ops.queue.lineage("qit_feedback_001", { limit: 10 });
+    await ops.queue.priority("qit_feedback_001", readFixture(join(fixturesDir, "valid/queue_priority_request.json")).data);
+    await ops.taskWindowClaims.create(readFixture(join(fixturesDir, "valid/task_window_claim_create_request.json")).data);
+    await ops.taskWindowClaims.list();
+    await ops.taskSessions.list();
+    await ops.taskSessions.start(readFixture(join(fixturesDir, "valid/task_session_start_request.json")).data);
+    await ops.taskSessions.get("codex_thread_123");
+    await ops.taskSessions.followup("codex_thread_123", readFixture(join(fixturesDir, "valid/task_session_followup_request.json")).data);
+    await ops.taskSessions.replacement("codex_thread_123", readFixture(join(fixturesDir, "valid/task_session_replacement_request.json")).data);
+    await ops.taskSessions.bindTask("codex_thread_123", readFixture(join(fixturesDir, "valid/task_session_binding_request.json")).data);
+    await ops.taskSessions.listMessages();
+    await ops.taskSessions.reconcileAttempted(readFixture(join(fixturesDir, "valid/task_messages_reconcile_attempted_request.json")).data);
+    await ops.agents.codex.autoBind();
+    await ops.agents.codex.resolveForeground();
+    await ops.agents.codex.inspect("codex_thread_123");
+    await ops.agents.claude.inspect("claude_session_123");
     await ops.readingQueue.list();
     await ops.readingQueue.promote(readFixture(join(fixturesDir, "valid/reading_queue_promote_request.json")).data);
     await ops.readingQueue.autoPromote(readFixture(join(fixturesDir, "valid/reading_queue_auto_promote_request.json")).data);
@@ -609,45 +638,41 @@ describe("primitive catalog SDK boundary", () => {
     await ops.triggers.get("trg_deploy_watcher");
     await ops.triggers.patch("trg_deploy_watcher", readFixture(join(fixturesDir, "valid/paper_trigger_patch_request.json")).data);
     await ops.triggers.delete("trg_deploy_watcher");
+    await ops.agentSources.poll(readFixture(join(fixturesDir, "valid/mcp_poll_request.json")).data);
+    await ops.agentSources.listMcpSources();
+    await ops.agentSources.pollAllAndRoute(readFixture(join(fixturesDir, "valid/mcp_poll_all_and_route_request.json")).data);
+    await ops.agentSources.getMcpSource("local-events");
+    await ops.agentSources.pollMcpSource("local-events");
+    await ops.agentSources.previewMcpSource("local-events");
+    await ops.agentSources.pollAndRouteMcpSource("local-events");
+    await ops.agentSources.upsertAgentRun(readFixture(join(fixturesDir, "valid/agent_run_upsert_request.json")).data);
+    await ops.agentSources.getAgentRun("agent_run_123");
+    await ops.agentSources.submitVoiceCommand(readFixture(join(fixturesDir, "valid/voice_command_request.json")).data);
+    await ops.observability.health();
+    await ops.observability.metrics();
+    await ops.observability.activity();
+    await ops.followsWindows.exclude(readFixture(join(fixturesDir, "valid/follows_window_exclusion_create_request.json")).data);
+    await ops.followsWindows.listExclusions();
+    await ops.followsWindows.deleteExclusion("fwex_demo");
+    await ops.workspace.status();
+    await ops.workspace.capture();
+    await ops.workspace.restorePlan(readFixture(join(fixturesDir, "valid/workspace_restore_plan_request.json")).data);
+    await ops.workspace.restore(readFixture(join(fixturesDir, "valid/workspace_restore_request.json")).data, "idem_workspace_restore");
 
-    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
-      "POST /master/fan-out",
-      "GET /modes/manual",
-      "POST /modes/manual",
-      "POST /tasks",
-      "GET /tasks",
-      "GET /tasks/:id",
-      "GET /tasks/:id/layout",
-      "PUT /tasks/:id/layout",
-      "POST /tasks/:id/workspace-snapshot",
-      "GET /tasks/current",
-      "POST /tasks/current",
-      "GET /reading-queue",
-      "POST /reading-queue/promote",
-      "POST /reading-queue/auto-promote",
-      "GET /onboarding/scan",
-      "POST /onboarding/approvals",
-      "POST /onboarding/approvals/batch",
-      "POST /onboarding/rejections",
-      "GET /contexts",
-      "POST /contexts/restore-plan",
-      "POST /contexts/restore-requests",
-      "GET /contexts/restore-requests/next",
-      "POST /contexts/restore-requests/claim-next",
-      "GET /contexts/restore-requests/:id",
-      "POST /contexts/restore-requests/:id/done",
-      "POST /contexts/restore-requests/:id/failed",
-      "POST /contexts/restore-requests/:id/retry",
-      "GET /triggers",
-      "POST /triggers",
-      "GET /triggers/:id",
-      "PATCH /triggers/:id",
-      "DELETE /triggers/:id"
-    ]);
-    expect(calls[5]?.input).toMatchObject({ pathParams: { id: "task_demo_customer" } });
-    expect(calls[7]?.input).toMatchObject({ body: workspaceSnapshot });
-    expect(calls[23]?.input).toMatchObject({ pathParams: { id: "ctx_restore_123" } });
-    expect(calls[30]?.input).toMatchObject({ pathParams: { id: "trg_deploy_watcher" } });
+    const calledRoutes = new Set(calls.map((call) => `${call.method} ${call.path}`));
+    const catalogRoutes = new Set(primitiveRoutes(catalog).map((route) => `${route.method} ${route.path}`));
+    expect(calledRoutes).toEqual(catalogRoutes);
+    expect(calledRoutes.size).toBe(primitiveRoutes(catalog).length);
+    expect(calls.find((call) => call.path === "/tasks/:id")?.input).toMatchObject({ pathParams: { id: "task_demo_customer" } });
+    expect(calls.find((call) => call.path === "/tasks/:id/layout" && call.method === "PUT")?.input).toMatchObject({ body: workspaceSnapshot });
+    expect(calls.find((call) => call.path === "/review-packets/:id")?.input).toMatchObject({ pathParams: { id: "pkt_feedback_001" } });
+    expect(calls.find((call) => call.path === "/contexts/restore-requests/:id")?.input).toMatchObject({
+      pathParams: { id: "ctx_restore_123" }
+    });
+    expect(calls.find((call) => call.path === "/mcp-sources/:id/poll")?.input).toMatchObject({
+      pathParams: { id: "local-events" },
+      body: {}
+    });
   });
 });
 

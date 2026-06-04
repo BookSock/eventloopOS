@@ -27,7 +27,9 @@ It also exposes `createPrimitiveOperationsClient`, a small typed convenience
 layer for common master-command, manual-mode, task-workspace, queue,
 workspace, task-session, Codex/Claude agent, task-window-claim,
 follows-window, reading-queue, onboarding, context-restore, and trigger
-operations on top of the same catalog-validated routes.
+operations, plus MCP/source-hook, voice-command, agent-run, and observability
+routes. Shared tests compare operation-helper route coverage against every
+cataloged HTTP route so SDK drift is caught by `pnpm typecheck`.
 
 Runnable examples live in `examples/primitives/`: restore a saved desk, inspect
 and rerank an attention queue, and wire external hotkeys to task-window/follows
@@ -774,7 +776,8 @@ Highest-leverage steps before calling this a real primitives library:
    convenience methods over master-command, manual-mode, task-workspace,
    queue, workspace, task-session, Codex/Claude agent, task-window-claim,
    follows-window, reading-queue, onboarding, context-restore, and trigger
-   primitives.
+   primitives, with route-coverage tests across every cataloged HTTP
+   primitive.
 2. Split `@eventloopos/orchestrator` into public contracts and private server
    implementation packages.
 3. Keep `bin/human-demo-ready`'s default macOS hotkey-latency gate green before
