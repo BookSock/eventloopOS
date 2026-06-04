@@ -716,6 +716,8 @@ Useful standalone uses:
 - route future matching events to a task without a human decision each time
 - create lightweight agent/source automation rules
 - keep trigger edits auditable through store and activity tests
+- reject enabled cross-task trigger overlaps before they can double-paper the
+  user for the same future event; disabled trigger drafts are still allowed
 
 Proof:
 

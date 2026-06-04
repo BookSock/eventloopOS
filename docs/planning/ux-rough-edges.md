@@ -106,9 +106,14 @@ Task references thread UUID X. You delete the rollout file (or never resume the 
 
 ## Tier 3 — would annoy you within a week
 
-### 3.1 Custom triggers: substring conflicts across tasks
+### 3.1 Custom triggers: substring conflicts across tasks — resolved 2026-06-04
 
 You set "Slack message about `deploy` → paper for task A." Later you set "Slack message about `deploy` → paper for task B." Now both fire. Confusing.
+
+**Resolution:** `POST /triggers` and `PATCH /triggers/:id` now reject enabled
+cross-task overlaps with `409 trigger_conflict` when event type, source
+selector, and body substring would match the same future event. Disabled drafts
+are still allowed. Evidence: `app/orchestrator/test/triggers_route.test.ts`.
 
 **Mitigations:** voice intent rejects creating an overlapping trigger. Or both fire and that's just user error.
 

@@ -20,6 +20,7 @@ describe("triggers route — phase 7b", () => {
   let server: Server;
   let baseUrl: string;
   let taskId: string;
+  let taskIdB: string;
 
   before(async () => {
     const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
@@ -37,6 +38,20 @@ describe("triggers route — phase 7b", () => {
       }),
     }).then((r) => r.json()) as { task: { task_id: string } };
     taskId = body.task.task_id;
+
+    const bodyB = await fetch(`${baseUrl}/tasks`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        primary_anchor: { kind: "codex_thread", id: "thread-trig-2" },
+        captured_layout: {
+          ...layout,
+          activeWorkspace: "eventloop-trig-b",
+          windows: [{ id: 12, app: "Ghostty", title: "codex trig b", workspace: "eventloop-trig-b" }],
+        },
+      }),
+    }).then((r) => r.json()) as { task: { task_id: string } };
+    taskIdB = bodyB.task.task_id;
   });
 
   after(async () => {
@@ -104,6 +119,64 @@ describe("triggers route — phase 7b", () => {
       }),
     });
     assert.equal(response.status, 404);
+  });
+
+  it("rejects overlapping enabled triggers for different tasks", async () => {
+    const first = await fetch(`${baseUrl}/triggers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: taskId,
+        name: "rollout watcher",
+        match_event_type: "slack.message_received",
+        match_source_id_pattern: "slack:T1:C1",
+        match_body_substring: "rollout",
+      }),
+    });
+    assert.equal(first.status, 200);
+    const firstBody = await first.json() as { trigger: { trigger_id: string } };
+
+    const overlap = await fetch(`${baseUrl}/triggers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: taskIdB,
+        name: "rollout deploy watcher",
+        match_event_type: "slack.message_received",
+        match_source_id_pattern: "slack:T1:C1",
+        match_body_substring: "rollout deploy",
+      }),
+    });
+    assert.equal(overlap.status, 409);
+    const overlapBody = await overlap.json() as { error?: { code?: string; details?: { trigger_id?: string; task_id?: string } } };
+    assert.equal(overlapBody.error?.code, "trigger_conflict");
+    assert.equal(overlapBody.error?.details?.trigger_id, firstBody.trigger.trigger_id);
+    assert.equal(overlapBody.error?.details?.task_id, taskId);
+
+    const disabledDraft = await fetch(`${baseUrl}/triggers`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: taskIdB,
+        name: "disabled rollout draft",
+        match_event_type: "slack.message_received",
+        match_source_id_pattern: "slack:T1:C1",
+        match_body_substring: "rollout deploy",
+        enabled: false,
+      }),
+    });
+    assert.equal(disabledDraft.status, 200);
+    const disabledBody = await disabledDraft.json() as { trigger: { trigger_id: string } };
+
+    const enableDraft = await fetch(`${baseUrl}/triggers/${disabledBody.trigger.trigger_id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    assert.equal(enableDraft.status, 409);
+    const enableBody = await enableDraft.json() as { error?: { code?: string; details?: { trigger_id?: string } } };
+    assert.equal(enableBody.error?.code, "trigger_conflict");
+    assert.equal(enableBody.error?.details?.trigger_id, firstBody.trigger.trigger_id);
   });
 
   it("validates required fields", async () => {
