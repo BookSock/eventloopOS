@@ -168,12 +168,17 @@ function auditHttpRoute(route, prefix, repoRoot, schemaNames, errors) {
   }
   auditSchemaRef(route.request_schema, `${prefix}.request_schema`, schemaNames, errors);
   auditSchemaRef(route.response_schema, `${prefix}.response_schema`, schemaNames, errors);
-  if (route.query_parameters !== undefined) {
-    if (!Array.isArray(route.query_parameters)) {
-      errors.push(`${prefix}.query_parameters must be an array when present`);
+  if (route.query_parameters !== undefined && route.parameters !== undefined) {
+    errors.push(`${prefix} must not define both query_parameters and parameters`);
+  }
+  const routeParameters = route.query_parameters ?? route.parameters;
+  const parameterLabel = route.query_parameters !== undefined ? "query_parameters" : "parameters";
+  if (routeParameters !== undefined) {
+    if (!Array.isArray(routeParameters)) {
+      errors.push(`${prefix}.${parameterLabel} must be an array when present`);
     } else {
-      for (const [index, parameter] of route.query_parameters.entries()) {
-        auditQueryParameter(parameter, `${prefix}.query_parameters[${index}]`, errors);
+      for (const [index, parameter] of routeParameters.entries()) {
+        auditQueryParameter(parameter, `${prefix}.${parameterLabel}[${index}]`, errors);
       }
     }
   }
@@ -203,6 +208,9 @@ function auditQueryParameter(parameter, prefix, errors) {
     return;
   }
   if (!readNonEmptyString(parameter.name)) errors.push(`${prefix}.name is required`);
+  if (parameter.in !== undefined && parameter.in !== "query") {
+    errors.push(`${prefix}.in must be query when present`);
+  }
   if (parameter.description !== undefined && !readNonEmptyString(parameter.description)) {
     errors.push(`${prefix}.description must be non-empty when present`);
   }
@@ -361,7 +369,7 @@ function runSelfTest() {
         route_file: "app/orchestrator/src/routes/example.ts",
         request_schema: "ExampleRequest",
         response_schema: "ExampleResponse",
-        query_parameters: [{ name: "task_id", schema: { type: "string" } }],
+        parameters: [{ name: "task_id", in: "query", schema: { type: "string" } }],
       }],
       code: ["code.ts"],
       proofs: ["proof.test.ts"],
@@ -399,6 +407,19 @@ function runSelfTest() {
   auditCatalog(badSchema, root, badSchemaErrors);
   if (!badSchemaErrors.some((error) => error.includes("MissingRequest"))) {
     throw new Error(`bad schema fixture did not fail as expected: ${badSchemaErrors.join("; ")}`);
+  }
+
+  const badParameter = {
+    ...good,
+    primitives: [{
+      ...good.primitives[0],
+      http: [{ ...good.primitives[0].http[0], parameters: [{ name: "task_id", in: "path" }] }],
+    }],
+  };
+  const badParameterErrors = [];
+  auditCatalog(badParameter, root, badParameterErrors);
+  if (!badParameterErrors.some((error) => error.includes(".in must be query"))) {
+    throw new Error(`bad parameter fixture did not fail as expected: ${badParameterErrors.join("; ")}`);
   }
 
   fs.writeFileSync(

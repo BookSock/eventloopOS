@@ -2019,7 +2019,7 @@
           "path": "/queue",
           "route_file": "app/orchestrator/src/routes/queue.ts",
           "response_schema": "QueueListResponse",
-          "parameters": [{ "name": "state", "in": "query", "schema": { "type": "string", "enum": ["ready", "leased", "deferred", "done", "dead"] } }]
+          "query_parameters": [{ "name": "state", "schema": { "type": "string", "enum": ["ready", "leased", "deferred", "done", "dead"] } }]
         },
         {
           "method": "GET",

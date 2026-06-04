@@ -170,7 +170,7 @@ function operationForRoute(input) {
       },
     };
   }
-  const queryParameters = queryParametersForRoute(input.route.query_parameters);
+  const queryParameters = queryParametersForRoute(input.route.query_parameters ?? input.route.parameters);
   if (queryParameters.length > 0) operation.parameters.push(...queryParameters);
   if (operation.parameters.length === 0) delete operation.parameters;
   return operation;
@@ -200,6 +200,8 @@ function queryParametersForRoute(value) {
     .map((parameter) => {
       const name = readString(parameter.name);
       if (!name) return undefined;
+      const parameterLocation = readString(parameter.in);
+      if (parameterLocation && parameterLocation !== "query") return undefined;
       return {
         name,
         in: "query",
@@ -278,7 +280,7 @@ function runSelfTest() {
           request_schema: "CreateTaskRequest",
           request_body_required: false,
           response_schema: "CreateTaskResponse",
-          query_parameters: [{ name: "dry_run", schema: { type: "boolean" } }],
+          parameters: [{ name: "dry_run", in: "query", schema: { type: "boolean" } }],
         },
       ],
       code: ["routes/tasks.ts"],

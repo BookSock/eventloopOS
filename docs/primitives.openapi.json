@@ -1720,6 +1720,23 @@
       "get": {
         "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
         "operationId": "queue_paper_routing_get_queue",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "enum": [
+                "ready",
+                "leased",
+                "deferred",
+                "done",
+                "dead"
+              ],
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
