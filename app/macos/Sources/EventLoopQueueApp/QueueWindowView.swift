@@ -157,7 +157,7 @@ struct QueueWindowView: View {
                             Label("Return + Restore", systemImage: "play.circle")
                         }
                         .accessibilityIdentifier("queue-return-restore-button")
-                        .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+                        .keyboardShortcut("m", modifiers: [.control, .option])
 
                         Button {
                             Task {
@@ -167,6 +167,7 @@ struct QueueWindowView: View {
                             Label("Return Here", systemImage: "arrow.down.right.and.arrow.up.left")
                         }
                         .accessibilityIdentifier("queue-return-here-button")
+                        .keyboardShortcut("m", modifiers: [.control, .option, .shift])
                     } else {
                         Button {
                             Task {
@@ -176,7 +177,7 @@ struct QueueWindowView: View {
                             Label("Manual Mode", systemImage: "pause.circle")
                         }
                         .accessibilityIdentifier("queue-mode-toggle-button")
-                        .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+                        .keyboardShortcut("m", modifiers: [.control, .option])
                     }
 
                     Button {
@@ -195,7 +196,7 @@ struct QueueWindowView: View {
                         Label("Master", systemImage: "command")
                     }
                     .accessibilityIdentifier("queue-master-command-button")
-                    .keyboardShortcut("k", modifiers: [.command, .option, .shift])
+                    .keyboardShortcut("k", modifiers: [.control, .option])
 
                     Button {
                         viewModel.presentOnboarding()

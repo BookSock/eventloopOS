@@ -577,9 +577,9 @@ Shared contracts:
 
 Mac hotkeys:
 
-- `Ctrl-Option-M`: enter/toggle manual mode
-- `Ctrl-Option-Shift-M`: return while preserving or restoring the saved desk
-  depending on the chosen UI action
+- `Ctrl-Option-M`: enter Manual Mode; while manual, return and restore the
+  selected saved paper/workspace
+- `Ctrl-Option-Shift-M`: return while keeping the current manual windows here
 
 Guarantees:
 
@@ -702,8 +702,8 @@ Hotkeys:
 - `Ctrl-Option-H`: defer one hour
 - `Ctrl-Option-R`: restore selected paper
 - `Ctrl-Option-K`: master command
-- `Ctrl-Option-M`: manual mode
-- `Ctrl-Option-Shift-M`: return from manual mode
+- `Ctrl-Option-M`: manual mode / return and restore
+- `Ctrl-Option-Shift-M`: return here from manual mode
 
 Useful standalone uses:
 

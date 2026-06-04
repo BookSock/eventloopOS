@@ -63,7 +63,8 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 - Restore selected paper: `Ctrl-Option-R`
 - Master command: `Ctrl-Option-K`
 - Enter Manual Mode: `Ctrl-Option-M`
-- Return from Manual Mode: `Ctrl-Option-Shift-M`
+- Return from Manual Mode + restore saved paper: `Ctrl-Option-M`
+- Return from Manual Mode and keep current windows: `Ctrl-Option-Shift-M`
 - Rectangle-style left/right/top/bottom: `Ctrl-Option-Left/Right/Up/Down`
 - Rectangle-style center: `Ctrl-Option-C`
 - Rectangle-style maximize: `Ctrl-Option-Shift-Return`
@@ -86,7 +87,7 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 12. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
 13. Press `Ctrl-Option-M` to enter Manual Mode.
 14. Open or move a dummy app.
-15. Press `Ctrl-Option-Shift-M`.
+15. Press `Ctrl-Option-M`.
 16. Confirm eventloopOS restores the saved paper context and Queue remains usable.
 
 ## What To Report

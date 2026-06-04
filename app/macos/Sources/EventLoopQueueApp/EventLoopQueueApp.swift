@@ -93,7 +93,7 @@ struct EventLoopQueueApp: App {
                         await viewModel.pullNextPaper()
                     }
                 }
-                .keyboardShortcut("j", modifiers: [.command, .option, .shift])
+                .keyboardShortcut("j", modifiers: [.control, .option])
                 .accessibilityIdentifier("queue-command-pull-next-paper")
 
                 Button(viewModel.selectedPacket?.recommendedAction ?? "Run Recommended Action") {
@@ -101,7 +101,7 @@ struct EventLoopQueueApp: App {
                         await viewModel.executeRecommendedActionAndNext()
                     }
                 }
-                .keyboardShortcut(.return, modifiers: [.command, .shift])
+                .keyboardShortcut(.return, modifiers: [.control, .option])
                 .disabled(!viewModel.canExecuteSelectedRecommendedAction)
                 .accessibilityIdentifier("queue-command-execute-recommended-action")
 
@@ -110,7 +110,7 @@ struct EventLoopQueueApp: App {
                         await viewModel.doneAndNext()
                     }
                 }
-                .keyboardShortcut(.return, modifiers: [.command])
+                .keyboardShortcut("e", modifiers: [.control, .option])
                 .disabled(viewModel.selectedPacket == nil)
                 .accessibilityIdentifier("queue-command-done-next")
 
@@ -119,7 +119,7 @@ struct EventLoopQueueApp: App {
                         await viewModel.deferSelectedPacketForOneHour()
                     }
                 }
-                .keyboardShortcut("d", modifiers: [.command, .option])
+                .keyboardShortcut("h", modifiers: [.control, .option])
                 .disabled(viewModel.selectedPacket == nil)
                 .accessibilityIdentifier("queue-command-defer-one-hour")
 
@@ -136,7 +136,7 @@ struct EventLoopQueueApp: App {
                         await viewModel.confirmSelectedWorkspaceRestore()
                     }
                 }
-                .keyboardShortcut("r", modifiers: [.command, .option])
+                .keyboardShortcut("r", modifiers: [.control, .option])
                 .disabled(!viewModel.canRestoreSelectedWorkspace)
                 .accessibilityIdentifier("queue-command-restore-queue-workspace")
 
@@ -155,7 +155,7 @@ struct EventLoopQueueApp: App {
                             await viewModel.returnToEventLoopModeAndPrepareWorkspaceRestore()
                         }
                     }
-                    .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+                    .keyboardShortcut("m", modifiers: [.control, .option])
                     .accessibilityIdentifier("queue-command-return-restore")
 
                     Button("Return Here") {
@@ -163,6 +163,7 @@ struct EventLoopQueueApp: App {
                             await viewModel.returnToEventLoopModeKeepingCurrentLayout()
                         }
                     }
+                    .keyboardShortcut("m", modifiers: [.control, .option, .shift])
                     .accessibilityIdentifier("queue-command-return-here")
                 } else {
                     Button("Enter Manual Mode") {
@@ -170,7 +171,7 @@ struct EventLoopQueueApp: App {
                             await viewModel.enterManualModeAndRestoreSavedWorkspaceIfAvailable()
                         }
                     }
-                    .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+                    .keyboardShortcut("m", modifiers: [.control, .option])
                     .accessibilityIdentifier("queue-command-mode-toggle")
                 }
 
@@ -188,7 +189,7 @@ struct EventLoopQueueApp: App {
                     openQueueWindow()
                     viewModel.presentMasterCommand()
                 }
-                .keyboardShortcut("k", modifiers: [.command, .option, .shift])
+                .keyboardShortcut("k", modifiers: [.control, .option])
                 .accessibilityIdentifier("queue-command-master-command")
 
                 Button("Scan Desk") {
@@ -388,7 +389,7 @@ private struct QueueMenuView: View {
                 openQueueWindow()
                 viewModel.presentMasterCommand()
             }
-            .keyboardShortcut("k", modifiers: [.command, .option, .shift])
+            .keyboardShortcut("k", modifiers: [.control, .option])
             .accessibilityIdentifier("queue-menu-master-command")
 
             Button("Scan Desk") {
@@ -407,7 +408,7 @@ private struct QueueMenuView: View {
                     await viewModel.pullNextPaper()
                 }
             }
-            .keyboardShortcut("j", modifiers: [.command, .option, .shift])
+            .keyboardShortcut("j", modifiers: [.control, .option])
             .accessibilityIdentifier("queue-menu-pull-next-paper")
 
             Button(viewModel.selectedPacket?.recommendedAction ?? "Run Recommended Action") {
@@ -415,7 +416,7 @@ private struct QueueMenuView: View {
                     await viewModel.executeRecommendedActionAndNext()
                 }
             }
-            .keyboardShortcut(.return, modifiers: [.command, .shift])
+            .keyboardShortcut(.return, modifiers: [.control, .option])
             .disabled(!viewModel.canExecuteSelectedRecommendedAction)
             .accessibilityIdentifier("queue-menu-execute-recommended-action")
 
@@ -424,7 +425,7 @@ private struct QueueMenuView: View {
                     await viewModel.doneAndNext()
                 }
             }
-            .keyboardShortcut(.return, modifiers: [.command])
+            .keyboardShortcut("e", modifiers: [.control, .option])
             .disabled(viewModel.selectedPacket == nil)
             .accessibilityIdentifier("queue-menu-done-next")
 
@@ -433,7 +434,7 @@ private struct QueueMenuView: View {
                     await viewModel.deferSelectedPacketForOneHour()
                 }
             }
-            .keyboardShortcut("d", modifiers: [.command, .option])
+            .keyboardShortcut("h", modifiers: [.control, .option])
             .disabled(viewModel.selectedPacket == nil)
             .accessibilityIdentifier("queue-menu-defer-one-hour")
 
@@ -450,7 +451,7 @@ private struct QueueMenuView: View {
                     await viewModel.confirmSelectedWorkspaceRestore()
                 }
             }
-            .keyboardShortcut("r", modifiers: [.command, .option])
+            .keyboardShortcut("r", modifiers: [.control, .option])
             .disabled(!viewModel.canRestoreSelectedWorkspace)
             .accessibilityIdentifier("queue-menu-restore-queue-workspace")
 
@@ -469,7 +470,7 @@ private struct QueueMenuView: View {
                         await viewModel.returnToEventLoopModeAndPrepareWorkspaceRestore()
                     }
                 }
-                .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+                .keyboardShortcut("m", modifiers: [.control, .option])
                 .accessibilityIdentifier("queue-menu-return-restore")
 
                 Button("Return Here") {
@@ -477,6 +478,7 @@ private struct QueueMenuView: View {
                         await viewModel.returnToEventLoopModeKeepingCurrentLayout()
                     }
                 }
+                .keyboardShortcut("m", modifiers: [.control, .option, .shift])
                 .accessibilityIdentifier("queue-menu-return-here")
             } else {
                 Button("Enter Manual Mode") {
@@ -484,7 +486,7 @@ private struct QueueMenuView: View {
                         await viewModel.enterManualModeAndRestoreSavedWorkspaceIfAvailable()
                     }
                 }
-                .keyboardShortcut("m", modifiers: [.command, .option, .shift])
+                .keyboardShortcut("m", modifiers: [.control, .option])
                 .accessibilityIdentifier("queue-menu-mode-toggle")
             }
 

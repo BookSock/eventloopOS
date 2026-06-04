@@ -168,7 +168,7 @@ In the queue app:
 - **Pull Next Paper** leases the highest-priority ready paper and prepares its saved workspace.
 - **Done / Next**, **Send to Agent**, **Defer**, and **Ignore** save the selected task's current workspace before advancing the stack.
 - **Manual Mode** pauses workspace automation so you can use the Mac normally. **Restore Manual Workspace** moves back to the saved manual layout.
-- **Master** opens a command sheet for routing a note through `/voice/commands` or starting a new task session through `/task-sessions`. Use `Cmd-Option-Shift-K` from any app to summon it.
+- **Master** opens a command sheet for routing a note through `/voice/commands` or starting a new task session through `/task-sessions`. Use `Ctrl-Option-K` from any app to summon it; legacy `Cmd-Option-Shift-K` remains registered.
 - **Scan Desk** calls `/onboarding/scan`, shows proposed task groups from current windows, browser tabs, and task sessions, and lets you approve a proposal through `/onboarding/approvals`.
 
 When `codex_app_server` task sessions are enabled, `dev:dogfood` starts a shared websocket `codex app-server` and points the orchestrator at it. That lets a visible Ghostty/Codex TUI and eventloopOS use the same native thread:
