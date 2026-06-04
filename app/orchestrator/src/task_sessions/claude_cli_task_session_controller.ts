@@ -11,6 +11,11 @@ export type ClaudeCliSessionConfig = {
   status?: ClaudeCliTaskSession["status"];
   created_at?: string;
   updated_at?: string;
+  pid?: number;
+  agent_pid?: number;
+  terminal_pid?: number;
+  root_pid?: number;
+  pids?: number[];
 };
 
 export type ClaudeCliTaskSession = {
@@ -31,6 +36,11 @@ export type ClaudeCliTaskSession = {
   last_seen_at: string;
   created_at: string;
   updated_at: string;
+  pid?: number;
+  agent_pid?: number;
+  terminal_pid?: number;
+  root_pid?: number;
+  pids?: number[];
 };
 
 export type ClaudeCliTaskMessage = {
@@ -170,6 +180,7 @@ export class ClaudeCliTaskSessionController implements TaskSessionController {
       last_seen_at: updatedAt,
       created_at: createdAt,
       updated_at: updatedAt,
+      ...pidFields(config),
     };
   }
 
@@ -248,6 +259,7 @@ export function parseClaudeSessionConfigs(raw: string | undefined): ClaudeCliSes
       status: parseStatus(value.status),
       created_at: optionalString(value.created_at),
       updated_at: optionalString(value.updated_at),
+      ...pidConfigFields(value),
     };
   });
 }
@@ -274,6 +286,47 @@ function parseStatus(value: unknown): ClaudeCliTaskSession["status"] | undefined
 
 function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalNumberArray(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const numbers = value.filter((entry): entry is number => typeof entry === "number" && Number.isFinite(entry));
+  return numbers.length > 0 ? numbers : undefined;
+}
+
+function pidConfigFields(record: Record<string, unknown>): Pick<ClaudeCliSessionConfig, "pid" | "agent_pid" | "terminal_pid" | "root_pid" | "pids"> {
+  const pid = optionalNumber(record.pid);
+  const agentPid = optionalNumber(record.agent_pid ?? record.agentPid);
+  const terminalPid = optionalNumber(record.terminal_pid ?? record.terminalPid);
+  const rootPid = optionalNumber(record.root_pid ?? record.rootPid);
+  const pids = optionalNumberArray(record.pids);
+  return {
+    ...(pid !== undefined ? { pid } : {}),
+    ...(agentPid !== undefined ? { agent_pid: agentPid } : {}),
+    ...(terminalPid !== undefined ? { terminal_pid: terminalPid } : {}),
+    ...(rootPid !== undefined ? { root_pid: rootPid } : {}),
+    ...(pids !== undefined ? { pids } : {}),
+  };
+}
+
+function pidFields(input: {
+  pid?: number;
+  agent_pid?: number;
+  terminal_pid?: number;
+  root_pid?: number;
+  pids?: number[];
+}): Pick<ClaudeCliTaskSession, "pid" | "agent_pid" | "terminal_pid" | "root_pid" | "pids"> {
+  return {
+    ...(input.pid !== undefined ? { pid: input.pid } : {}),
+    ...(input.agent_pid !== undefined ? { agent_pid: input.agent_pid } : {}),
+    ...(input.terminal_pid !== undefined ? { terminal_pid: input.terminal_pid } : {}),
+    ...(input.root_pid !== undefined ? { root_pid: input.root_pid } : {}),
+    ...(input.pids !== undefined ? { pids: input.pids } : {}),
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

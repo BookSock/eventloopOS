@@ -11,6 +11,11 @@ export type CodexNativeThread = {
   updated_at?: string;
   createdAt?: number;
   updatedAt?: number;
+  pid?: number;
+  agent_pid?: number;
+  terminal_pid?: number;
+  root_pid?: number;
+  pids?: number[];
 };
 
 export type CodexNativeTurn = {
@@ -58,6 +63,11 @@ export type CodexTaskSession = {
   last_seen_at: string;
   created_at: string;
   updated_at: string;
+  pid?: number;
+  agent_pid?: number;
+  terminal_pid?: number;
+  root_pid?: number;
+  pids?: number[];
 };
 
 export type CodexTaskMessage = {
@@ -348,6 +358,7 @@ export class CodexNativeThreadController implements TaskSessionController {
       last_seen_at: updatedAt,
       created_at: createdAt,
       updated_at: updatedAt,
+      ...pidFields(thread),
     };
   }
 
@@ -432,6 +443,22 @@ function timestampFromThread(iso: string | undefined, unixSeconds: number | unde
     return new Date(unixSeconds * 1000).toISOString();
   }
   return new Date(0).toISOString();
+}
+
+function pidFields(input: {
+  pid?: number;
+  agent_pid?: number;
+  terminal_pid?: number;
+  root_pid?: number;
+  pids?: number[];
+}): Pick<CodexTaskSession, "pid" | "agent_pid" | "terminal_pid" | "root_pid" | "pids"> {
+  return {
+    ...(input.pid !== undefined ? { pid: input.pid } : {}),
+    ...(input.agent_pid !== undefined ? { agent_pid: input.agent_pid } : {}),
+    ...(input.terminal_pid !== undefined ? { terminal_pid: input.terminal_pid } : {}),
+    ...(input.root_pid !== undefined ? { root_pid: input.root_pid } : {}),
+    ...(input.pids !== undefined ? { pids: input.pids } : {}),
+  };
 }
 
 function stableId(input: string): string {

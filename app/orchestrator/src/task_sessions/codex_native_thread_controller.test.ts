@@ -21,6 +21,10 @@ describe("CodexNativeThreadController", () => {
           cwd: "/repo",
           created_at: "2026-01-01T17:00:00.000Z",
           updated_at: "2026-01-01T18:00:00.000Z",
+          pid: 410,
+          agent_pid: 411,
+          terminal_pid: 409,
+          pids: [410, 411],
         },
       ],
     }));
@@ -47,6 +51,10 @@ describe("CodexNativeThreadController", () => {
         last_seen_at: "2026-01-01T18:00:00.000Z",
         created_at: "2026-01-01T17:00:00.000Z",
         updated_at: "2026-01-01T18:00:00.000Z",
+        pid: 410,
+        agent_pid: 411,
+        terminal_pid: 409,
+        pids: [410, 411],
       },
     ]);
   });

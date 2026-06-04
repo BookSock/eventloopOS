@@ -5,12 +5,13 @@ import { createSeededDevelopmentTaskSessions, DevelopmentTaskSessionController }
 describe("DevelopmentTaskSessionController", () => {
   it("lists and looks up seeded sessions", () => {
     const controller = createSeededDevelopmentTaskSessions(() => new Date("2026-05-06T22:00:00.000Z"));
-    controller.seedSession({ id: "task_session_infra", task_id: "task_infra_incident", status: "blocked" });
+    controller.seedSession({ id: "task_session_infra", task_id: "task_infra_incident", status: "blocked", pid: 610 });
 
     const sessions = controller.listSessions();
 
     assert.deepEqual(sessions.map((session) => session.id), ["task_session_blog", "task_session_infra"]);
     assert.equal(controller.getSession("task_session_blog")?.task_id, "task_blog_feedback");
+    assert.equal(controller.getSession("task_session_infra")?.pid, 610);
     assert.equal(controller.getSession("task_session_missing"), undefined);
   });
 

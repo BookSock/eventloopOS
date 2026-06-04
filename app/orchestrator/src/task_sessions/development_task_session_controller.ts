@@ -14,6 +14,11 @@ export type DevelopmentTaskSession = {
   created_at: string;
   updated_at: string;
   terminal_ref?: string;
+  pid?: number;
+  agent_pid?: number;
+  terminal_pid?: number;
+  root_pid?: number;
+  pids?: number[];
 };
 
 export type DevelopmentTaskMessage = {
@@ -53,7 +58,17 @@ export class DevelopmentTaskSessionController {
     this.clock = clock;
   }
 
-  seedSession(input: { id: string; task_id?: string; status?: DevelopmentTaskSession["status"]; terminal_ref?: string }): DevelopmentTaskSession {
+  seedSession(input: {
+    id: string;
+    task_id?: string;
+    status?: DevelopmentTaskSession["status"];
+    terminal_ref?: string;
+    pid?: number;
+    agent_pid?: number;
+    terminal_pid?: number;
+    root_pid?: number;
+    pids?: number[];
+  }): DevelopmentTaskSession {
     const now = this.clock().toISOString();
     const session: DevelopmentTaskSession = {
       id: input.id,
@@ -71,6 +86,11 @@ export class DevelopmentTaskSessionController {
       created_at: now,
       updated_at: now,
       ...(input.terminal_ref !== undefined ? { terminal_ref: input.terminal_ref } : {}),
+      ...(input.pid !== undefined ? { pid: input.pid } : {}),
+      ...(input.agent_pid !== undefined ? { agent_pid: input.agent_pid } : {}),
+      ...(input.terminal_pid !== undefined ? { terminal_pid: input.terminal_pid } : {}),
+      ...(input.root_pid !== undefined ? { root_pid: input.root_pid } : {}),
+      ...(input.pids !== undefined ? { pids: input.pids } : {}),
     };
     this.sessions.set(session.id, session);
     return session;

@@ -29,6 +29,11 @@ export type TaskRuntimeSession = Record<string, unknown> & {
   last_seen_at?: string;
   created_at?: string;
   updated_at?: string;
+  pid?: number;
+  agent_pid?: number;
+  terminal_pid?: number;
+  root_pid?: number;
+  pids?: number[];
 };
 
 export type TaskRuntimeMessage = Record<string, unknown> & {

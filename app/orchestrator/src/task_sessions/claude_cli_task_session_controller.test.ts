@@ -19,6 +19,10 @@ describe("ClaudeCliTaskSessionController", () => {
           status: "running",
           created_at: "2026-05-06T17:00:00.000Z",
           updated_at: "2026-05-06T18:00:00.000Z",
+          pid: 510,
+          agent_pid: 511,
+          terminal_pid: 509,
+          pids: [510, 511],
         },
       ],
       execFile: async () => ({ stdout: "{}", stderr: "" }),
@@ -43,6 +47,10 @@ describe("ClaudeCliTaskSessionController", () => {
         last_seen_at: "2026-05-06T18:00:00.000Z",
         created_at: "2026-05-06T17:00:00.000Z",
         updated_at: "2026-05-06T18:00:00.000Z",
+        pid: 510,
+        agent_pid: 511,
+        terminal_pid: 509,
+        pids: [510, 511],
       },
     ]);
   });
@@ -173,6 +181,10 @@ describe("parseClaudeSessionConfigs", () => {
         status: "blocked",
         created_at: "2026-05-06T17:00:00.000Z",
         updated_at: "2026-05-06T18:00:00.000Z",
+        pid: 510,
+        agentPid: 511,
+        terminal_pid: 509,
+        pids: [510, 511],
       },
     })), [
       {
@@ -190,6 +202,10 @@ describe("parseClaudeSessionConfigs", () => {
         status: "blocked",
         created_at: "2026-05-06T17:00:00.000Z",
         updated_at: "2026-05-06T18:00:00.000Z",
+        pid: 510,
+        agent_pid: 511,
+        terminal_pid: 509,
+        pids: [510, 511],
       },
     ]);
   });

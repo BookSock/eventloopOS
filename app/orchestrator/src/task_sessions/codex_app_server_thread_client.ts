@@ -149,6 +149,7 @@ export class CodexAppServerThreadClient implements CodexNativeThreadClient {
       cwd: readOptionalString(thread.cwd),
       createdAt: readOptionalNumber(thread.createdAt),
       updatedAt: readOptionalNumber(thread.updatedAt),
+      ...pidFieldsFromRecord(thread),
     };
   }
 
@@ -212,6 +213,27 @@ function readOptionalString(value: unknown): string | undefined {
 
 function readOptionalNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readOptionalNumberArray(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const numbers = value.filter((entry): entry is number => typeof entry === "number" && Number.isFinite(entry));
+  return numbers.length > 0 ? numbers : undefined;
+}
+
+function pidFieldsFromRecord(record: Record<string, unknown>): Pick<CodexNativeThread, "pid" | "agent_pid" | "terminal_pid" | "root_pid" | "pids"> {
+  const pid = readOptionalNumber(record.pid);
+  const agentPid = readOptionalNumber(record.agent_pid ?? record.agentPid);
+  const terminalPid = readOptionalNumber(record.terminal_pid ?? record.terminalPid);
+  const rootPid = readOptionalNumber(record.root_pid ?? record.rootPid);
+  const pids = readOptionalNumberArray(record.pids);
+  return {
+    ...(pid !== undefined ? { pid } : {}),
+    ...(agentPid !== undefined ? { agent_pid: agentPid } : {}),
+    ...(terminalPid !== undefined ? { terminal_pid: terminalPid } : {}),
+    ...(rootPid !== undefined ? { root_pid: rootPid } : {}),
+    ...(pids !== undefined ? { pids } : {}),
+  };
 }
 
 function stableId(input: string): string {
