@@ -12,17 +12,19 @@ const args = process.argv.slice(2);
 const skipScreenshot = args.includes("--skip-screenshot");
 const skipQueueLatency = args.includes("--skip-queue-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY === "0";
 const queueLatencyEnabled = !skipQueueLatency;
+const skipWorkspaceLatency = args.includes("--skip-workspace-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY === "0";
+const workspaceLatencyEnabled = !skipWorkspaceLatency;
 const skipHotkeyLatency = args.includes("--skip-hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "0";
 const hotkeyLatencyRequested = args.includes("--hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "1";
 const hotkeyLatencyEnabled = !skipHotkeyLatency && (hotkeyLatencyRequested || process.platform === "darwin");
 const jsonOnly = args.includes("--json");
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-queue-latency] [--skip-hotkey-latency] [--hotkey-latency] [--json]
+  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-queue-latency] [--skip-workspace-latency] [--skip-hotkey-latency] [--hotkey-latency] [--json]
 
 Check current Mac Studio human-demo readiness without resetting demo state.
-Includes a read-only queue/master latency gate by default. On macOS, also
-includes a live queue-app hotkey feedback p95 gate by default.
+Includes read-only queue/master and workspace capture/restore-plan latency gates
+by default. On macOS, also includes a live queue-app hotkey feedback p95 gate by default.
 Use skip flags only while bootstrapping remote host/Accessibility permission.
 
 Environment:
@@ -32,6 +34,9 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY=1 keeps queue latency on
   EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY=0 skips queue latency
   EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_RUNS default: 3
+  EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY=1 keeps workspace latency on
+  EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY=0 skips workspace latency
+  EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY_RUNS default: 2
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=1 forces hotkey latency on
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=0 skips hotkey latency
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_TARGET=local runs latency on this Mac instead of the lab Mac
@@ -68,10 +73,15 @@ if (!skipScreenshot) {
 }
 const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
 const queueLatencyManifestPath = path.join(runDir, "queue-latency.json");
+const workspaceLatencyManifestPath = path.join(runDir, "workspace-latency.json");
 const queueLatency = queueLatencyEnabled
   ? runQueueLatencyStep(queueLatencyManifestPath, env)
   : undefined;
 const queueLatencyManifest = queueLatency ? readJsonIfPresent(queueLatencyManifestPath) : undefined;
+const workspaceLatency = workspaceLatencyEnabled
+  ? runWorkspaceLatencyStep(workspaceLatencyManifestPath, env)
+  : undefined;
+const workspaceLatencyManifest = workspaceLatency ? readJsonIfPresent(workspaceLatencyManifestPath) : undefined;
 const hotkeyLatency = hotkeyLatencyEnabled
   ? runHotkeyLatencyStep(hotkeyLatencyManifestPath, env)
   : undefined;
@@ -84,6 +94,7 @@ const checks = {
   ambient_autosave_proof_ok: templateJson?.ambient_autosave_ok === true,
   screen_sharing_capture_ok: skipScreenshot || screenshot?.status === 0,
   queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
+  workspace_latency_ok: !workspaceLatencyEnabled || (workspaceLatency?.status === 0 && workspaceLatencyManifest?.ok === true),
   hotkey_feedback_latency_ok: !hotkeyLatencyEnabled || (hotkeyLatency?.status === 0 && hotkeyLatencyManifest?.ok === true),
 };
 const failedChecks = Object.entries(checks).filter(([, ok]) => ok !== true).map(([key]) => key);
@@ -100,6 +111,7 @@ const manifest = {
   profile: env.LAB_DOGFOOD_PROFILE,
   url: env.LAB_DOGFOOD_URL,
   queue_latency_required: queueLatencyEnabled,
+  workspace_latency_required: workspaceLatencyEnabled,
   hotkey_latency_required: hotkeyLatencyEnabled,
   checks,
   failed_checks: failedChecks,
@@ -133,6 +145,15 @@ const manifest = {
   } : {
     skipped: true,
   },
+  workspace_latency: workspaceLatency ? {
+    ok: workspaceLatency.status === 0 && workspaceLatencyManifest?.ok === true,
+    manifest_path: workspaceLatencyManifestPath,
+    exit_code: workspaceLatency.status,
+    failed_budgets: workspaceLatencyManifest?.failed_budgets ?? [],
+    summary: workspaceLatencyManifest?.summary,
+  } : {
+    skipped: true,
+  },
   hotkey_feedback_latency: hotkeyLatency ? {
     ok: hotkeyLatency.status === 0 && hotkeyLatencyManifest?.ok === true,
     manifest_path: hotkeyLatencyManifestPath,
@@ -158,6 +179,7 @@ const output = {
   latest_human_demo: manifest.latest_human_demo,
   screen_sharing_capture: manifest.screen_sharing_capture,
   queue_latency: manifest.queue_latency,
+  workspace_latency: manifest.workspace_latency,
 };
 
 if (jsonOnly) {
@@ -225,6 +247,18 @@ function runQueueLatencyStep(manifestPath, envOverride) {
   ], envOverride);
 }
 
+function runWorkspaceLatencyStep(manifestPath, envOverride) {
+  return runStep("workspace latency", "node", [
+    "bin/workspace-latency-proof",
+    "--url",
+    envOverride.LAB_DOGFOOD_URL,
+    "--runs",
+    process.env.EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY_RUNS ?? "2",
+    "--manifest",
+    manifestPath,
+  ], envOverride);
+}
+
 function extractJsonObject(value) {
   if (!value.trim()) return undefined;
   const starts = [];
@@ -254,6 +288,7 @@ function renderReadyMarkdown(manifest) {
   const latest = manifest.latest_human_demo;
   const screenshot = manifest.screen_sharing_capture;
   const queueLatency = manifest.queue_latency;
+  const workspaceLatency = manifest.workspace_latency;
   const hotkey = manifest.hotkey_feedback_latency;
   return `# eventloopOS Human Demo Ready
 
@@ -264,6 +299,7 @@ function renderReadyMarkdown(manifest) {
 - Latest proof screenshot: ${latest?.screenshot_path ?? ""}
 - Fresh Screen Sharing capture: ${screenshot?.output ?? "skipped"}
 - Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
+- Workspace latency: ${workspaceLatency?.manifest_path ?? "skipped"}${manifest.workspace_latency_required ? " (required)" : ""}
 - Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}${manifest.hotkey_latency_required ? " (required)" : ""}
 - Failed checks: ${manifest.failed_checks.length === 0 ? "none" : manifest.failed_checks.join(", ")}
 
@@ -288,10 +324,13 @@ function runSelfTest() {
     screen_sharing_capture: { output: "artifacts/lab-runs/ready/screen-sharing.png" },
     queue_latency: { manifest_path: "artifacts/lab-runs/ready/queue-latency.json" },
     queue_latency_required: true,
+    workspace_latency: { manifest_path: "artifacts/lab-runs/ready/workspace-latency.json" },
+    workspace_latency_required: true,
     hotkey_feedback_latency: { skipped: true },
   });
   assert.match(markdown, /Ready: yes/);
   assert.match(markdown, /artifacts\/lab-runs\/demo\/manifest\.json/);
   assert.match(markdown, /Hotkey feedback latency: skipped/);
   assert.match(markdown, /Queue latency: artifacts\/lab-runs\/ready\/queue-latency\.json/);
+  assert.match(markdown, /Workspace latency: artifacts\/lab-runs\/ready\/workspace-latency\.json/);
 }
