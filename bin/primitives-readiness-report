@@ -1,0 +1,223 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/primitives-readiness-report [--json] [--strict] [catalog.json]
+
+Summarizes docs/primitives.catalog.json into a builder-facing readiness report.
+Default output is readable text. --json emits machine-readable JSON.
+--strict exits non-zero when any primitive lacks code, proof, contract, or
+self-test coverage expected for a reusable API surface.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  process.exit(0);
+}
+
+const catalogPath = args.find((arg) => !arg.startsWith("-")) ?? "docs/primitives.catalog.json";
+const result = buildReadinessReport(catalogPath, process.cwd());
+if (args.includes("--json")) {
+  console.log(JSON.stringify(result, null, 2));
+} else {
+  console.log(renderReadinessReport(result));
+}
+if (args.includes("--strict") && !result.strict_ok) {
+  process.exit(1);
+}
+
+function buildReadinessReport(catalogPath, repoRoot) {
+  const fullPath = path.resolve(repoRoot, catalogPath);
+  const catalog = JSON.parse(fs.readFileSync(fullPath, "utf8"));
+  const primitives = Array.isArray(catalog.primitives) ? catalog.primitives : [];
+  const rows = primitives.map((primitive) => summarizePrimitive(primitive, repoRoot));
+  const statusCounts = countBy(rows, (row) => row.status);
+  const categoryCounts = countBy(rows, (row) => row.category);
+  const gaps = rows.flatMap((row) => row.gaps.map((gap) => ({ primitive: row.id, gap })));
+  const hardeningGaps = rows.flatMap((row) => row.hardening_gaps.map((gap) => ({ primitive: row.id, gap })));
+  const ok = gaps.length === 0;
+  const strictOk = ok && hardeningGaps.length === 0;
+  return {
+    kind: "eventloopos.primitives_readiness_report",
+    catalog: catalogPath,
+    schema_version: catalog.schema_version,
+    ok,
+    strict_ok: strictOk,
+    primitive_count: rows.length,
+    status_counts: statusCounts,
+    category_counts: categoryCounts,
+    totals: {
+      http_routes: sum(rows, (row) => row.http_routes),
+      cli_commands: sum(rows, (row) => row.cli_commands),
+      self_tests: sum(rows, (row) => row.self_tests),
+      proof_refs: sum(rows, (row) => row.proof_refs),
+      missing_refs: sum(rows, (row) => row.missing_refs.length),
+    },
+    gaps,
+    hardening_gaps: hardeningGaps,
+    primitives: rows,
+  };
+}
+
+function summarizePrimitive(primitive, repoRoot) {
+  const http = Array.isArray(primitive.http) ? primitive.http : [];
+  const code = arrayOfStrings(primitive.code);
+  const proofs = arrayOfStrings(primitive.proofs);
+  const cli = arrayOfStrings(primitive.cli);
+  const selfTests = arrayOfStrings(primitive.self_tests);
+  const refs = [...code, ...proofs, ...cli.filter((entry) => entry.startsWith("bin/"))];
+  const missingRefs = refs.filter((entry) => !entryExists(repoRoot, entry));
+  const routeGaps = http.flatMap((route, index) => routeContractGaps(route, index));
+  const gaps = [
+    ...missingRefs.map((entry) => `missing reference: ${entry}`),
+    ...routeGaps,
+  ];
+  if (code.length === 0) gaps.push("missing code/doc references");
+  if (proofs.length === 0) gaps.push("missing proof references");
+  if (http.length > 0 && !http.every((route) => route.response_schema)) gaps.push("http response schema missing");
+  const hardeningGaps = [];
+  if ((http.length > 0 || cli.length > 0) && selfTests.length === 0) hardeningGaps.push("missing dedicated self-test command");
+
+  return {
+    id: String(primitive.id ?? ""),
+    title: String(primitive.title ?? primitive.id ?? ""),
+    status: String(primitive.status ?? "unknown"),
+    category: classifyPrimitive(primitive, http),
+    summary: String(primitive.summary ?? ""),
+    http_routes: http.length,
+    cli_commands: cli.length,
+    self_tests: selfTests.length,
+    proof_refs: proofs.length,
+    code_refs: code.length,
+    missing_refs: missingRefs,
+    gaps,
+    hardening_gaps: hardeningGaps,
+  };
+}
+
+function routeContractGaps(route, index) {
+  const gaps = [];
+  const method = String(route?.method ?? "").toUpperCase();
+  const label = `http[${index}] ${method || "UNKNOWN"} ${route?.path ?? ""}`.trim();
+  if (!route?.response_schema) gaps.push(`${label}: missing response_schema`);
+  if (["POST", "PUT", "PATCH"].includes(method) && !route?.request_schema && route?.no_request_body !== true) {
+    gaps.push(`${label}: missing request_schema or no_request_body`);
+  }
+  if (!route?.route_file) gaps.push(`${label}: missing route_file`);
+  return gaps;
+}
+
+function classifyPrimitive(primitive, http) {
+  const id = String(primitive.id ?? "");
+  if (id.includes("workspace") || id.includes("window") || id === "manual_mode" || id === "mac_app_hotkeys") return "os_control";
+  if (id.includes("queue") || id.includes("routing") || id.includes("command") || id.includes("trigger")) return "attention_routing";
+  if (id.includes("agent") || id.includes("session") || id.includes("context")) return "agent_context";
+  if (http.some((route) => String(route.path ?? "").startsWith("/health") || String(route.path ?? "").startsWith("/metrics"))) return "observability";
+  return "runtime";
+}
+
+function renderReadinessReport(report) {
+  const lines = [];
+  lines.push(`eventloopOS primitives readiness: ${report.primitive_count} primitives`);
+  lines.push(`status: ${formatCounts(report.status_counts)}`);
+  lines.push(`category: ${formatCounts(report.category_counts)}`);
+  lines.push(`surfaces: ${report.totals.http_routes} HTTP routes, ${report.totals.cli_commands} CLI commands, ${report.totals.self_tests} self-tests, ${report.totals.proof_refs} proof refs`);
+  lines.push(`contract result: ${report.ok ? "ok" : `${report.gaps.length} gap(s)`}`);
+  lines.push(`strict hardening: ${report.strict_ok ? "ok" : `${report.hardening_gaps.length} backlog item(s)`}`);
+  lines.push("");
+  for (const primitive of report.primitives) {
+    const structuralText = primitive.gaps.length === 0 ? "ok" : primitive.gaps.join("; ");
+    const hardeningText = primitive.hardening_gaps.length === 0 ? "" : `; hardening: ${primitive.hardening_gaps.join("; ")}`;
+    lines.push(`- ${primitive.id} [${primitive.status}/${primitive.category}]: ${primitive.http_routes} routes, ${primitive.cli_commands} cli, ${primitive.self_tests} self-tests, ${primitive.proof_refs} proofs -> ${structuralText}${hardeningText}`);
+  }
+  return lines.join("\n");
+}
+
+function entryExists(repoRoot, entry) {
+  if (!entry || entry.startsWith("pnpm ")) return true;
+  const command = entry.split(/\s+/)[0];
+  return fs.existsSync(path.resolve(repoRoot, command));
+}
+
+function arrayOfStrings(value) {
+  return Array.isArray(value) ? value.filter((entry) => typeof entry === "string" && entry.trim()) : [];
+}
+
+function countBy(items, keyFn) {
+  const counts = {};
+  for (const item of items) {
+    const key = keyFn(item) || "unknown";
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function sum(items, valueFn) {
+  return items.reduce((total, item) => total + Number(valueFn(item) ?? 0), 0);
+}
+
+function formatCounts(counts) {
+  return Object.entries(counts).map(([key, value]) => `${key}=${value}`).join(", ");
+}
+
+function runSelfTest() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-primitives-readiness-"));
+  fs.mkdirSync(path.join(root, "bin"), { recursive: true });
+  fs.writeFileSync(path.join(root, "code.ts"), "export {}\n");
+  fs.writeFileSync(path.join(root, "proof.test.ts"), "export {}\n");
+  fs.writeFileSync(path.join(root, "bin/proof"), "#!/usr/bin/env node\n");
+  const catalogPath = path.join(root, "catalog.json");
+  fs.writeFileSync(catalogPath, JSON.stringify({
+    schema_version: 1,
+    primitives: [{
+      id: "workspace_control",
+      title: "Workspace Control",
+      status: "dogfood",
+      summary: "Capture and restore windows.",
+      code: ["code.ts"],
+      proofs: ["proof.test.ts"],
+      cli: ["bin/proof"],
+      self_tests: ["bin/proof --self-test"],
+      http: [{
+        method: "POST",
+        path: "/workspace/capture",
+        route_file: "code.ts",
+        no_request_body: true,
+        response_schema: "WorkspaceCaptureResponse",
+      }],
+    }],
+  }));
+  const good = buildReadinessReport(catalogPath, root);
+  assert.equal(good.ok, true);
+  assert.equal(good.primitive_count, 1);
+  assert.equal(good.totals.http_routes, 1);
+  assert.equal(good.primitives[0].category, "os_control");
+  assert.match(renderReadinessReport(good), /workspace_control/);
+
+  fs.writeFileSync(catalogPath, JSON.stringify({
+    schema_version: 1,
+    primitives: [{
+      id: "queue_paper_routing",
+      title: "Queue Paper Routing",
+      status: "dogfood",
+      summary: "Route attention.",
+      code: [],
+      proofs: [],
+      http: [{ method: "POST", path: "/queue/:id/defer", route_file: "missing.ts" }],
+    }],
+  }));
+  const bad = buildReadinessReport(catalogPath, root);
+  assert.equal(bad.ok, false);
+  assert.ok(bad.gaps.some((gap) => gap.gap.includes("missing request_schema")));
+  assert.ok(bad.gaps.some((gap) => gap.gap.includes("missing code/doc references")));
+
+  fs.rmSync(root, { recursive: true, force: true });
+  console.log("primitives-readiness-report self-test passed");
+}

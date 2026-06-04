@@ -15,6 +15,9 @@ the orchestrator server package.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.
+Generate a builder-facing coverage/readiness summary with
+`bin/primitives-readiness-report docs/primitives.catalog.json` or use
+`--json` for machine-readable audit output.
 The catalog audit also verifies every catalog schema has a matching
 `@eventloopos/shared` Zod schema, TypeScript type, and ContractSchemas registry
 entry, and that cataloged HTTP routes cannot silently drift back to freeform
@@ -760,6 +763,7 @@ Proof scripts:
 - `bin/workspace-latency-proof`
 - `bin/queue-latency-proof`
 - `bin/macos-hotkey-feedback-latency`
+- `bin/primitives-readiness-report`
 - `bin/task-workspace-memory-proof-smoke`
 - `bin/workspace-task-switch-proof-smoke`
 
@@ -767,6 +771,8 @@ Useful standalone uses:
 
 - repeat flaky OS proofs until confidence is high
 - track queue/master HTTP p95 latency against local budgets
+- summarize primitive API readiness by status, category, HTTP route count, CLI
+  count, proof refs, self-tests, and missing references
 - prove app startup/recovery before handing a Mac to a human
 - generate artifacts that another agent can audit
 

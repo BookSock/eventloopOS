@@ -2645,8 +2645,10 @@
         "bin/product-readiness-proof",
         "bin/workspace-latency-proof",
         "bin/queue-latency-proof",
-        "bin/macos-hotkey-feedback-latency"
-      ]
+        "bin/macos-hotkey-feedback-latency",
+        "bin/primitives-readiness-report"
+      ],
+      "self_tests": ["bin/primitives-readiness-report --self-test"]
     }
   ]
 }
