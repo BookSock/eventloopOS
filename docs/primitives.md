@@ -4,8 +4,10 @@ eventloopOS is currently a product, but the code already exposes reusable
 operating-system control primitives. This document catalogs the primitives that
 other tools could build on without taking the whole queue app.
 
-Machine-readable catalog: `docs/primitives.catalog.json`. Validate it with
-`bin/primitives-catalog-audit docs/primitives.catalog.json`.
+Machine-readable catalog: `docs/primitives.catalog.json`. Builder-facing HTTP
+skeleton: `docs/primitives.openapi.json`. Validate both with
+`bin/primitives-catalog-audit docs/primitives.catalog.json` and
+`bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.
 
 Status labels:
 
@@ -581,7 +583,8 @@ entrypoint.
 
 Highest-leverage steps before calling this a real primitives library:
 
-1. Generate OpenAPI or JSON Schema docs from route validators and fixtures.
+1. Replace the conservative OpenAPI skeleton with full JSON schemas generated
+   from route validators and fixtures.
 2. Split `@eventloopos/orchestrator` into public contracts and private server
    implementation packages.
 3. Extend latency budgets from workspace/queue HTTP proofs to the Mac

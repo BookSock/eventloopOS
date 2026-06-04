@@ -1,0 +1,1839 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "eventloopOS Primitive API",
+    "version": "1",
+    "description": "Conservative OpenAPI skeleton generated from docs/primitives.catalog.json.",
+    "license": {
+      "name": "AGPL-3.0-only"
+    }
+  },
+  "tags": [
+    {
+      "name": "agent_source_hooks",
+      "description": "Agent And Source Hooks: Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions."
+    },
+    {
+      "name": "ambient_autosave",
+      "description": "Ambient Autosave: Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, task-window claim filtering, tagged-window inference, process-tree claim inference, and process-root claim expansion."
+    },
+    {
+      "name": "context_capture_restore",
+      "description": "Context Capture And Restore: Store context resources and manage local restore requests for browser tabs, files, and deeplinks."
+    },
+    {
+      "name": "follows_windows",
+      "description": "Follows Windows: Detect windows seen across several workspaces and move them with focused task workspace unless excluded."
+    },
+    {
+      "name": "mac_app_hotkeys",
+      "description": "Mac App And Hotkey Surface: Swift macOS queue UI, hotkeys, manual mode, restore, voice capture, and master command shell."
+    },
+    {
+      "name": "manual_mode",
+      "description": "Manual Mode: Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk."
+    },
+    {
+      "name": "master_command_router",
+      "description": "Master Command Router: Route one universal command to tasks, idle sessions, fan-out targets, or queue prioritization."
+    },
+    {
+      "name": "observability_proofs",
+      "description": "Observability And Proof Harnesses: Health, metrics, activity, proof runners, latency checks, and machine-readable manifests."
+    },
+    {
+      "name": "queue_paper_routing",
+      "description": "Queue And Paper Routing: Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency."
+    },
+    {
+      "name": "runtime_spine",
+      "description": "Runtime Spine: Flat dependency record for routes, timers, stores, workspace, sessions, observability, and source polling."
+    },
+    {
+      "name": "task_session_control",
+      "description": "Task Session Control: Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions."
+    },
+    {
+      "name": "task_window_claims",
+      "description": "Task Window Claims: Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots."
+    },
+    {
+      "name": "task_workspace_memory",
+      "description": "Task Workspace Memory: Persist task-specific workspace snapshots so later papers inherit task desk state."
+    },
+    {
+      "name": "workspace_control",
+      "description": "Workspace Control: Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves."
+    }
+  ],
+  "paths": {
+    "/activity": {
+      "get": {
+        "description": "Health, metrics, activity, proof runners, latency checks, and machine-readable manifests.",
+        "operationId": "observability_proofs_get_activity",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Observability And Proof Harnesses GET /activity",
+        "tags": [
+          "observability_proofs"
+        ],
+        "x-eventloopos-primitive": "observability_proofs",
+        "x-eventloopos-route-file": "app/orchestrator/src/server.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/agent-runs": {
+      "post": {
+        "description": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+        "operationId": "agent_source_hooks_post_agent_runs",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent And Source Hooks POST /agent-runs",
+        "tags": [
+          "agent_source_hooks"
+        ],
+        "x-eventloopos-primitive": "agent_source_hooks",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/agent_runs.ts",
+        "x-eventloopos-status": "mixed"
+      }
+    },
+    "/contexts": {
+      "get": {
+        "description": "Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
+        "operationId": "context_capture_restore_get_contexts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Context Capture And Restore GET /contexts",
+        "tags": [
+          "context_capture_restore"
+        ],
+        "x-eventloopos-primitive": "context_capture_restore",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/context_restore.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/contexts/restore-plan": {
+      "post": {
+        "description": "Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
+        "operationId": "context_capture_restore_post_contexts_restore_plan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Context Capture And Restore POST /contexts/restore-plan",
+        "tags": [
+          "context_capture_restore"
+        ],
+        "x-eventloopos-primitive": "context_capture_restore",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/context_restore.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/contexts/restore-requests": {
+      "post": {
+        "description": "Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
+        "operationId": "context_capture_restore_post_contexts_restore_requests",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Context Capture And Restore POST /contexts/restore-requests",
+        "tags": [
+          "context_capture_restore"
+        ],
+        "x-eventloopos-primitive": "context_capture_restore",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/context_restore.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/contexts/restore-requests/claim-next": {
+      "post": {
+        "description": "Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
+        "operationId": "context_capture_restore_post_contexts_restore_requests_claim_next",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Context Capture And Restore POST /contexts/restore-requests/claim-next",
+        "tags": [
+          "context_capture_restore"
+        ],
+        "x-eventloopos-primitive": "context_capture_restore",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/context_restore.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/events": {
+      "post": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_post_events",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing POST /events",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/events.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/follows-windows/exclude": {
+      "post": {
+        "description": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded.",
+        "operationId": "follows_windows_post_follows_windows_exclude",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Follows Windows POST /follows-windows/exclude",
+        "tags": [
+          "follows_windows"
+        ],
+        "x-eventloopos-primitive": "follows_windows",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/follows_windows.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Health, metrics, activity, proof runners, latency checks, and machine-readable manifests.",
+        "operationId": "observability_proofs_get_health",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Observability And Proof Harnesses GET /health",
+        "tags": [
+          "observability_proofs"
+        ],
+        "x-eventloopos-primitive": "observability_proofs",
+        "x-eventloopos-route-file": "app/orchestrator/src/server.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/master/fan-out": {
+      "post": {
+        "description": "Route one universal command to tasks, idle sessions, fan-out targets, or queue prioritization.",
+        "operationId": "master_command_router_post_master_fan_out",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Master Command Router POST /master/fan-out",
+        "tags": [
+          "master_command_router"
+        ],
+        "x-eventloopos-primitive": "master_command_router",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/master.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/mcp-sources": {
+      "get": {
+        "description": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+        "operationId": "agent_source_hooks_get_mcp_sources",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent And Source Hooks GET /mcp-sources",
+        "tags": [
+          "agent_source_hooks"
+        ],
+        "x-eventloopos-primitive": "agent_source_hooks",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
+        "x-eventloopos-status": "mixed"
+      }
+    },
+    "/mcp/poll": {
+      "post": {
+        "description": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+        "operationId": "agent_source_hooks_post_mcp_poll",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent And Source Hooks POST /mcp/poll",
+        "tags": [
+          "agent_source_hooks"
+        ],
+        "x-eventloopos-primitive": "agent_source_hooks",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
+        "x-eventloopos-status": "mixed"
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "Health, metrics, activity, proof runners, latency checks, and machine-readable manifests.",
+        "operationId": "observability_proofs_get_metrics",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Observability And Proof Harnesses GET /metrics",
+        "tags": [
+          "observability_proofs"
+        ],
+        "x-eventloopos-primitive": "observability_proofs",
+        "x-eventloopos-route-file": "app/orchestrator/src/server.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/modes/manual": {
+      "get": {
+        "description": "Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
+        "operationId": "manual_mode_get_modes_manual",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Manual Mode GET /modes/manual",
+        "tags": [
+          "manual_mode"
+        ],
+        "x-eventloopos-primitive": "manual_mode",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/modes.ts",
+        "x-eventloopos-status": "stable_enough"
+      },
+      "post": {
+        "description": "Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
+        "operationId": "manual_mode_post_modes_manual",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Manual Mode POST /modes/manual",
+        "tags": [
+          "manual_mode"
+        ],
+        "x-eventloopos-primitive": "manual_mode",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/modes.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/queue": {
+      "get": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_get_queue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing GET /queue",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/queue/lease-next": {
+      "post": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_post_queue_lease_next",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing POST /queue/lease-next",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/queue/{id}/actions/recommended": {
+      "post": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_post_queue_by_id_actions_recommended",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing POST /queue/:id/actions/recommended",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/queue/{id}/defer": {
+      "post": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_post_queue_by_id_defer",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing POST /queue/:id/defer",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/queue/{id}/done": {
+      "post": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_post_queue_by_id_done",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing POST /queue/:id/done",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/queue/{id}/priority": {
+      "post": {
+        "description": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+        "operationId": "queue_paper_routing_post_queue_by_id_priority",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Queue And Paper Routing POST /queue/:id/priority",
+        "tags": [
+          "queue_paper_routing"
+        ],
+        "x-eventloopos-primitive": "queue_paper_routing",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/task-messages": {
+      "get": {
+        "description": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
+        "operationId": "task_session_control_get_task_messages",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Session Control GET /task-messages",
+        "tags": [
+          "task_session_control"
+        ],
+        "x-eventloopos-primitive": "task_session_control",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/task_sessions.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/task-sessions": {
+      "get": {
+        "description": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
+        "operationId": "task_session_control_get_task_sessions",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Session Control GET /task-sessions",
+        "tags": [
+          "task_session_control"
+        ],
+        "x-eventloopos-primitive": "task_session_control",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/task_sessions.ts",
+        "x-eventloopos-status": "dogfood"
+      },
+      "post": {
+        "description": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
+        "operationId": "task_session_control_post_task_sessions",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Session Control POST /task-sessions",
+        "tags": [
+          "task_session_control"
+        ],
+        "x-eventloopos-primitive": "task_session_control",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/task_sessions.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/task-sessions/{id}/followup": {
+      "post": {
+        "description": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
+        "operationId": "task_session_control_post_task_sessions_by_id_followup",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Session Control POST /task-sessions/:id/followup",
+        "tags": [
+          "task_session_control"
+        ],
+        "x-eventloopos-primitive": "task_session_control",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/task_sessions.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/task-sessions/{id}/task-binding": {
+      "put": {
+        "description": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
+        "operationId": "task_session_control_put_task_sessions_by_id_task_binding",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Session Control PUT /task-sessions/:id/task-binding",
+        "tags": [
+          "task_session_control"
+        ],
+        "x-eventloopos-primitive": "task_session_control",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/task_sessions.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/task-window-claims": {
+      "get": {
+        "description": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots.",
+        "operationId": "task_window_claims_get_task_window_claims",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Window Claims GET /task-window-claims",
+        "tags": [
+          "task_window_claims"
+        ],
+        "x-eventloopos-primitive": "task_window_claims",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/task_window_claims.ts",
+        "x-eventloopos-status": "dogfood"
+      },
+      "post": {
+        "description": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots.",
+        "operationId": "task_window_claims_post_task_window_claims",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Window Claims POST /task-window-claims",
+        "tags": [
+          "task_window_claims"
+        ],
+        "x-eventloopos-primitive": "task_window_claims",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/task_window_claims.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/tasks": {
+      "get": {
+        "description": "Persist task-specific workspace snapshots so later papers inherit task desk state.",
+        "operationId": "task_workspace_memory_get_tasks",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Workspace Memory GET /tasks",
+        "tags": [
+          "task_workspace_memory"
+        ],
+        "x-eventloopos-primitive": "task_workspace_memory",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/tasks.ts",
+        "x-eventloopos-status": "stable_enough"
+      },
+      "post": {
+        "description": "Persist task-specific workspace snapshots so later papers inherit task desk state.",
+        "operationId": "task_workspace_memory_post_tasks",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Workspace Memory POST /tasks",
+        "tags": [
+          "task_workspace_memory"
+        ],
+        "x-eventloopos-primitive": "task_workspace_memory",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/tasks.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/tasks/current": {
+      "get": {
+        "description": "Persist task-specific workspace snapshots so later papers inherit task desk state.",
+        "operationId": "task_workspace_memory_get_tasks_current",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Workspace Memory GET /tasks/current",
+        "tags": [
+          "task_workspace_memory"
+        ],
+        "x-eventloopos-primitive": "task_workspace_memory",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/tasks.ts",
+        "x-eventloopos-status": "stable_enough"
+      },
+      "post": {
+        "description": "Persist task-specific workspace snapshots so later papers inherit task desk state.",
+        "operationId": "task_workspace_memory_post_tasks_current",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Workspace Memory POST /tasks/current",
+        "tags": [
+          "task_workspace_memory"
+        ],
+        "x-eventloopos-primitive": "task_workspace_memory",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/tasks.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/tasks/{id}/layout": {
+      "get": {
+        "description": "Persist task-specific workspace snapshots so later papers inherit task desk state.",
+        "operationId": "task_workspace_memory_get_tasks_by_id_layout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Workspace Memory GET /tasks/:id/layout",
+        "tags": [
+          "task_workspace_memory"
+        ],
+        "x-eventloopos-primitive": "task_workspace_memory",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/tasks.ts",
+        "x-eventloopos-status": "stable_enough"
+      },
+      "put": {
+        "description": "Persist task-specific workspace snapshots so later papers inherit task desk state.",
+        "operationId": "task_workspace_memory_put_tasks_by_id_layout",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Workspace Memory PUT /tasks/:id/layout",
+        "tags": [
+          "task_workspace_memory"
+        ],
+        "x-eventloopos-primitive": "task_workspace_memory",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/tasks.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/tasks/{id}/workspace-snapshot": {
+      "post": {
+        "description": "Persist task-specific workspace snapshots so later papers inherit task desk state.",
+        "operationId": "task_workspace_memory_post_tasks_by_id_workspace_snapshot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Task Workspace Memory POST /tasks/:id/workspace-snapshot",
+        "tags": [
+          "task_workspace_memory"
+        ],
+        "x-eventloopos-primitive": "task_workspace_memory",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/tasks.ts",
+        "x-eventloopos-status": "stable_enough"
+      }
+    },
+    "/voice/commands": {
+      "post": {
+        "description": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+        "operationId": "agent_source_hooks_post_voice_commands",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Agent And Source Hooks POST /voice/commands",
+        "tags": [
+          "agent_source_hooks"
+        ],
+        "x-eventloopos-primitive": "agent_source_hooks",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/events.ts",
+        "x-eventloopos-status": "mixed"
+      }
+    },
+    "/workspace/capture": {
+      "post": {
+        "description": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+        "operationId": "workspace_control_post_workspace_capture",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Workspace Control POST /workspace/capture",
+        "tags": [
+          "workspace_control"
+        ],
+        "x-eventloopos-primitive": "workspace_control",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/workspace.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/workspace/restore": {
+      "post": {
+        "description": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+        "operationId": "workspace_control_post_workspace_restore",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Workspace Control POST /workspace/restore",
+        "tags": [
+          "workspace_control"
+        ],
+        "x-eventloopos-primitive": "workspace_control",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/workspace.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/workspace/restore-plan": {
+      "post": {
+        "description": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+        "operationId": "workspace_control_post_workspace_restore_plan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FreeformJsonObject"
+              }
+            }
+          },
+          "required": false
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Workspace Control POST /workspace/restore-plan",
+        "tags": [
+          "workspace_control"
+        ],
+        "x-eventloopos-primitive": "workspace_control",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/workspace.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
+    "/workspace/status": {
+      "get": {
+        "description": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+        "operationId": "workspace_control_get_workspace_status",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Workspace Control GET /workspace/status",
+        "tags": [
+          "workspace_control"
+        ],
+        "x-eventloopos-primitive": "workspace_control",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/workspace.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "FreeformJsonObject": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": false
+          },
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "x-eventloopos-catalog": {
+    "schema_version": 1,
+    "generated_at": "manual",
+    "primitive_count": 14,
+    "source": "docs/primitives.catalog.json"
+  }
+}
