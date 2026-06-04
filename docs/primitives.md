@@ -6,8 +6,9 @@ other tools could build on without taking the whole queue app.
 
 Machine-readable catalog: `docs/primitives.catalog.json`. Builder-facing HTTP
 OpenAPI artifact: `docs/primitives.openapi.json`. It includes concrete schemas
-for task-window claims and follows-window exclusion rules, while broader routes
-still use conservative freeform envelopes until their validators are exported.
+for task-window claims and follows-window exclusion rules; those schemas are
+also exported from `@eventloopos/shared`. Broader routes still use conservative
+freeform envelopes until their validators are exported.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.
@@ -181,6 +182,9 @@ Guarantees today:
   queue clients decode these fields so demo/debug UI can inspect ancestry too
 - expands process-root task-window claims into concrete window claims when a
   background agent launch produces descendant app windows
+- if task B's agent opens a visible Chrome window while the human is reviewing
+  task A, the task B claim keeps that Chrome window out of task A's saved
+  paper, then keeps it when task B becomes current
 
 Why it matters: this is the primitive that makes window layout memory feel
 automatic instead of like a manual "save workspace" button.
@@ -205,6 +209,13 @@ HTTP surface:
 
 - `POST /task-window-claims`
 - `GET /task-window-claims`
+
+Shared contracts:
+
+- `TaskWindowClaimCreateRequest`
+- `TaskWindowClaimRecord`
+- `TaskWindowClaimResponse`
+- `TaskWindowClaimsListResponse`
 
 CLI surface:
 
@@ -251,6 +262,7 @@ Proof:
 - `app/orchestrator/src/routes/events_task_window_claims.test.ts`
 - `app/orchestrator/src/agents/ambient_workspace_saver.test.ts`
 - `app/orchestrator/test/gateway_store_conformance.test.ts`
+- `app/shared/test/contracts.test.ts`
 - `bin/task-window-spawn --self-test`
 
 Status: dogfood. Browser context capture has an automatic emitter; generic
@@ -281,6 +293,13 @@ HTTP surface:
 - `GET /follows-windows/exclusions`
 - `DELETE /follows-windows/exclusions/:id`
 
+Shared contracts:
+
+- `FollowsWindowExclusionCreateRequest`
+- `FollowsWindowExclusionRecord`
+- `FollowsWindowExclusionResponse`
+- `FollowsWindowExclusionsListResponse`
+
 Important behavior:
 
 - uses window id path and app-bundle/title-prefix slot path
@@ -300,6 +319,7 @@ Proof:
 
 - `app/orchestrator/src/agents/follows_window_orchestrator.test.ts`
 - store follows-window conformance tests
+- `app/shared/test/contracts.test.ts`
 - Mac Studio human demo shared TextEdit proof
 
 Status: dogfood.

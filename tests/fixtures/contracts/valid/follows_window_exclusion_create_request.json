@@ -1,0 +1,7 @@
+{
+  "schema": "FollowsWindowExclusionCreateRequest",
+  "data": {
+    "app_bundle": "com.google.chrome",
+    "title_substring": "playwright"
+  }
+}

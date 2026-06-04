@@ -1,0 +1,9 @@
+{
+  "schema": "TaskWindowClaimCreateRequest",
+  "data": {
+    "task_id": "task_background_test",
+    "process_root_pid": 4242,
+    "source": "codex_spawn_wrapper",
+    "ttl_ms": 1800000
+  }
+}

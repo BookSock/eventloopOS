@@ -12,6 +12,10 @@ const event = EventSchema.parse(input);
 
 Exports include Zod schemas, inferred TypeScript types, registry helpers, and JSON Schema generated with `zod-to-json-schema`.
 
+Current public route payloads include task-window claims and follows-window
+exclusion rules. These are the reusable primitives behind background-agent
+window attribution and sticky-window cleanup.
+
 ## Local Commands
 
 ```bash

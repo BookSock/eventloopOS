@@ -664,6 +664,121 @@ describe("ambient_workspace_saver", () => {
     assert.equal(obs.counters.get("task_window_claims_process_tree_total"), 1);
   });
 
+  it("keeps an inactive task agent-spawned Chrome out of the active paper but saves it for its owner", async () => {
+    const snapshots: WorkspaceSnapshot[] = [
+      {
+        backend: "aerospace",
+        activeWorkspace: "paper-a",
+        focusedWindowId: 2,
+        windows: [
+          { id: 1, app: "Ghostty", title: "Paper A work", workspace: "paper-a", pid: 100 },
+          {
+            id: 2,
+            app: "Google Chrome",
+            appBundleId: "com.google.Chrome",
+            title: "Paper B Playwright report",
+            workspace: "paper-a",
+            pid: 520,
+          },
+        ],
+      },
+      {
+        backend: "aerospace",
+        activeWorkspace: "paper-b",
+        focusedWindowId: 2,
+        windows: [
+          {
+            id: 2,
+            app: "Google Chrome",
+            appBundleId: "com.google.Chrome",
+            title: "Paper B Playwright report",
+            workspace: "paper-b",
+            pid: 520,
+          },
+        ],
+      },
+    ];
+    const obs = makeFakeObservability();
+    const writes: Array<{ taskId: string; snapshot: WorkspaceSnapshot }> = [];
+    const claims: Array<{
+      taskId: string;
+      windowId?: string;
+      appBundle?: string;
+      titlePrefix?: string;
+      processRootPid?: number;
+      source?: string;
+      ttlMs?: number;
+    }> = [
+      {
+        taskId: "task_paper_b",
+        processRootPid: 500,
+        source: "agent_spawn_root",
+        ttlMs: 60_000,
+      },
+    ];
+    let currentSnapshotIndex = 0;
+    let currentTaskId = "task_paper_a";
+    let nowMs = Date.parse("2026-05-10T15:00:00.000Z");
+    const saver = createAmbientWorkspaceSaver({
+      workspace: { capture: async () => snapshots[currentSnapshotIndex] },
+      getCurrentTaskState: async () => ({ currentTaskId }),
+      updateTaskLayout: async (taskId, nextSnapshot) => {
+        writes.push({ taskId, snapshot: nextSnapshot });
+      },
+      isManualModeActive: () => false,
+      claimTaskWindow: async (input) => {
+        claims.push({
+          taskId: input.taskId,
+          windowId: input.windowId,
+          appBundle: input.appBundle,
+          titlePrefix: input.titlePrefix,
+          processRootPid: input.processRootPid,
+          source: input.source,
+          ttlMs: input.ttlMs,
+        });
+      },
+      getTaskWindowClaims: () => claims.map((claim) => ({
+        task_id: claim.taskId,
+        window_id: claim.windowId,
+        app_bundle: claim.appBundle,
+        title_prefix: claim.titlePrefix,
+        process_root_pid: claim.processRootPid,
+      })),
+      getProcessAncestorPids: (pid) => pid === 520 ? [510, 500, 1] : [1],
+      observability: obs.recorder,
+      debounceMs: 3_000,
+      now: () => new Date(nowMs),
+    });
+
+    assert.equal((await saver.tick()).decision, "debounced");
+    nowMs += 5_000;
+    assert.equal((await saver.tick()).decision, "committed");
+    assert.equal(writes[0]?.taskId, "task_paper_a");
+    assert.deepEqual(writes[0]?.snapshot.windows.map((window) => window.id), [1]);
+    assert.equal(writes[0]?.snapshot.focusedWindowId, undefined);
+    assert.deepEqual(claims.slice(1), [
+      {
+        taskId: "task_paper_b",
+        windowId: "2",
+        appBundle: "com.google.Chrome",
+        titlePrefix: "paper b playwright report",
+        processRootPid: undefined,
+        source: "ambient_process_tree",
+        ttlMs: 1_800_000,
+      },
+    ]);
+
+    currentTaskId = "task_paper_b";
+    currentSnapshotIndex = 1;
+    nowMs += 5_000;
+    assert.equal((await saver.tick()).decision, "debounced");
+    nowMs += 5_000;
+    assert.equal((await saver.tick()).decision, "committed");
+    assert.equal(writes[1]?.taskId, "task_paper_b");
+    assert.deepEqual(writes[1]?.snapshot.windows.map((window) => window.id), [2]);
+    assert.equal(writes[1]?.snapshot.focusedWindowId, 2);
+  });
+
   it("recovers from updateTaskLayout error and emits an error event", async () => {
     const workspace = makeFakeWorkspace(makeSnapshot([1]));
     const obs = makeFakeObservability();

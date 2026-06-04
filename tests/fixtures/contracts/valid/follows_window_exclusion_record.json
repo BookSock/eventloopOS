@@ -1,0 +1,9 @@
+{
+  "schema": "FollowsWindowExclusionRecord",
+  "data": {
+    "exclusion_id": "fwex_chrome_report",
+    "app_bundle": "com.google.chrome",
+    "title_substring": "playwright",
+    "created_at": "2026-06-04T08:00:00.000Z"
+  }
+}

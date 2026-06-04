@@ -259,6 +259,108 @@ export const ContextRestoreRequestSchema = z
   .strict();
 export type ContextRestoreRequest = z.infer<typeof ContextRestoreRequestSchema>;
 
+export const TaskWindowClaimRecordSchema = z
+  .object({
+    claim_id: id,
+    task_id: id,
+    window_id: z.string().min(1).optional(),
+    app_bundle: z.string().min(1).optional(),
+    title_prefix: z.string().min(1).optional(),
+    process_root_pid: z.number().int().positive().optional(),
+    source: z.string().min(1).optional(),
+    created_at: isoDateTime,
+    expires_at: isoDateTime.optional()
+  })
+  .strict();
+export type TaskWindowClaimRecord = z.infer<typeof TaskWindowClaimRecordSchema>;
+
+export const TaskWindowClaimCreateRequestSchema = z
+  .object({
+    task_id: id,
+    window_id: z.string().min(1).optional(),
+    app_bundle: z.string().min(1).optional(),
+    title_prefix: z.string().min(1).optional(),
+    process_root_pid: z.number().int().positive().optional(),
+    source: z.string().min(1).optional(),
+    ttl_ms: z.number().int().positive().optional()
+  })
+  .strict()
+  .superRefine((claim, ctx) => {
+    if (!claim.window_id && !claim.app_bundle && !claim.title_prefix && claim.process_root_pid === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "window_id, app_bundle, title_prefix, or process_root_pid is required",
+        path: ["window_id"]
+      });
+    }
+  });
+export type TaskWindowClaimCreateRequest = z.infer<typeof TaskWindowClaimCreateRequestSchema>;
+
+export const TaskWindowClaimResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    claim: TaskWindowClaimRecordSchema,
+    request_id: id
+  })
+  .strict();
+export type TaskWindowClaimResponse = z.infer<typeof TaskWindowClaimResponseSchema>;
+
+export const TaskWindowClaimsListResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    claims: z.array(TaskWindowClaimRecordSchema),
+    count: z.number().int().nonnegative(),
+    request_id: id
+  })
+  .strict();
+export type TaskWindowClaimsListResponse = z.infer<typeof TaskWindowClaimsListResponseSchema>;
+
+export const FollowsWindowExclusionRecordSchema = z
+  .object({
+    exclusion_id: id,
+    app_bundle: z.string().min(1).optional(),
+    title_substring: z.string().min(1).optional(),
+    created_at: isoDateTime
+  })
+  .strict();
+export type FollowsWindowExclusionRecord = z.infer<typeof FollowsWindowExclusionRecordSchema>;
+
+export const FollowsWindowExclusionCreateRequestSchema = z
+  .object({
+    app_bundle: z.string().min(1).optional(),
+    title_substring: z.string().min(1).optional()
+  })
+  .strict()
+  .superRefine((exclusion, ctx) => {
+    if (!exclusion.app_bundle && !exclusion.title_substring) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "app_bundle or title_substring is required",
+        path: ["app_bundle"]
+      });
+    }
+  });
+export type FollowsWindowExclusionCreateRequest = z.infer<typeof FollowsWindowExclusionCreateRequestSchema>;
+
+export const FollowsWindowExclusionResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    exclusion: FollowsWindowExclusionRecordSchema,
+    request_id: id
+  })
+  .strict();
+export type FollowsWindowExclusionResponse = z.infer<typeof FollowsWindowExclusionResponseSchema>;
+
+export const FollowsWindowExclusionsListResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    exclusions: z.array(FollowsWindowExclusionRecordSchema),
+    count: z.number().int().nonnegative(),
+    request_id: id
+  })
+  .strict();
+export type FollowsWindowExclusionsListResponse = z.infer<typeof FollowsWindowExclusionsListResponseSchema>;
+
 export const ActionSchema = z
   .object({
     id,
@@ -572,6 +674,14 @@ export const ContractSchemas = {
   ContextResource: ContextResourceSchema,
   ContextRestorePlan: ContextRestorePlanSchema,
   ContextRestoreRequest: ContextRestoreRequestSchema,
+  TaskWindowClaimRecord: TaskWindowClaimRecordSchema,
+  TaskWindowClaimCreateRequest: TaskWindowClaimCreateRequestSchema,
+  TaskWindowClaimResponse: TaskWindowClaimResponseSchema,
+  TaskWindowClaimsListResponse: TaskWindowClaimsListResponseSchema,
+  FollowsWindowExclusionRecord: FollowsWindowExclusionRecordSchema,
+  FollowsWindowExclusionCreateRequest: FollowsWindowExclusionCreateRequestSchema,
+  FollowsWindowExclusionResponse: FollowsWindowExclusionResponseSchema,
+  FollowsWindowExclusionsListResponse: FollowsWindowExclusionsListResponseSchema,
   Event: EventSchema,
   Task: TaskSchema,
   AgentRun: AgentRunSchema,
