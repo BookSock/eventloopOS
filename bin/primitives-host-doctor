@@ -58,7 +58,13 @@ async function runDoctor(options, deps = {}) {
   const checks = [];
 
   checks.push(commandCheck(commandRunner, "catalog_audit", "node", ["bin/primitives-catalog-audit", "docs/primitives.catalog.json"]));
-  checks.push(commandCheck(commandRunner, "strict_readiness", "node", ["bin/primitives-readiness-report", "--strict", "--json", "docs/primitives.catalog.json"]));
+  checks.push(commandCheck(
+    commandRunner,
+    "strict_readiness",
+    "node",
+    ["bin/primitives-readiness-report", "--strict", "--json", "docs/primitives.catalog.json"],
+    { summarizeJson: summarizePrimitiveReadiness }
+  ));
   checks.push(commandCheck(commandRunner, "builder_docs_current", "node", ["bin/primitives-docs-audit", "docs/primitives.catalog.json", "docs/primitives.md"]));
   checks.push(commandCheck(commandRunner, "openapi_current", "node", ["bin/primitives-openapi-export", "--check", "docs/primitives.catalog.json", "docs/primitives.openapi.json"]));
   checks.push(commandCheck(commandRunner, "primitive_self_tests", "node", ["bin/primitives-self-test-runner", "--catalog", "docs/primitives.catalog.json"]));
@@ -76,6 +82,7 @@ async function runDoctor(options, deps = {}) {
   const allChecks = [...localChecks, ...liveChecks];
   const failedChecks = allChecks.filter((check) => check.status === "failed");
   const warningChecks = allChecks.filter((check) => check.status === "warning");
+  const primitiveReadiness = localChecks.find((check) => check.name === "strict_readiness")?.summary ?? null;
   const finishedAt = new Date().toISOString();
   return {
     schema_version: 1,
@@ -87,13 +94,14 @@ async function runDoctor(options, deps = {}) {
     passed: failedChecks.length === 0,
     orchestrator_url: options.url,
     require_live: options.requireLive,
+    primitive_readiness: primitiveReadiness,
     checks: allChecks,
     failed_checks: failedChecks.map((check) => check.name),
     warning_checks: warningChecks.map((check) => check.name),
   };
 }
 
-function commandCheck(commandRunner, name, command, commandArgs) {
+function commandCheck(commandRunner, name, command, commandArgs, options = {}) {
   const result = commandRunner(command, commandArgs);
   const check = {
     name,
@@ -101,9 +109,45 @@ function commandCheck(commandRunner, name, command, commandArgs) {
     command: [command, ...commandArgs],
     exit_code: result.status,
   };
+  if (options.summarizeJson && result.stdout?.trim()) {
+    try {
+      check.summary = options.summarizeJson(JSON.parse(result.stdout));
+    } catch (error) {
+      check.summary_parse_error = error instanceof Error ? error.message : String(error);
+    }
+  }
   if (result.stdout?.trim()) check.stdout = result.stdout.trim().slice(-2_000);
   if (result.stderr?.trim()) check.stderr = result.stderr.trim().slice(-2_000);
   return check;
+}
+
+function summarizePrimitiveReadiness(report) {
+  return {
+    ok: report.ok === true,
+    strict_ok: report.strict_ok === true,
+    primitive_count: Number(report.primitive_count ?? 0),
+    status_counts: objectOfNumbers(report.status_counts),
+    category_counts: objectOfNumbers(report.category_counts),
+    totals: {
+      http_routes: Number(report.totals?.http_routes ?? 0),
+      cli_commands: Number(report.totals?.cli_commands ?? 0),
+      self_tests: Number(report.totals?.self_tests ?? 0),
+      proof_refs: Number(report.totals?.proof_refs ?? 0),
+      missing_refs: Number(report.totals?.missing_refs ?? 0),
+    },
+    gap_count: Array.isArray(report.gaps) ? report.gaps.length : 0,
+    hardening_gap_count: Array.isArray(report.hardening_gaps) ? report.hardening_gaps.length : 0,
+  };
+}
+
+function objectOfNumbers(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([, count]) => Number.isFinite(Number(count)))
+      .map(([key, count]) => [key, Number(count)])
+      .sort(([left], [right]) => left.localeCompare(right))
+  );
 }
 
 async function runLiveChecks({ url, requireLive, fetcher }) {
@@ -189,9 +233,22 @@ function renderMarkdown(manifest) {
     `Live URL: \`${manifest.orchestrator_url}\``,
     `Require live: \`${manifest.require_live}\``,
     "",
-    "## Checks",
-    "",
   ];
+  if (manifest.primitive_readiness) {
+    lines.push("## Primitive Readiness");
+    lines.push("");
+    lines.push(`- Strict: ${manifest.primitive_readiness.strict_ok ? "passed" : "failed"}`);
+    lines.push(`- Primitives: ${manifest.primitive_readiness.primitive_count}`);
+    lines.push(`- HTTP routes: ${manifest.primitive_readiness.totals.http_routes}`);
+    lines.push(`- CLI commands: ${manifest.primitive_readiness.totals.cli_commands}`);
+    lines.push(`- Self-tests: ${manifest.primitive_readiness.totals.self_tests}`);
+    lines.push(`- Proof refs: ${manifest.primitive_readiness.totals.proof_refs}`);
+    lines.push(`- Status: ${formatCounts(manifest.primitive_readiness.status_counts)}`);
+    lines.push(`- Category: ${formatCounts(manifest.primitive_readiness.category_counts)}`);
+    lines.push("");
+  }
+  lines.push("## Checks");
+  lines.push("");
   for (const check of manifest.checks) {
     lines.push(`- ${check.status}: ${check.name}`);
   }
@@ -205,9 +262,16 @@ function summaryOutput(manifest, manifestPath) {
     failed_checks: manifest.failed_checks,
     warning_checks: manifest.warning_checks,
     check_count: manifest.checks.length,
+    primitive_readiness: manifest.primitive_readiness,
     live_required: manifest.require_live,
     orchestrator_url: manifest.orchestrator_url,
   };
+}
+
+function formatCounts(counts) {
+  const entries = Object.entries(counts ?? {});
+  if (entries.length === 0) return "none";
+  return entries.map(([key, value]) => `${key}=${value}`).join(", ");
 }
 
 function normalizeUrl(value) {
@@ -227,7 +291,27 @@ function utcStamp() {
 }
 
 async function runSelfTest() {
-  const commandRunner = () => ({ status: 0, stdout: "ok\n", stderr: "" });
+  const readinessStdout = JSON.stringify({
+    ok: true,
+    strict_ok: true,
+    primitive_count: 2,
+    status_counts: { dogfood: 1, stable_enough: 1 },
+    category_counts: { os_control: 1, runtime: 1 },
+    totals: {
+      http_routes: 4,
+      cli_commands: 1,
+      self_tests: 2,
+      proof_refs: 6,
+      missing_refs: 0,
+    },
+    gaps: [],
+    hardening_gaps: [],
+  });
+  const commandRunner = (_command, commandArgs) => ({
+    status: 0,
+    stdout: commandArgs.includes("bin/primitives-readiness-report") ? readinessStdout : "ok\n",
+    stderr: "",
+  });
   const fetcher = async () => ({
     status: 200,
     text: async () => "{\"ok\":true}",
@@ -243,6 +327,11 @@ async function runSelfTest() {
   assert.ok(manifest.checks.some((check) => check.name === "builder_docs_current"));
   assert.ok(manifest.checks.some((check) => check.name === "primitive_self_tests"));
   assert.ok(manifest.checks.some((check) => check.name === "live_workspace_status"));
+  assert.equal(manifest.primitive_readiness.strict_ok, true);
+  assert.equal(manifest.primitive_readiness.primitive_count, 2);
+  assert.equal(manifest.primitive_readiness.totals.http_routes, 4);
+  assert.equal(summaryOutput(manifest, "manifest.json").primitive_readiness.totals.self_tests, 2);
+  assert.match(renderMarkdown(manifest), /Primitive Readiness/);
 
   const warningManifest = await runDoctor({
     url: "http://127.0.0.1:4377",

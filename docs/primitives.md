@@ -827,7 +827,12 @@ Status: stable enough internally. `bin/primitives-host-doctor` is the small
 runs strict readiness, executes the cataloged primitive self-tests, verifies
 this builder-facing docs index against the catalog, runs primitive example
 self-tests, and optionally gates live orchestrator `/health`, `/metrics`,
-`/activity`, and `/workspace/status` with `--require-live`.
+`/activity`, and `/workspace/status` with `--require-live`. Its manifest,
+Markdown report, and `--json` output include a compact primitive-readiness
+summary with primitive count, HTTP route count, CLI command count, self-test
+count, proof count, status/category counts, and strict gap counts so an agent
+can decide whether the host exposes a reusable primitive API surface without
+opening the full readiness report.
 
 ## Near-Term Library Hardening
 
