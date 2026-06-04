@@ -25,6 +25,7 @@ import {
   parsePrimitiveCatalog,
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
+  createPrimitiveOperationsClient,
   getPrimitiveRoute,
   PrimitiveHttpError,
   PrimitiveResponseParseError,
@@ -56,12 +57,27 @@ const lineage = await client.request("GET", "/queue/:id/lineage", {
   pathParams: { id: "qit_feedback_001" },
   query: { limit: 25 }
 });
+
+const ops = createPrimitiveOperationsClient({
+  catalog,
+  baseUrl: "http://127.0.0.1:4377"
+});
+await ops.queue.done("qit_feedback_001", { actor_id: "human" });
+await ops.taskWindowClaims.create({
+  task_id: "task_checkout",
+  process_root_pid: 4242,
+  source: "demo_wrapper"
+});
+await ops.workspace.restore(workspaceRestoreRequest, "idem_restore_checkout");
 ```
 
 Use this when building tools on top of eventloopOS primitives without importing
 or running the orchestrator server package. Request helpers interpolate route
 templates, encode query strings, enforce `no_request_body`, and validate known
 request/response schemas through the exported Zod contract registry.
+`createPrimitiveOperationsClient` layers small typed convenience methods over
+the same validated routes for common queue, workspace, task-window-claim, and
+follows-window operations.
 
 The HTTP client exposes catchable error classes for builder-facing tools:
 

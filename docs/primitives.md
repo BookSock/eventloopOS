@@ -23,6 +23,9 @@ The shared primitive HTTP client validates request and response bodies and
 throws typed errors for non-2xx responses, invalid JSON, and response-schema
 mismatches so builders can recover from conflicts, dependency failures, and
 server drift without string-matching generic exceptions.
+It also exposes `createPrimitiveOperationsClient`, a small typed convenience
+layer for common queue, workspace, task-window-claim, and follows-window
+operations on top of the same catalog-validated routes.
 
 Runnable examples live in `examples/primitives/`: restore a saved desk, inspect
 and rerank an attention queue, and wire external hotkeys to task-window/follows
@@ -765,8 +768,9 @@ Highest-leverage steps before calling this a real primitives library:
    validating HTTP client into a published SDK, including typed convenience
   clients generated from `docs/primitives.openapi.json`.
    Current shared helpers already include request builders, a validating HTTP
-   client, and typed primitive client errors; next SDK work should add
-   operation-specific convenience methods over those primitives.
+   client, typed primitive client errors, and first-pass operation-specific
+   convenience methods over queue, workspace, task-window-claim, and
+   follows-window primitives.
 2. Split `@eventloopos/orchestrator` into public contracts and private server
    implementation packages.
 3. Keep `bin/human-demo-ready`'s default macOS hotkey-latency gate green before

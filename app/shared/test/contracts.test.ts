@@ -22,6 +22,7 @@ import {
 import {
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
+  createPrimitiveOperationsClient,
   parsePrimitiveCatalog,
   PrimitiveHttpError,
   PrimitiveResponseParseError,
@@ -478,6 +479,61 @@ describe("primitive catalog SDK boundary", () => {
       expect(primitiveError.payload).toEqual({ ok: true });
       expect(primitiveError.cause).toBeTruthy();
     }
+  });
+
+  it("creates typed primitive operation helpers over queue, windows, follows rules, and workspace routes", async () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const calls: Array<{ url: string; method?: string; headers: Record<string, string>; body?: unknown }> = [];
+    const responseFixtures = new Map<string, unknown>([
+      ["GET /queue?state=ready", readFixture(join(fixturesDir, "valid/queue_list_response.json")).data],
+      ["POST /queue/qit_feedback_001/done", readFixture(join(fixturesDir, "valid/queue_action_response.json")).data],
+      ["POST /task-window-claims", readFixture(join(fixturesDir, "valid/task_window_claim_response.json")).data],
+      ["DELETE /follows-windows/exclusions/fwex_demo", readFixture(join(fixturesDir, "valid/follows_window_exclusion_response.json")).data],
+      ["POST /workspace/restore", readFixture(join(fixturesDir, "valid/workspace_restore_response.json")).data]
+    ]);
+    const fakeFetch: typeof fetch = async (url, init) => {
+      const parsedUrl = new URL(String(url));
+      const key = `${init?.method ?? "GET"} ${parsedUrl.pathname}${parsedUrl.search}`;
+      const fixture = responseFixtures.get(key);
+      calls.push({
+        url: `${parsedUrl.pathname}${parsedUrl.search}`,
+        method: init?.method,
+        headers: Object.fromEntries(new Headers(init?.headers).entries()),
+        body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined
+      });
+      if (!fixture) {
+        return new Response(JSON.stringify({ ok: false, error: `missing fixture for ${key}` }), { status: 500 });
+      }
+      return new Response(JSON.stringify(fixture), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    };
+    const client = createPrimitiveOperationsClient({
+      catalog,
+      baseUrl: "http://127.0.0.1:4480/root/",
+      fetch: fakeFetch
+    });
+
+    await expect(client.queue.list({ state: "ready" })).resolves.toMatchObject({ count: 1 });
+    await expect(client.queue.done("qit_feedback_001", { actor_id: "human_demo" })).resolves.toMatchObject({ ok: true });
+    await expect(
+      client.taskWindowClaims.create(readFixture(join(fixturesDir, "valid/task_window_claim_create_request.json")).data)
+    ).resolves.toMatchObject({ ok: true });
+    await expect(client.followsWindows.deleteExclusion("fwex_demo")).resolves.toMatchObject({ ok: true });
+    await expect(
+      client.workspace.restore(readFixture(join(fixturesDir, "valid/workspace_restore_request.json")).data, "idem_workspace_restore")
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual([
+      "GET /queue?state=ready",
+      "POST /queue/qit_feedback_001/done",
+      "POST /task-window-claims",
+      "DELETE /follows-windows/exclusions/fwex_demo",
+      "POST /workspace/restore"
+    ]);
+    expect(calls[1]?.body).toMatchObject({ action: "done", actor_id: "human_demo" });
+    expect(calls[4]?.headers["idempotency-key"]).toBe("idem_workspace_restore");
   });
 });
 

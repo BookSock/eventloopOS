@@ -1,5 +1,33 @@
 import { z } from "zod";
 import { getContractSchema } from "./schemas.js";
+import type {
+  FollowsWindowExclusionCreateRequest,
+  FollowsWindowExclusionResponse,
+  FollowsWindowExclusionsListResponse,
+  QueueActionResponse,
+  QueueDeferRequest,
+  QueueDoneRequest,
+  QueueIgnoreRequest,
+  QueueLeaseRenewRequest,
+  QueueLeaseRenewResponse,
+  QueueLeaseRequest,
+  QueueLineageResponse,
+  QueueListResponse,
+  QueueNextResponse,
+  QueuePriorityRequest,
+  QueuePriorityResponse,
+  QueueRecommendedActionRequest,
+  QueueRecommendedActionResponse,
+  TaskWindowClaimCreateRequest,
+  TaskWindowClaimResponse,
+  TaskWindowClaimsListResponse,
+  WorkspaceCaptureResponse,
+  WorkspaceRestorePlanRequest,
+  WorkspaceRestorePlanResponse,
+  WorkspaceRestoreRequest,
+  WorkspaceRestoreResponse,
+  WorkspaceStatusResponse
+} from "./schemas.js";
 
 const nonEmpty = z.string().min(1);
 const schemaReference = z.union([nonEmpty, z.record(z.unknown())]);
@@ -125,6 +153,44 @@ export type PrimitiveHttpClient = {
     path: string,
     input?: PrimitiveHttpClientRequestOptions
   ): Promise<T>;
+};
+
+export type PrimitiveQueueListOptions = {
+  state?: "ready" | "leased" | "deferred" | "done" | "dead";
+};
+
+export type PrimitiveQueueLineageOptions = {
+  limit?: number;
+};
+
+export type PrimitiveOperationsClient = {
+  queue: {
+    list(options?: PrimitiveQueueListOptions): Promise<QueueListResponse>;
+    next(): Promise<QueueNextResponse>;
+    leaseNext(body?: QueueLeaseRequest): Promise<QueueNextResponse>;
+    renewLease(id: string, body: QueueLeaseRenewRequest): Promise<QueueLeaseRenewResponse>;
+    done(id: string, body?: Omit<QueueDoneRequest, "action">): Promise<QueueActionResponse>;
+    defer(id: string, body: Omit<QueueDeferRequest, "action">): Promise<QueueActionResponse>;
+    ignore(id: string, body?: Omit<QueueIgnoreRequest, "action">): Promise<QueueActionResponse>;
+    recommendedAction(id: string, body?: QueueRecommendedActionRequest): Promise<QueueRecommendedActionResponse>;
+    lineage(id: string, options?: PrimitiveQueueLineageOptions): Promise<QueueLineageResponse>;
+    priority(id: string, body: QueuePriorityRequest): Promise<QueuePriorityResponse>;
+  };
+  taskWindowClaims: {
+    create(body: TaskWindowClaimCreateRequest): Promise<TaskWindowClaimResponse>;
+    list(): Promise<TaskWindowClaimsListResponse>;
+  };
+  followsWindows: {
+    exclude(body: FollowsWindowExclusionCreateRequest): Promise<FollowsWindowExclusionResponse>;
+    listExclusions(): Promise<FollowsWindowExclusionsListResponse>;
+    deleteExclusion(id: string): Promise<FollowsWindowExclusionResponse>;
+  };
+  workspace: {
+    status(): Promise<WorkspaceStatusResponse>;
+    capture(): Promise<WorkspaceCaptureResponse>;
+    restorePlan(body: WorkspaceRestorePlanRequest): Promise<WorkspaceRestorePlanResponse>;
+    restore(body: WorkspaceRestoreRequest, idempotencyKey: string): Promise<WorkspaceRestoreResponse>;
+  };
 };
 
 export type PrimitiveHttpClientRequestOptions = Omit<PrimitiveRequestBuildInput, "catalog" | "method" | "path" | "baseUrl">;
@@ -334,6 +400,83 @@ export function createPrimitiveHttpClient(options: PrimitiveHttpClientOptions): 
             cause: error
           }
         );
+      }
+    }
+  };
+}
+
+export function createPrimitiveOperationsClient(options: PrimitiveHttpClientOptions): PrimitiveOperationsClient {
+  return bindPrimitiveOperationsClient(createPrimitiveHttpClient(options));
+}
+
+export function bindPrimitiveOperationsClient(client: PrimitiveHttpClient): PrimitiveOperationsClient {
+  return {
+    queue: {
+      list(options: PrimitiveQueueListOptions = {}) {
+        return client.request("GET", "/queue", { query: options });
+      },
+      next() {
+        return client.request("GET", "/queue/next");
+      },
+      leaseNext(body: QueueLeaseRequest = {}) {
+        return client.request("POST", "/queue/lease-next", { body });
+      },
+      renewLease(id: string, body: QueueLeaseRenewRequest) {
+        return client.request("POST", "/queue/:id/lease/renew", { pathParams: { id }, body });
+      },
+      done(id: string, body: Omit<QueueDoneRequest, "action"> = {}) {
+        return client.request("POST", "/queue/:id/done", { pathParams: { id }, body: { ...body, action: "done" } });
+      },
+      defer(id: string, body: Omit<QueueDeferRequest, "action">) {
+        return client.request("POST", "/queue/:id/defer", { pathParams: { id }, body: { ...body, action: "defer" } });
+      },
+      ignore(id: string, body: Omit<QueueIgnoreRequest, "action"> = {}) {
+        return client.request("POST", "/queue/:id/ignore", { pathParams: { id }, body: { ...body, action: "ignore" } });
+      },
+      recommendedAction(id: string, body: QueueRecommendedActionRequest = {}) {
+        return client.request("POST", "/queue/:id/actions/recommended", { pathParams: { id }, body });
+      },
+      lineage(id: string, options: PrimitiveQueueLineageOptions = {}) {
+        return client.request("GET", "/queue/:id/lineage", { pathParams: { id }, query: options });
+      },
+      priority(id: string, body: QueuePriorityRequest) {
+        return client.request("POST", "/queue/:id/priority", { pathParams: { id }, body });
+      }
+    },
+    taskWindowClaims: {
+      create(body: TaskWindowClaimCreateRequest) {
+        return client.request("POST", "/task-window-claims", { body });
+      },
+      list() {
+        return client.request("GET", "/task-window-claims");
+      }
+    },
+    followsWindows: {
+      exclude(body: FollowsWindowExclusionCreateRequest) {
+        return client.request("POST", "/follows-windows/exclude", { body });
+      },
+      listExclusions() {
+        return client.request("GET", "/follows-windows/exclusions");
+      },
+      deleteExclusion(id: string) {
+        return client.request("DELETE", "/follows-windows/exclusions/:id", { pathParams: { id } });
+      }
+    },
+    workspace: {
+      status() {
+        return client.request("GET", "/workspace/status");
+      },
+      capture() {
+        return client.request("POST", "/workspace/capture", { body: {} });
+      },
+      restorePlan(body: WorkspaceRestorePlanRequest) {
+        return client.request("POST", "/workspace/restore-plan", { body });
+      },
+      restore(body: WorkspaceRestoreRequest, idempotencyKey: string) {
+        return client.request("POST", "/workspace/restore", {
+          body,
+          headers: { "Idempotency-Key": idempotencyKey }
+        });
       }
     }
   };
