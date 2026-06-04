@@ -2,7 +2,7 @@ import type { Observability } from "../observability.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
 import type { Runtime } from "../runtime.js";
 import type { WorkspaceController } from "../workspace/controller.js";
-import type { WorkspaceSnapshot } from "../workspace/aerospace.js";
+import type { AerospaceWindow, WorkspaceSnapshot } from "../workspace/aerospace.js";
 import { normalizeTitlePrefix } from "../store.js";
 
 export const DEFAULT_AMBIENT_SAVE_POLL_MS = 5_000;
@@ -38,6 +38,13 @@ export type WindowWorkspaceObservationWriter = (input: {
   titlePrefix?: string;
 }) => Promise<unknown> | unknown;
 export type FollowsWindowIdReader = () => Promise<Iterable<string | number>> | Iterable<string | number>;
+export type TaskWindowClaim = {
+  task_id: string;
+  window_id?: string;
+  app_bundle?: string;
+  title_prefix?: string;
+};
+export type TaskWindowClaimReader = () => Promise<Iterable<TaskWindowClaim>> | Iterable<TaskWindowClaim>;
 
 export type AmbientWorkspaceSaverDeps = {
   workspace: Pick<WorkspaceController, "capture">;
@@ -46,6 +53,7 @@ export type AmbientWorkspaceSaverDeps = {
   isManualModeActive: ManualModeReader;
   recordWindowObservation?: WindowWorkspaceObservationWriter;
   getFollowsWindowIds?: FollowsWindowIdReader;
+  getTaskWindowClaims?: TaskWindowClaimReader;
   observability?: Observability;
   pollIntervalMs?: number;
   debounceMs?: number;
@@ -109,7 +117,12 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
 
       const rawSnapshot = await deps.workspace.capture();
       await recordWindowObservations(deps, rawSnapshot, currentTaskId, tickNow);
-      const snapshot = filterSnapshotForTaskSave(rawSnapshot, await readFollowsWindowIds(deps), currentTaskId);
+      const snapshot = filterSnapshotForTaskSave(
+        rawSnapshot,
+        await readFollowsWindowIds(deps),
+        currentTaskId,
+        await readTaskWindowClaims(deps),
+      );
       const fingerprint = snapshotFingerprint(snapshot);
       const lastFingerprint = lastSavedSnapshotByTask.get(currentTaskId);
 
@@ -293,11 +306,12 @@ export function filterSnapshotForTaskSave(
   snapshot: WorkspaceSnapshot,
   followsWindowIds: ReadonlySet<string> = new Set(),
   currentTaskId?: string,
+  taskWindowClaims: readonly TaskWindowClaim[] = [],
 ): WorkspaceSnapshot {
   if (!snapshot.activeWorkspace) return snapshot;
   const windows = snapshot.windows.filter(
     (window) =>
-      isTaskSnapshotEligibleWindow(window, currentTaskId)
+      isTaskSnapshotEligibleWindow(window, currentTaskId, taskWindowClaims)
       && (window.workspace === snapshot.activeWorkspace || followsWindowIds.has(String(window.id))),
   );
   const focusedWindowId =
@@ -312,13 +326,20 @@ export function filterSnapshotForTaskSave(
   };
 }
 
-function isTaskSnapshotEligibleWindow(window: WorkspaceSnapshot["windows"][number], currentTaskId?: string): boolean {
+function isTaskSnapshotEligibleWindow(
+  window: WorkspaceSnapshot["windows"][number],
+  currentTaskId?: string,
+  taskWindowClaims: readonly TaskWindowClaim[] = [],
+): boolean {
   const app = window.app.trim().toLowerCase();
   const bundle = typeof window.appBundleId === "string" ? window.appBundleId.trim().toLowerCase() : "";
   if (TASK_SNAPSHOT_APP_BLOCKLIST.has(app) || TASK_SNAPSHOT_BUNDLE_BLOCKLIST.has(bundle)) return false;
 
   const taggedTaskId = taskIdFromTaggedWindow(window);
-  return !taggedTaskId || !currentTaskId || taggedTaskId === currentTaskId;
+  if (taggedTaskId && currentTaskId && taggedTaskId !== currentTaskId) return false;
+
+  const claimedTaskId = taskIdFromWindowClaims(window, taskWindowClaims);
+  return !claimedTaskId || !currentTaskId || claimedTaskId === currentTaskId;
 }
 
 function taskIdFromTaggedWindow(window: WorkspaceSnapshot["windows"][number]): string | undefined {
@@ -333,10 +354,33 @@ function normalizeTaskId(value: string): string {
   return `task_${slug || "untitled"}`;
 }
 
+function taskIdFromWindowClaims(window: AerospaceWindow, claims: readonly TaskWindowClaim[]): string | undefined {
+  for (const claim of claims) {
+    if (taskWindowClaimMatches(window, claim)) return claim.task_id;
+  }
+  return undefined;
+}
+
+function taskWindowClaimMatches(window: AerospaceWindow, claim: TaskWindowClaim): boolean {
+  if (claim.window_id && String(window.id) === claim.window_id) return true;
+  const claimBundle = claim.app_bundle?.trim().toLowerCase();
+  const windowBundle = window.appBundleId?.trim().toLowerCase() || window.app.trim().toLowerCase();
+  const claimTitlePrefix = normalizeTitlePrefix(claim.title_prefix);
+  const windowTitlePrefix = normalizeTitlePrefix(window.title);
+  const bundleMatches = claimBundle ? claimBundle === windowBundle : true;
+  const titleMatches = claimTitlePrefix ? windowTitlePrefix?.startsWith(claimTitlePrefix) === true : true;
+  return Boolean((claimBundle || claimTitlePrefix) && bundleMatches && titleMatches);
+}
+
 async function readFollowsWindowIds(deps: AmbientWorkspaceSaverDeps): Promise<ReadonlySet<string>> {
   if (!deps.getFollowsWindowIds) return new Set();
   const ids = await deps.getFollowsWindowIds();
   return new Set(Array.from(ids, (id) => String(id)));
+}
+
+async function readTaskWindowClaims(deps: AmbientWorkspaceSaverDeps): Promise<readonly TaskWindowClaim[]> {
+  if (!deps.getTaskWindowClaims) return [];
+  return Array.from(await deps.getTaskWindowClaims());
 }
 
 // Adapter that lets the orchestrator wire its (Phase-2-pending) store-level
@@ -366,6 +410,7 @@ export function createAmbientWorkspaceSaverFromRuntime(
       actorId?: string;
     }) => Promise<unknown>;
     listFollowsWindows?: (input: { now: Date; ttlMs: number; minWorkspaceCount: number }) => Promise<Array<{ window_id: string }>>;
+    listTaskWindowClaims?: (input: { now: Date }) => Promise<TaskWindowClaim[]>;
   };
 
   const getCurrentTaskState: CurrentTaskStateReader = async () => {
@@ -422,6 +467,10 @@ export function createAmbientWorkspaceSaverFromRuntime(
           return follows.map((follow) => follow.window_id);
         }
       : undefined;
+  const getTaskWindowClaims: TaskWindowClaimReader | undefined =
+    typeof store.listTaskWindowClaims === "function"
+      ? async () => store.listTaskWindowClaims!({ now: runtime.now() })
+      : undefined;
 
   return createAmbientWorkspaceSaver({
     workspace,
@@ -430,6 +479,7 @@ export function createAmbientWorkspaceSaverFromRuntime(
     isManualModeActive,
     recordWindowObservation,
     getFollowsWindowIds,
+    getTaskWindowClaims,
     observability: runtime.observability,
     pollIntervalMs: overrides.pollIntervalMs,
     debounceMs: overrides.debounceMs,

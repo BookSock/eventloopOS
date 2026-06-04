@@ -1205,6 +1205,48 @@ function runGatewayStoreContract(
         await harness.cleanup();
       }
     });
+
+    it("records task-owned window claims and hides expired claims", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      try {
+        await harness.store.createTask({
+          taskId: "task_claims_b",
+          primaryAnchor: { kind: "codex_thread", id: "thread-claims-b" },
+          capturedLayout: { backend: "aerospace", windows: [] },
+          now,
+        });
+        const claim = await harness.store.claimTaskWindow({
+          taskId: "task_claims_b",
+          appBundle: "com.google.Chrome",
+          titlePrefix: "Playwright Report",
+          source: "codex",
+          ttlMs: 60_000,
+          now: new Date("2026-05-06T12:00:00.000Z"),
+        });
+
+        assert.equal(claim.task_id, "task_claims_b");
+        assert.equal(claim.app_bundle, "com.google.chrome");
+        assert.equal(claim.title_prefix, "playwright report");
+        assert.equal(claim.expires_at, "2026-05-06T12:01:00.000Z");
+
+        const active = await harness.store.listTaskWindowClaims({
+          taskId: "task_claims_b",
+          now: new Date("2026-05-06T12:00:30.000Z"),
+        });
+        assert.equal(active.length, 1);
+        assert.equal(active[0]?.claim_id, claim.claim_id);
+
+        const expired = await harness.store.listTaskWindowClaims({
+          taskId: "task_claims_b",
+          now: new Date("2026-05-06T12:01:01.000Z"),
+        });
+        assert.deepEqual(expired, []);
+      } finally {
+        await harness.cleanup();
+      }
+    });
   });
 }
 

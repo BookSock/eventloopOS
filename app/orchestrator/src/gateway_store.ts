@@ -46,6 +46,8 @@ import {
   recordWindowWorkspaceObservation,
   listFollowsWindows,
   addFollowsWindowExclusion,
+  claimTaskWindow,
+  listTaskWindowClaims,
   pruneWindowWorkspaceObservations,
   saveTaskWorkspaceSnapshot,
   upsertAgentRun,
@@ -68,6 +70,7 @@ import {
   type StoredActionAttempt,
   type StoredEventResult,
   type TaskSessionTerminalRefRecord,
+  type TaskWindowClaimRecord,
   type TaskWorkspaceSnapshotRecord,
   type OnboardingRejectionRecord,
   type OnboardingApprovalBatchRecord,
@@ -196,6 +199,16 @@ export type GatewayStore = {
   }): Promise<WindowWorkspaceObservationRecord>;
   listFollowsWindows(input: { now: Date; ttlMs: number; minWorkspaceCount?: number }): Promise<FollowsWindowRecord[]>;
   addFollowsWindowExclusion(input: { appBundle?: string; titleSubstring?: string; now: Date }): Promise<FollowsWindowExclusionRecord>;
+  claimTaskWindow(input: {
+    taskId: string;
+    windowId?: string;
+    appBundle?: string;
+    titlePrefix?: string;
+    source?: string;
+    now: Date;
+    ttlMs?: number;
+  }): Promise<TaskWindowClaimRecord>;
+  listTaskWindowClaims(input: { now: Date; taskId?: string }): Promise<TaskWindowClaimRecord[]>;
   pruneWindowWorkspaceObservations(olderThan: Date): Promise<number>;
   createPaperTrigger(input: PaperTriggerCreateInput, now: Date): Promise<PaperTriggerRecord>;
   listPaperTriggers(filter?: { task_id?: string; only_enabled?: boolean }): Promise<PaperTriggerRecord[]>;
@@ -652,6 +665,12 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     async addFollowsWindowExclusion(input) {
       return addFollowsWindowExclusion(store, input);
     },
+    async claimTaskWindow(input) {
+      return claimTaskWindow(store, input);
+    },
+    async listTaskWindowClaims(input) {
+      return listTaskWindowClaims(store, input);
+    },
     async pruneWindowWorkspaceObservations(olderThan) {
       return pruneWindowWorkspaceObservations(store, olderThan);
     },
@@ -894,6 +913,12 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async addFollowsWindowExclusion(input) {
       return store.addFollowsWindowExclusion(input);
+    },
+    async claimTaskWindow(input) {
+      return store.claimTaskWindow(input);
+    },
+    async listTaskWindowClaims(input) {
+      return store.listTaskWindowClaims(input);
     },
     async pruneWindowWorkspaceObservations(olderThan) {
       return store.pruneWindowWorkspaceObservations(olderThan);

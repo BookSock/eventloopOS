@@ -92,6 +92,7 @@ export type InMemoryStore = {
   currentTaskState?: { value: CurrentTaskStateRecord };
   windowWorkspaceObservations?: Map<string, WindowWorkspaceObservationRecord>;
   followsWindowExclusions?: Map<string, FollowsWindowExclusionRecord>;
+  taskWindowClaims?: Map<string, TaskWindowClaimRecord>;
   paperTriggers?: Map<string, PaperTriggerRecord>;
   paperTriggerFirings?: Map<string, true>;
 };
@@ -175,6 +176,17 @@ export type FollowsWindowExclusionRecord = {
   app_bundle?: string;
   title_substring?: string;
   created_at: string;
+};
+
+export type TaskWindowClaimRecord = {
+  claim_id: string;
+  task_id: string;
+  window_id?: string;
+  app_bundle?: string;
+  title_prefix?: string;
+  source?: string;
+  created_at: string;
+  expires_at?: string;
 };
 
 export const FOLLOWS_TITLE_PREFIX_MAX_LEN = 40;
@@ -750,6 +762,56 @@ export function addFollowsWindowExclusion(
   return record;
 }
 
+export function claimTaskWindow(
+  store: InMemoryStore,
+  input: {
+    taskId: string;
+    windowId?: string;
+    appBundle?: string;
+    titlePrefix?: string;
+    source?: string;
+    now: Date;
+    ttlMs?: number;
+  },
+): TaskWindowClaimRecord {
+  const claims = store.taskWindowClaims ?? new Map<string, TaskWindowClaimRecord>();
+  store.taskWindowClaims = claims;
+  const windowId = normalizeOptionalText(input.windowId);
+  const appBundle = normalizeOptionalText(input.appBundle)?.toLowerCase();
+  const titlePrefix = normalizeTitlePrefix(input.titlePrefix);
+  if (!windowId && !appBundle && !titlePrefix) {
+    throw new Error("task window claim needs windowId, appBundle, or titlePrefix");
+  }
+  const key = taskWindowClaimKey(input.taskId, windowId, appBundle, titlePrefix);
+  const timestamp = input.now.toISOString();
+  const expiresAt = input.ttlMs && input.ttlMs > 0 ? new Date(input.now.getTime() + input.ttlMs).toISOString() : undefined;
+  const record: TaskWindowClaimRecord = {
+    claim_id: `twc_${stableId(key)}`,
+    task_id: input.taskId,
+    window_id: windowId,
+    app_bundle: appBundle,
+    title_prefix: titlePrefix,
+    source: normalizeOptionalText(input.source),
+    created_at: timestamp,
+    expires_at: expiresAt,
+  };
+  claims.set(record.claim_id, record);
+  return record;
+}
+
+export function listTaskWindowClaims(
+  store: InMemoryStore,
+  input: { now: Date; taskId?: string },
+): TaskWindowClaimRecord[] {
+  const claims = store.taskWindowClaims;
+  if (!claims) return [];
+  const nowMs = input.now.getTime();
+  return [...claims.values()]
+    .filter((claim) => !input.taskId || claim.task_id === input.taskId)
+    .filter((claim) => !claim.expires_at || Date.parse(claim.expires_at) >= nowMs)
+    .sort((a, b) => a.claim_id.localeCompare(b.claim_id));
+}
+
 function isFollowsExcluded(
   window: { app_bundle?: string; title_prefix?: string },
   exclusions: FollowsWindowExclusionRecord[],
@@ -787,6 +849,10 @@ export function pruneWindowWorkspaceObservations(
 
 function observationKey(windowId: string, workspaceId: string): string {
   return `${windowId} ${workspaceId}`;
+}
+
+function taskWindowClaimKey(taskId: string, windowId?: string, appBundle?: string, titlePrefix?: string): string {
+  return `${taskId} ${windowId ?? ""} ${appBundle ?? ""} ${titlePrefix ?? ""}`;
 }
 
 export function buildReviewArtifactsFromEvent(

@@ -22,6 +22,7 @@ const MAP_KEYS = [
   "taskLayouts",
   "windowWorkspaceObservations",
   "followsWindowExclusions",
+  "taskWindowClaims",
   "paperTriggers",
   "paperTriggerFirings",
 ] as const;

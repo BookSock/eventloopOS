@@ -157,13 +157,13 @@ Guarantees today:
 - includes active-workspace windows and follows windows
 - excludes eventloopOS/AeroSpace/Tailscale system windows
 - excludes windows explicitly tagged for a different `[task:...]`
+- excludes windows claimed by another task through `POST /task-window-claims`
 
 Why it matters: this is the primitive that makes window layout memory feel
 automatic instead of like a manual "save workspace" button.
 
-Known gap: untagged windows spawned by a background agent can still be hard to
-attribute. The current safe rule protects explicitly tagged foreign-task windows
-without blocking user-created untagged windows.
+Known gap: the first attribution hook now exists, but Codex/Claude/browser
+tooling still needs to call it automatically when they spawn windows.
 
 Proof:
 
@@ -171,6 +171,41 @@ Proof:
 - Mac Studio human demo `proofs.ambient_autosave.ok=true`
 
 Status: dogfood; needs better foreign-window attribution before public API.
+
+## Task Window Claims
+
+Primitive: let an agent or tool declare that a window belongs to a specific
+task, even if the window appears on the user's current workspace.
+
+HTTP surface:
+
+- `POST /task-window-claims`
+- `GET /task-window-claims`
+
+Claim identity:
+
+- exact `window_id`
+- `app_bundle`
+- `title_prefix`
+- optional `ttl_ms`
+- optional `source`
+
+Useful standalone uses:
+
+- background Codex/Claude test opens Chrome, claims it for its task, and
+  ambient autosave avoids polluting the human's active paper
+- browser automation can claim Playwright/Chrome report windows before the
+  user sees them
+- tools can inspect current claims to explain why a window was ignored
+
+Proof:
+
+- `app/orchestrator/src/routes/task_window_claims.test.ts`
+- `app/orchestrator/src/agents/ambient_workspace_saver.test.ts`
+- `app/orchestrator/test/gateway_store_conformance.test.ts`
+
+Status: dogfood. Automatic claim emitters for real agent runtimes are the next
+step.
 
 ## Follows Windows
 
@@ -508,7 +543,8 @@ Highest-leverage steps before calling this a real primitives library:
 3. Extend latency budgets from workspace HTTP proof to queue lease and Mac
    hotkey-to-feedback path.
 4. Add a public "workspace backend adapter" guide with a fake backend example.
-5. Add attribution hooks for foreign windows spawned by background agents.
+5. Add automatic claim emitters for foreign windows spawned by background
+   agents.
 6. Add user-facing follows/unfollows rules and durable rule export/import.
 7. Publish example apps: "restore my desk," "agent attention queue," and
    "window hotkey router."

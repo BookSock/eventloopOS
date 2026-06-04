@@ -20,6 +20,7 @@ import { handleModesRoute } from "./routes/modes.js";
 import { handleQueueRoute } from "./routes/queue.js";
 import { handleReadingQueueRoute } from "./routes/reading_queue.js";
 import { handleTaskSessionsRoute } from "./routes/task_sessions.js";
+import { handleTaskWindowClaimsRoute } from "./routes/task_window_claims.js";
 import { handleTasksRoute } from "./routes/tasks.js";
 import { handleTriggersRoute } from "./routes/triggers.js";
 import { handleWorkspaceRoute } from "./routes/workspace.js";
@@ -194,6 +195,26 @@ export function createGatewayServer(options: GatewayServerOptions): Server {
           observability,
           routeNameForPath(request.method, context.url.pathname) ?? "follows_windows",
           followsWindowsRoute,
+          startedAt,
+        );
+      }
+
+      const taskWindowClaimsRoute = await handleTaskWindowClaimsRoute({
+        method: request.method,
+        pathname: context.url.pathname,
+        url: context.url,
+        readJsonBody: () => readJsonBody(request),
+        runtime,
+        now: now(),
+        requestId: context.requestId,
+      });
+      if (taskWindowClaimsRoute) {
+        return sendObservedRouteResult(
+          response,
+          context,
+          observability,
+          routeNameForPath(request.method, context.url.pathname) ?? "task_window_claims",
+          taskWindowClaimsRoute,
           startedAt,
         );
       }

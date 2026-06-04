@@ -27,6 +27,7 @@ describe("Postgres migrations", () => {
       "0017_window_identity_keys.sql",
       "0018_tasks_dormant_at.sql",
       "0019_follows_window_exclusions.sql",
+      "0020_task_window_claims.sql",
     ]);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
@@ -81,5 +82,8 @@ describe("Postgres migrations", () => {
     assert.match(sql, /tasks_dormant_at_idx/);
     assert.match(sql, /CREATE TABLE follows_window_exclusions/);
     assert.match(sql, /CHECK \(app_bundle IS NOT NULL OR title_substring IS NOT NULL\)/);
+    assert.match(sql, /CREATE TABLE IF NOT EXISTS task_window_claims/);
+    assert.match(sql, /REFERENCES tasks\(task_id\) ON DELETE CASCADE/);
+    assert.match(sql, /idx_task_window_claims_identity/);
   });
 });

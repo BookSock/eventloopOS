@@ -46,6 +46,7 @@ import {
   type WindowWorkspaceObservationRecord,
   type FollowsWindowRecord,
   type FollowsWindowExclusionRecord,
+  type TaskWindowClaimRecord,
   type PaperTriggerRecord,
   type PaperTriggerCreateInput,
   type PaperTriggerPatch,
@@ -1007,6 +1008,64 @@ export class PostgresQueueStore {
       [exclusionId, appBundle, titleSubstring, timestamp],
     );
     return rowToFollowsWindowExclusionRecord(result.rows[0]);
+  }
+
+  async claimTaskWindow(input: {
+    taskId: string;
+    windowId?: string;
+    appBundle?: string;
+    titlePrefix?: string;
+    source?: string;
+    now: Date;
+    ttlMs?: number;
+  }): Promise<TaskWindowClaimRecord> {
+    const windowId = normalizeOptionalText(input.windowId) ?? null;
+    const appBundle = normalizeOptionalText(input.appBundle)?.toLowerCase() ?? null;
+    const titlePrefix = normalizeOptionalText(input.titlePrefix)?.toLowerCase().slice(0, 40) ?? null;
+    if (!windowId && !appBundle && !titlePrefix) {
+      throw new Error("task window claim needs windowId, appBundle, or titlePrefix");
+    }
+    const claimId = `twc_${stableId(`${input.taskId}_${windowId ?? ""}_${appBundle ?? ""}_${titlePrefix ?? ""}`)}`;
+    const timestamp = input.now.toISOString();
+    const expiresAt = input.ttlMs && input.ttlMs > 0 ? new Date(input.now.getTime() + input.ttlMs).toISOString() : null;
+    const result = await this.pool.query(
+      `
+        INSERT INTO task_window_claims (
+          claim_id,
+          task_id,
+          window_id,
+          app_bundle,
+          title_prefix,
+          source,
+          created_at,
+          expires_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8::timestamptz)
+        ON CONFLICT (claim_id) DO UPDATE SET
+          source = COALESCE(EXCLUDED.source, task_window_claims.source),
+          expires_at = EXCLUDED.expires_at
+        RETURNING claim_id, task_id, window_id, app_bundle, title_prefix, source, created_at, expires_at
+      `,
+      [claimId, input.taskId, windowId, appBundle, titlePrefix, normalizeOptionalText(input.source) ?? null, timestamp, expiresAt],
+    );
+    return rowToTaskWindowClaimRecord(result.rows[0]);
+  }
+
+  async listTaskWindowClaims(input: { now: Date; taskId?: string }): Promise<TaskWindowClaimRecord[]> {
+    const values: unknown[] = [input.now.toISOString()];
+    const taskFilter = input.taskId ? "AND task_id = $2" : "";
+    if (input.taskId) values.push(input.taskId);
+    const result = await this.pool.query(
+      `
+        SELECT claim_id, task_id, window_id, app_bundle, title_prefix, source, created_at, expires_at
+        FROM task_window_claims
+        WHERE (expires_at IS NULL OR expires_at >= $1::timestamptz)
+          ${taskFilter}
+        ORDER BY claim_id ASC
+      `,
+      values,
+    );
+    return result.rows.map(rowToTaskWindowClaimRecord);
   }
 
   async pruneWindowWorkspaceObservations(olderThan: Date): Promise<number> {
@@ -2379,6 +2438,25 @@ function rowToWindowWorkspaceObservation(row: Record<string, unknown>): WindowWo
   };
   if (typeof appBundle === "string" && appBundle.length > 0) record.app_bundle = appBundle;
   if (typeof titlePrefix === "string" && titlePrefix.length > 0) record.title_prefix = titlePrefix;
+  return record;
+}
+
+function rowToTaskWindowClaimRecord(row: Record<string, unknown>): TaskWindowClaimRecord {
+  const windowId = row.window_id;
+  const appBundle = row.app_bundle;
+  const titlePrefix = row.title_prefix;
+  const source = row.source;
+  const expiresAt = row.expires_at;
+  const record: TaskWindowClaimRecord = {
+    claim_id: String(row.claim_id),
+    task_id: String(row.task_id),
+    created_at: requiredDateToIso(row.created_at),
+  };
+  if (typeof windowId === "string" && windowId.length > 0) record.window_id = windowId;
+  if (typeof appBundle === "string" && appBundle.length > 0) record.app_bundle = appBundle;
+  if (typeof titlePrefix === "string" && titlePrefix.length > 0) record.title_prefix = titlePrefix;
+  if (typeof source === "string" && source.length > 0) record.source = source;
+  if (expiresAt) record.expires_at = requiredDateToIso(expiresAt);
   return record;
 }
 

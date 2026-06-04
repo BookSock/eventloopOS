@@ -385,6 +385,43 @@ describe("ambient_workspace_saver", () => {
     assert.equal(filtered.focusedWindowId, undefined, "focused foreign-task window must not be persisted as current paper focus");
   });
 
+  it("does not save windows claimed by another task into the current paper", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 2,
+      windows: [
+        { id: 1, app: "TextEdit", title: "Reply", workspace: "paper-a" },
+        { id: 2, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "Playwright report", workspace: "paper-a" },
+      ],
+    };
+
+    const filtered = filterSnapshotForTaskSave(snapshot, new Set(), "task_paper_a", [
+      { task_id: "task_paper_b", app_bundle: "com.google.chrome", title_prefix: "playwright" },
+    ]);
+
+    assert.deepEqual(filtered.windows.map((window) => window.id), [1]);
+    assert.equal(filtered.focusedWindowId, undefined, "focused foreign-claimed window must not be persisted");
+  });
+
+  it("keeps windows claimed by the current task", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 2,
+      windows: [
+        { id: 2, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "Playwright report", workspace: "paper-a" },
+      ],
+    };
+
+    const filtered = filterSnapshotForTaskSave(snapshot, new Set(), "task_paper_a", [
+      { task_id: "task_paper_a", window_id: "2" },
+    ]);
+
+    assert.deepEqual(filtered.windows.map((window) => window.id), [2]);
+    assert.equal(filtered.focusedWindowId, 2);
+  });
+
   it("keeps user-created untagged windows on the active paper", async () => {
     const snapshot: WorkspaceSnapshot = {
       backend: "aerospace",
