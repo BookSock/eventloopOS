@@ -144,6 +144,7 @@ let followsWindowOrchestrator: FollowsWindowOrchestrator | undefined;
 if (process.env.EVENTLOOPOS_FOLLOWS_WINDOWS === "1" && workspace) {
   const runtime = createRuntime({
     store: gatewayRuntime.store,
+    taskSessions,
     workspace,
     observability,
   });

@@ -6,6 +6,7 @@ import type { AerospaceCommand, WorkspaceSnapshot } from "../workspace/aerospace
 import { focusWorkspacePlan, moveToWorkspacePlan } from "../workspace/aerospace.js";
 import type { TaskWindowClaimRecord } from "../store.js";
 import { normalizeTitlePrefix } from "../store.js";
+import type { TaskRuntimeSession } from "../task_sessions/types.js";
 
 export const DEFAULT_FOLLOWS_POLL_MS = 500;
 export const DEFAULT_FOLLOWS_TTL_HOURS = 24;
@@ -13,6 +14,7 @@ export const DEFAULT_FOLLOWS_PRUNE_MS = 60 * 60 * 1_000;
 
 export type FocusedWorkspaceReader = () => Promise<string | undefined>;
 export type AerospaceCommandRunner = (command: AerospaceCommand) => Promise<unknown>;
+export type TaskSessionReader = () => Promise<Iterable<TaskRuntimeSession>> | Iterable<TaskRuntimeSession>;
 
 export type FollowsWindowOrchestratorDeps = {
   store: Pick<
@@ -27,6 +29,7 @@ export type FollowsWindowOrchestratorDeps = {
   workspace: Pick<WorkspaceController, "capture">;
   getFocusedWorkspace: FocusedWorkspaceReader;
   runAerospaceCommand: AerospaceCommandRunner;
+  listTaskSessions?: TaskSessionReader;
   getProcessAncestorPids?: (pid: number) => Promise<Iterable<number>> | Iterable<number>;
   observability?: Observability;
   pollIntervalMs?: number;
@@ -338,7 +341,11 @@ async function redirectForeignClaimedWindows(
   },
 ): Promise<{ moved: number; skipped: number; movedWindowIds: Set<string> }> {
   const foreignClaims = input.claims.filter((claim) => claim.task_id !== input.currentTaskId);
-  if (foreignClaims.length === 0) return { moved: 0, skipped: 0, movedWindowIds: new Set() };
+  const sessionOwners = await readTaskSessionOwners(deps);
+  const foreignSessionOwners = sessionOwners.filter((owner) => owner.taskId !== input.currentTaskId);
+  if (foreignClaims.length === 0 && foreignSessionOwners.length === 0) {
+    return { moved: 0, skipped: 0, movedWindowIds: new Set() };
+  }
 
   const snapshot = input.snapshot ?? await deps.workspace.capture();
   const movedWindowIds = new Set<string>();
@@ -350,7 +357,7 @@ async function redirectForeignClaimedWindows(
     if (window.workspace !== input.focusedWorkspace) continue;
     if (SYSTEM_APPS_BLOCKLIST.has(window.app.toLowerCase())) continue;
 
-    const matchingTaskIds = await taskIdsMatchingWindowClaim(deps, window, input.claims);
+    const matchingTaskIds = await taskIdsMatchingWindowOwner(deps, window, input.claims, sessionOwners);
     if (matchingTaskIds.size === 0 || matchingTaskIds.has(input.currentTaskId)) continue;
     if (matchingTaskIds.size > 1) {
       skipped += 1;
@@ -449,13 +456,26 @@ async function redirectForeignClaimedWindows(
   return { moved, skipped, movedWindowIds };
 }
 
-async function taskIdsMatchingWindowClaim(
+async function taskIdsMatchingWindowOwner(
   deps: FollowsWindowOrchestratorDeps,
   window: WorkspaceSnapshot["windows"][number],
   claims: readonly TaskWindowClaimRecord[],
+  sessionOwners: readonly TaskSessionOwner[],
 ): Promise<Set<string>> {
   const matched = new Set<string>();
   let ancestors: Set<number> | undefined;
+
+  async function readAncestors(): Promise<Set<number>> {
+    if (!ancestors) {
+      if (!isPositiveInteger(window.pid)) {
+        ancestors = new Set();
+        return ancestors;
+      }
+      const readAncestorPids = deps.getProcessAncestorPids ?? defaultReadProcessAncestorPids;
+      ancestors = new Set([window.pid, ...Array.from(await readAncestorPids(window.pid), (pid) => Number(pid)).filter(isPositiveInteger)]);
+    }
+    return ancestors;
+  }
 
   for (const claim of claims) {
     if (claim.window_id && String(window.id) === claim.window_id) {
@@ -463,11 +483,7 @@ async function taskIdsMatchingWindowClaim(
       continue;
     }
     if (isPositiveInteger(claim.process_root_pid) && isPositiveInteger(window.pid)) {
-      if (!ancestors) {
-        const readAncestors = deps.getProcessAncestorPids ?? defaultReadProcessAncestorPids;
-        ancestors = new Set([window.pid, ...Array.from(await readAncestors(window.pid), (pid) => Number(pid)).filter(isPositiveInteger)]);
-      }
-      if (ancestors.has(claim.process_root_pid)) {
+      if ((await readAncestors()).has(claim.process_root_pid)) {
         matched.add(claim.task_id);
         continue;
       }
@@ -475,7 +491,43 @@ async function taskIdsMatchingWindowClaim(
     if (claimMatchesWindowIdentity(window, claim)) matched.add(claim.task_id);
   }
 
+  if (isPositiveInteger(window.pid)) {
+    for (const owner of sessionOwners) {
+      if (setIntersects(owner.pids, await readAncestors())) {
+        matched.add(owner.taskId);
+      }
+    }
+  }
+
   return matched;
+}
+
+type TaskSessionOwner = {
+  taskId: string;
+  pids: Set<number>;
+};
+
+async function readTaskSessionOwners(deps: FollowsWindowOrchestratorDeps): Promise<TaskSessionOwner[]> {
+  if (!deps.listTaskSessions) return [];
+  const sessions = Array.from(await deps.listTaskSessions());
+  return sessions
+    .map(sessionOwnerFromRuntimeSession)
+    .filter((owner): owner is TaskSessionOwner => owner !== undefined && owner.pids.size > 0);
+}
+
+function sessionOwnerFromRuntimeSession(session: TaskRuntimeSession): TaskSessionOwner | undefined {
+  if (!isRecord(session) || typeof session.task_id !== "string" || !session.task_id) return undefined;
+  const pids = new Set<number>();
+  for (const key of ["pid", "process_id", "agent_pid", "terminal_pid", "root_pid"]) {
+    addPid(pids, session[key]);
+  }
+  for (const key of ["pids", "process_pids", "agent_pids"]) {
+    const values = session[key];
+    if (Array.isArray(values)) {
+      for (const value of values) addPid(pids, value);
+    }
+  }
+  return { taskId: session.task_id, pids };
 }
 
 function claimMatchesWindowIdentity(window: WorkspaceSnapshot["windows"][number], claim: TaskWindowClaimRecord): boolean {
@@ -539,6 +591,22 @@ function isPositiveInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+function addPid(output: Set<number>, value: unknown): void {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  if (isPositiveInteger(parsed)) output.add(parsed);
+}
+
+function setIntersects(left: ReadonlySet<number>, right: ReadonlySet<number>): boolean {
+  for (const value of left) {
+    if (right.has(value)) return true;
+  }
+  return false;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 export type FollowsWindowOrchestratorRuntimeOptions = {
   pollIntervalMs?: number;
   ttlMs?: number;
@@ -549,6 +617,9 @@ export type FollowsWindowOrchestratorRuntimeOptions = {
 export function createFollowsWindowOrchestratorFromRuntime(
   runtime: {
     store: GatewayStore;
+    taskSessions?: {
+      listSessions?: () => Promise<TaskRuntimeSession[]> | TaskRuntimeSession[];
+    };
     workspace?: WorkspaceController;
     observability?: Observability;
     now: () => Date;
@@ -563,6 +634,9 @@ export function createFollowsWindowOrchestratorFromRuntime(
     workspace: runtime.workspace,
     getFocusedWorkspace,
     runAerospaceCommand,
+    listTaskSessions: typeof runtime.taskSessions?.listSessions === "function"
+      ? async () => runtime.taskSessions?.listSessions?.() ?? []
+      : undefined,
     observability: runtime.observability,
     pollIntervalMs: overrides.pollIntervalMs,
     ttlMs: overrides.ttlMs,

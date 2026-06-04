@@ -26,6 +26,7 @@ function makeDeps(overrides: Partial<{
     created_at: string;
   }>;
   taskWorkspaces: Record<string, string | undefined>;
+  taskSessions: Array<Record<string, unknown>>;
 }> = {}): {
   deps: FollowsWindowOrchestratorDeps;
   ranCommands: AerospaceCommand[];
@@ -89,6 +90,9 @@ function makeDeps(overrides: Partial<{
     },
     async getFocusedWorkspace() {
       return overrides.focusedWorkspace === undefined ? "ws-2" : overrides.focusedWorkspace;
+    },
+    async listTaskSessions() {
+      return overrides.taskSessions ?? [];
     },
     async runAerospaceCommand(command) {
       if (overrides.runError) throw overrides.runError;
@@ -260,6 +264,39 @@ describe("follows_window_orchestrator", () => {
       ["move-node-to-workspace", "--window-id", "300", "ws-b"],
       ["workspace", "ws-a"],
     ]);
+  });
+
+  it("moves a task-session descendant window away before ambient autosave creates a claim", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "ws-a",
+      windows: [
+        { id: 100, app: "Ghostty", title: "paper A", workspace: "ws-a", pid: 100 },
+        { id: 302, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "Task B Playwright", workspace: "ws-a", pid: 520 },
+      ],
+    };
+    const { deps, ranCommands, activities } = makeDeps({
+      focusedWorkspace: "ws-a",
+      follows: [],
+      snapshot,
+      claims: [],
+      taskSessions: [
+        { id: "session_b", task_id: "task_b", provider: "codex", pid: 500 },
+      ],
+      taskWorkspaces: { task_b: "ws-b" },
+    });
+
+    const orch = createFollowsWindowOrchestrator(deps);
+    const result = await orch.tick();
+
+    assert.equal(result.decision, "switch_handled");
+    if (result.decision !== "switch_handled") return;
+    assert.equal(result.foreignClaimedMoved, 1);
+    assert.deepEqual(ranCommands.map((command) => command.args), [
+      ["move-node-to-workspace", "--window-id", "302", "ws-b"],
+      ["workspace", "ws-a"],
+    ]);
+    assert.ok(activities.some((activity) => activity.type === "foreign_claimed_window_redirected"));
   });
 
   it("moves a detached agent-claimed browser window away from the user's current paper", async () => {

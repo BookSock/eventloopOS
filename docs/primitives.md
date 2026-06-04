@@ -201,6 +201,10 @@ Guarantees today:
   queue clients decode these fields so demo/debug UI can inspect ancestry too
 - expands process-root task-window claims into concrete window claims when a
   background agent launch produces descendant app windows
+- follows-window redirect also reads bound task-session PIDs directly, so a
+  background agent's descendant window can be moved off the user's current
+  paper on the fast follows poll before ambient autosave creates a concrete
+  claim
 - if task B's agent opens a visible Chrome window while the human is reviewing
   task A, the task B claim keeps that Chrome window out of task A's saved
   paper, and the follows-window orchestrator moves it back to task B's
@@ -267,8 +271,9 @@ Useful standalone uses:
   appear, moves them back to the owner task workspace when known, and restores
   human focus; `--wait-ms` covers slow LaunchServices/Chrome startup
 - a bound Codex/Claude task session exposes `pid`/`agent_pid`/`terminal_pid`,
-  and ambient autosave claims descendant app windows even when the window pops
-  onto the human's current paper
+  and the follows-window orchestrator redirects descendant app windows before
+  they can linger on the human's current paper; ambient autosave also converts
+  those descendants into concrete task-window claims
 - a launch wrapper claims `process_root_pid` before starting a visible browser
   test, then ambient autosave converts the descendant Chrome window into a
   concrete claim for that background task
@@ -298,8 +303,9 @@ Status: dogfood. Browser context capture has an automatic emitter; generic
 routed window resources are auto-claimed; tagged windows are inferred from OS
 snapshots; process-tree launches are claimed when session pid metadata exists;
 command-wrapped untagged launches are pre-claimed by process root and then by
-window id/title/bundle; claimed windows that appear on the active paper are
-redirected to the owning task workspace when possible.
+window id/title/bundle; claimed windows and bound task-session descendant
+windows that appear on the active paper are redirected to the owning task
+workspace when possible.
 
 ## Follows Windows
 
