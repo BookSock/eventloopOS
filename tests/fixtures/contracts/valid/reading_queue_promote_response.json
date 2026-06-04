@@ -1,0 +1,18 @@
+{
+  "schema": "ReadingQueuePromoteResponse",
+  "data": {
+    "ok": true,
+    "promoted": [
+      {
+        "context_id": "browser_tab:launch",
+        "queue_item_id": "qit_reading_launch",
+        "review_packet_id": "pkt_reading_launch",
+        "event_id": "evt_reading_queue_launch",
+        "idempotent": false
+      }
+    ],
+    "promoted_count": 1,
+    "missing_context_ids": [],
+    "request_id": "req_reading_queue_promote"
+  }
+}

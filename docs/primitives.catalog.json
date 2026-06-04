@@ -363,6 +363,96 @@
         "result": {}
       }
     },
+    "ReadingQueueContextSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "captured_at", "event_id", "source"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "title": { "type": "string", "minLength": 1 },
+        "url": { "type": "string", "format": "uri" },
+        "captured_at": { "type": "string", "format": "date-time" },
+        "event_id": { "type": "string", "minLength": 1 },
+        "source": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ReadingQueueListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contexts", "count", "request_id"],
+      "properties": {
+        "contexts": { "type": "array", "items": { "$ref": "#/components/schemas/ReadingQueueContextSummary" } },
+        "count": { "type": "integer", "minimum": 0 },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ReadingQueuePromoteRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "context_ids": {
+          "anyOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          ]
+        },
+        "context_id": {
+          "anyOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          ]
+        },
+        "actor_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ReadingQueuePromotionResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["context_id", "event_id", "idempotent"],
+      "properties": {
+        "context_id": { "type": "string", "minLength": 1 },
+        "queue_item_id": { "type": "string", "minLength": 1 },
+        "review_packet_id": { "type": "string", "minLength": 1 },
+        "event_id": { "type": "string", "minLength": 1 },
+        "idempotent": { "type": "boolean" }
+      }
+    },
+    "ReadingQueuePromoteResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "promoted", "promoted_count", "missing_context_ids", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "promoted": { "type": "array", "items": { "$ref": "#/components/schemas/ReadingQueuePromotionResult" } },
+        "promoted_count": { "type": "integer", "minimum": 0 },
+        "missing_context_ids": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ReadingQueueAutoPromoteRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "min_age_seconds": { "type": "number", "minimum": 0 },
+        "actor_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ReadingQueueAutoPromoteResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "evaluated_count", "aged_count", "promoted_count", "promoted", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "paused": { "type": "boolean", "const": true },
+        "reason": { "type": "string", "const": "manual_mode_active" },
+        "manual_mode": { "$ref": "#/components/schemas/ManualModeState" },
+        "evaluated_count": { "type": "integer", "minimum": 0 },
+        "aged_count": { "type": "integer", "minimum": 0 },
+        "promoted_count": { "type": "integer", "minimum": 0 },
+        "promoted": { "type": "array", "items": { "$ref": "#/components/schemas/ReadingQueuePromotionResult" } },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "QueueItemWithPacket": {
       "type": "object",
       "additionalProperties": false,
@@ -1451,9 +1541,9 @@
       "status": "dogfood",
       "summary": "Promote idle unbound browser contexts into task_reading_queue papers manually or by age threshold.",
       "http": [
-        { "method": "GET", "path": "/reading-queue", "route_file": "app/orchestrator/src/routes/reading_queue.ts" },
-        { "method": "POST", "path": "/reading-queue/promote", "route_file": "app/orchestrator/src/routes/reading_queue.ts" },
-        { "method": "POST", "path": "/reading-queue/auto-promote", "route_file": "app/orchestrator/src/routes/reading_queue.ts" }
+        { "method": "GET", "path": "/reading-queue", "route_file": "app/orchestrator/src/routes/reading_queue.ts", "response_schema": "ReadingQueueListResponse" },
+        { "method": "POST", "path": "/reading-queue/promote", "route_file": "app/orchestrator/src/routes/reading_queue.ts", "request_schema": "ReadingQueuePromoteRequest", "response_schema": "ReadingQueuePromoteResponse" },
+        { "method": "POST", "path": "/reading-queue/auto-promote", "route_file": "app/orchestrator/src/routes/reading_queue.ts", "request_schema": "ReadingQueueAutoPromoteRequest", "response_schema": "ReadingQueueAutoPromoteResponse" }
       ],
       "code": ["app/orchestrator/src/routes/reading_queue.ts"],
       "proofs": [

@@ -1,0 +1,10 @@
+{
+  "schema": "ReadingQueuePromotionResult",
+  "data": {
+    "context_id": "browser_tab:launch",
+    "queue_item_id": "qit_reading_launch",
+    "review_packet_id": "pkt_reading_launch",
+    "event_id": "evt_reading_queue_launch",
+    "idempotent": false
+  }
+}

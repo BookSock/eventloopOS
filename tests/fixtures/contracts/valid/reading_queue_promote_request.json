@@ -1,0 +1,7 @@
+{
+  "schema": "ReadingQueuePromoteRequest",
+  "data": {
+    "context_ids": ["browser_tab:launch"],
+    "actor_id": "human_demo"
+  }
+}

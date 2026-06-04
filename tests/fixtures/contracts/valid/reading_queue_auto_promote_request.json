@@ -1,0 +1,7 @@
+{
+  "schema": "ReadingQueueAutoPromoteRequest",
+  "data": {
+    "min_age_seconds": 300,
+    "actor_id": "reading-queue-autopromote"
+  }
+}

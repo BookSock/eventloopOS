@@ -2215,7 +2215,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ReadingQueueListResponse"
                 }
               }
             },
@@ -2249,18 +2249,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/ReadingQueueAutoPromoteRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ReadingQueueAutoPromoteResponse"
                 }
               }
             },
@@ -2294,18 +2294,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/ReadingQueuePromoteRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ReadingQueuePromoteResponse"
                 }
               }
             },
@@ -4650,6 +4650,241 @@
           "ok",
           "item",
           "request_id"
+        ],
+        "type": "object"
+      },
+      "ReadingQueueAutoPromoteRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "actor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "min_age_seconds": {
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "ReadingQueueAutoPromoteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "aged_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "evaluated_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "manual_mode": {
+            "$ref": "#/components/schemas/ManualModeState"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "paused": {
+            "const": true,
+            "type": "boolean"
+          },
+          "promoted": {
+            "items": {
+              "$ref": "#/components/schemas/ReadingQueuePromotionResult"
+            },
+            "type": "array"
+          },
+          "promoted_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reason": {
+            "const": "manual_mode_active",
+            "type": "string"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "evaluated_count",
+          "aged_count",
+          "promoted_count",
+          "promoted",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "ReadingQueueContextSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "captured_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "event_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "url": {
+            "format": "uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "captured_at",
+          "event_id",
+          "source"
+        ],
+        "type": "object"
+      },
+      "ReadingQueueListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "contexts": {
+            "items": {
+              "$ref": "#/components/schemas/ReadingQueueContextSummary"
+            },
+            "type": "array"
+          },
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "contexts",
+          "count",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "ReadingQueuePromoteRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "actor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "context_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "context_ids": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "ReadingQueuePromoteResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "missing_context_ids": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "promoted": {
+            "items": {
+              "$ref": "#/components/schemas/ReadingQueuePromotionResult"
+            },
+            "type": "array"
+          },
+          "promoted_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "promoted",
+          "promoted_count",
+          "missing_context_ids",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "ReadingQueuePromotionResult": {
+        "additionalProperties": false,
+        "properties": {
+          "context_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "event_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "idempotent": {
+            "type": "boolean"
+          },
+          "queue_item_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "review_packet_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "context_id",
+          "event_id",
+          "idempotent"
         ],
         "type": "object"
       },

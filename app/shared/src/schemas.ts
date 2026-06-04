@@ -1292,6 +1292,81 @@ export const ContextRestoreFinishRequestSchema = z
   .passthrough();
 export type ContextRestoreFinishRequest = z.infer<typeof ContextRestoreFinishRequestSchema>;
 
+export const ReadingQueueContextSummarySchema = z
+  .object({
+    id,
+    title: nonEmpty,
+    url: z.string().url().optional(),
+    captured_at: isoDateTime,
+    event_id: id,
+    source: nonEmpty
+  })
+  .strict();
+export type ReadingQueueContextSummary = z.infer<typeof ReadingQueueContextSummarySchema>;
+
+export const ReadingQueueListResponseSchema = z
+  .object({
+    contexts: z.array(ReadingQueueContextSummarySchema),
+    count: z.number().int().nonnegative(),
+    request_id: id
+  })
+  .strict();
+export type ReadingQueueListResponse = z.infer<typeof ReadingQueueListResponseSchema>;
+
+export const ReadingQueuePromoteRequestSchema = z
+  .object({
+    context_ids: z.union([id, z.array(id)]).optional(),
+    context_id: z.union([id, z.array(id)]).optional(),
+    actor_id: id.optional()
+  })
+  .passthrough();
+export type ReadingQueuePromoteRequest = z.infer<typeof ReadingQueuePromoteRequestSchema>;
+
+export const ReadingQueuePromotionResultSchema = z
+  .object({
+    context_id: id,
+    queue_item_id: id.optional(),
+    review_packet_id: id.optional(),
+    event_id: id,
+    idempotent: z.boolean()
+  })
+  .strict();
+export type ReadingQueuePromotionResult = z.infer<typeof ReadingQueuePromotionResultSchema>;
+
+export const ReadingQueuePromoteResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    promoted: z.array(ReadingQueuePromotionResultSchema),
+    promoted_count: z.number().int().nonnegative(),
+    missing_context_ids: z.array(id),
+    request_id: id
+  })
+  .strict();
+export type ReadingQueuePromoteResponse = z.infer<typeof ReadingQueuePromoteResponseSchema>;
+
+export const ReadingQueueAutoPromoteRequestSchema = z
+  .object({
+    min_age_seconds: z.number().nonnegative().optional(),
+    actor_id: id.optional()
+  })
+  .passthrough();
+export type ReadingQueueAutoPromoteRequest = z.infer<typeof ReadingQueueAutoPromoteRequestSchema>;
+
+export const ReadingQueueAutoPromoteResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    paused: z.literal(true).optional(),
+    reason: z.literal("manual_mode_active").optional(),
+    manual_mode: ManualModeStateSchema.optional(),
+    evaluated_count: z.number().int().nonnegative(),
+    aged_count: z.number().int().nonnegative(),
+    promoted_count: z.number().int().nonnegative(),
+    promoted: z.array(ReadingQueuePromotionResultSchema),
+    request_id: id
+  })
+  .strict();
+export type ReadingQueueAutoPromoteResponse = z.infer<typeof ReadingQueueAutoPromoteResponseSchema>;
+
 export const OwnershipLockSchema = z
   .object({
     id,
@@ -1515,6 +1590,13 @@ export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   ContextRestoreRequestMaybeResponse: ContextRestoreRequestMaybeResponseSchema,
   ContextRestoreClaimRequest: ContextRestoreClaimRequestSchema,
   ContextRestoreFinishRequest: ContextRestoreFinishRequestSchema,
+  ReadingQueueContextSummary: ReadingQueueContextSummarySchema,
+  ReadingQueueListResponse: ReadingQueueListResponseSchema,
+  ReadingQueuePromoteRequest: ReadingQueuePromoteRequestSchema,
+  ReadingQueuePromotionResult: ReadingQueuePromotionResultSchema,
+  ReadingQueuePromoteResponse: ReadingQueuePromoteResponseSchema,
+  ReadingQueueAutoPromoteRequest: ReadingQueueAutoPromoteRequestSchema,
+  ReadingQueueAutoPromoteResponse: ReadingQueueAutoPromoteResponseSchema,
   OwnershipLock: OwnershipLockSchema,
   HookDecision: HookDecisionSchema,
   EvidenceReceipt: EvidenceReceiptSchema,

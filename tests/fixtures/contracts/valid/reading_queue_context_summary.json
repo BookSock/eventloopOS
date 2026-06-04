@@ -1,0 +1,11 @@
+{
+  "schema": "ReadingQueueContextSummary",
+  "data": {
+    "id": "browser_tab:launch",
+    "title": "Launch doc",
+    "url": "https://example.test/launch",
+    "captured_at": "2026-05-06T17:00:00Z",
+    "event_id": "evt_browser_ctx_123",
+    "source": "browser"
+  }
+}
