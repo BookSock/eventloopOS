@@ -4621,7 +4621,7 @@ describe("orchestrator gateway API", () => {
       const exclusionsBody = await exclusionsResponse.json() as {
         ok: boolean;
         count: number;
-        exclusions: Array<{ title_substring?: string }>;
+        exclusions: Array<{ exclusion_id: string; title_substring?: string }>;
       };
       assert.equal(exclusionsResponse.status, 200);
       assert.equal(exclusionsBody.ok, true);
@@ -4630,6 +4630,18 @@ describe("orchestrator gateway API", () => {
 
       const after = await store.listFollowsWindows({ now: fixedNow, ttlMs: 24 * 60 * 60 * 1_000 });
       assert.deepEqual(after, []);
+
+      const deleteResponse = await fetch(
+        `${voiceBaseUrl}/follows-windows/exclusions/${encodeURIComponent(exclusionsBody.exclusions[0]!.exclusion_id)}`,
+        { method: "DELETE" },
+      );
+      const deleteBody = await deleteResponse.json() as { ok: boolean; exclusion?: { title_substring?: string } };
+      assert.equal(deleteResponse.status, 200);
+      assert.equal(deleteBody.ok, true);
+      assert.equal(deleteBody.exclusion?.title_substring, "slack");
+
+      const restored = await store.listFollowsWindows({ now: fixedNow, ttlMs: 24 * 60 * 60 * 1_000 });
+      assert.equal(restored.length, 1);
     } finally {
       await new Promise<void>((resolve, reject) => {
         voiceServer.close((error) => (error ? reject(error) : resolve()));

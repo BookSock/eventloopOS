@@ -1023,6 +1023,14 @@ function runGatewayStoreContract(
           ttlMs: 24 * 60 * 60 * 1_000,
         });
         assert.deepEqual(excluded, [], "explicit exclusions must stop accidental sticky follows");
+
+        const removed = await harness.store.deleteFollowsWindowExclusion(exclusions[0]!.exclusion_id);
+        assert.equal(removed?.title_substring, "team-eng");
+        const restored = await harness.store.listFollowsWindows({
+          now: new Date("2026-05-09T09:03:00.000Z"),
+          ttlMs: 24 * 60 * 60 * 1_000,
+        });
+        assert.equal(restored.length, 1, "deleting exclusions must let follows candidates reappear");
       } finally {
         await harness.cleanup();
       }

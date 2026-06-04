@@ -47,6 +47,7 @@ import {
   listFollowsWindows,
   addFollowsWindowExclusion,
   listFollowsWindowExclusions,
+  deleteFollowsWindowExclusion,
   claimTaskWindow,
   listTaskWindowClaims,
   pruneWindowWorkspaceObservations,
@@ -201,6 +202,7 @@ export type GatewayStore = {
   listFollowsWindows(input: { now: Date; ttlMs: number; minWorkspaceCount?: number }): Promise<FollowsWindowRecord[]>;
   addFollowsWindowExclusion(input: { appBundle?: string; titleSubstring?: string; now: Date }): Promise<FollowsWindowExclusionRecord>;
   listFollowsWindowExclusions(): Promise<FollowsWindowExclusionRecord[]>;
+  deleteFollowsWindowExclusion(exclusionId: string): Promise<FollowsWindowExclusionRecord | undefined>;
   claimTaskWindow(input: {
     taskId: string;
     windowId?: string;
@@ -671,6 +673,9 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     async listFollowsWindowExclusions() {
       return listFollowsWindowExclusions(store);
     },
+    async deleteFollowsWindowExclusion(exclusionId) {
+      return deleteFollowsWindowExclusion(store, exclusionId);
+    },
     async claimTaskWindow(input) {
       return claimTaskWindow(store, input);
     },
@@ -922,6 +927,9 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     },
     async listFollowsWindowExclusions() {
       return store.listFollowsWindowExclusions();
+    },
+    async deleteFollowsWindowExclusion(exclusionId) {
+      return store.deleteFollowsWindowExclusion(exclusionId);
     },
     async claimTaskWindow(input) {
       return store.claimTaskWindow(input);

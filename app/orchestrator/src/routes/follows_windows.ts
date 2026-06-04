@@ -19,6 +19,29 @@ export async function handleFollowsWindowsRoute(input: {
     };
   }
 
+  const exclusionMatch = matchExclusionPath(input.pathname);
+  if (input.method === "DELETE" && exclusionMatch) {
+    const removed = await input.runtime.store.deleteFollowsWindowExclusion(exclusionMatch.exclusionId);
+    if (!removed) return notFound(`follows-window exclusion ${exclusionMatch.exclusionId} was not found`);
+    await input.runtime.observability.recordActivity({
+      type: "follows_window_exclusion_deleted",
+      occurred_at: input.now.toISOString(),
+      actor: "human",
+      status: "ok",
+      summary: `Follows window exclusion removed: ${removed.title_substring ?? removed.app_bundle}`,
+      details: {
+        exclusion_id: removed.exclusion_id,
+        app_bundle: removed.app_bundle,
+        title_substring: removed.title_substring,
+      },
+    });
+    return {
+      ok: true,
+      status: 200,
+      body: { ok: true, exclusion: removed, request_id: input.requestId },
+    };
+  }
+
   if (input.method !== "POST" || input.pathname !== "/follows-windows/exclude") {
     return undefined;
   }
@@ -66,6 +89,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function matchExclusionPath(pathname: string): { exclusionId: string } | undefined {
+  if (!pathname.startsWith("/follows-windows/exclusions/")) return undefined;
+  const remainder = pathname.slice("/follows-windows/exclusions/".length);
+  if (!remainder || remainder.includes("/")) return undefined;
+  return { exclusionId: decodeURIComponent(remainder) };
+}
+
 function schemaError(message: string): RouteResult {
   return { ok: false, status: 400, code: "schema_error", message };
+}
+
+function notFound(message: string): RouteResult {
+  return { ok: false, status: 404, code: "not_found", message };
 }

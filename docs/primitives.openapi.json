@@ -442,6 +442,51 @@
         "x-eventloopos-status": "dogfood"
       }
     },
+    "/follows-windows/exclusions/{id}": {
+      "delete": {
+        "description": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded.",
+        "operationId": "follows_windows_delete_follows_windows_exclusions_by_id",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreeformJsonObject"
+                }
+              }
+            },
+            "description": "Successful response. See route implementation and tests for exact envelope."
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Error response."
+          }
+        },
+        "summary": "Follows Windows DELETE /follows-windows/exclusions/:id",
+        "tags": [
+          "follows_windows"
+        ],
+        "x-eventloopos-primitive": "follows_windows",
+        "x-eventloopos-route-file": "app/orchestrator/src/routes/follows_windows.ts",
+        "x-eventloopos-status": "dogfood"
+      }
+    },
     "/health": {
       "get": {
         "description": "Health, metrics, activity, proof runners, latency checks, and machine-readable manifests.",

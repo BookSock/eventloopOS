@@ -266,6 +266,8 @@ Exports current sticky-window exclusion rules over `GET /follows-windows/exclusi
 HTTP surface:
 
 - `POST /follows-windows/exclude`
+- `GET /follows-windows/exclusions`
+- `DELETE /follows-windows/exclusions/:id`
 
 Important behavior:
 

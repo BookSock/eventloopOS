@@ -769,6 +769,21 @@ export function listFollowsWindowExclusions(store: InMemoryStore): FollowsWindow
   return [...exclusions.values()].sort((a, b) => a.exclusion_id.localeCompare(b.exclusion_id));
 }
 
+export function deleteFollowsWindowExclusion(
+  store: InMemoryStore,
+  exclusionId: string,
+): FollowsWindowExclusionRecord | undefined {
+  const exclusions = store.followsWindowExclusions;
+  if (!exclusions) return undefined;
+  for (const [key, record] of exclusions.entries()) {
+    if (record.exclusion_id === exclusionId) {
+      exclusions.delete(key);
+      return record;
+    }
+  }
+  return undefined;
+}
+
 export function claimTaskWindow(
   store: InMemoryStore,
   input: {
