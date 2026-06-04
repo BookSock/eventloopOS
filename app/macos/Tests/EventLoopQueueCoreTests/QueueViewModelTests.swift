@@ -474,6 +474,21 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Done. Next paper ready."))
     }
 
+    func testDoneAndNextTreatsNextLeaseConflictAsSavedActionFeedback() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+        client.setNextLeaseError(QueueClientError.httpStatus(409))
+
+        await viewModel.doneAndNext()
+
+        XCTAssertEqual(client.completedPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.packets.map(\.id), ["packet-ci-failed", "packet-external-send"])
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Action saved. Queue paused; no next paper claimed."))
+    }
+
     func testDeferSelectedPacketShowsSuccessToastWhenNextPaperExists() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
@@ -485,6 +500,21 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(client.deferredPacketIds, ["packet-blog-feedback"])
         XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
         XCTAssertEqual(viewModel.advanceToast, .deferredUntil(dueAt))
+    }
+
+    func testDeferSelectedPacketTreatsNextLeaseConflictAsSavedActionFeedback() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        let dueAt = Date(timeIntervalSince1970: 1_778_074_500)
+        await viewModel.pullNextPaper()
+        client.setNextLeaseError(QueueClientError.httpStatus(409))
+
+        await viewModel.deferSelectedPacket(until: dueAt)
+
+        XCTAssertEqual(client.deferredPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Action saved. Queue paused; no next paper claimed."))
     }
 
     func testDeferSelectedPacketShowsEmptyQueueToastWhenNoNextPaper() async {
@@ -804,10 +834,11 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state, .loaded)
         XCTAssertEqual(viewModel.packets, [])
         XCTAssertNil(viewModel.selectedPacketID)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Sent to agent. Next paper ready."))
     }
 
     func testExecuteRecommendedActionTreatsNextLeaseConflictAsNonFatal() async {
-        let packet = ReviewPacket(
+        let routePacket = ReviewPacket(
             id: "packet-route",
             taskId: "task_blog_feedback",
             title: "Route feedback",
@@ -818,7 +849,16 @@ final class QueueViewModelTests: XCTestCase {
             recommendedActionType: "resume_agent",
             createdAt: Date(timeIntervalSince1970: 0)
         )
-        let client = FakeQueueClient(packets: [packet])
+        let followupPacket = ReviewPacket(
+            id: "packet-followup",
+            title: "Review followup",
+            summary: "Next queued paper.",
+            source: "manual://review",
+            priority: 80,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(packets: [routePacket, followupPacket])
         let viewModel = QueueViewModel(client: client)
         await viewModel.pullNextPaper()
         client.setNextLeaseError(QueueClientError.httpStatus(409))
@@ -827,8 +867,9 @@ final class QueueViewModelTests: XCTestCase {
 
         XCTAssertEqual(client.executedRecommendedActions, ["packet-route"])
         XCTAssertEqual(viewModel.state, .loaded)
-        XCTAssertEqual(viewModel.packets, [])
-        XCTAssertNil(viewModel.selectedPacketID)
+        XCTAssertEqual(viewModel.packets.map(\.id), ["packet-followup"])
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-followup")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Action saved. Queue paused; no next paper claimed."))
     }
 
     func testRecommendedActionAvailabilityFollowsSelectedPacket() async {

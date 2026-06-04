@@ -1059,7 +1059,7 @@ public final class QueueViewModel: ObservableObject {
             packets = (try? await client.fetchQueue()) ?? packets
             selectedPacketID = packets.first?.id
             state = .loaded
-            advanceToast = packets.isEmpty ? successToast : .actionComplete("Queue paused. Try again.")
+            advanceToast = packets.isEmpty ? successToast : .actionComplete("Action saved. Queue paused; no next paper claimed.")
             await loadTaskSessionsForSelectedPacketIfNeeded()
             await prepareSelectedWorkspaceRestore()
             await requestSelectedBrowserContextRestoresIfNeeded()

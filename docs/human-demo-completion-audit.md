@@ -29,7 +29,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 | Autosave observability | `/activity` shows `ambient_workspace_save_*`; `ambient_workspace_saver` tests cover commit/skip/fail paths | Proven |
 | Local Screen Sharing window-only capture | `bin/local-screen-sharing-capture`; capture manifests use `capture_mode=local_screen_sharing_window`; screenshots show only Screen Sharing window | Proven |
 | Repeatable human demo setup | `bin/lab-mac-human-demo-setup`; latest manifest `ok=true`, queue count 2 | Proven |
-| Visible feedback during demo | Queue footer `feedback=...`; `QueueHarnessStatusTextTests`; latest screenshot shows `feedback=ready` | Proven |
+| Visible feedback during demo | Queue footer `feedback=...`; `QueueHarnessStatusTextTests`; `QueueViewModelTests` post-action lease-conflict coverage proves Done/Defer/Send show saved-action feedback instead of surfacing 409 noise; latest screenshot shows `feedback=ready` | Proven |
 | Human keyboard/mouse UX | Jason must run `docs/human-demo-walkthrough.md`, fill `bin/human-demo-result-template --write` output, and pass `bin/human-demo-result-verify --lab-status` | Pending |
 
 ## Human Gate
