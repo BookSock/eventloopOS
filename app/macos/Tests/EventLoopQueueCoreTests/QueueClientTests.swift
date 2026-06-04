@@ -5,6 +5,15 @@ import FoundationNetworking
 @testable import EventLoopQueueCore
 
 final class QueueClientTests: XCTestCase {
+    func testQueueDecoderAcceptsIso8601DatesWithAndWithoutFractionalSeconds() throws {
+        let decoder = QueueCoders.makeDecoder()
+        let standard = try decoder.decode(DateProbe.self, from: #"{"at":"2026-05-06T12:00:00Z"}"#.data(using: .utf8)!)
+        let fractional = try decoder.decode(DateProbe.self, from: #"{"at":"2026-05-06T12:00:00.000Z"}"#.data(using: .utf8)!)
+
+        XCTAssertEqual(standard.at, fractional.at)
+        XCTAssertEqual(standard.at.timeIntervalSince1970, 1_778_068_800)
+    }
+
     func testFakeQueueClientLoadsSeededPacketsFromFixtureJSON() async throws {
         let packets = try loadFixturePackets()
         let client = FakeQueueClient(packets: packets)
@@ -1603,6 +1612,10 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(slugifyTaskName("--leading-and-trailing--"), "leading-and-trailing")
         XCTAssertEqual(slugifyTaskName("ALL UPPER"), "all-upper")
     }
+}
+
+private struct DateProbe: Decodable {
+    let at: Date
 }
 
 private final class HTTPClientRecorder: @unchecked Sendable {
