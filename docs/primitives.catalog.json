@@ -1463,6 +1463,101 @@
         "intent": { "type": "string", "minLength": 1 },
         "request_id": { "type": "string", "minLength": 1 }
       }
+    },
+    "CodexAutoBindBound": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["task_id", "task_session_id", "terminal_ref", "window_id", "window_app"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "task_session_id": { "type": "string", "minLength": 1 },
+        "terminal_ref": { "type": "string", "minLength": 1 },
+        "window_id": { "type": "integer", "minimum": 1 },
+        "window_app": { "type": "string", "minLength": 1 }
+      }
+    },
+    "CodexAutoBindSkipped": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason"],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "window_id": { "type": "integer", "minimum": 1 },
+        "window_title": { "type": "string" },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "CodexAutoBindResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "scanned_window_count", "matched_count", "bound", "skipped", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "paused": { "type": "boolean", "const": true },
+        "reason": { "type": "string", "const": "manual_mode_active" },
+        "manual_mode": { "$ref": "#/components/schemas/ManualModeState" },
+        "scanned_window_count": { "type": "integer", "minimum": 0 },
+        "matched_count": { "type": "integer", "minimum": 0 },
+        "bound": { "type": "array", "items": { "$ref": "#/components/schemas/CodexAutoBindBound" } },
+        "skipped": { "type": "array", "items": { "$ref": "#/components/schemas/CodexAutoBindSkipped" } },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "CodexForegroundResolveResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["codex_thread_id", "ghostty_window_id", "source", "request_id"],
+      "properties": {
+        "codex_thread_id": {
+          "anyOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "ghostty_window_id": {
+          "anyOf": [
+            { "type": "string", "minLength": 1 },
+            { "type": "null" }
+          ]
+        },
+        "source": { "type": "string", "enum": ["title_resolver", "codex_session", "none"] },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "CodexSessionInspectionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["thread_id", "exists", "request_id"],
+      "properties": {
+        "thread_id": { "type": "string", "minLength": 1 },
+        "exists": { "type": "boolean" },
+        "rollout_path": { "type": "string" },
+        "rollout_size_bytes": { "type": "integer", "minimum": 0 },
+        "last_event_at": { "type": "string", "format": "date-time" },
+        "idle_seconds": { "type": "integer", "minimum": 0 },
+        "event_count": { "type": "integer", "minimum": 0 },
+        "recent_event_types": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "recent_summary": { "type": "string" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ClaudeSessionInspectionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["session_id", "exists", "request_id"],
+      "properties": {
+        "session_id": { "type": "string", "minLength": 1 },
+        "exists": { "type": "boolean" },
+        "rollout_path": { "type": "string" },
+        "rollout_size_bytes": { "type": "integer", "minimum": 0 },
+        "last_event_at": { "type": "string", "format": "date-time" },
+        "idle_seconds": { "type": "integer", "minimum": 0 },
+        "event_count": { "type": "integer", "minimum": 0 },
+        "recent_event_types": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "recent_summary": { "type": "string" },
+        "cwd_hint": { "type": "string" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
     }
   },
   "primitives": [
@@ -1919,10 +2014,10 @@
       "status": "dogfood",
       "summary": "Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows.",
       "http": [
-        { "method": "POST", "path": "/agents/codex/auto-bind", "route_file": "app/orchestrator/src/routes/agents.ts" },
-        { "method": "POST", "path": "/agents/codex/resolve-foreground", "route_file": "app/orchestrator/src/routes/agents.ts" },
-        { "method": "GET", "path": "/agents/codex/inspect/:id", "route_file": "app/orchestrator/src/routes/agents.ts" },
-        { "method": "GET", "path": "/agents/claude/inspect/:id", "route_file": "app/orchestrator/src/routes/agents.ts" }
+        { "method": "POST", "path": "/agents/codex/auto-bind", "route_file": "app/orchestrator/src/routes/agents.ts", "response_schema": "CodexAutoBindResponse" },
+        { "method": "POST", "path": "/agents/codex/resolve-foreground", "route_file": "app/orchestrator/src/routes/agents.ts", "response_schema": "CodexForegroundResolveResponse" },
+        { "method": "GET", "path": "/agents/codex/inspect/:id", "route_file": "app/orchestrator/src/routes/agents.ts", "response_schema": "CodexSessionInspectionResponse" },
+        { "method": "GET", "path": "/agents/claude/inspect/:id", "route_file": "app/orchestrator/src/routes/agents.ts", "response_schema": "ClaudeSessionInspectionResponse" }
       ],
       "code": [
         "app/orchestrator/src/routes/agents.ts",

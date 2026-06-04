@@ -1,0 +1,16 @@
+{
+  "schema": "ClaudeSessionInspectionResponse",
+  "data": {
+    "session_id": "claude-session-001",
+    "exists": true,
+    "rollout_path": "/Users/demo/.claude/projects/-Users-demo-repo/claude-session-001.jsonl",
+    "rollout_size_bytes": 8192,
+    "last_event_at": "2026-05-06T17:31:00Z",
+    "idle_seconds": 8,
+    "event_count": 31,
+    "recent_event_types": ["assistant", "user"],
+    "recent_summary": "assistant: ready for next step",
+    "cwd_hint": "/Users/demo/repo",
+    "request_id": "req_claude_inspect_001"
+  }
+}

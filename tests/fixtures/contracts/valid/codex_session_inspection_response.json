@@ -1,0 +1,15 @@
+{
+  "schema": "CodexSessionInspectionResponse",
+  "data": {
+    "thread_id": "7a228b97-3df0-46ec-9b79-a01c65f3a4df",
+    "exists": true,
+    "rollout_path": "/Users/demo/.codex/sessions/2026/05/06/rollout-demo-7a228b97-3df0-46ec-9b79-a01c65f3a4df.jsonl",
+    "rollout_size_bytes": 4096,
+    "last_event_at": "2026-05-06T17:30:00Z",
+    "idle_seconds": 12,
+    "event_count": 47,
+    "recent_event_types": ["event_msg", "user_input"],
+    "recent_summary": "event_msg/assistant: waiting for approval",
+    "request_id": "req_codex_inspect_001"
+  }
+}

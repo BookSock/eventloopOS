@@ -1585,6 +1585,85 @@ export const VoiceCommandResponseSchema = z
   .passthrough();
 export type VoiceCommandResponse = z.infer<typeof VoiceCommandResponseSchema>;
 
+export const CodexAutoBindBoundSchema = z
+  .object({
+    task_id: id,
+    task_session_id: id,
+    terminal_ref: nonEmpty,
+    window_id: z.number().int().positive(),
+    window_app: nonEmpty
+  })
+  .strict();
+export type CodexAutoBindBound = z.infer<typeof CodexAutoBindBoundSchema>;
+
+export const CodexAutoBindSkippedSchema = z
+  .object({
+    task_id: id.optional(),
+    window_id: z.number().int().positive().optional(),
+    window_title: z.string().optional(),
+    reason: nonEmpty
+  })
+  .strict();
+export type CodexAutoBindSkipped = z.infer<typeof CodexAutoBindSkippedSchema>;
+
+export const CodexAutoBindResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    paused: z.literal(true).optional(),
+    reason: z.literal("manual_mode_active").optional(),
+    manual_mode: ManualModeStateSchema.optional(),
+    scanned_window_count: z.number().int().nonnegative(),
+    matched_count: z.number().int().nonnegative(),
+    bound: z.array(CodexAutoBindBoundSchema),
+    skipped: z.array(CodexAutoBindSkippedSchema),
+    request_id: id
+  })
+  .strict();
+export type CodexAutoBindResponse = z.infer<typeof CodexAutoBindResponseSchema>;
+
+export const CodexForegroundResolveResponseSchema = z
+  .object({
+    codex_thread_id: id.nullable(),
+    ghostty_window_id: id.nullable(),
+    source: z.enum(["title_resolver", "codex_session", "none"]),
+    request_id: id
+  })
+  .strict();
+export type CodexForegroundResolveResponse = z.infer<typeof CodexForegroundResolveResponseSchema>;
+
+export const CodexSessionInspectionResponseSchema = z
+  .object({
+    thread_id: nonEmpty,
+    exists: z.boolean(),
+    rollout_path: z.string().optional(),
+    rollout_size_bytes: z.number().int().nonnegative().optional(),
+    last_event_at: isoDateTime.optional(),
+    idle_seconds: z.number().int().nonnegative().optional(),
+    event_count: z.number().int().nonnegative().optional(),
+    recent_event_types: z.array(nonEmpty).optional(),
+    recent_summary: z.string().optional(),
+    request_id: id
+  })
+  .strict();
+export type CodexSessionInspectionResponse = z.infer<typeof CodexSessionInspectionResponseSchema>;
+
+export const ClaudeSessionInspectionResponseSchema = z
+  .object({
+    session_id: nonEmpty,
+    exists: z.boolean(),
+    rollout_path: z.string().optional(),
+    rollout_size_bytes: z.number().int().nonnegative().optional(),
+    last_event_at: isoDateTime.optional(),
+    idle_seconds: z.number().int().nonnegative().optional(),
+    event_count: z.number().int().nonnegative().optional(),
+    recent_event_types: z.array(nonEmpty).optional(),
+    recent_summary: z.string().optional(),
+    cwd_hint: z.string().optional(),
+    request_id: id
+  })
+  .strict();
+export type ClaudeSessionInspectionResponse = z.infer<typeof ClaudeSessionInspectionResponseSchema>;
+
 export const OwnershipLockSchema = z
   .object({
     id,
@@ -1834,6 +1913,12 @@ export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   AgentRunGetResponse: AgentRunGetResponseSchema,
   VoiceCommandRequest: VoiceCommandRequestSchema,
   VoiceCommandResponse: VoiceCommandResponseSchema,
+  CodexAutoBindBound: CodexAutoBindBoundSchema,
+  CodexAutoBindSkipped: CodexAutoBindSkippedSchema,
+  CodexAutoBindResponse: CodexAutoBindResponseSchema,
+  CodexForegroundResolveResponse: CodexForegroundResolveResponseSchema,
+  CodexSessionInspectionResponse: CodexSessionInspectionResponseSchema,
+  ClaudeSessionInspectionResponse: ClaudeSessionInspectionResponseSchema,
   OwnershipLock: OwnershipLockSchema,
   HookDecision: HookDecisionSchema,
   EvidenceReceipt: EvidenceReceiptSchema,

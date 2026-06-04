@@ -227,7 +227,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/ClaudeSessionInspectionResponse"
                 }
               }
             },
@@ -272,7 +272,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/CodexAutoBindResponse"
                 }
               }
             },
@@ -317,7 +317,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/CodexSessionInspectionResponse"
                 }
               }
             },
@@ -362,7 +362,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/CodexForegroundResolveResponse"
                 }
               }
             },
@@ -3787,6 +3787,267 @@
         },
         "required": [
           "agent_run",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "ClaudeSessionInspectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "cwd_hint": {
+            "type": "string"
+          },
+          "event_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "idle_seconds": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_event_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "recent_event_types": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "recent_summary": {
+            "type": "string"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rollout_path": {
+            "type": "string"
+          },
+          "rollout_size_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "session_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "exists",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "CodexAutoBindBound": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_session_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "terminal_ref": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "window_app": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "window_id": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "task_id",
+          "task_session_id",
+          "terminal_ref",
+          "window_id",
+          "window_app"
+        ],
+        "type": "object"
+      },
+      "CodexAutoBindResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "bound": {
+            "items": {
+              "$ref": "#/components/schemas/CodexAutoBindBound"
+            },
+            "type": "array"
+          },
+          "manual_mode": {
+            "$ref": "#/components/schemas/ManualModeState"
+          },
+          "matched_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "paused": {
+            "const": true,
+            "type": "boolean"
+          },
+          "reason": {
+            "const": "manual_mode_active",
+            "type": "string"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "scanned_window_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "skipped": {
+            "items": {
+              "$ref": "#/components/schemas/CodexAutoBindSkipped"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "ok",
+          "scanned_window_count",
+          "matched_count",
+          "bound",
+          "skipped",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "CodexAutoBindSkipped": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "window_id": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "window_title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
+      "CodexForegroundResolveResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "codex_thread_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ghostty_window_id": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "title_resolver",
+              "codex_session",
+              "none"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "codex_thread_id",
+          "ghostty_window_id",
+          "source",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "CodexSessionInspectionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "event_count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "exists": {
+            "type": "boolean"
+          },
+          "idle_seconds": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "last_event_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "recent_event_types": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "recent_summary": {
+            "type": "string"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "rollout_path": {
+            "type": "string"
+          },
+          "rollout_size_bytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "thread_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "thread_id",
+          "exists",
           "request_id"
         ],
         "type": "object"

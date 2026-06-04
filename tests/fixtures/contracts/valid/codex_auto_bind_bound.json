@@ -1,0 +1,10 @@
+{
+  "schema": "CodexAutoBindBound",
+  "data": {
+    "task_id": "task_demo_polish",
+    "task_session_id": "task_session_demo",
+    "terminal_ref": "ghostty:win-42",
+    "window_id": 42,
+    "window_app": "Ghostty"
+  }
+}

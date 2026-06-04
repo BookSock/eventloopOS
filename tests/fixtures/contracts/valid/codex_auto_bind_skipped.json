@@ -1,0 +1,9 @@
+{
+  "schema": "CodexAutoBindSkipped",
+  "data": {
+    "task_id": "task_demo_polish",
+    "window_id": 43,
+    "window_title": "[task:demo polish] stale session",
+    "reason": "already_bound"
+  }
+}

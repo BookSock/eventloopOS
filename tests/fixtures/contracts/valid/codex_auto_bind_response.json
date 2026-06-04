@@ -1,0 +1,26 @@
+{
+  "schema": "CodexAutoBindResponse",
+  "data": {
+    "ok": true,
+    "scanned_window_count": 3,
+    "matched_count": 2,
+    "bound": [
+      {
+        "task_id": "task_demo_polish",
+        "task_session_id": "task_session_demo",
+        "terminal_ref": "ghostty:win-42",
+        "window_id": 42,
+        "window_app": "Ghostty"
+      }
+    ],
+    "skipped": [
+      {
+        "task_id": "task_docs",
+        "window_id": 43,
+        "window_title": "[task:docs] already bound",
+        "reason": "already_bound"
+      }
+    ],
+    "request_id": "req_auto_bind_001"
+  }
+}

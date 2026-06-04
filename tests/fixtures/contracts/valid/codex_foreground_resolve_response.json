@@ -1,0 +1,9 @@
+{
+  "schema": "CodexForegroundResolveResponse",
+  "data": {
+    "codex_thread_id": "7a228b97-3df0-46ec-9b79-a01c65f3a4df",
+    "ghostty_window_id": "42",
+    "source": "codex_session",
+    "request_id": "req_foreground_001"
+  }
+}
