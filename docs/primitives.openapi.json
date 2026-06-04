@@ -3752,11 +3752,18 @@
             },
             "type": "array"
           },
+          "backend": {
+            "minLength": 1,
+            "type": "string"
+          },
           "command": {
             "enum": [
               "aerospace",
               "osascript"
             ],
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           }
         },
@@ -8500,6 +8507,33 @@
         ],
         "type": "object"
       },
+      "WorkspaceCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "args": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "backend": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "command": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "command",
+          "args"
+        ],
+        "type": "object"
+      },
       "WorkspaceFrameCaptureStatus": {
         "additionalProperties": false,
         "properties": {
@@ -8539,11 +8573,15 @@
             },
             "type": "array"
           },
+          "backend": {
+            "minLength": 1,
+            "type": "string"
+          },
           "command": {
-            "enum": [
-              "aerospace",
-              "osascript"
-            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "description": {
             "type": "string"
           },
           "stderr": {
@@ -8565,7 +8603,7 @@
         "properties": {
           "commands": {
             "items": {
-              "$ref": "#/components/schemas/AerospaceCommand"
+              "$ref": "#/components/schemas/WorkspaceCommand"
             },
             "type": "array"
           },

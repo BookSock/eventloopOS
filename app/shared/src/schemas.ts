@@ -195,12 +195,19 @@ export const WorkspaceRestorePlanRequestSchema = z
   .passthrough();
 export type WorkspaceRestorePlanRequest = z.infer<typeof WorkspaceRestorePlanRequestSchema>;
 
-export const AerospaceCommandSchema = z
+export const WorkspaceCommandSchema = z
   .object({
-    command: z.enum(["aerospace", "osascript"]),
-    args: z.array(z.string())
+    backend: nonEmpty.optional(),
+    command: nonEmpty,
+    args: z.array(z.string()),
+    description: z.string().optional()
   })
   .strict();
+export type WorkspaceCommand = z.infer<typeof WorkspaceCommandSchema>;
+
+export const AerospaceCommandSchema = WorkspaceCommandSchema.extend({
+  command: z.enum(["aerospace", "osascript"])
+}).strict();
 export type AerospaceCommand = z.infer<typeof AerospaceCommandSchema>;
 
 export const RestoreSkipSchema = z
@@ -214,7 +221,7 @@ export type RestoreSkip = z.infer<typeof RestoreSkipSchema>;
 
 export const WorkspaceRestorePlanSchema = z
   .object({
-    commands: z.array(AerospaceCommandSchema),
+    commands: z.array(WorkspaceCommandSchema),
     skipped: z.array(RestoreSkipSchema)
   })
   .strict();
@@ -234,7 +241,7 @@ export const WorkspaceRestoreRequestSchema = WorkspaceRestorePlanRequestSchema.e
 }).passthrough();
 export type WorkspaceRestoreRequest = z.infer<typeof WorkspaceRestoreRequestSchema>;
 
-export const WorkspaceRestoreCommandReceiptSchema = AerospaceCommandSchema.extend({
+export const WorkspaceRestoreCommandReceiptSchema = WorkspaceCommandSchema.extend({
   stdout: z.string(),
   stderr: z.string().optional()
 }).strict();
@@ -2253,6 +2260,7 @@ export const ContractSchemas: Record<string, z.ZodTypeAny> = {
   WorkspaceStatusResponse: WorkspaceStatusResponseSchema,
   WorkspaceCaptureResponse: WorkspaceCaptureResponseSchema,
   WorkspaceRestorePlanRequest: WorkspaceRestorePlanRequestSchema,
+  WorkspaceCommand: WorkspaceCommandSchema,
   AerospaceCommand: AerospaceCommandSchema,
   RestoreSkip: RestoreSkipSchema,
   WorkspaceRestorePlan: WorkspaceRestorePlanSchema,

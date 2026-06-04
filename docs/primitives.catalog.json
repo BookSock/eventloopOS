@@ -106,16 +106,32 @@
         }
       }
     },
+    "WorkspaceCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "args"],
+      "properties": {
+        "backend": { "type": "string", "minLength": 1 },
+        "command": { "type": "string", "minLength": 1 },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "description": { "type": "string" }
+      }
+    },
     "AerospaceCommand": {
       "type": "object",
       "additionalProperties": false,
       "required": ["command", "args"],
       "properties": {
+        "backend": { "type": "string", "minLength": 1 },
         "command": { "type": "string", "enum": ["aerospace", "osascript"] },
         "args": {
           "type": "array",
           "items": { "type": "string" }
-        }
+        },
+        "description": { "type": "string" }
       }
     },
     "RestoreSkip": {
@@ -135,7 +151,7 @@
       "properties": {
         "commands": {
           "type": "array",
-          "items": { "$ref": "#/components/schemas/AerospaceCommand" }
+          "items": { "$ref": "#/components/schemas/WorkspaceCommand" }
         },
         "skipped": {
           "type": "array",
@@ -171,11 +187,13 @@
       "additionalProperties": false,
       "required": ["command", "args", "stdout"],
       "properties": {
-        "command": { "type": "string", "enum": ["aerospace", "osascript"] },
+        "backend": { "type": "string", "minLength": 1 },
+        "command": { "type": "string", "minLength": 1 },
         "args": {
           "type": "array",
           "items": { "type": "string" }
         },
+        "description": { "type": "string" },
         "stdout": { "type": "string" },
         "stderr": { "type": "string" }
       }

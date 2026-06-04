@@ -811,8 +811,8 @@ Highest-leverage steps before calling this a real primitives library:
    implementation packages.
 3. Keep `bin/human-demo-ready`'s default macOS hotkey-latency gate green before
    release demos; use `--skip-hotkey-latency` only for Accessibility bootstrap.
-4. Generalize the restore command envelope beyond the legacy
-   `aerospace`/`osascript` command union while keeping the adapter guide green.
+4. Grow the generic `WorkspaceCommand` envelope into richer backend-specific
+   adapter guides while keeping AeroSpace executor safety green.
 5. Extend task-session controllers to expose stable root pids by default, so
    process-tree window claims work without custom session metadata.
 6. Grow `examples/primitives/` from tiny CLI examples into richer starter apps
