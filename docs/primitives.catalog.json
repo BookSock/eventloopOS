@@ -25,25 +25,25 @@
       "additionalProperties": false,
       "required": ["exclusion_id", "created_at"],
       "properties": {
-        "exclusion_id": { "type": "string" },
-        "app_bundle": { "type": "string" },
-        "title_substring": { "type": "string" },
+        "exclusion_id": { "type": "string", "minLength": 1 },
+        "app_bundle": { "type": "string", "minLength": 1 },
+        "title_substring": { "type": "string", "minLength": 1 },
         "created_at": { "type": "string", "format": "date-time" }
       }
     },
     "FollowsWindowExclusionResponse": {
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "required": ["ok", "exclusion", "request_id"],
       "properties": {
         "ok": { "type": "boolean", "const": true },
         "exclusion": { "$ref": "#/components/schemas/FollowsWindowExclusionRecord" },
-        "request_id": { "type": "string" }
+        "request_id": { "type": "string", "minLength": 1 }
       }
     },
     "FollowsWindowExclusionsListResponse": {
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "required": ["ok", "exclusions", "count", "request_id"],
       "properties": {
         "ok": { "type": "boolean", "const": true },
@@ -52,7 +52,7 @@
           "items": { "$ref": "#/components/schemas/FollowsWindowExclusionRecord" }
         },
         "count": { "type": "integer", "minimum": 0 },
-        "request_id": { "type": "string" }
+        "request_id": { "type": "string", "minLength": 1 }
       }
     },
     "TaskWindowClaimCreateRequest": {
@@ -95,30 +95,30 @@
       "additionalProperties": false,
       "required": ["claim_id", "task_id", "created_at"],
       "properties": {
-        "claim_id": { "type": "string" },
-        "task_id": { "type": "string" },
-        "window_id": { "type": "string" },
-        "app_bundle": { "type": "string" },
-        "title_prefix": { "type": "string" },
+        "claim_id": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
+        "window_id": { "type": "string", "minLength": 1 },
+        "app_bundle": { "type": "string", "minLength": 1 },
+        "title_prefix": { "type": "string", "minLength": 1 },
         "process_root_pid": { "type": "integer", "minimum": 1 },
-        "source": { "type": "string" },
+        "source": { "type": "string", "minLength": 1 },
         "created_at": { "type": "string", "format": "date-time" },
         "expires_at": { "type": "string", "format": "date-time" }
       }
     },
     "TaskWindowClaimResponse": {
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "required": ["ok", "claim", "request_id"],
       "properties": {
         "ok": { "type": "boolean", "const": true },
         "claim": { "$ref": "#/components/schemas/TaskWindowClaimRecord" },
-        "request_id": { "type": "string" }
+        "request_id": { "type": "string", "minLength": 1 }
       }
     },
     "TaskWindowClaimsListResponse": {
       "type": "object",
-      "additionalProperties": true,
+      "additionalProperties": false,
       "required": ["ok", "claims", "count", "request_id"],
       "properties": {
         "ok": { "type": "boolean", "const": true },
@@ -127,7 +127,7 @@
           "items": { "$ref": "#/components/schemas/TaskWindowClaimRecord" }
         },
         "count": { "type": "integer", "minimum": 0 },
-        "request_id": { "type": "string" }
+        "request_id": { "type": "string", "minLength": 1 }
       }
     }
   },
