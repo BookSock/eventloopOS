@@ -498,6 +498,7 @@ export async function routeEventThroughGateway(
       taskMessageError = typeof injected.taskMessage.error === "string" ? injected.taskMessage.error : "task followup failed";
     } else {
       const result = await options.store.recordEventRoute(event, injected.routeDecision, now);
+      await autoClaimBrowserContextWindows(options, event, result.route_decision, now);
       await recordRoutedEventActivity(options, event, result.route_decision, {
         taskMessage: injected.taskMessage,
         queueItemId: undefined,
@@ -513,6 +514,7 @@ export async function routeEventThroughGateway(
   }
 
   const result = await options.store.ingestEventAsReviewPacket(event, now);
+  await autoClaimBrowserContextWindows(options, event, result.route_decision, now);
   await recordRoutedEventActivity(options, event, result.route_decision, {
     queueItemId: result.queue_item?.id,
     taskMessage: injected?.taskMessage,
@@ -526,6 +528,56 @@ export async function routeEventThroughGateway(
     queue_item: result.queue_item,
     ...(triggerFires.length > 0 ? { trigger_fires: triggerFires } : {}),
   };
+}
+
+async function autoClaimBrowserContextWindows(
+  options: EventGatewayOptions,
+  event: McpEvent,
+  routeDecision: RouteDecision,
+  now: Date,
+): Promise<void> {
+  if (event.type !== "browser.context_captured") return;
+  if (routeDecision.action !== "attach_to_task" && routeDecision.action !== "inject_into_agent_thread") return;
+  const taskId = routeDecision.target_task_id;
+  if (!taskId) return;
+  const task = await options.store.getTask(taskId);
+  if (!task) return;
+
+  let claimed = 0;
+  for (const resource of event.resources) {
+    if (!isRecord(resource) || resource.kind !== "browser_tab") continue;
+    const titlePrefix = readString(resource.title);
+    const windowId = readString(resource.window_id);
+    if (!titlePrefix && !windowId) continue;
+    await options.store.claimTaskWindow({
+      taskId,
+      windowId,
+      appBundle: readString(resource.app_bundle) ?? "com.google.Chrome",
+      titlePrefix,
+      source: "browser.context_captured",
+      now,
+      ttlMs: 30 * 60 * 1_000,
+    });
+    claimed += 1;
+  }
+  if (claimed === 0 || !options.observability) return;
+  await options.observability.incrementCounter("task_window_claims_auto_created_total", claimed);
+  await options.observability.recordActivity({
+    type: "task_window_claims_auto_created",
+    occurred_at: now.toISOString(),
+    actor: "system",
+    task_id: taskId,
+    event_id: event.id,
+    source_id: event.source_id,
+    status: "ok",
+    summary: `Auto-claimed ${claimed} browser window(s) for ${taskId}.`,
+    details: sanitizeActivityDetails({
+      count: claimed,
+      route_action: routeDecision.action,
+      source: event.source,
+      type: event.type,
+    }),
+  });
 }
 
 async function fireMatchingPaperTriggers(
@@ -620,6 +672,10 @@ async function recordRoutedEventActivity(
 
 function taskIdFromFollowupPolicy(policy: { scope_kind?: string; scope_id?: string } | undefined): string | undefined {
   return policy?.scope_kind === "task" && typeof policy.scope_id === "string" ? policy.scope_id : undefined;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function validateVoiceCommandRequest(

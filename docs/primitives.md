@@ -162,8 +162,8 @@ Guarantees today:
 Why it matters: this is the primitive that makes window layout memory feel
 automatic instead of like a manual "save workspace" button.
 
-Known gap: the first attribution hook now exists, but Codex/Claude/browser
-tooling still needs to call it automatically when they spawn windows.
+Known gap: browser-context events now auto-claim attached Chrome windows, but
+Codex/Claude process-spawn tooling still needs first-class claim emitters.
 
 Proof:
 
@@ -196,16 +196,19 @@ Useful standalone uses:
   ambient autosave avoids polluting the human's active paper
 - browser automation can claim Playwright/Chrome report windows before the
   user sees them
+- browser context capture auto-claims Chrome windows when the event attaches to
+  a task
 - tools can inspect current claims to explain why a window was ignored
 
 Proof:
 
 - `app/orchestrator/src/routes/task_window_claims.test.ts`
+- `app/orchestrator/src/routes/events_task_window_claims.test.ts`
 - `app/orchestrator/src/agents/ambient_workspace_saver.test.ts`
 - `app/orchestrator/test/gateway_store_conformance.test.ts`
 
-Status: dogfood. Automatic claim emitters for real agent runtimes are the next
-step.
+Status: dogfood. Browser context capture has an automatic emitter; Codex/Claude
+runtime emitters are next.
 
 ## Follows Windows
 
@@ -543,8 +546,7 @@ Highest-leverage steps before calling this a real primitives library:
 3. Extend latency budgets from workspace HTTP proof to queue lease and Mac
    hotkey-to-feedback path.
 4. Add a public "workspace backend adapter" guide with a fake backend example.
-5. Add automatic claim emitters for foreign windows spawned by background
-   agents.
+5. Add automatic claim emitters for Codex/Claude-spawned foreign windows.
 6. Add user-facing follows/unfollows rules and durable rule export/import.
 7. Publish example apps: "restore my desk," "agent attention queue," and
    "window hotkey router."
