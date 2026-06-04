@@ -351,6 +351,7 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
     private let captureSnapshot: WorkspaceSnapshot
     private let planEnvelope: WorkspaceRestorePlanEnvelope
     private let restoreEnvelope: WorkspaceRestoreExecutionEnvelope
+    private let captureDelayNanoseconds: UInt64
     private let restoreDelayNanoseconds: UInt64
     private var captureCount = 0
     private var requestedSnapshots: [WorkspaceSnapshot] = []
@@ -374,12 +375,14 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
             executeSupported: true,
             idempotencyKey: "idem_fake_workspace_restore"
         ),
+        captureDelayNanoseconds: UInt64 = 0,
         restoreDelayNanoseconds: UInt64 = 0
     ) {
         self.statusEnvelope = statusEnvelope
         self.captureSnapshot = captureSnapshot
         self.planEnvelope = planEnvelope
         self.restoreEnvelope = restoreEnvelope
+        self.captureDelayNanoseconds = captureDelayNanoseconds
         self.restoreDelayNanoseconds = restoreDelayNanoseconds
     }
 
@@ -406,6 +409,9 @@ public final class FakeWorkspaceClient: WorkspaceClient, @unchecked Sendable {
     public func capture() async throws -> WorkspaceSnapshot {
         lock.withLock {
             captureCount += 1
+        }
+        if captureDelayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: captureDelayNanoseconds)
         }
         return captureSnapshot
     }

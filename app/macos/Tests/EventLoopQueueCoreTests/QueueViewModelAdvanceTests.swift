@@ -35,6 +35,42 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         }
     }
 
+    func testRapidAdvanceDeduplicatesWhileInFlight() async {
+        let client = FakeQueueClient(packets: [])
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: WorkspaceSnapshot(
+                windows: [WorkspaceWindow(id: 1, app: "Ghostty", title: "codex", workspace: "1")],
+                activeWorkspace: "1",
+                focusedWindowId: 1
+            ),
+            captureDelayNanoseconds: 100_000_000
+        )
+        let aero = FakeAeroSpaceWorkspaceClient(focused: "1")
+        let resolver = FakeCodexForegroundResolver(AdvanceForegroundContext(codexThreadId: "thr_xyz"))
+        let viewModel = QueueViewModel(
+            client: client,
+            workspaceClient: workspaceClient,
+            aeroSpaceClient: aero,
+            codexForegroundResolver: resolver
+        )
+
+        let firstAdvance = Task { @MainActor in
+            await viewModel.advance()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        let secondAdvance = Task { @MainActor in
+            await viewModel.advance()
+        }
+
+        await firstAdvance.value
+        await secondAdvance.value
+
+        XCTAssertEqual(client.createTaskRequests.count, 1)
+        XCTAssertEqual(client.setCurrentTaskRequests, ["task_fake_1"])
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
+    }
+
     func testAdvanceFromStateBWithEmptyQueueEntersLimbo() async {
         let client = FakeQueueClient(packets: [])
         let workspaceClient = FakeWorkspaceClient(

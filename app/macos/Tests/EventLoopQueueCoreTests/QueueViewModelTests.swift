@@ -28,6 +28,34 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state, .loaded)
     }
 
+    func testRapidDoneNextDeduplicatesWhileInFlight() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: SeededQueue.blogFeedbackWorkspace,
+            captureDelayNanoseconds: 100_000_000
+        )
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+
+        await viewModel.pullNextPaper()
+        let captureCountBeforeDone = workspaceClient.workspaceCaptureCount
+
+        let firstDone = Task { @MainActor in
+            await viewModel.doneAndNext()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        let secondDone = Task { @MainActor in
+            await viewModel.doneAndNext()
+        }
+
+        await firstDone.value
+        await secondDone.value
+
+        XCTAssertEqual(client.completedPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, captureCountBeforeDone + 1)
+        XCTAssertEqual(viewModel.state, .loaded)
+    }
+
     func testPullNextPaperLeasesTopPacketAndPlansWorkspace() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let plan = WorkspaceRestorePlan(

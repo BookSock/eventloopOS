@@ -155,6 +155,7 @@ public final class QueueViewModel: ObservableObject {
     private var activityRefreshTask: Task<Void, Never>?
     private var autoBindLoopTask: Task<Void, Never>?
     private var autoRestoredContextPacketIds = Set<String>()
+    private var paperActionInFlight = false
     private var workspaceRestoreInFlight = false
 
     public init(
@@ -531,7 +532,27 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    private func beginPaperAction(_ status: String) -> Bool {
+        guard !paperActionInFlight else {
+            advanceToast = .actionComplete("Already working...")
+            return false
+        }
+        paperActionInFlight = true
+        advanceToast = .actionComplete(status)
+        return true
+    }
+
+    private func finishPaperAction() {
+        paperActionInFlight = false
+    }
+
     public func pullNextPaper() async {
+        guard beginPaperAction("Switching papers...") else { return }
+        defer { finishPaperAction() }
+        await pullNextPaperUnguarded()
+    }
+
+    private func pullNextPaperUnguarded() async {
         if mode == .manual {
             await captureManualWorkspaceSnapshot()
             await returnToEventLoopMode()
@@ -573,7 +594,8 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func advance() async {
-        advanceToast = nil
+        guard beginPaperAction("Switching papers...") else { return }
+        defer { finishPaperAction() }
         let snapshot: AdvanceServerSnapshot
         do {
             snapshot = try await loadAdvanceSnapshot()
@@ -659,7 +681,7 @@ public final class QueueViewModel: ObservableObject {
             advanceToast = .manualModeActive
         case .toastNoForegroundCodex:
             if !snapshot.queue.isEmpty {
-                await pullNextPaper()
+                await pullNextPaperUnguarded()
                 return
             }
             advanceToast = .noForegroundCodex
@@ -805,6 +827,8 @@ public final class QueueViewModel: ObservableObject {
         guard let packetId = selectedPacketID else {
             return
         }
+        guard beginPaperAction("Completing paper...") else { return }
+        defer { finishPaperAction() }
         let workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot()
 
         state = .loading
@@ -820,6 +844,8 @@ public final class QueueViewModel: ObservableObject {
         guard let packetId = selectedPacketID else {
             return
         }
+        guard beginPaperAction("Deferring paper...") else { return }
+        defer { finishPaperAction() }
         let workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot()
 
         state = .loading
@@ -839,6 +865,8 @@ public final class QueueViewModel: ObservableObject {
         guard let packetId = selectedPacketID else {
             return
         }
+        guard beginPaperAction("Ignoring paper...") else { return }
+        defer { finishPaperAction() }
         let workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot()
 
         state = .loading
@@ -915,6 +943,8 @@ public final class QueueViewModel: ObservableObject {
     }
 
     private func runRecommendedActionAfterChecks(packetId: String) async {
+        guard beginPaperAction("Sending to agent...") else { return }
+        defer { finishPaperAction() }
         let workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot()
 
         state = .loading
