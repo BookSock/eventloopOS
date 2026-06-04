@@ -2239,6 +2239,7 @@
       "summary": "Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, task-window claim filtering, tagged-window inference, process-tree claim inference, process-root claim expansion, and foreign claimed-window cleanup.",
       "code": ["app/orchestrator/src/agents/ambient_workspace_saver.ts"],
       "proofs": ["app/orchestrator/src/agents/ambient_workspace_saver.test.ts"],
+      "self_tests": ["pnpm --filter @eventloopos/orchestrator run test:ambient-autosave"],
       "gaps": ["Task-session controllers should expose stable root pids by default; unwrapped LaunchServices-detached apps still need tags, process ancestry, or routed resources."]
     },
     {
