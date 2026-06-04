@@ -1,0 +1,284 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { performance } from "node:perf_hooks";
+
+const execFileAsync = promisify(execFile);
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/macos-hotkey-feedback-latency [--self-test] [--process-name NAME] [--hotkey ctrl-option-r] [--expect TEXT] [--runs N] [--budget-ms N] [--manifest PATH]
+
+Measures hotkey-to-visible-feedback latency for the macOS queue app harness
+status text. Live mode requires macOS Accessibility permission for the shell
+running this command.
+
+Defaults:
+  process name: EventLoopQueueApp
+  hotkey:       ctrl-option-r
+  expect:       feedback text changes from the pre-hotkey value
+  runs:         5
+  budget-ms:    1200 p95
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  process.exit(0);
+}
+
+if (process.platform !== "darwin") {
+  console.log("macOS hotkey feedback latency skipped: requires darwin");
+  process.exit(0);
+}
+
+const processName = readArg("--process-name") ?? process.env.EVENTLOOPOS_QUEUE_PROCESS_NAME ?? "EventLoopQueueApp";
+const hotkey = parseHotkey(readArg("--hotkey") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_CHORD ?? "ctrl-option-r");
+const expectedText = readArg("--expect") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_EXPECT;
+const runs = positiveInteger(readArg("--runs") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_RUNS, 5);
+const budgetMs = positiveInteger(readArg("--budget-ms") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_BUDGET_MS, 1_200);
+const runId = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+const manifestPath = readArg("--manifest") ?? path.join("artifacts", "macos-hotkey-latency", runId, "manifest.json");
+
+const manifest = await measureHotkeyFeedbackLatency({
+  processName,
+  hotkey,
+  expectedText,
+  runs,
+  budgetMs,
+});
+writeJson(manifestPath, manifest);
+console.log(`macOS hotkey feedback latency manifest: ${manifestPath}`);
+console.log(JSON.stringify({
+  ok: manifest.ok,
+  runs: manifest.runs,
+  failed_budgets: manifest.failed_budgets,
+  summary: manifest.summary,
+}, null, 2));
+process.exit(manifest.ok ? 0 : 1);
+
+async function measureHotkeyFeedbackLatency({ processName, hotkey, expectedText, runs, budgetMs }) {
+  const startedAt = new Date().toISOString();
+  const samples = [];
+  for (let index = 0; index < runs; index += 1) {
+    const sample = { run: index + 1, ok: true, timings_ms: {}, errors: [] };
+    try {
+      const before = await readHarnessStatus(processName);
+      const beforeFeedback = feedbackValue(before);
+      const start = performance.now();
+      await pressHotkey(hotkey);
+      const after = await waitForHarnessFeedback({
+        processName,
+        beforeFeedback,
+        expectedText,
+        timeoutMs: Math.max(2_500, budgetMs * 3),
+      });
+      sample.timings_ms.hotkey_to_feedback = roundMs(performance.now() - start);
+      sample.before_feedback = beforeFeedback;
+      sample.after_feedback = feedbackValue(after);
+    } catch (error) {
+      sample.ok = false;
+      sample.errors.push(error instanceof Error ? error.message : String(error));
+    }
+    samples.push(sample);
+  }
+
+  const summary = summarize(samples);
+  const p95 = summary.hotkey_to_feedback?.p95_ms;
+  const failedBudgets = typeof p95 === "number" && p95 > budgetMs
+    ? [{ name: "hotkey_to_feedback", p95_ms: p95, budget_ms: budgetMs }]
+    : [];
+  return {
+    ok: samples.every((sample) => sample.ok) && failedBudgets.length === 0,
+    kind: "eventloopos.macos_hotkey_feedback_latency",
+    started_at: startedAt,
+    finished_at: new Date().toISOString(),
+    process_name: processName,
+    hotkey: hotkey.raw,
+    expected_text: expectedText,
+    runs,
+    budgets_ms: { hotkey_to_feedback: budgetMs },
+    failed_budgets: failedBudgets,
+    summary,
+    samples,
+  };
+}
+
+async function waitForHarnessFeedback({ processName, beforeFeedback, expectedText, timeoutMs }) {
+  const deadline = performance.now() + timeoutMs;
+  let lastStatus = "";
+  while (performance.now() < deadline) {
+    lastStatus = await readHarnessStatus(processName);
+    const feedback = feedbackValue(lastStatus);
+    if (expectedText) {
+      if (feedback.includes(expectedText) || lastStatus.includes(expectedText)) return lastStatus;
+    } else if (feedback && feedback !== beforeFeedback) {
+      return lastStatus;
+    }
+    await sleep(50);
+  }
+  throw new Error(`timed out waiting for feedback; last=${JSON.stringify(lastStatus)}`);
+}
+
+async function readHarnessStatus(processName) {
+  const script = `
+on flattenText(theElement)
+  set output to ""
+  try
+    set output to output & " " & (description of theElement as string)
+  end try
+  try
+    set output to output & " " & (name of theElement as string)
+  end try
+  try
+    set output to output & " " & (value of theElement as string)
+  end try
+  try
+    repeat with childElement in UI elements of theElement
+      set output to output & " " & my flattenText(childElement)
+    end repeat
+  end try
+  return output
+end flattenText
+
+tell application "System Events"
+  if not (exists process "${escapeAppleScriptString(processName)}") then error "process not found: ${escapeAppleScriptString(processName)}"
+  tell process "${escapeAppleScriptString(processName)}"
+    repeat with candidateWindow in windows
+      set windowText to my flattenText(candidateWindow)
+      if windowText contains "eventloopOS harness status" then return windowText
+    end repeat
+  end tell
+end tell
+error "eventloopOS harness status not found"
+`;
+  const result = await execFileAsync("osascript", ["-e", script], { timeout: 3_000 });
+  return normalizeSpace(result.stdout);
+}
+
+async function pressHotkey(hotkey) {
+  const modifierPart = hotkey.modifiers.length > 0
+    ? ` using {${hotkey.modifiers.join(", ")}}`
+    : "";
+  const script = `tell application "System Events" to key code ${hotkey.keyCode}${modifierPart}`;
+  await execFileAsync("osascript", ["-e", script], { timeout: 2_000 });
+}
+
+function parseHotkey(raw) {
+  const parts = String(raw).trim().toLowerCase().split(/[-+]/).filter(Boolean);
+  const key = parts.at(-1);
+  if (!key) throw new Error(`invalid hotkey: ${raw}`);
+  const modifiers = [];
+  for (const part of parts.slice(0, -1)) {
+    if (part === "ctrl" || part === "control") modifiers.push("control down");
+    else if (part === "option" || part === "alt") modifiers.push("option down");
+    else if (part === "shift") modifiers.push("shift down");
+    else if (part === "cmd" || part === "command") modifiers.push("command down");
+    else throw new Error(`unknown modifier in hotkey ${raw}: ${part}`);
+  }
+  const keyCode = keyCodeFor(key);
+  return { raw, key, keyCode, modifiers };
+}
+
+function keyCodeFor(key) {
+  const keyCodes = {
+    a: 0, s: 1, d: 2, f: 3, h: 4, g: 5, z: 6, x: 7, c: 8, v: 9,
+    b: 11, q: 12, w: 13, e: 14, r: 15, y: 16, t: 17, 1: 18, 2: 19,
+    3: 20, 4: 21, 6: 22, 5: 23, equal: 24, 9: 25, 7: 26, minus: 27,
+    8: 28, 0: 29, rightbracket: 30, o: 31, u: 32, leftbracket: 33,
+    i: 34, p: 35, l: 37, j: 38, quote: 39, k: 40, semicolon: 41,
+    backslash: 42, comma: 43, slash: 44, n: 45, m: 46, period: 47,
+    return: 36, enter: 36, space: 49, tab: 48, escape: 53,
+    left: 123, right: 124, down: 125, up: 126,
+  };
+  const code = keyCodes[key];
+  if (code === undefined) throw new Error(`unsupported hotkey key: ${key}`);
+  return code;
+}
+
+function feedbackValue(status) {
+  return normalizeSpace(String(status).match(/feedback=([^|]+)/)?.[1] ?? "");
+}
+
+function summarize(samples) {
+  const values = samples
+    .map((sample) => sample.timings_ms.hotkey_to_feedback)
+    .filter((value) => typeof value === "number" && Number.isFinite(value))
+    .sort((left, right) => left - right);
+  if (values.length === 0) return {};
+  return {
+    hotkey_to_feedback: {
+      count: values.length,
+      min_ms: roundMs(values[0]),
+      median_ms: percentile(values, 0.5),
+      p95_ms: percentile(values, 0.95),
+      max_ms: roundMs(values[values.length - 1]),
+    },
+  };
+}
+
+function percentile(values, p) {
+  const index = Math.min(values.length - 1, Math.ceil(values.length * p) - 1);
+  return roundMs(values[index]);
+}
+
+function roundMs(value) {
+  return Math.round(value * 10) / 10;
+}
+
+function readArg(name) {
+  const index = args.indexOf(name);
+  if (index < 0) return undefined;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${name} requires a value`);
+  return value;
+}
+
+function positiveInteger(value, fallback) {
+  if (value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`expected positive integer, got ${value}`);
+  return parsed;
+}
+
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function normalizeSpace(value) {
+  return String(value).replace(/\s+/g, " ").trim();
+}
+
+function escapeAppleScriptString(value) {
+  return String(value).replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function runSelfTest() {
+  const hotkey = parseHotkey("ctrl-option-shift-return");
+  if (hotkey.keyCode !== 36) throw new Error("return key code parse failed");
+  if (hotkey.modifiers.join(",") !== "control down,option down,shift down") {
+    throw new Error(`modifier parse failed: ${hotkey.modifiers.join(",")}`);
+  }
+  const status = "eventloopOS harness status | feedback=Showing paper: qit_demo | state=loaded";
+  if (feedbackValue(status) !== "Showing paper: qit_demo") throw new Error("feedback parse failed");
+  const summary = summarize([
+    { timings_ms: { hotkey_to_feedback: 120 } },
+    { timings_ms: { hotkey_to_feedback: 80 } },
+    { timings_ms: { hotkey_to_feedback: 200 } },
+  ]);
+  if (summary.hotkey_to_feedback.p95_ms !== 200) throw new Error("summary p95 failed");
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-hotkey-latency-"));
+  writeJson(path.join(temp, "manifest.json"), { ok: true });
+  if (!fs.existsSync(path.join(temp, "manifest.json"))) throw new Error("manifest write failed");
+  fs.rmSync(temp, { recursive: true, force: true });
+  console.log("macos-hotkey-feedback-latency self-test passed");
+}

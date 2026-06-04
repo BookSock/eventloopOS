@@ -208,7 +208,8 @@
         "Ctrl-Option-Shift-M"
       ],
       "code": ["app/macos/Sources/EventLoopQueueCore", "app/macos/Sources/EventLoopQueueApp"],
-      "proofs": ["docs/human-demo-walkthrough.md", "bin/lab-mac-human-demo-setup"]
+      "proofs": ["docs/human-demo-walkthrough.md", "bin/lab-mac-human-demo-setup", "bin/macos-hotkey-feedback-latency"],
+      "self_tests": ["bin/macos-hotkey-feedback-latency --self-test"]
     },
     {
       "id": "observability_proofs",
@@ -226,7 +227,8 @@
         "bin/proof-repeat",
         "bin/product-readiness-proof",
         "bin/workspace-latency-proof",
-        "bin/queue-latency-proof"
+        "bin/queue-latency-proof",
+        "bin/macos-hotkey-feedback-latency"
       ]
     }
   ]

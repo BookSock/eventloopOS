@@ -566,6 +566,7 @@ Proof scripts:
 - `bin/lab-mac-human-demo-setup`
 - `bin/workspace-latency-proof`
 - `bin/queue-latency-proof`
+- `bin/macos-hotkey-feedback-latency`
 - `bin/task-workspace-memory-proof-smoke`
 - `bin/workspace-task-switch-proof-smoke`
 
@@ -587,8 +588,8 @@ Highest-leverage steps before calling this a real primitives library:
    from route validators and fixtures.
 2. Split `@eventloopos/orchestrator` into public contracts and private server
    implementation packages.
-3. Extend latency budgets from workspace/queue HTTP proofs to the Mac
-   hotkey-to-feedback path.
+3. Feed live Mac hotkey-to-feedback latency manifests into dogfood/release gates
+   after each human-demo setup.
 4. Generalize the restore command envelope beyond the legacy
    `aerospace`/`osascript` command union while keeping the adapter guide green.
 5. Extend task-session controllers to expose stable root pids by default, so
