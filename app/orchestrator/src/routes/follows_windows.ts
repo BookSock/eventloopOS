@@ -10,6 +10,15 @@ export async function handleFollowsWindowsRoute(input: {
   now: Date;
   requestId: string;
 }): Promise<RouteResult | undefined> {
+  if (input.method === "GET" && input.pathname === "/follows-windows/exclusions") {
+    const exclusions = await input.runtime.store.listFollowsWindowExclusions();
+    return {
+      ok: true,
+      status: 200,
+      body: { ok: true, exclusions, count: exclusions.length, request_id: input.requestId },
+    };
+  }
+
   if (input.method !== "POST" || input.pathname !== "/follows-windows/exclude") {
     return undefined;
   }

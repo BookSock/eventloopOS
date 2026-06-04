@@ -1010,6 +1010,17 @@ export class PostgresQueueStore {
     return rowToFollowsWindowExclusionRecord(result.rows[0]);
   }
 
+  async listFollowsWindowExclusions(): Promise<FollowsWindowExclusionRecord[]> {
+    const result = await this.pool.query(
+      `
+        SELECT exclusion_id, app_bundle, title_substring, created_at
+        FROM follows_window_exclusions
+        ORDER BY exclusion_id ASC
+      `,
+    );
+    return result.rows.map(rowToFollowsWindowExclusionRecord);
+  }
+
   async claimTaskWindow(input: {
     taskId: string;
     windowId?: string;

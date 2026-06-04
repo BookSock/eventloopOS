@@ -94,7 +94,8 @@
       "status": "dogfood",
       "summary": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded.",
       "http": [
-        { "method": "POST", "path": "/follows-windows/exclude", "route_file": "app/orchestrator/src/routes/follows_windows.ts" }
+        { "method": "POST", "path": "/follows-windows/exclude", "route_file": "app/orchestrator/src/routes/follows_windows.ts" },
+        { "method": "GET", "path": "/follows-windows/exclusions", "route_file": "app/orchestrator/src/routes/follows_windows.ts" }
       ],
       "code": ["app/orchestrator/src/agents/follows_window_orchestrator.ts", "app/orchestrator/src/routes/follows_windows.ts"],
       "proofs": ["app/orchestrator/src/agents/follows_window_orchestrator.test.ts"]

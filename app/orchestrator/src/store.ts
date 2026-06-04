@@ -763,6 +763,12 @@ export function addFollowsWindowExclusion(
   return record;
 }
 
+export function listFollowsWindowExclusions(store: InMemoryStore): FollowsWindowExclusionRecord[] {
+  const exclusions = store.followsWindowExclusions;
+  if (!exclusions) return [];
+  return [...exclusions.values()].sort((a, b) => a.exclusion_id.localeCompare(b.exclusion_id));
+}
+
 export function claimTaskWindow(
   store: InMemoryStore,
   input: {

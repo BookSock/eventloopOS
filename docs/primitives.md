@@ -261,6 +261,8 @@ Code:
 - `app/orchestrator/src/agents/follows_window_orchestrator.ts`
 - `app/orchestrator/src/routes/follows_windows.ts`
 
+Exports current sticky-window exclusion rules over `GET /follows-windows/exclusions` so a demo, support script, or release proof can show why a shared app is no longer following every paper.
+
 HTTP surface:
 
 - `POST /follows-windows/exclude`

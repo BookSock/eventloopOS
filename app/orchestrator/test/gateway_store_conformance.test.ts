@@ -1014,6 +1014,10 @@ function runGatewayStoreContract(
           titleSubstring: "team-eng",
           now: new Date("2026-05-09T09:03:00.000Z"),
         });
+        const exclusions = await harness.store.listFollowsWindowExclusions();
+        assert.deepEqual(exclusions.map((exclusion) => exclusion.app_bundle), ["com.tinyspeck.slackmacgap"]);
+        assert.deepEqual(exclusions.map((exclusion) => exclusion.title_substring), ["team-eng"]);
+
         const excluded = await harness.store.listFollowsWindows({
           now: new Date("2026-05-09T09:03:00.000Z"),
           ttlMs: 24 * 60 * 60 * 1_000,

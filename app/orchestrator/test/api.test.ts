@@ -4617,6 +4617,17 @@ describe("orchestrator gateway API", () => {
       assert.equal(body.intent, "stop_sharing");
       assert.equal(body.exclusion?.title_substring, "slack");
 
+      const exclusionsResponse = await fetch(`${voiceBaseUrl}/follows-windows/exclusions`);
+      const exclusionsBody = await exclusionsResponse.json() as {
+        ok: boolean;
+        count: number;
+        exclusions: Array<{ title_substring?: string }>;
+      };
+      assert.equal(exclusionsResponse.status, 200);
+      assert.equal(exclusionsBody.ok, true);
+      assert.equal(exclusionsBody.count, 1);
+      assert.equal(exclusionsBody.exclusions[0]?.title_substring, "slack");
+
       const after = await store.listFollowsWindows({ now: fixedNow, ttlMs: 24 * 60 * 60 * 1_000 });
       assert.deepEqual(after, []);
     } finally {
