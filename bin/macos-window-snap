@@ -37,9 +37,7 @@ const frame = frameFor(action, desktop);
 setFrontWindowFrame(frame);
 
 function readPrimaryDesktopFrame() {
-  const output = execFileSync("osascript", ["-e", 'tell application "Finder" to get bounds of window of desktop'], {
-    encoding: "utf8",
-  }).trim();
+  const output = readPrimaryDesktopFrameWithAppKit() ?? readPrimaryDesktopFrameWithFinder();
   const values = output.split(/\s*,\s*/).map((value) => Number.parseInt(value, 10));
   if (values.length !== 4 || values.some((value) => !Number.isFinite(value))) {
     throw new Error(`could not read desktop bounds: ${output}`);
@@ -49,6 +47,39 @@ function readPrimaryDesktopFrame() {
     throw new Error(`invalid desktop bounds: ${output}`);
   }
   return { x: left, y: top, width: right - left, height: bottom - top };
+}
+
+function readPrimaryDesktopFrameWithAppKit() {
+  try {
+    return execFileSync("swift", ["-"], {
+      encoding: "utf8",
+      input: `
+import AppKit
+
+guard let screen = NSScreen.main else {
+  exit(1)
+}
+
+let screenFrame = screen.frame
+let visibleFrame = screen.visibleFrame
+let left = Int(visibleFrame.minX.rounded())
+let top = Int((screenFrame.maxY - visibleFrame.maxY).rounded())
+let right = Int(visibleFrame.maxX.rounded())
+let bottom = Int((screenFrame.maxY - visibleFrame.minY).rounded())
+print("\\(left), \\(top), \\(right), \\(bottom)")
+`,
+      timeout: 4_000,
+    }).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+function readPrimaryDesktopFrameWithFinder() {
+  return execFileSync("osascript", ["-e", 'tell application "Finder" to get bounds of window of desktop'], {
+    encoding: "utf8",
+    timeout: 2_000,
+  }).trim();
 }
 
 function frameFor(candidate, desktop) {
