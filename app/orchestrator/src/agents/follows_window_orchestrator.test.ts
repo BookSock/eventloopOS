@@ -211,9 +211,12 @@ describe("follows_window_orchestrator", () => {
     assert.equal(result.decision, "switch_handled");
     if (result.decision !== "switch_handled") return;
     assert.equal(result.foreignClaimedMoved, 1);
-    assert.equal(ranCommands.length, 1);
-    assert.deepEqual(ranCommands[0]?.args, ["move-node-to-workspace", "--window-id", "200", "ws-b"]);
+    assert.deepEqual(ranCommands.map((command) => command.args), [
+      ["move-node-to-workspace", "--window-id", "200", "ws-b"],
+      ["workspace", "ws-a"],
+    ]);
     assert.ok(activities.some((a) => a.type === "foreign_claimed_window_redirected"));
+    assert.ok(activities.some((a) => a.type === "foreign_claimed_window_focus_restored"));
   });
 
   it("moves a process-root descendant window away even when focused workspace is unchanged", async () => {
@@ -243,15 +246,20 @@ describe("follows_window_orchestrator", () => {
     const orch = createFollowsWindowOrchestrator(deps);
     const first = await orch.tick();
     assert.equal(first.decision, "switch_handled");
-    assert.equal(ranCommands.length, 1);
+    assert.deepEqual(ranCommands.map((command) => command.args), [
+      ["move-node-to-workspace", "--window-id", "300", "ws-b"],
+      ["workspace", "ws-a"],
+    ]);
     ranCommands.length = 0;
 
     const second = await orch.tick();
     assert.equal(second.decision, "no_change");
     if (second.decision !== "no_change") return;
     assert.equal(second.foreignClaimedMoved, 1);
-    assert.equal(ranCommands.length, 1);
-    assert.deepEqual(ranCommands[0]?.args, ["move-node-to-workspace", "--window-id", "300", "ws-b"]);
+    assert.deepEqual(ranCommands.map((command) => command.args), [
+      ["move-node-to-workspace", "--window-id", "300", "ws-b"],
+      ["workspace", "ws-a"],
+    ]);
   });
 
   it("moves a detached agent-claimed browser window away from the user's current paper", async () => {
@@ -296,6 +304,7 @@ describe("follows_window_orchestrator", () => {
     assert.equal(result.foreignClaimedMoved, 1);
     assert.deepEqual(ranCommands.map((command) => command.args), [
       ["move-node-to-workspace", "--window-id", "301", "ws-b"],
+      ["workspace", "ws-a"],
     ]);
   });
 

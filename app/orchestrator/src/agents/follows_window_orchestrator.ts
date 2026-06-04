@@ -3,7 +3,7 @@ import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js"
 import type { GatewayStore } from "../gateway_store.js";
 import type { WorkspaceController } from "../workspace/controller.js";
 import type { AerospaceCommand, WorkspaceSnapshot } from "../workspace/aerospace.js";
-import { moveToWorkspacePlan } from "../workspace/aerospace.js";
+import { focusWorkspacePlan, moveToWorkspacePlan } from "../workspace/aerospace.js";
 import type { TaskWindowClaimRecord } from "../store.js";
 import { normalizeTitlePrefix } from "../store.js";
 
@@ -392,6 +392,32 @@ async function redirectForeignClaimedWindows(
         details: {
           window_id: String(window.id),
           task_id: ownerTaskId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+
+  if (moved > 0) {
+    try {
+      await deps.runAerospaceCommand(focusWorkspacePlan(input.focusedWorkspace));
+      await emitForeignRedirectActivity(deps, {
+        type: "foreign_claimed_window_focus_restored",
+        summary: `Focus restored to workspace ${input.focusedWorkspace} after foreign window redirect`,
+        tickNow: input.tickNow,
+        details: {
+          workspace: input.focusedWorkspace,
+          moved,
+        },
+      });
+    } catch (error) {
+      await emitForeignRedirectActivity(deps, {
+        type: "foreign_claimed_window_focus_restore_failed",
+        summary: `Focus restore to workspace ${input.focusedWorkspace} failed after foreign window redirect`,
+        tickNow: input.tickNow,
+        status: "failed",
+        details: {
+          workspace: input.focusedWorkspace,
           error: error instanceof Error ? error.message : String(error),
         },
       });
