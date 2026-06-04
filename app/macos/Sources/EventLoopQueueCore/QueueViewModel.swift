@@ -1835,6 +1835,7 @@ public final class QueueViewModel: ObservableObject {
     public func confirmWorkspaceRestore(snapshot: WorkspaceSnapshot) async {
         guard shouldRestoreWorkspace else {
             workspaceRestoreState = .skippedManualMode
+            advanceToast = .manualModeActive
             return
         }
 
@@ -1844,6 +1845,7 @@ public final class QueueViewModel: ObservableObject {
     private func executeWorkspaceRestore(snapshot: WorkspaceSnapshot, idempotencyPrefix: String) async {
         guard !workspaceRestoreInFlight else {
             workspaceRestoreState = .alreadyRestoring
+            advanceToast = .actionComplete("Workspace restore already running...")
             return
         }
 
@@ -1852,11 +1854,13 @@ public final class QueueViewModel: ObservableObject {
            recent.snapshot == snapshot,
            Date().timeIntervalSince(recent.completedAt) < workspaceRestoreRepeatWindow {
             workspaceRestoreState = .alreadyRestored(recent.receipt)
+            advanceToast = .actionComplete("Workspace already restored.")
             return
         }
 
         workspaceRestoreInFlight = true
         workspaceRestoreState = .restoring
+        advanceToast = .actionComplete("Restoring workspace...")
         defer {
             workspaceRestoreInFlight = false
         }
@@ -1874,14 +1878,17 @@ public final class QueueViewModel: ObservableObject {
                 completedAt: Date(),
                 receipt: response.receipt
             )
+            advanceToast = .actionComplete("Workspace restored.")
         } catch {
             workspaceRestoreState = .failed(error.localizedDescription)
+            advanceToast = .actionComplete("Workspace restore failed: \(Self.shortStatusMessage(error.localizedDescription))")
         }
     }
 
     public func confirmSelectedWorkspaceRestore() async {
         guard let snapshot = selectedWorkspaceSnapshot else {
             workspaceRestoreState = .failed("Selected packet has no workspace snapshot")
+            advanceToast = .actionComplete("Selected paper has no saved workspace.")
             return
         }
 
@@ -1910,10 +1917,12 @@ public final class QueueViewModel: ObservableObject {
     public func confirmManualWorkspaceRestore() async {
         guard let snapshot = manualWorkspaceSnapshot else {
             workspaceRestoreState = .failed("No manual workspace snapshot saved")
+            advanceToast = .actionComplete("No manual workspace saved.")
             return
         }
 
         do {
+            advanceToast = .actionComplete("Restoring manual workspace...")
             let response = try await workspaceClient.restore(
                 snapshot: snapshot,
                 currentWindows: nil,
@@ -1922,8 +1931,10 @@ public final class QueueViewModel: ObservableObject {
             mode = .manual
             shouldRestoreWorkspace = false
             workspaceRestoreState = .executed(response.receipt)
+            advanceToast = .actionComplete("Manual workspace restored.")
         } catch {
             workspaceRestoreState = .failed(error.localizedDescription)
+            advanceToast = .actionComplete("Manual workspace restore failed: \(Self.shortStatusMessage(error.localizedDescription))")
         }
     }
 
@@ -2016,6 +2027,17 @@ public final class QueueViewModel: ObservableObject {
     private func normalizedTaskHint(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed?.isEmpty == false ? trimmed : nil
+    }
+
+    private static func shortStatusMessage(_ value: String, maxLength: Int = 96) -> String {
+        let normalized = value
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count > maxLength else {
+            return normalized
+        }
+        let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
+        return "\(normalized[..<index])..."
     }
 }
 

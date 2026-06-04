@@ -759,6 +759,10 @@ Hotkeys:
 - `Ctrl-Option-M`: manual mode / return and restore
 - `Ctrl-Option-Shift-M`: return here from manual mode
 
+Restore hotkey feedback is explicit: start, success, duplicate in-flight,
+recent-repeat, skipped-manual-mode, and missing-snapshot cases update the same
+toast/harness feedback path used by queue hotkeys.
+
 Useful standalone uses:
 
 - build another UI over the same queue/workspace primitives

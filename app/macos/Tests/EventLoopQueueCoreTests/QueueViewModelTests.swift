@@ -2587,6 +2587,7 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.confirmSelectedWorkspaceRestore()
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .failed("Selected packet has no workspace snapshot"))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Selected paper has no saved workspace."))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys, [])
     }
 
@@ -2681,6 +2682,7 @@ final class QueueViewModelTests: XCTestCase {
             XCTFail("expected executed workspace restore state")
             return
         }
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restored."))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }
 
@@ -2726,6 +2728,7 @@ final class QueueViewModelTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 10_000_000)
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .restoring)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Restoring workspace..."))
 
         let secondRestore = Task { @MainActor in
             await viewModel.confirmSelectedWorkspaceRestore()
@@ -2734,11 +2737,13 @@ final class QueueViewModelTests: XCTestCase {
         await secondRestore.value
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestoring)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restore already running..."))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
 
         await firstRestore.value
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restored."))
     }
 
     func testImmediateSelectedWorkspaceRestoreRepeatReusesRecentReceipt() async {
@@ -2780,6 +2785,7 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.confirmSelectedWorkspaceRestore()
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestored(receipt))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace already restored."))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }
 
@@ -2813,6 +2819,7 @@ final class QueueViewModelTests: XCTestCase {
             return
         }
         XCTAssertEqual(observedReceipt, receipt)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restored."))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
         XCTAssertTrue(workspaceClient.restoreIdempotencyKeys[0].hasPrefix("mac_workspace_restore_"))
     }
@@ -2831,6 +2838,7 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.confirmWorkspaceRestore(snapshot: snapshot)
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .skippedManualMode)
+        XCTAssertEqual(viewModel.advanceToast, .manualModeActive)
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys, [])
     }
 
