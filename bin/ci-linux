@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+run() {
+  printf 'ci-linux start: %s\n' "$*"
+  "$@"
+  printf 'ci-linux pass: %s\n' "$*"
+}
+
+run pnpm test:contracts
+run pnpm lint
+
+run pnpm --filter @eventloopos/shared typecheck
+run pnpm --filter @eventloopos/browser-extension typecheck
+run pnpm --filter @eventloopos/native-host typecheck
+run pnpm --filter @eventloopos/orchestrator typecheck
+run pnpm --filter @eventloopos/test-harness typecheck
+
+run pnpm --filter @eventloopos/browser-extension test
+run pnpm --filter @eventloopos/native-host test
+run pnpm --filter @eventloopos/orchestrator test
+run pnpm --filter @eventloopos/test-harness test
+
+run pnpm test:e2e:event-loop
+run pnpm --filter @eventloopos/browser-extension test:e2e
+run pnpm --filter @eventloopos/native-host test:e2e
+run pnpm --filter @eventloopos/test-harness test:e2e
