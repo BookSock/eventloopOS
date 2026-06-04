@@ -78,6 +78,8 @@ describe("PostgresQueueStore", () => {
       { id: "0017_window_identity_keys.sql" },
       { id: "0018_tasks_dormant_at.sql" },
       { id: "0019_follows_window_exclusions.sql" },
+      { id: "0020_task_window_claims.sql" },
+      { id: "0021_task_window_claim_process_root_pid.sql" },
     ]);
 
     const column = await store.pool.query(
