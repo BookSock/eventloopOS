@@ -24,6 +24,13 @@ const layoutB: WorkspaceSnapshot = {
   windows: [{ id: 22, app: "Ghostty", title: "codex reports", workspace: "eventloop-reports" }],
 };
 
+const layoutFake: WorkspaceSnapshot = {
+  backend: "fake",
+  activeWorkspace: "fake-main",
+  focusedWindowId: 33,
+  windows: [{ id: 33, app: "FakeApp", title: "fake docs", workspace: "fake-main" }],
+};
+
 describe("tasks route — phase 2 of hotkey state machine", () => {
   let server: Server;
   let baseUrl: string;
@@ -156,17 +163,19 @@ describe("tasks route — phase 2 of hotkey state machine", () => {
     const updated = await fetch(`${baseUrl}/tasks/${created.task.task_id}/layout`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(layoutB),
+      body: JSON.stringify(layoutFake),
     });
     assert.equal(updated.status, 200);
     const updatedBody = await updated.json() as { ok: boolean; layout: { layout: WorkspaceSnapshot } };
     assert.equal(updatedBody.ok, true);
-    assert.equal(updatedBody.layout.layout.activeWorkspace, "eventloop-reports");
+    assert.equal(updatedBody.layout.layout.backend, "fake");
+    assert.equal(updatedBody.layout.layout.activeWorkspace, "fake-main");
 
     const fetched = await fetch(`${baseUrl}/tasks/${created.task.task_id}`).then((r) => r.json()) as {
       layout: { layout: WorkspaceSnapshot } | null;
     };
-    assert.equal(fetched.layout?.layout.activeWorkspace, "eventloop-reports");
+    assert.equal(fetched.layout?.layout.backend, "fake");
+    assert.equal(fetched.layout?.layout.activeWorkspace, "fake-main");
   });
 
   it("POST /tasks/current sets the singleton, GET reflects it, null clears it", async () => {

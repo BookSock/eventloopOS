@@ -63,8 +63,8 @@ Current backend: AeroSpace + macOS System Events in
 `app/orchestrator/src/workspace/aerospace.ts`.
 
 Adapter guide: `docs/workspace-backend-adapter.md`. Current non-AeroSpace
-backends must emit AeroSpace-compatible snapshots until the public snapshot
-schema is generalized.
+backends can use custom backend ids, but window records and restore plans still
+share the legacy AeroSpace-compatible shape.
 
 Captured data:
 
@@ -574,8 +574,8 @@ Highest-leverage steps before calling this a real primitives library:
    implementation packages.
 3. Extend latency budgets from workspace/queue HTTP proofs to the Mac
    hotkey-to-feedback path.
-4. Generalize the public workspace snapshot schema beyond
-   `backend: "aerospace"` while keeping the adapter guide green.
+4. Generalize the restore command envelope beyond the legacy
+   `aerospace`/`osascript` command union while keeping the adapter guide green.
 5. Add automatic claim emitters for unwrapped untagged Codex/Claude-spawned
    foreign windows.
 6. Add user-facing follows/unfollows rules and durable rule export/import.

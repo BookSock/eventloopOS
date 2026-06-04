@@ -1,4 +1,5 @@
 import type { WorkspaceSnapshot } from "../contracts.js";
+import { readWorkspaceBackend } from "../workspace/controller.js";
 import type { Runtime } from "../runtime.js";
 import type { TaskAnchorKind, TaskRecord } from "../store.js";
 import type { JsonBodyReader } from "./context_restore.js";
@@ -237,7 +238,12 @@ function validateCreateTaskRequest(value: unknown): ValidatedCreateTaskRequest |
 
 function validateWorkspaceSnapshot(value: unknown): { ok: true; snapshot: WorkspaceSnapshot } | { ok: false; message: string } {
   if (!isRecord(value)) return { ok: false, message: "workspace snapshot must be an object" };
-  if (value.backend !== "aerospace") return { ok: false, message: "workspace snapshot backend must be 'aerospace'" };
+  let backend: string;
+  try {
+    backend = readWorkspaceBackend(value.backend);
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
   if (!Array.isArray(value.windows)) return { ok: false, message: "workspace snapshot windows must be an array" };
   for (const [index, window] of value.windows.entries()) {
     if (!isRecord(window)) return { ok: false, message: `windows[${index}] must be an object` };
@@ -246,7 +252,7 @@ function validateWorkspaceSnapshot(value: unknown): { ok: true; snapshot: Worksp
     if (typeof window.title !== "string") return { ok: false, message: `windows[${index}].title must be a string` };
     if (typeof window.workspace !== "string") return { ok: false, message: `windows[${index}].workspace must be a string` };
   }
-  return { ok: true, snapshot: value as WorkspaceSnapshot };
+  return { ok: true, snapshot: { ...value, backend } as WorkspaceSnapshot };
 }
 
 function matchTaskPath(pathname: string): { taskId: string; suffix: string } | undefined {

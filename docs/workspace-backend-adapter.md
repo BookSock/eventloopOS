@@ -5,10 +5,10 @@ eventloopOS can use a replaceable workspace backend through the
 This is the seam for people who want the OS/window-control primitive without
 taking the whole queue app.
 
-Current limitation: the public HTTP snapshot schema is still
-`backend: "aerospace"`. A non-AeroSpace backend can be used today, but it must
-emit AeroSpace-compatible `WorkspaceSnapshot` objects and restore plans until
-the schema is generalized.
+Current limitation: the public HTTP snapshot schema accepts custom backend ids,
+but the window shape is still AeroSpace-compatible and restore plans still use
+the legacy `aerospace`/`osascript` command envelope. A non-AeroSpace backend can
+be used today by emitting compatible window records and executing its own plans.
 
 ## Contract
 
@@ -36,7 +36,7 @@ Today a compatible snapshot looks like:
 
 ```json
 {
-  "backend": "aerospace",
+  "backend": "fake",
   "activeWorkspace": "paper-a",
   "focusedWindowId": 42,
   "windows": [
@@ -73,11 +73,10 @@ Recommended fields:
 ```ts
 import type { WorkspaceController } from "./workspace/controller.js";
 import type { RestorePlan, WorkspaceSnapshot } from "./workspace/aerospace.js";
-import { restoreWorkspacePlan } from "./workspace/aerospace.js";
 
 class FakeWorkspaceController implements WorkspaceController {
   private snapshot: WorkspaceSnapshot = {
-    backend: "aerospace",
+    backend: "fake",
     activeWorkspace: "fake-main",
     focusedWindowId: 101,
     windows: [
@@ -96,8 +95,8 @@ class FakeWorkspaceController implements WorkspaceController {
   status() {
     return {
       available: true,
-      backend: "aerospace" as const,
-      detail: "fake backend emitting AeroSpace-compatible snapshots",
+      backend: "fake",
+      detail: "fake backend emitting workspace-compatible snapshots",
       monitorCount: 1
     };
   }
@@ -107,7 +106,19 @@ class FakeWorkspaceController implements WorkspaceController {
   }
 
   planRestore(snapshot: WorkspaceSnapshot, currentWindows = this.snapshot.windows) {
-    return restoreWorkspacePlan(snapshot, currentWindows);
+    const currentWindowsById = new Map(currentWindows.map((window) => [window.id, window]));
+    return {
+      commands: [
+        ...snapshot.windows
+          .filter((window) => currentWindowsById.has(window.id))
+          .map((window) => ({ command: "aerospace" as const, args: ["fake-move", String(window.id), window.workspace] })),
+        ...(snapshot.activeWorkspace ? [{ command: "aerospace" as const, args: ["workspace", snapshot.activeWorkspace] }] : []),
+        ...(snapshot.focusedWindowId ? [{ command: "aerospace" as const, args: ["focus", String(snapshot.focusedWindowId)] }] : [])
+      ],
+      skipped: snapshot.windows
+        .filter((window) => !currentWindowsById.has(window.id))
+        .map((window) => ({ reason: "stale_window_id" as const, windowId: window.id, workspace: window.workspace }))
+    };
   }
 
   executeRestorePlan(plan: RestorePlan) {

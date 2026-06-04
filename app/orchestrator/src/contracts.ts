@@ -31,7 +31,7 @@ export type ContextResource = {
 };
 
 export type WorkspaceSnapshot = {
-  backend: "aerospace";
+  backend: string;
   windows: WorkspaceWindow[];
   activeWorkspace?: string;
   focusedWindowId?: number;

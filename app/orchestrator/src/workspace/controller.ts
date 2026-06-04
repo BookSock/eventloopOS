@@ -46,16 +46,25 @@ export function parseWorkspaceSnapshot(input: unknown): WorkspaceSnapshot {
   if (!isRecord(input)) {
     throw new Error("workspace snapshot must be an object");
   }
-  if (input.backend !== "aerospace") {
-    throw new Error("workspace snapshot backend must be aerospace");
-  }
+  const backend = readWorkspaceBackend(input.backend);
 
   return {
-    backend: "aerospace",
+    backend,
     windows: parseAerospaceWindows(input.windows),
     activeWorkspace: readOptionalString(input, "activeWorkspace", "active_workspace"),
     focusedWindowId: readOptionalInteger(input, "focusedWindowId", "focused_window_id"),
   };
+}
+
+export function readWorkspaceBackend(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error("workspace snapshot backend must be a non-empty string");
+  }
+  const backend = value.trim();
+  if (!/^[A-Za-z0-9._:-]+$/.test(backend)) {
+    throw new Error(`unsafe workspace backend: ${backend}`);
+  }
+  return backend;
 }
 
 export function parseRestorePlanRequest(input: unknown): {

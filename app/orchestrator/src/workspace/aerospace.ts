@@ -21,14 +21,14 @@ export const AEROSPACE_WINDOW_CAPTURE_FORMAT =
 export type WorkspaceCapabilityStatus =
   | {
       available: true;
-      backend: "aerospace";
+      backend: string;
       reason?: undefined;
       detail?: string;
       monitorCount?: number;
     }
   | {
       available: false;
-      backend: "aerospace";
+      backend: string;
       reason: "binary_missing" | "permission_denied" | "server_unavailable" | "invalid_response" | "unknown_error";
       detail?: string;
     };
@@ -53,7 +53,7 @@ export type WindowFrame = {
 };
 
 export type WorkspaceSnapshot = {
-  backend: "aerospace";
+  backend: string;
   windows: AerospaceWindow[];
   activeWorkspace?: string;
   focusedWindowId?: number;
@@ -274,6 +274,10 @@ export function restoreWindowFramePlan(window: AerospaceWindow): AerospaceComman
 }
 
 export function restoreWorkspacePlan(snapshot: WorkspaceSnapshot, currentWindows: AerospaceWindow[]): RestorePlan {
+  if (snapshot.backend !== "aerospace") {
+    throw new Error(`aerospace restore planner cannot restore ${snapshot.backend} snapshots`);
+  }
+
   const currentWindowsById = new Map(currentWindows.map((window) => [window.id, window]));
   const commands: AerospaceCommand[] = [];
   const frameCommands: AerospaceCommand[] = [];

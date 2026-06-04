@@ -95,6 +95,21 @@ describe("workspace controller", () => {
     assert.deepEqual(plan.skipped, []);
   });
 
+  it("rejects non-AeroSpace snapshots in the AeroSpace restore planner", async () => {
+    const controller = new AerospaceWorkspaceController(async () => {
+      throw new Error("exec should not be called when current windows supplied");
+    });
+    const snapshot: WorkspaceSnapshot = {
+      backend: "fake",
+      windows: [{ id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog" }],
+    };
+
+    await assert.rejects(
+      () => controller.planRestore(snapshot, [{ id: 9, app: "Ghostty", title: "codex", workspace: "manual" }]),
+      /cannot restore fake snapshots/,
+    );
+  });
+
   it("parses restore requests with snake-case active and focused fields", () => {
     const request = parseRestorePlanRequest({
       snapshot: {
@@ -128,7 +143,9 @@ describe("workspace controller", () => {
   });
 
   it("rejects malformed snapshots", () => {
-    assert.throws(() => parseWorkspaceSnapshot({ backend: "spaces", windows: [] }), /backend must be aerospace/);
+    assert.equal(parseWorkspaceSnapshot({ backend: "spaces", windows: [] }).backend, "spaces");
+    assert.throws(() => parseWorkspaceSnapshot({ backend: "", windows: [] }), /backend must be a non-empty string/);
+    assert.throws(() => parseWorkspaceSnapshot({ backend: "bad/backend", windows: [] }), /unsafe workspace backend/);
     assert.throws(
       () => parseWorkspaceSnapshot({ backend: "aerospace", windows: [{ id: 1, workspace: "bad;name" }] }),
       /unsafe aerospace workspace/,
@@ -150,11 +167,16 @@ describe("workspace controller", () => {
     const baseUrl = `http://127.0.0.1:${address.port}`;
 
     try {
-      const status = await requestJson<{ execute_supported: boolean; status: { available: boolean } }>(baseUrl, "/workspace/status");
+      const status = await requestJson<{ execute_supported: boolean; status: { available: boolean; backend: string } }>(
+        baseUrl,
+        "/workspace/status",
+      );
       assert.equal(status.execute_supported, true);
       assert.equal(status.status.available, true);
+      assert.equal(status.status.backend, "fake");
 
       const captured = await requestJson<{ snapshot: WorkspaceSnapshot }>(baseUrl, "/workspace/capture", { method: "POST", body: {} });
+      assert.equal(captured.snapshot.backend, "fake");
       assert.equal(captured.snapshot.activeWorkspace, "fake-main");
       assert.equal(captured.snapshot.windows[0].id, 101);
 
@@ -166,10 +188,8 @@ describe("workspace controller", () => {
         },
       });
       assert.deepEqual(planned.plan.commands.map((command) => [command.command, command.args[0]]), [
-        ["aerospace", "move-node-to-workspace"],
-        ["aerospace", "layout"],
+        ["aerospace", "fake-move"],
         ["aerospace", "workspace"],
-        ["osascript", "-e"],
         ["aerospace", "focus"],
       ]);
 
@@ -183,8 +203,8 @@ describe("workspace controller", () => {
         },
       });
       assert.equal(restored.ok, true);
-      assert.equal(fake.executed.length, 5);
-      assert.deepEqual(fake.executed.map((command) => command.args[0]), ["move-node-to-workspace", "layout", "workspace", "-e", "focus"]);
+      assert.equal(fake.executed.length, 3);
+      assert.deepEqual(fake.executed.map((command) => command.args[0]), ["fake-move", "workspace", "focus"]);
     } finally {
       await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
@@ -197,15 +217,15 @@ class FakeWorkspaceController implements WorkspaceController {
   status() {
     return {
       available: true as const,
-      backend: "aerospace" as const,
-      detail: "fake backend emitting AeroSpace-compatible snapshots",
+      backend: "fake",
+      detail: "fake backend emitting workspace-compatible snapshots",
       monitorCount: 1,
     };
   }
 
   capture(): WorkspaceSnapshot {
     return {
-      backend: "aerospace",
+      backend: "fake",
       activeWorkspace: "fake-main",
       focusedWindowId: 101,
       windows: [
@@ -223,10 +243,20 @@ class FakeWorkspaceController implements WorkspaceController {
     };
   }
 
-  planRestore(snapshot: WorkspaceSnapshot, currentWindows = this.capture().windows) {
-    return new AerospaceWorkspaceController(async () => {
-      throw new Error("fake conformance should not call AeroSpace exec");
-    }).planRestore(snapshot, currentWindows);
+  planRestore(snapshot: WorkspaceSnapshot, currentWindows = this.capture().windows): RestorePlan {
+    const currentWindowsById = new Map(currentWindows.map((window) => [window.id, window]));
+    return {
+      commands: [
+        ...snapshot.windows
+          .filter((window) => currentWindowsById.has(window.id))
+          .map((window) => ({ command: "aerospace" as const, args: ["fake-move", String(window.id), window.workspace] })),
+        ...(snapshot.activeWorkspace ? [{ command: "aerospace" as const, args: ["workspace", snapshot.activeWorkspace] }] : []),
+        ...(snapshot.focusedWindowId ? [{ command: "aerospace" as const, args: ["focus", String(snapshot.focusedWindowId)] }] : []),
+      ],
+      skipped: snapshot.windows
+        .filter((window) => !currentWindowsById.has(window.id))
+        .map((window) => ({ reason: "stale_window_id" as const, windowId: window.id, workspace: window.workspace })),
+    };
   }
 
   executeRestorePlan(plan: RestorePlan) {
