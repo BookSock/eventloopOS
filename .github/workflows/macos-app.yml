@@ -1,0 +1,28 @@
+name: macOS App
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/macos-app.yml"
+      - "app/macos/**"
+  pull_request:
+    paths:
+      - ".github/workflows/macos-app.yml"
+      - "app/macos/**"
+  workflow_dispatch:
+
+concurrency:
+  group: macos-app-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  swift-tests:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - run: swift test --package-path app/macos
