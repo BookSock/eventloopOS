@@ -1,4 +1,5 @@
 import type { TaskSessionController } from "./types.js";
+import { normalizeTaskSessionPidFields } from "./pid_fields.js";
 
 export type CodexNativeThread = {
   id: string;
@@ -452,13 +453,7 @@ function pidFields(input: {
   root_pid?: number;
   pids?: number[];
 }): Pick<CodexTaskSession, "pid" | "agent_pid" | "terminal_pid" | "root_pid" | "pids"> {
-  return {
-    ...(input.pid !== undefined ? { pid: input.pid } : {}),
-    ...(input.agent_pid !== undefined ? { agent_pid: input.agent_pid } : {}),
-    ...(input.terminal_pid !== undefined ? { terminal_pid: input.terminal_pid } : {}),
-    ...(input.root_pid !== undefined ? { root_pid: input.root_pid } : {}),
-    ...(input.pids !== undefined ? { pids: input.pids } : {}),
-  };
+  return normalizeTaskSessionPidFields(input);
 }
 
 function stableId(input: string): string {

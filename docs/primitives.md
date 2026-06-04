@@ -19,7 +19,7 @@ Generate a builder-facing coverage/readiness summary with
 `bin/primitives-readiness-report docs/primitives.catalog.json` or use
 `--json` for machine-readable audit output.
 Current catalog summary: 18 primitives, 79 HTTP routes, 8 CLI commands, 18
-self-tests, 69 proof refs.
+self-tests, 73 proof refs.
 Strict readiness is expected to stay green: every cataloged primitive
 has a `self_tests` command, and the shared primitive operation-helper test
 proves typed helper coverage for every cataloged HTTP route.
@@ -225,7 +225,7 @@ Guarantees today:
 Why it matters: this is the primitive that makes window layout memory feel
 automatic instead of like a manual "save workspace" button.
 
-Known gap: unclaimed LaunchServices-detached apps may lose useful
+Known gap: unclaimed LaunchServices-detached apps can still lose useful
 parent-process ancestry, so wrappers should claim `process_root_pid`, tag the
 window, or emit routed resources for those launches.
 
@@ -549,6 +549,8 @@ Useful standalone uses:
 - route Slack/GitHub/browser events into Codex/Claude sessions
 - bind an existing terminal/Codex window to a task
 - detect stale/lost task sessions and create human papers
+- expose normalized `root_pid`/`pids` for Codex, Claude, and fake sessions so
+  process-tree window claims can attribute agent-spawned windows
 
 Proof:
 
@@ -813,7 +815,5 @@ Highest-leverage steps before calling this a real primitives library:
    release demos; use `--skip-hotkey-latency` only for Accessibility bootstrap.
 4. Grow the generic `WorkspaceCommand` envelope into richer backend-specific
    adapter guides while keeping AeroSpace executor safety green.
-5. Extend task-session controllers to expose stable root pids by default, so
-   process-tree window claims work without custom session metadata.
-6. Grow `examples/primitives/` from tiny CLI examples into richer starter apps
+5. Grow `examples/primitives/` from tiny CLI examples into richer starter apps
    with screenshots and fixture-backed walkthroughs.

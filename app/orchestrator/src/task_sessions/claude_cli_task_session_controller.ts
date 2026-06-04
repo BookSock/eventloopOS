@@ -1,4 +1,5 @@
 import type { TaskSessionController } from "./types.js";
+import { normalizeTaskSessionPidFields } from "./pid_fields.js";
 
 export type ClaudeCliSessionConfig = {
   session_id: string;
@@ -304,13 +305,7 @@ function pidConfigFields(record: Record<string, unknown>): Pick<ClaudeCliSession
   const terminalPid = optionalNumber(record.terminal_pid ?? record.terminalPid);
   const rootPid = optionalNumber(record.root_pid ?? record.rootPid);
   const pids = optionalNumberArray(record.pids);
-  return {
-    ...(pid !== undefined ? { pid } : {}),
-    ...(agentPid !== undefined ? { agent_pid: agentPid } : {}),
-    ...(terminalPid !== undefined ? { terminal_pid: terminalPid } : {}),
-    ...(rootPid !== undefined ? { root_pid: rootPid } : {}),
-    ...(pids !== undefined ? { pids } : {}),
-  };
+  return normalizeTaskSessionPidFields({ pid, agent_pid: agentPid, terminal_pid: terminalPid, root_pid: rootPid, pids });
 }
 
 function pidFields(input: {
@@ -320,13 +315,7 @@ function pidFields(input: {
   root_pid?: number;
   pids?: number[];
 }): Pick<ClaudeCliTaskSession, "pid" | "agent_pid" | "terminal_pid" | "root_pid" | "pids"> {
-  return {
-    ...(input.pid !== undefined ? { pid: input.pid } : {}),
-    ...(input.agent_pid !== undefined ? { agent_pid: input.agent_pid } : {}),
-    ...(input.terminal_pid !== undefined ? { terminal_pid: input.terminal_pid } : {}),
-    ...(input.root_pid !== undefined ? { root_pid: input.root_pid } : {}),
-    ...(input.pids !== undefined ? { pids: input.pids } : {}),
-  };
+  return normalizeTaskSessionPidFields(input);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

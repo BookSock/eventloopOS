@@ -2259,7 +2259,7 @@
       "code": ["app/orchestrator/src/agents/ambient_workspace_saver.ts"],
       "proofs": ["app/orchestrator/src/agents/ambient_workspace_saver.test.ts"],
       "self_tests": ["pnpm --filter @eventloopos/orchestrator run test:ambient-autosave"],
-      "gaps": ["Task-session controllers should expose stable root pids by default; unwrapped LaunchServices-detached apps still need tags, process ancestry, or routed resources."]
+      "gaps": ["Unwrapped LaunchServices-detached apps still need tags, process ancestry, or routed resources."]
     },
     {
       "id": "task_window_claims",
@@ -2516,9 +2516,16 @@
         { "method": "POST", "path": "/task-messages/reconcile-attempted", "route_file": "app/orchestrator/src/routes/task_sessions.ts", "request_schema": "TaskMessagesReconcileAttemptedRequest", "response_schema": "TaskMessagesReconcileAttemptedResponse" }
       ],
       "cli": ["pnpm task:sessions", "pnpm task:bind", "pnpm task:messages", "pnpm task:replace"],
-      "code": ["app/orchestrator/src/task_sessions/types.ts", "app/orchestrator/src/routes/task_sessions.ts"],
-      "proofs": ["app/orchestrator/src/task_sessions/task_session_cli.test.ts", "bin/task-runtime-smoke"],
-      "self_tests": ["pnpm --filter @eventloopos/shared run test:primitive-ops"]
+      "code": ["app/orchestrator/src/task_sessions/types.ts", "app/orchestrator/src/task_sessions/pid_fields.ts", "app/orchestrator/src/routes/task_sessions.ts"],
+      "proofs": [
+        "app/orchestrator/src/task_sessions/task_session_cli.test.ts",
+        "app/orchestrator/src/task_sessions/codex_app_server_thread_client.test.ts",
+        "app/orchestrator/src/task_sessions/codex_native_thread_controller.test.ts",
+        "app/orchestrator/src/task_sessions/claude_cli_task_session_controller.test.ts",
+        "app/orchestrator/src/task_sessions/development_task_session_controller.test.ts",
+        "bin/task-runtime-smoke"
+      ],
+      "self_tests": ["pnpm --filter @eventloopos/orchestrator run test:task-sessions"]
     },
     {
       "id": "context_capture_restore",

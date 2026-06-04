@@ -1,4 +1,5 @@
 import type { CodexNativeThread, CodexNativeThreadClient, CodexNativeTurn } from "./codex_native_thread_controller.js";
+import { normalizeTaskSessionPidFields } from "./pid_fields.js";
 
 export type CodexAppServerRequest = (request: {
   method: "initialize" | "thread/start" | "thread/list" | "thread/read" | "turn/start";
@@ -227,13 +228,7 @@ function pidFieldsFromRecord(record: Record<string, unknown>): Pick<CodexNativeT
   const terminalPid = readOptionalNumber(record.terminal_pid ?? record.terminalPid);
   const rootPid = readOptionalNumber(record.root_pid ?? record.rootPid);
   const pids = readOptionalNumberArray(record.pids);
-  return {
-    ...(pid !== undefined ? { pid } : {}),
-    ...(agentPid !== undefined ? { agent_pid: agentPid } : {}),
-    ...(terminalPid !== undefined ? { terminal_pid: terminalPid } : {}),
-    ...(rootPid !== undefined ? { root_pid: rootPid } : {}),
-    ...(pids !== undefined ? { pids } : {}),
-  };
+  return normalizeTaskSessionPidFields({ pid, agent_pid: agentPid, terminal_pid: terminalPid, root_pid: rootPid, pids });
 }
 
 function stableId(input: string): string {

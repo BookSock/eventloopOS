@@ -64,7 +64,8 @@ describe("CodexAppServerThreadClient", () => {
         pid: 410,
         agent_pid: 411,
         terminal_pid: 409,
-        pids: [410, 411],
+        root_pid: 409,
+        pids: [409, 410, 411],
       },
       {
         id: "thread_infra",

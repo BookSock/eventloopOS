@@ -52,7 +52,7 @@ describe("ClaudeCliTaskSessionController", () => {
         agent_pid: 511,
         terminal_pid: 509,
         root_pid: 500,
-        pids: [510, 511],
+        pids: [500, 509, 510, 511],
       },
     ]);
   });
@@ -207,7 +207,8 @@ describe("parseClaudeSessionConfigs", () => {
         pid: 510,
         agent_pid: 511,
         terminal_pid: 509,
-        pids: [510, 511],
+        root_pid: 509,
+        pids: [509, 510, 511],
       },
     ]);
   });

@@ -12,6 +12,8 @@ describe("DevelopmentTaskSessionController", () => {
     assert.deepEqual(sessions.map((session) => session.id), ["task_session_blog", "task_session_infra"]);
     assert.equal(controller.getSession("task_session_blog")?.task_id, "task_blog_feedback");
     assert.equal(controller.getSession("task_session_infra")?.pid, 610);
+    assert.equal(controller.getSession("task_session_infra")?.root_pid, 610);
+    assert.deepEqual(controller.getSession("task_session_infra")?.pids, [610]);
     assert.equal(controller.getSession("task_session_missing"), undefined);
   });
 

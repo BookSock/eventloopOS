@@ -1,3 +1,5 @@
+import { normalizeTaskSessionPidFields } from "./pid_fields.js";
+
 export type DevelopmentTaskSession = {
   id: string;
   task_id?: string;
@@ -86,11 +88,7 @@ export class DevelopmentTaskSessionController {
       created_at: now,
       updated_at: now,
       ...(input.terminal_ref !== undefined ? { terminal_ref: input.terminal_ref } : {}),
-      ...(input.pid !== undefined ? { pid: input.pid } : {}),
-      ...(input.agent_pid !== undefined ? { agent_pid: input.agent_pid } : {}),
-      ...(input.terminal_pid !== undefined ? { terminal_pid: input.terminal_pid } : {}),
-      ...(input.root_pid !== undefined ? { root_pid: input.root_pid } : {}),
-      ...(input.pids !== undefined ? { pids: input.pids } : {}),
+      ...normalizeTaskSessionPidFields(input),
     };
     this.sessions.set(session.id, session);
     return session;
