@@ -1,0 +1,253 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import path from "node:path";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/primitives-host-doctor [--json] [--require-live] [--skip-live] [--url URL] [--manifest PATH]
+
+Proves this checkout exposes a usable eventloopOS primitive API surface.
+Default mode validates local catalog/OpenAPI/examples, then probes a live
+orchestrator if one is reachable. Use --require-live for a host readiness gate.
+
+Environment:
+  EVENTLOOPOS_ORCHESTRATOR_URL  default: http://127.0.0.1:4377
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  await runSelfTest();
+  console.log("primitives-host-doctor self-test passed");
+  process.exit(0);
+}
+
+const options = parseArgs(args);
+const manifest = await runDoctor(options);
+writeManifest(manifest, options.manifestPath);
+
+if (options.json) {
+  console.log(JSON.stringify(summaryOutput(manifest, options.manifestPath)));
+} else {
+  console.log(`primitives host doctor manifest: ${options.manifestPath}`);
+  console.log(JSON.stringify(summaryOutput(manifest, options.manifestPath), null, 2));
+}
+
+process.exit(manifest.ok ? 0 : 1);
+
+function parseArgs(argv) {
+  const runId = utcStamp();
+  const manifestPath = readArg(argv, "--manifest") ?? path.join("artifacts", "primitives-host-doctor", runId, "manifest.json");
+  return {
+    json: argv.includes("--json"),
+    requireLive: argv.includes("--require-live"),
+    skipLive: argv.includes("--skip-live"),
+    url: readArg(argv, "--url") ?? process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377",
+    manifestPath,
+  };
+}
+
+async function runDoctor(options, deps = {}) {
+  const startedAt = new Date().toISOString();
+  const commandRunner = deps.commandRunner ?? runCommand;
+  const fetcher = deps.fetcher ?? fetchWithTimeout;
+  const checks = [];
+
+  checks.push(commandCheck(commandRunner, "catalog_audit", "node", ["bin/primitives-catalog-audit", "docs/primitives.catalog.json"]));
+  checks.push(commandCheck(commandRunner, "openapi_current", "node", ["bin/primitives-openapi-export", "--check", "docs/primitives.catalog.json", "docs/primitives.openapi.json"]));
+  checks.push(commandCheck(commandRunner, "restore_my_desk_example", "node", ["examples/primitives/restore-my-desk.mjs", "--self-test"]));
+  checks.push(commandCheck(commandRunner, "agent_attention_queue_example", "node", ["examples/primitives/agent-attention-queue.mjs", "--self-test"]));
+  checks.push(commandCheck(commandRunner, "window_hotkey_router_example", "node", ["examples/primitives/window-hotkey-router.mjs", "--self-test"]));
+
+  const localChecks = await Promise.all(checks);
+  const liveChecks = options.skipLive ? [skippedCheck("live_orchestrator", "live checks skipped by --skip-live")] : await runLiveChecks({
+    url: options.url,
+    requireLive: options.requireLive,
+    fetcher,
+  });
+
+  const allChecks = [...localChecks, ...liveChecks];
+  const failedChecks = allChecks.filter((check) => check.status === "failed");
+  const warningChecks = allChecks.filter((check) => check.status === "warning");
+  const finishedAt = new Date().toISOString();
+  return {
+    schema_version: 1,
+    kind: "eventloopos.primitives_host_doctor",
+    started_at: startedAt,
+    finished_at: finishedAt,
+    duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
+    ok: failedChecks.length === 0,
+    passed: failedChecks.length === 0,
+    orchestrator_url: options.url,
+    require_live: options.requireLive,
+    checks: allChecks,
+    failed_checks: failedChecks.map((check) => check.name),
+    warning_checks: warningChecks.map((check) => check.name),
+  };
+}
+
+function commandCheck(commandRunner, name, command, commandArgs) {
+  const result = commandRunner(command, commandArgs);
+  const check = {
+    name,
+    status: result.status === 0 ? "passed" : "failed",
+    command: [command, ...commandArgs],
+    exit_code: result.status,
+  };
+  if (result.stdout?.trim()) check.stdout = result.stdout.trim().slice(-2_000);
+  if (result.stderr?.trim()) check.stderr = result.stderr.trim().slice(-2_000);
+  return check;
+}
+
+async function runLiveChecks({ url, requireLive, fetcher }) {
+  const baseUrl = normalizeUrl(url);
+  const probe = await liveEndpointCheck(fetcher, baseUrl, "/health", { requireLive });
+  if (probe.status !== "passed") {
+    return [{
+      ...probe,
+      name: "live_orchestrator",
+      status: requireLive ? "failed" : "warning",
+      required: requireLive,
+    }];
+  }
+
+  const checks = [
+    { name: "live_health", path: "/health" },
+    { name: "live_metrics", path: "/metrics" },
+    { name: "live_activity", path: "/activity" },
+    { name: "live_workspace_status", path: "/workspace/status" },
+  ];
+  const results = [];
+  for (const check of checks) {
+    results.push(await liveEndpointCheck(fetcher, baseUrl, check.path, { name: check.name, requireLive }));
+  }
+  return results;
+}
+
+async function liveEndpointCheck(fetcher, baseUrl, endpointPath, { name = endpointPath, requireLive }) {
+  const target = new URL(endpointPath, baseUrl).toString();
+  try {
+    const response = await fetcher(target);
+    const status = response.status;
+    const body = await response.text();
+    const passed = status >= 200 && status < 300;
+    return {
+      name,
+      status: passed ? "passed" : "failed",
+      required: requireLive,
+      url: target,
+      http_status: status,
+      body_excerpt: body.trim().slice(0, 1_000),
+    };
+  } catch (error) {
+    return {
+      name,
+      status: requireLive ? "failed" : "warning",
+      required: requireLive,
+      url: target,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function fetchWithTimeout(url) {
+  return fetch(url, { signal: AbortSignal.timeout(1_500) });
+}
+
+function runCommand(command, commandArgs) {
+  return spawnSync(command, commandArgs, {
+    cwd: repoRoot,
+    encoding: "utf8",
+    shell: false,
+  });
+}
+
+function skippedCheck(name, reason) {
+  return { name, status: "skipped", required: false, reason };
+}
+
+function writeManifest(manifest, relativePath) {
+  const fullPath = path.resolve(repoRoot, relativePath);
+  mkdirSync(path.dirname(fullPath), { recursive: true });
+  writeFileSync(fullPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  writeFileSync(path.join(path.dirname(fullPath), "DOCTOR.md"), renderMarkdown(manifest), "utf8");
+}
+
+function renderMarkdown(manifest) {
+  const lines = [
+    "# eventloopOS Primitives Host Doctor",
+    "",
+    `Generated: ${manifest.finished_at}`,
+    `Passed: \`${manifest.ok}\``,
+    `Live URL: \`${manifest.orchestrator_url}\``,
+    `Require live: \`${manifest.require_live}\``,
+    "",
+    "## Checks",
+    "",
+  ];
+  for (const check of manifest.checks) {
+    lines.push(`- ${check.status}: ${check.name}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function summaryOutput(manifest, manifestPath) {
+  return {
+    manifest: manifestPath,
+    ok: manifest.ok,
+    failed_checks: manifest.failed_checks,
+    warning_checks: manifest.warning_checks,
+    check_count: manifest.checks.length,
+    live_required: manifest.require_live,
+    orchestrator_url: manifest.orchestrator_url,
+  };
+}
+
+function normalizeUrl(value) {
+  const parsed = new URL(value);
+  if (!parsed.pathname.endsWith("/")) parsed.pathname = `${parsed.pathname}/`;
+  return parsed;
+}
+
+function readArg(argv, name) {
+  const index = argv.indexOf(name);
+  if (index === -1) return undefined;
+  return argv[index + 1];
+}
+
+function utcStamp() {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+}
+
+async function runSelfTest() {
+  const commandRunner = () => ({ status: 0, stdout: "ok\n", stderr: "" });
+  const fetcher = async () => ({
+    status: 200,
+    text: async () => "{\"ok\":true}",
+  });
+  const manifest = await runDoctor({
+    url: "http://127.0.0.1:4377",
+    requireLive: true,
+    skipLive: false,
+  }, { commandRunner, fetcher });
+  assert.equal(manifest.ok, true);
+  assert.equal(manifest.failed_checks.length, 0);
+  assert.ok(manifest.checks.some((check) => check.name === "live_workspace_status"));
+
+  const warningManifest = await runDoctor({
+    url: "http://127.0.0.1:4377",
+    requireLive: false,
+    skipLive: false,
+  }, {
+    commandRunner,
+    fetcher: async () => {
+      throw new Error("offline");
+    },
+  });
+  assert.equal(warningManifest.ok, true);
+  assert.deepEqual(warningManifest.warning_checks, ["live_orchestrator"]);
+}

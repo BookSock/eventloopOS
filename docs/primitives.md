@@ -743,6 +743,7 @@ HTTP surface:
 
 Proof scripts:
 
+- `bin/primitives-host-doctor`
 - `bin/proof-agent`
 - `bin/proof-repeat`
 - `bin/product-readiness-proof`
@@ -761,8 +762,11 @@ Useful standalone uses:
 - prove app startup/recovery before handing a Mac to a human
 - generate artifacts that another agent can audit
 
-Status: stable enough internally; public users need a smaller "prove my host"
-entrypoint.
+Status: stable enough internally. `bin/primitives-host-doctor` is the small
+"prove my host" entrypoint for builders: it validates catalog/OpenAPI drift,
+runs primitive example self-tests, and optionally gates live orchestrator
+`/health`, `/metrics`, `/activity`, and `/workspace/status` with
+`--require-live`.
 
 ## Near-Term Library Hardening
 
