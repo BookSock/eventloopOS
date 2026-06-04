@@ -19,7 +19,7 @@ Generate a builder-facing coverage/readiness summary with
 `bin/primitives-readiness-report docs/primitives.catalog.json` or use
 `--json` for machine-readable audit output.
 Current catalog summary: 18 primitives, 79 HTTP routes, 8 CLI commands, 18
-self-tests, 62 proof refs.
+self-tests, 69 proof refs.
 Strict readiness is expected to stay green: every cataloged primitive
 has a `self_tests` command, and the shared primitive operation-helper test
 proves typed helper coverage for every cataloged HTTP route.
@@ -656,6 +656,7 @@ Proof:
 
 - MCP source tests
 - local integration script tests
+- `pnpm --filter @eventloopos/orchestrator run test:agent-source-hooks`
 - `docs/codex-mcp-skill.md`
 - `bin/agent-run-cli-smoke`
 
