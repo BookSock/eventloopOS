@@ -30,13 +30,20 @@ pnpm install
 pnpm run dev:dogfood                            # builds + runs orchestrator + Mac queue app
 ```
 
-Once the queue app is up, three global hotkeys do most of the work:
+Once the queue app is up, these global hotkeys do most of the work:
 
 | Hotkey | Action |
 |---|---|
-| `Cmd-Option-Shift-J` | Pull next paper |
-| `Cmd-Option-Shift-K` | Open master command sheet (route / start task / rerank / broadcast) |
-| `Cmd-Option-Shift-M` | Toggle manual mode |
+| `Ctrl-Option-J` | Advance to the next paper/task state |
+| `Ctrl-Option-E` | Done / Next |
+| `Ctrl-Option-Return` | Send selected paper back to its bound agent |
+| `Ctrl-Option-H` | Defer selected paper one hour |
+| `Ctrl-Option-R` | Restore selected paper workspace |
+| `Ctrl-Option-K` | Open master command sheet (route / start task / rerank / broadcast) |
+| `Ctrl-Option-M` | Enter Manual Mode, or return and restore while in Manual Mode |
+| `Ctrl-Option-Shift-M` | Return from Manual Mode and keep current layout |
+
+Legacy `Cmd-Option-Shift-J/M/K` aliases are still registered for older dogfood setups.
 
 For first-time setup on a fresh Mac (Codex CLI, Chrome extension, AeroSpace permissions, etc.), see [docs/try-on-mac.md](docs/try-on-mac.md).
 
@@ -57,10 +64,10 @@ See [TODO.md](./TODO.md) for the live list — what's built but not yet verified
 
 Major in-flight directions:
 
-- Real-world dogfood: many features ship "works in unit/proof tests" but not "works on Jason's actual day of email + Codex + Chrome." Logging real-day pain is the next focus.
-- Richer paper sources: today browser, Slack, Gmail, manual, and `/agent-runs` waiting agents. Vision wants Codex/Claude session itself surfacing as a paper without manual configuration.
-- Better workbench fidelity: Chrome scroll-anchor capture, multi-monitor restore, deeper provider anchors (Slack thread / Notion block / Docs heading) end-to-end through the extension.
-- Master agent natural-language command surface: rerank and fan-out work; "defer everything non-critical for an hour" and similar do not yet.
+- Real-world dogfood: product-readiness and lab proofs are green, but daily-use friction still drives the roadmap.
+- Primitive SDK/library hardening: run `pnpm primitives:doctor` to validate the catalog, OpenAPI export, examples, and optional live host API.
+- Polished follows/unfollow UX: APIs and rules exist; Mac UI controls are still thin.
+- Richer starter apps/examples on top of `@eventloopos/shared/primitives`.
 
 ## Contributing
 
