@@ -2110,7 +2110,8 @@
       "status": "stable_enough",
       "summary": "Flat dependency record for routes, timers, stores, workspace, sessions, observability, and source polling.",
       "code": ["app/orchestrator/src/runtime.ts"],
-      "proofs": ["app/orchestrator/test/gateway_store_conformance.test.ts"]
+      "proofs": ["app/orchestrator/test/gateway_store_conformance.test.ts"],
+      "self_tests": ["pnpm --filter @eventloopos/orchestrator run test:runtime-spine"]
     },
     {
       "id": "workspace_control",

@@ -41,6 +41,7 @@
     "onboarding:apply": "pnpm run build && node dist/src/onboarding/onboarding_scan_cli.js apply",
     "test": "pnpm run build && sh -c 'node --test $(find dist/test dist/src -name \"*.test.js\" -print) src/agents/codex/*.test.mjs src/task_sessions/*.test.mjs'",
     "test:ambient-autosave": "pnpm run build && node --test dist/src/agents/ambient_workspace_saver.test.js",
+    "test:runtime-spine": "pnpm run build && node --test dist/src/runtime.test.js",
     "test:db": "pnpm run build && node --test dist/test/db*.test.js",
     "test:db:docker": "bin/dev-postgres test",
     "test:db:native": "bin/dev-postgres native-test",
