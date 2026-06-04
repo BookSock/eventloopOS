@@ -284,7 +284,9 @@ Useful standalone uses:
   and the wrapper immediately claims the command process root, polls workspace
   capture every 100ms by default, claims matching newly-created windows as they
   appear, moves them back to the owner task workspace when known, and restores
-  human focus; `--wait-ms` covers slow LaunchServices/Chrome startup
+  human focus; `--wait-ms` covers slow LaunchServices/Chrome startup, and
+  `--request-timeout-ms` prevents stalled local HTTP calls from wedging the
+  agent/demo
 - a bound Codex/Claude task session exposes `pid`/`agent_pid`/`terminal_pid`,
   and the follows-window orchestrator redirects descendant app windows before
   they can linger on the human's current paper; ambient autosave also converts

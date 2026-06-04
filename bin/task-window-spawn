@@ -40,6 +40,7 @@ Options:
   --settle-ms MS        Wait after command exits before after-capture. Default 1500
   --wait-ms MS          Poll for matching new windows after settle. Default 5000
   --poll-ms MS          Workspace capture poll interval during wait. Default 100
+  --request-timeout-ms MS  HTTP request timeout. Default 5000
   --ttl-ms MS           Claim TTL. Default 1800000
   --source NAME         Claim source. Default task-window-spawn
   --app CONTAINS        Optional app/app_bundle substring filter for new windows
@@ -60,6 +61,7 @@ function parseArgs(argv) {
     settleMs: 1_500,
     waitMs: 5_000,
     pollMs: 100,
+    requestTimeoutMs: 5_000,
     ttlMs: 30 * 60 * 1_000,
     source: "task-window-spawn",
     appContains: undefined,
@@ -86,6 +88,9 @@ function parseArgs(argv) {
       case "--poll-ms":
         options.pollMs = readPositiveInteger(readValue(optionArgs, ++index, arg), arg);
         break;
+      case "--request-timeout-ms":
+        options.requestTimeoutMs = readPositiveInteger(readValue(optionArgs, ++index, arg), arg);
+        break;
       case "--ttl-ms":
         options.ttlMs = readPositiveInteger(readValue(optionArgs, ++index, arg), arg);
         break;
@@ -108,17 +113,17 @@ function parseArgs(argv) {
 }
 
 async function runTaskWindowSpawn(options) {
-  const before = await captureWorkspace(options.baseUrl);
+  const before = await captureWorkspace(options);
   const waitStartedAt = Date.now();
   const rootClaims = [];
   const errors = [];
-  const taskWorkspace = await readTaskWorkspace(options.baseUrl, options.taskId).catch(() => undefined);
+  const taskWorkspace = await readTaskWorkspace(options, options.taskId).catch(() => undefined);
   const focusWorkspace = before.snapshot?.activeWorkspace;
   let commandDoneAt;
   const commandPromise = runCommand(options.command, options.args, async (child) => {
     if (!isPositiveInteger(child.pid)) return;
     try {
-      const claim = await claimWindow(options.baseUrl, {
+      const claim = await claimWindow(options, {
         task_id: options.taskId,
         process_root_pid: child.pid,
         source: `${options.source}:process_root`,
@@ -187,7 +192,7 @@ async function watchNewWindows({ options, beforeWindows, taskWorkspace, focusWor
 
   do {
     captureAttempts += 1;
-    after = await captureWorkspace(options.baseUrl);
+    after = await captureWorkspace(options);
     const currentNewWindows = findNewWindowsFromSeen(seenWindowIds, after.snapshot?.windows ?? [])
       .filter((window) => windowMatchesFilters(window, options));
     if (currentNewWindows.length > 0 && firstNewWindowMs === undefined) {
@@ -196,7 +201,7 @@ async function watchNewWindows({ options, beforeWindows, taskWorkspace, focusWor
     for (const window of currentNewWindows) {
       newWindows.push(window);
       try {
-        const claim = await claimWindow(options.baseUrl, {
+        const claim = await claimWindow(options, {
           task_id: options.taskId,
           window_id: String(window.id),
           app_bundle: readWindowAppBundle(window),
@@ -275,12 +280,20 @@ function runCommand(command, args, onSpawn = async () => {}) {
   });
 }
 
-async function captureWorkspace(baseUrl) {
-  return requestJson(baseUrl, "/workspace/capture", { method: "POST", body: {} });
+async function captureWorkspace(options) {
+  return requestJson(options.baseUrl, "/workspace/capture", {
+    method: "POST",
+    body: {},
+    timeoutMs: options.requestTimeoutMs,
+  });
 }
 
-async function claimWindow(baseUrl, body) {
-  return requestJson(baseUrl, "/task-window-claims", { method: "POST", body });
+async function claimWindow(options, body) {
+  return requestJson(options.baseUrl, "/task-window-claims", {
+    method: "POST",
+    body,
+    timeoutMs: options.requestTimeoutMs,
+  });
 }
 
 async function requestJson(baseUrl, route, options = {}) {
@@ -294,6 +307,7 @@ async function requestJson(baseUrl, route, options = {}) {
     method: options.method ?? "GET",
     headers,
     body,
+    signal: isPositiveInteger(options.timeoutMs) ? AbortSignal.timeout(options.timeoutMs) : undefined,
   });
   const text = await response.text();
   let parsed;
@@ -370,8 +384,10 @@ function isPositiveInteger(value) {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
-async function readTaskWorkspace(baseUrl, taskId) {
-  const body = await requestJson(baseUrl, `/tasks/${encodeURIComponent(taskId)}`);
+async function readTaskWorkspace(options, taskId) {
+  const body = await requestJson(options.baseUrl, `/tasks/${encodeURIComponent(taskId)}`, {
+    timeoutMs: options.requestTimeoutMs,
+  });
   return readString(body?.task?.aerospace_workspace_id);
 }
 
@@ -445,6 +461,7 @@ async function runSelfTest() {
       settleMs: 0,
       waitMs: 1_000,
       pollMs: 1,
+      requestTimeoutMs: 5_000,
       ttlMs: 123_000,
       source: "self-test",
       appContains: "chrome",
@@ -474,6 +491,60 @@ async function runSelfTest() {
       ["workspace", "main"],
     ])) {
       throw new Error(`expected move then focus restore, got ${commandJson}`);
+    }
+
+    const timeoutServer = http.createServer(async (request, response) => {
+      const send = (status, body) => {
+        response.writeHead(status, { "content-type": "application/json" });
+        response.end(JSON.stringify(body));
+      };
+      if (request.method === "POST" && request.url === "/workspace/capture") {
+        send(200, {
+          snapshot: {
+            backend: "aerospace",
+            activeWorkspace: "main",
+            windows: [{ id: 1, app: "TextEdit", title: "Notes", workspace: "main" }],
+          },
+        });
+        return;
+      }
+      if (request.method === "GET" && request.url === "/tasks/task_checkout") {
+        send(200, { ok: true, task: { task_id: "task_checkout" } });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/task-window-claims") {
+        setTimeout(() => send(200, { ok: true, claim: { claim_id: "too_late" } }), 100);
+        return;
+      }
+      send(404, { ok: false });
+    });
+    await new Promise((resolve) => timeoutServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const timeoutAddress = timeoutServer.address();
+      const timeoutResult = await runTaskWindowSpawn({
+        baseUrl: `http://127.0.0.1:${timeoutAddress.port}`,
+        taskId: "task_checkout",
+        settleMs: 0,
+        waitMs: 1,
+        pollMs: 1,
+        requestTimeoutMs: 25,
+        ttlMs: 123_000,
+        source: "self-test-timeout",
+        appContains: undefined,
+        titleContains: undefined,
+        runAerospace: async () => {},
+        command: process.execPath,
+        args: ["-e", ""],
+      });
+      if (timeoutResult.ok) throw new Error(`timeout result should not be ok: ${JSON.stringify(timeoutResult)}`);
+      if (!timeoutResult.errors.some((error) => String(error.error).includes("aborted"))) {
+        throw new Error(`expected timeout error, got ${JSON.stringify(timeoutResult.errors)}`);
+      }
+    } finally {
+      timeoutServer.closeAllConnections?.();
+      await new Promise((resolve, reject) => {
+        timeoutServer.close((error) => (error ? reject(error) : resolve()));
+      });
     }
     console.log("task-window-spawn self-test passed");
   } finally {

@@ -80,7 +80,6 @@ if (process.argv.includes("list")) {
           EVENTLOOPOS_GMAIL_LIMIT: "3",
           EVENTLOOPOS_GMAIL_PROJECT_HINT: "eventloopOS",
           EVENTLOOPOS_GMAIL_TASK_HINT: "local integration",
-          EVENTLOOPOS_GMAIL_TIMEOUT_MS: "1000",
         },
       });
       const result = parseScriptEventsOutput(stdout);
