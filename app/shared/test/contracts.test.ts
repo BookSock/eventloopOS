@@ -23,6 +23,9 @@ import {
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
   parsePrimitiveCatalog,
+  PrimitiveHttpError,
+  PrimitiveResponseParseError,
+  PrimitiveResponseValidationError,
   routeHasRequestBody,
   summarizePrimitiveCatalog,
   validatePrimitiveResponse
@@ -415,6 +418,66 @@ describe("primitive catalog SDK boundary", () => {
         body: expect.stringContaining("idem_onboarding_batch")
       }
     ]);
+  });
+
+  it("exposes typed primitive HTTP failures with status, route, and payload", async () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const fakeFetch: typeof fetch = async () =>
+      new Response(JSON.stringify({ ok: false, error: "duplicate idempotency key" }), {
+        status: 409,
+        statusText: "Conflict",
+        headers: { "content-type": "application/json" }
+      });
+    const client = createPrimitiveHttpClient({
+      catalog,
+      baseUrl: "http://127.0.0.1:4480",
+      fetch: fakeFetch
+    });
+
+    try {
+      await client.request("POST", "/onboarding/approvals/batch", {
+        body: readFixture(join(fixturesDir, "valid/onboarding_approval_batch_request.json")).data
+      });
+      throw new Error("expected primitive HTTP error");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PrimitiveHttpError);
+      const primitiveError = error as PrimitiveHttpError;
+      expect(primitiveError.status).toBe(409);
+      expect(primitiveError.statusText).toBe("Conflict");
+      expect(primitiveError.route?.path).toBe("/onboarding/approvals/batch");
+      expect(primitiveError.payload).toMatchObject({ error: "duplicate idempotency key" });
+      expect(primitiveError.responseText).toContain("duplicate idempotency key");
+    }
+  });
+
+  it("exposes typed primitive response parse and validation failures", async () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const parseClient = createPrimitiveHttpClient({
+      catalog,
+      baseUrl: "http://127.0.0.1:4480",
+      fetch: async () => new Response("not-json", { status: 200 })
+    });
+
+    await expect(parseClient.request("POST", "/agents/codex/auto-bind")).rejects.toBeInstanceOf(PrimitiveResponseParseError);
+
+    const validationClient = createPrimitiveHttpClient({
+      catalog,
+      baseUrl: "http://127.0.0.1:4480",
+      fetch: async () => new Response(JSON.stringify({ ok: true }), { status: 200 })
+    });
+
+    try {
+      await validationClient.request("POST", "/onboarding/approvals/batch", {
+        body: readFixture(join(fixturesDir, "valid/onboarding_approval_batch_request.json")).data
+      });
+      throw new Error("expected primitive validation error");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PrimitiveResponseValidationError);
+      const primitiveError = error as PrimitiveResponseValidationError;
+      expect(primitiveError.route?.path).toBe("/onboarding/approvals/batch");
+      expect(primitiveError.payload).toEqual({ ok: true });
+      expect(primitiveError.cause).toBeTruthy();
+    }
   });
 });
 

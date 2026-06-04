@@ -136,6 +136,73 @@ export type PrimitiveHttpClientOptions = {
   headers?: Record<string, string>;
 };
 
+export type PrimitiveErrorDetails = {
+  route?: PrimitiveHttpRoute;
+  method?: PrimitiveHttpMethod;
+  path?: string;
+  cause?: unknown;
+};
+
+export class PrimitiveError extends Error {
+  readonly route?: PrimitiveHttpRoute;
+  readonly method?: PrimitiveHttpMethod;
+  readonly path?: string;
+  override readonly cause?: unknown;
+
+  constructor(message: string, details: PrimitiveErrorDetails = {}) {
+    super(message);
+    this.name = "PrimitiveError";
+    this.route = details.route;
+    this.method = details.method ?? details.route?.method;
+    this.path = details.path ?? details.route?.path;
+    this.cause = details.cause;
+  }
+}
+
+export class PrimitiveHttpError extends PrimitiveError {
+  readonly status: number;
+  readonly statusText: string;
+  readonly payload: unknown;
+  readonly responseText: string;
+
+  constructor(
+    message: string,
+    details: PrimitiveErrorDetails & {
+      status: number;
+      statusText: string;
+      payload: unknown;
+      responseText: string;
+    }
+  ) {
+    super(message, details);
+    this.name = "PrimitiveHttpError";
+    this.status = details.status;
+    this.statusText = details.statusText;
+    this.payload = details.payload;
+    this.responseText = details.responseText;
+  }
+}
+
+export class PrimitiveResponseParseError extends PrimitiveError {
+  readonly responseText: string;
+
+  constructor(message: string, details: PrimitiveErrorDetails & { responseText: string }) {
+    super(message, details);
+    this.name = "PrimitiveResponseParseError";
+    this.responseText = details.responseText;
+  }
+}
+
+export class PrimitiveResponseValidationError extends PrimitiveError {
+  readonly payload: unknown;
+
+  constructor(message: string, details: PrimitiveErrorDetails & { payload: unknown }) {
+    super(message, details);
+    this.name = "PrimitiveResponseValidationError";
+    this.payload = details.payload;
+  }
+}
+
 export function parsePrimitiveCatalog(value: unknown): PrimitiveCatalog {
   return PrimitiveCatalogSchema.parse(value);
 }
@@ -239,11 +306,35 @@ export function createPrimitiveHttpClient(options: PrimitiveHttpClientOptions): 
         body: request.body
       });
       const text = await response.text();
-      const payload = text ? JSON.parse(text) : {};
+      const payload = parsePrimitiveResponsePayload(request, text);
       if (!response.ok) {
-        throw new Error(`Primitive route failed: ${request.method} ${request.path} HTTP ${response.status}`);
+        throw new PrimitiveHttpError(
+          `Primitive route failed: ${request.method} ${request.path} HTTP ${response.status}`,
+          {
+            route: request.route,
+            method: request.method,
+            path: request.path,
+            status: response.status,
+            statusText: response.statusText,
+            payload,
+            responseText: text
+          }
+        );
       }
-      return validatePrimitiveResponse<T>(request.route, payload);
+      try {
+        return validatePrimitiveResponse<T>(request.route, payload);
+      } catch (error) {
+        throw new PrimitiveResponseValidationError(
+          `Primitive response failed schema validation: ${request.method} ${request.path}`,
+          {
+            route: request.route,
+            method: request.method,
+            path: request.path,
+            payload,
+            cause: error
+          }
+        );
+      }
     }
   };
 }
@@ -338,6 +429,21 @@ function validateNumericBounds(label: string, value: number, schema: Record<stri
   }
   if (typeof schema.maximum === "number" && value > schema.maximum) {
     throw new Error(`${label} must be <= ${schema.maximum}`);
+  }
+}
+
+function parsePrimitiveResponsePayload(request: PrimitiveRequest, text: string): unknown {
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new PrimitiveResponseParseError(`Primitive route returned invalid JSON: ${request.method} ${request.path}`, {
+      route: request.route,
+      method: request.method,
+      path: request.path,
+      responseText: text,
+      cause: error
+    });
   }
 }
 

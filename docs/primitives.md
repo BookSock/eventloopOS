@@ -19,6 +19,10 @@ The catalog audit also verifies every catalog schema has a matching
 `@eventloopos/shared` Zod schema, TypeScript type, and ContractSchemas registry
 entry, and that cataloged HTTP routes cannot silently drift back to freeform
 envelopes.
+The shared primitive HTTP client validates request and response bodies and
+throws typed errors for non-2xx responses, invalid JSON, and response-schema
+mismatches so builders can recover from conflicts, dependency failures, and
+server drift without string-matching generic exceptions.
 
 Runnable examples live in `examples/primitives/`: restore a saved desk, inspect
 and rerank an attention queue, and wire external hotkeys to task-window/follows
@@ -759,7 +763,10 @@ Highest-leverage steps before calling this a real primitives library:
 
 1. Polish `@eventloopos/shared/primitives` from local request builders and a
    validating HTTP client into a published SDK, including typed convenience
-   clients generated from `docs/primitives.openapi.json`.
+  clients generated from `docs/primitives.openapi.json`.
+   Current shared helpers already include request builders, a validating HTTP
+   client, and typed primitive client errors; next SDK work should add
+   operation-specific convenience methods over those primitives.
 2. Split `@eventloopos/orchestrator` into public contracts and private server
    implementation packages.
 3. Keep `bin/human-demo-ready`'s default macOS hotkey-latency gate green before

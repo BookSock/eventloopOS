@@ -26,6 +26,9 @@ import {
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
   getPrimitiveRoute,
+  PrimitiveHttpError,
+  PrimitiveResponseParseError,
+  PrimitiveResponseValidationError,
   routeHasRequestBody,
   summarizePrimitiveCatalog
 } from "@eventloopos/shared/primitives";
@@ -59,6 +62,27 @@ Use this when building tools on top of eventloopOS primitives without importing
 or running the orchestrator server package. Request helpers interpolate route
 templates, encode query strings, enforce `no_request_body`, and validate known
 request/response schemas through the exported Zod contract registry.
+
+The HTTP client exposes catchable error classes for builder-facing tools:
+
+- `PrimitiveHttpError`: non-2xx response, with `status`, `statusText`,
+  `payload`, `responseText`, and `route`.
+- `PrimitiveResponseParseError`: response body was not valid JSON.
+- `PrimitiveResponseValidationError`: successful JSON response did not match
+  the catalog response schema.
+
+```ts
+try {
+  await client.request("POST", "/onboarding/approvals/batch", { body });
+} catch (error) {
+  if (error instanceof PrimitiveHttpError && error.status === 409) {
+    console.log(error.payload);
+  }
+  if (error instanceof PrimitiveResponseValidationError) {
+    console.error(error.route?.path, error.cause);
+  }
+}
+```
 
 ## Local Commands
 
