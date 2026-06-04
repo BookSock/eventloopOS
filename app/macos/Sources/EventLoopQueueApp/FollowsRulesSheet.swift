@@ -3,6 +3,7 @@ import SwiftUI
 
 struct FollowsRulesSheet: View {
     let exclusions: [FollowsWindowExclusion]
+    let suggestions: [FollowsWindowSuggestion]
     let state: FollowsRulesState
     let refresh: () -> Void
     let add: (String?, String?) -> Void
@@ -96,6 +97,20 @@ struct FollowsRulesSheet: View {
                 EmptyView()
             }
 
+            if !suggestions.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Current Desktop")
+                        .font(.headline)
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(suggestions.prefix(6)) { suggestion in
+                            FollowsSuggestionRow(suggestion: suggestion, add: add)
+                                .accessibilityIdentifier("follows-rules-suggestion-\(suggestion.id)")
+                        }
+                    }
+                }
+                .accessibilityIdentifier("follows-rules-suggestions")
+            }
+
             if exclusions.isEmpty {
                 VStack(spacing: 6) {
                     Image(systemName: "rectangle.3.group")
@@ -124,6 +139,55 @@ struct FollowsRulesSheet: View {
         .padding(20)
         .frame(width: 640, height: 520)
         .accessibilityIdentifier("follows-rules-sheet")
+    }
+}
+
+private struct FollowsSuggestionRow: View {
+    let suggestion: FollowsWindowSuggestion
+    let add: (String?, String?) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "window.badge.exclamationmark")
+                .foregroundStyle(.blue)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(suggestion.appName)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    if let appBundle = suggestion.appBundle {
+                        Text(appBundle)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    if let title = suggestion.title {
+                        Text(title)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            Spacer()
+            if let appBundle = suggestion.appBundle {
+                Button {
+                    add(appBundle, nil)
+                } label: {
+                    Label("Exclude App", systemImage: "app.badge")
+                }
+                .accessibilityIdentifier("follows-rules-suggestion-app-\(suggestion.id)")
+            }
+            if let title = suggestion.title {
+                Button {
+                    add(nil, title)
+                } label: {
+                    Label("Exclude Title", systemImage: "text.badge.xmark")
+                }
+                .accessibilityIdentifier("follows-rules-suggestion-title-\(suggestion.id)")
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 

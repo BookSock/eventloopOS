@@ -1240,6 +1240,74 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.followsWindowExclusions.map(\.exclusionId), ["fwex_fake_2"])
     }
 
+    func testFollowsRulesSuggestsActiveDesktopWindowsWorthExcluding() async {
+        let client = FakeQueueClient(packets: [])
+        client.setFakeFollowsWindowExclusions([
+            FollowsWindowExclusion(
+                exclusionId: "fwex_notes",
+                appBundle: "com.apple.TextEdit",
+                titleSubstring: nil
+            ),
+            FollowsWindowExclusion(
+                exclusionId: "fwex_report",
+                appBundle: nil,
+                titleSubstring: "Already ignored"
+            ),
+        ])
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(
+                    id: 201,
+                    app: "Google Chrome",
+                    title: "Playwright Report",
+                    workspace: "eventloop-customer",
+                    appBundleId: "com.google.Chrome"
+                ),
+                WorkspaceWindow(
+                    id: 202,
+                    app: "TextEdit",
+                    title: "Customer notes",
+                    workspace: "eventloop-customer",
+                    appBundleId: "com.apple.TextEdit"
+                ),
+                WorkspaceWindow(
+                    id: 203,
+                    app: "Tailscale",
+                    title: "Tailscale",
+                    workspace: "eventloop-customer",
+                    appBundleId: "io.tailscale.ipn.macos"
+                ),
+                WorkspaceWindow(
+                    id: 204,
+                    app: "Safari",
+                    title: "Other workspace",
+                    workspace: "manual",
+                    appBundleId: "com.apple.Safari"
+                ),
+                WorkspaceWindow(
+                    id: 205,
+                    app: "Numbers",
+                    title: "Already ignored budget",
+                    workspace: "eventloop-customer",
+                    appBundleId: "com.apple.iWork.Numbers"
+                ),
+            ],
+            activeWorkspace: "eventloop-customer"
+        )
+        let workspaceClient = FakeWorkspaceClient(captureSnapshot: snapshot)
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+
+        await viewModel.refreshFollowsRules()
+
+        XCTAssertEqual(viewModel.followsRulesState, .loaded)
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
+        XCTAssertEqual(viewModel.followsWindowSuggestions.count, 1)
+        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.appName, "Google Chrome")
+        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.appBundle, "com.google.Chrome")
+        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.title, "Playwright Report")
+        XCTAssertEqual(viewModel.followsWindowSuggestions.first?.workspace, "eventloop-customer")
+    }
+
     func testAddFollowsRuleRequiresMatcher() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: []))
 

@@ -450,6 +450,7 @@ struct QueueWindowView: View {
             case .followsRules:
                 FollowsRulesSheet(
                     exclusions: viewModel.followsWindowExclusions,
+                    suggestions: viewModel.followsWindowSuggestions,
                     state: viewModel.followsRulesState,
                     refresh: {
                         Task { await viewModel.refreshFollowsRules() }

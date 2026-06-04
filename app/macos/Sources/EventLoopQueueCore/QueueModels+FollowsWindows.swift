@@ -86,3 +86,28 @@ public enum FollowsRulesState: Equatable, Sendable {
     case saving
     case failed(String)
 }
+
+public struct FollowsWindowSuggestion: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let appName: String
+    public let appBundle: String?
+    public let title: String?
+    public let workspace: String
+
+    public init(
+        appName: String,
+        appBundle: String? = nil,
+        title: String? = nil,
+        workspace: String
+    ) {
+        self.appName = appName
+        self.appBundle = appBundle
+        self.title = title
+        self.workspace = workspace
+        self.id = [
+            appBundle?.lowercased() ?? appName.lowercased(),
+            title?.lowercased() ?? "",
+            workspace.lowercased(),
+        ].joined(separator: "|")
+    }
+}

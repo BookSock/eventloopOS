@@ -134,6 +134,7 @@ public final class QueueViewModel: ObservableObject {
     @Published public var pendingTerminalSendConfirmation: PendingTerminalSendConfirmation?
     @Published public private(set) var activityEvents: [ActivityEvent] = []
     @Published public private(set) var followsWindowExclusions: [FollowsWindowExclusion] = []
+    @Published public private(set) var followsWindowSuggestions: [FollowsWindowSuggestion] = []
     @Published public private(set) var followsRulesState: FollowsRulesState = .idle
     @Published public private(set) var autoBindContinuousEnabled: Bool = false
     @Published public private(set) var lastAutoBindResult: CodexAutoBindResult?
@@ -1278,6 +1279,7 @@ public final class QueueViewModel: ObservableObject {
         do {
             let result = try await client.fetchFollowsWindowExclusions()
             followsWindowExclusions = result.exclusions
+            followsWindowSuggestions = await captureFollowsRuleSuggestions(exclusions: result.exclusions)
             followsRulesState = .loaded
         } catch {
             followsRulesState = .failed(error.localizedDescription)
@@ -1309,6 +1311,7 @@ public final class QueueViewModel: ObservableObject {
         do {
             _ = try await client.deleteFollowsWindowExclusion(id: id)
             followsWindowExclusions.removeAll { $0.exclusionId == id }
+            followsWindowSuggestions = await captureFollowsRuleSuggestions(exclusions: followsWindowExclusions)
             followsRulesState = .loaded
         } catch {
             followsRulesState = .failed(error.localizedDescription)
@@ -1475,6 +1478,76 @@ public final class QueueViewModel: ObservableObject {
     private func normalizedOptional(_ value: String?) -> String? {
         let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func captureFollowsRuleSuggestions(exclusions: [FollowsWindowExclusion]) async -> [FollowsWindowSuggestion] {
+        guard let snapshot = try? await workspaceClient.capture(),
+              let activeWorkspace = snapshot.activeWorkspace?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !activeWorkspace.isEmpty
+        else {
+            return []
+        }
+
+        var seen = Set<String>()
+        return snapshot.windows.compactMap { window in
+            guard window.workspace == activeWorkspace,
+                  isFollowsRuleSuggestionEligible(window),
+                  !isWindowAlreadyExcluded(window, exclusions: exclusions)
+            else {
+                return nil
+            }
+
+            let appBundle = normalizedOptional(window.appBundleId) ?? normalizedOptional(window.app)
+            let title = normalizedOptional(window.title)
+            let suggestion = FollowsWindowSuggestion(
+                appName: window.app,
+                appBundle: appBundle,
+                title: title,
+                workspace: window.workspace
+            )
+            guard seen.insert(suggestion.id).inserted else {
+                return nil
+            }
+            return suggestion
+        }
+    }
+
+    private func isFollowsRuleSuggestionEligible(_ window: WorkspaceWindow) -> Bool {
+        let app = window.app.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let bundle = window.appBundleId?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        guard !app.isEmpty else {
+            return false
+        }
+        let blockedApps: Set<String> = [
+            "aerospace",
+            "eventloopos queue",
+            "eventloopqueueapp",
+            "tailscale",
+            "finder",
+        ]
+        let blockedBundles: Set<String> = [
+            "com.eventloopos.queue",
+            "com.nikitavoloboev.aerospace",
+            "io.tailscale.ipn.macos",
+            "com.apple.finder",
+        ]
+        return !blockedApps.contains(app) && !blockedBundles.contains(bundle)
+    }
+
+    private func isWindowAlreadyExcluded(_ window: WorkspaceWindow, exclusions: [FollowsWindowExclusion]) -> Bool {
+        let windowBundle = (normalizedOptional(window.appBundleId) ?? normalizedOptional(window.app))?.lowercased()
+        let title = normalizedOptional(window.title)?.lowercased() ?? ""
+        return exclusions.contains { exclusion in
+            if let appBundle = normalizedOptional(exclusion.appBundle)?.lowercased(),
+               let windowBundle,
+               appBundle == windowBundle {
+                return true
+            }
+            if let titleSubstring = normalizedOptional(exclusion.titleSubstring)?.lowercased(), title.contains(titleSubstring) {
+                return true
+            }
+            return false
+        }
     }
 
     public func scanOnboarding() async {
