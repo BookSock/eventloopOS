@@ -12,6 +12,9 @@ freeform envelopes until their validators are exported.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.
+The catalog audit also verifies every catalog schema has a matching
+`@eventloopos/shared` Zod schema, TypeScript type, and ContractSchemas registry
+entry.
 
 Runnable examples live in `examples/primitives/`: restore a saved desk, inspect
 and rerank an attention queue, and wire external hotkeys to task-window/follows

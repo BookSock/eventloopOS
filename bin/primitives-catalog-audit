@@ -60,9 +60,31 @@ function auditCatalog(catalog, repoRoot, errors) {
 
   const allowedStatuses = new Set(Array.isArray(catalog.status_labels) ? catalog.status_labels : []);
   const schemaNames = new Set(isRecord(catalog.schemas) ? Object.keys(catalog.schemas) : []);
+  auditSharedContractSchemaExports(repoRoot, schemaNames, errors);
   const ids = new Set();
   for (const [index, primitive] of catalog.primitives.entries()) {
     auditPrimitive(primitive, index, repoRoot, allowedStatuses, schemaNames, ids, errors);
+  }
+}
+
+function auditSharedContractSchemaExports(repoRoot, schemaNames, errors) {
+  if (schemaNames.size === 0) return;
+  const sharedSchemasPath = path.resolve(repoRoot, "app/shared/src/schemas.ts");
+  if (!fs.existsSync(sharedSchemasPath)) {
+    errors.push("shared contract schema source missing: app/shared/src/schemas.ts");
+    return;
+  }
+  const source = fs.readFileSync(sharedSchemasPath, "utf8");
+  for (const schemaName of Array.from(schemaNames).sort()) {
+    if (!source.includes(`export const ${schemaName}Schema`)) {
+      errors.push(`catalog schema ${schemaName} missing shared Zod export ${schemaName}Schema`);
+    }
+    if (!source.includes(`export type ${schemaName} =`)) {
+      errors.push(`catalog schema ${schemaName} missing shared type export`);
+    }
+    if (!source.includes(`${schemaName}: ${schemaName}Schema`)) {
+      errors.push(`catalog schema ${schemaName} missing ContractSchemas registry entry`);
+    }
   }
 }
 
@@ -236,10 +258,25 @@ function isRecord(value) {
 function runSelfTest() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-primitives-catalog-audit-"));
   fs.mkdirSync(path.join(root, "app/orchestrator/src/routes"), { recursive: true });
+  fs.mkdirSync(path.join(root, "app/shared/src"), { recursive: true });
   fs.mkdirSync(path.join(root, "bin"), { recursive: true });
   fs.writeFileSync(path.join(root, "code.ts"), "export {}\n");
   fs.writeFileSync(path.join(root, "proof.test.ts"), "export {}\n");
   fs.writeFileSync(path.join(root, "bin/proof"), "#!/usr/bin/env node\n");
+  fs.writeFileSync(
+    path.join(root, "app/shared/src/schemas.ts"),
+    [
+      "export const ExampleRequestSchema = {};",
+      "export type ExampleRequest = {};",
+      "export const ExampleResponseSchema = {};",
+      "export type ExampleResponse = {};",
+      "export const ContractSchemas = {",
+      "  ExampleRequest: ExampleRequestSchema,",
+      "  ExampleResponse: ExampleResponseSchema,",
+      "};",
+      "",
+    ].join("\n"),
+  );
   fs.writeFileSync(
     path.join(root, "app/orchestrator/src/routes/example.ts"),
     'if (input.method === "POST" && input.pathname === "/example") {}\n',

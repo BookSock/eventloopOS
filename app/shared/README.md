@@ -14,7 +14,9 @@ Exports include Zod schemas, inferred TypeScript types, registry helpers, and JS
 
 Current public route payloads include task-window claims and follows-window
 exclusion rules. These are the reusable primitives behind background-agent
-window attribution and sticky-window cleanup.
+window attribution and sticky-window cleanup. Request schemas accept the
+snake_case fields used by the HTTP docs plus the camelCase aliases accepted by
+the current orchestrator routes.
 
 ## Local Commands
 

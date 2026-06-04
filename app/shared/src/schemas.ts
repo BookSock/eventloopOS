@@ -276,17 +276,39 @@ export type TaskWindowClaimRecord = z.infer<typeof TaskWindowClaimRecordSchema>;
 
 export const TaskWindowClaimCreateRequestSchema = z
   .object({
-    task_id: id,
+    task_id: id.optional(),
+    taskId: id.optional(),
     window_id: z.string().min(1).optional(),
+    windowId: z.string().min(1).optional(),
     app_bundle: z.string().min(1).optional(),
+    appBundle: z.string().min(1).optional(),
     title_prefix: z.string().min(1).optional(),
+    titlePrefix: z.string().min(1).optional(),
     process_root_pid: z.number().int().positive().optional(),
+    processRootPid: z.number().int().positive().optional(),
     source: z.string().min(1).optional(),
-    ttl_ms: z.number().int().positive().optional()
+    ttl_ms: z.number().int().positive().optional(),
+    ttlMs: z.number().int().positive().optional()
   })
-  .strict()
+  .passthrough()
   .superRefine((claim, ctx) => {
-    if (!claim.window_id && !claim.app_bundle && !claim.title_prefix && claim.process_root_pid === undefined) {
+    if (!claim.task_id && !claim.taskId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "task_id is required",
+        path: ["task_id"]
+      });
+    }
+    if (
+      !claim.window_id
+      && !claim.windowId
+      && !claim.app_bundle
+      && !claim.appBundle
+      && !claim.title_prefix
+      && !claim.titlePrefix
+      && claim.process_root_pid === undefined
+      && claim.processRootPid === undefined
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "window_id, app_bundle, title_prefix, or process_root_pid is required",
@@ -328,11 +350,13 @@ export type FollowsWindowExclusionRecord = z.infer<typeof FollowsWindowExclusion
 export const FollowsWindowExclusionCreateRequestSchema = z
   .object({
     app_bundle: z.string().min(1).optional(),
-    title_substring: z.string().min(1).optional()
+    appBundle: z.string().min(1).optional(),
+    title_substring: z.string().min(1).optional(),
+    titleSubstring: z.string().min(1).optional()
   })
-  .strict()
+  .passthrough()
   .superRefine((exclusion, ctx) => {
-    if (!exclusion.app_bundle && !exclusion.title_substring) {
+    if (!exclusion.app_bundle && !exclusion.appBundle && !exclusion.title_substring && !exclusion.titleSubstring) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "app_bundle or title_substring is required",

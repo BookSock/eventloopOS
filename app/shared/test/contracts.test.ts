@@ -9,7 +9,9 @@ import {
   ContextRestorePlanSchema,
   ContextResourceSchema,
   EventSchema,
+  FollowsWindowExclusionCreateRequestSchema,
   ReviewPacketSchema,
+  TaskWindowClaimCreateRequestSchema,
   WorkspaceSnapshotResourceSchema,
   getContractSchema
 } from "../src/index.js";
@@ -89,6 +91,26 @@ describe("contract schemas", () => {
     expect(request.status).toBe("pending");
     expect(request.restore_plan.kind).toBe("browser_extension_message");
     expect(request.resource.kind).toBe("browser_tab");
+  });
+
+  it("validates route request aliases that orchestrator accepts for primitive APIs", () => {
+    expect(
+      TaskWindowClaimCreateRequestSchema.parse({
+        taskId: "task_background_test",
+        processRootPid: 4242,
+        ttlMs: 60_000,
+        source: "codex_spawn_wrapper",
+        ignored_future_field: true
+      }).taskId
+    ).toBe("task_background_test");
+
+    expect(
+      FollowsWindowExclusionCreateRequestSchema.parse({
+        appBundle: "com.google.chrome",
+        titleSubstring: "playwright",
+        ignored_future_field: true
+      }).titleSubstring
+    ).toBe("playwright");
   });
 
   it("allows failed context restore requests for retryable browser failures", () => {
