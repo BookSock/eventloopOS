@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { createAmbientWorkspaceSaverFromRuntime, type AmbientWorkspaceSaver } from "./agents/ambient_workspace_saver.js";
+import { resolveForegroundCodex } from "./agents/codex/foreground_resolver.js";
+import type { RunOsascript } from "./agents/codex/ghostty_window_resolver.js";
 import {
   DEFAULT_FOLLOWS_POLL_MS,
   createFollowsWindowOrchestratorFromRuntime,
@@ -38,7 +40,7 @@ import { createSeededDevelopmentTaskSessions } from "./task_sessions/development
 import { PersistentTerminalRefController } from "./task_sessions/persistent_terminal_ref_controller.js";
 import type { GatewayStore } from "./gateway_store.js";
 import { terminalSendEnabledFromEnv, type TerminalSendCommand, type TerminalSendExecutor } from "./task_sessions/terminal_send.js";
-import type { TaskSessionController } from "./task_sessions/types.js";
+import type { TaskRuntimeSession, TaskSessionController } from "./task_sessions/types.js";
 import { AerospaceWorkspaceController } from "./workspace/controller.js";
 
 const config = loadConfig();
@@ -54,6 +56,7 @@ const taskSessionRuntime = createTaskSessionRuntime(gatewayRuntime.persistTermin
 const taskSessions = taskSessionRuntime?.controller;
 const mcpSources = await createMcpSourceRegistry();
 const workspace = config.value.workspace === "aerospace" ? new AerospaceWorkspaceController(execFilePromise) : undefined;
+const runOsascript = process.platform === "darwin" ? runOsascriptCommand : undefined;
 const terminalSendExecutor: TerminalSendExecutor = (command: TerminalSendCommand) =>
   new Promise((resolve, reject) => {
     execFile(command.file, command.args, (error) => (error ? reject(error) : resolve()));
@@ -69,6 +72,7 @@ const server = createGatewayServer({
   terminalSendExecutor,
   terminalSendEnabled: terminalSendEnabledFromEnv(process.env),
   codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
+  runOsascript,
 });
 
 server.listen(config.value.port, config.value.host, () => {
@@ -192,6 +196,13 @@ if (process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED === "1") {
       ingestor: gatewayRuntime.store,
       manualMode: gatewayRuntime.store,
       activeTask: gatewayRuntime.store,
+      focusedCodex: runOsascript
+        ? createAutoPaperFocusedCodexReader({
+            runOsascript,
+            codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
+            taskSessions,
+          })
+        : undefined,
       observability,
       codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
       defaultIdleSeconds: idleSeconds,
@@ -236,6 +247,64 @@ function parsePositiveNumber(value: string | undefined): number | undefined {
   if (!value) return undefined;
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function createAutoPaperFocusedCodexReader(input: {
+  runOsascript: RunOsascript;
+  codexHome?: string;
+  taskSessions?: TaskSessionController;
+}) {
+  return {
+    async getFocusedCodex() {
+      const foreground = await resolveForegroundCodex({
+        runOsascript: input.runOsascript,
+        codexHome: input.codexHome,
+      });
+      const terminalRef = terminalRefFromGhosttyWindowId(foreground.ghostty_window_id);
+      const taskId = terminalRef
+        ? await taskIdForTerminalRef(input.taskSessions, terminalRef).catch(() => null)
+        : null;
+      return {
+        codex_thread_id: foreground.codex_thread_id,
+        ghostty_window_id: foreground.ghostty_window_id,
+        terminal_ref: terminalRef,
+        task_id: taskId,
+      };
+    },
+  };
+}
+
+async function taskIdForTerminalRef(
+  taskSessions: TaskSessionController | undefined,
+  terminalRef: string,
+): Promise<string | null> {
+  if (!taskSessions?.listSessions) return null;
+  const sessions = await taskSessions.listSessions();
+  const normalizedTarget = normalizeTerminalRef(terminalRef);
+  const match = sessions.find((session) => {
+    const sessionTerminalRef = readString(session, "terminal_ref");
+    return sessionTerminalRef !== undefined && normalizeTerminalRef(sessionTerminalRef) === normalizedTarget;
+  });
+  return readString(match, "task_id") ?? null;
+}
+
+function terminalRefFromGhosttyWindowId(id: string | null | undefined): string | null {
+  const trimmed = id?.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("ghostty:")) return trimmed;
+  if (trimmed.startsWith("win-")) return `ghostty:${trimmed}`;
+  return `ghostty:win-${trimmed}`;
+}
+
+function normalizeTerminalRef(value: string): string {
+  const trimmed = value.trim();
+  return terminalRefFromGhosttyWindowId(trimmed) ?? trimmed;
+}
+
+function readString(record: TaskRuntimeSession | undefined, key: string): string | undefined {
+  if (!record) return undefined;
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
@@ -405,4 +474,8 @@ async function execFilePromise(command: string, args: string[], options: { cwd?:
       resolve({ stdout, stderr });
     });
   });
+}
+
+async function runOsascriptCommand(args: string[]) {
+  return execFilePromise("osascript", args, { timeoutMs: 5_000 });
 }

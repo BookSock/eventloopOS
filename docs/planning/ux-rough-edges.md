@@ -8,9 +8,16 @@ Going through the Tuesday walkthrough and the actual implementation, here's what
 
 ## Tier 1 — would annoy you within an hour
 
-### 1.1 Auto-paper false positives while reading Codex output
+### 1.1 Auto-paper false positives while reading Codex output — resolved 2026-06-04
 
 You're scrolling through a long Codex response. Codex is "idle" (waiting for your input). After 60s, the auto-paper watcher fires a paper *for the very task you're already engaged with*. You see a paper notification but you're literally looking at the thing.
+
+**Resolution:** the auto-paper watcher now suppresses task-idle papers when
+the current task is active, when the focused Codex thread matches the task's
+anchor, or when the focused Ghostty terminal ref is bound to the task session.
+Daemon startup also wires the real macOS `osascript` foreground resolver into
+`/agents/codex/resolve-foreground`, so this works in dogfood instead of only
+in route tests. Evidence: `app/orchestrator/src/agents/auto_paper_codex_idle.test.ts`.
 
 **Mitigations:**
 - Bump default threshold (60s → 5 min)?

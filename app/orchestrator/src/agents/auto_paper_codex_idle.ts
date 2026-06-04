@@ -37,6 +37,15 @@ export type AutoPaperActiveTaskReader = {
   getCurrentTaskState(): Promise<{ current_task_id: string | null }>;
 };
 
+export type AutoPaperFocusedCodexReader = {
+  getFocusedCodex(): Promise<{
+    codex_thread_id?: string | null;
+    ghostty_window_id?: string | null;
+    task_id?: string | null;
+    terminal_ref?: string | null;
+  }>;
+};
+
 export type AutoPaperTaskRegistry = {
   // TODO(phase-2-integration): replace with runtime.store.listTasks() once Phase 2
   // lands the tasks table + GatewayStore methods.
@@ -59,6 +68,7 @@ export type AutoPaperCodexIdleDeps = {
   ingestor: AutoPaperEventIngestor;
   manualMode: AutoPaperManualModeReader;
   activeTask?: AutoPaperActiveTaskReader;
+  focusedCodex?: AutoPaperFocusedCodexReader;
   inspect?: AutoPaperInspectFn;
   observability?: Observability;
   codexHome?: string;
@@ -117,6 +127,9 @@ export class AutoPaperCodexIdleWatcher {
     const currentTaskId = this.deps.activeTask
       ? (await this.deps.activeTask.getCurrentTaskState().catch(() => ({ current_task_id: null }))).current_task_id
       : null;
+    const focusedCodex = this.deps.focusedCodex
+      ? await this.deps.focusedCodex.getFocusedCodex().catch(() => undefined)
+      : undefined;
 
     const emitted: AutoPaperTickResult["emitted"] = [];
     const skipped: AutoPaperTickResult["skipped"] = [];
@@ -128,6 +141,14 @@ export class AutoPaperCodexIdleWatcher {
       }
       if (currentTaskId === task.id) {
         skipped.push({ task_id: task.id, reason: "task_currently_active" });
+        continue;
+      }
+      if (focusedCodex?.task_id === task.id) {
+        skipped.push({ task_id: task.id, reason: "task_focused_by_terminal" });
+        continue;
+      }
+      if (focusedCodex?.codex_thread_id === task.primary_anchor_id) {
+        skipped.push({ task_id: task.id, reason: "codex_thread_focused" });
         continue;
       }
       const inspection = await inspect(task.primary_anchor_id, { codexHome: this.deps.codexHome, now });

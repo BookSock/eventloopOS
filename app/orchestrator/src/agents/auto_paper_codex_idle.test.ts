@@ -16,6 +16,12 @@ function createDeps(input: {
   inspections: Map<string, CodexSessionInspection | CodexSessionInspection[]>;
   manualModeActive?: boolean;
   activeTaskId?: string | null;
+  focusedCodex?: {
+    codex_thread_id?: string | null;
+    ghostty_window_id?: string | null;
+    task_id?: string | null;
+    terminal_ref?: string | null;
+  };
   now?: Date;
   defaultIdleSeconds?: number;
   autoDormantSeconds?: number;
@@ -70,6 +76,13 @@ function createDeps(input: {
         return { current_task_id: input.activeTaskId ?? null, updated_at: now.toISOString() };
       },
     },
+    focusedCodex: input.focusedCodex
+      ? {
+          async getFocusedCodex() {
+            return input.focusedCodex ?? {};
+          },
+        }
+      : undefined,
     inspect: async (threadId) => {
       const value = inspectionMap.get(threadId);
       if (Array.isArray(value)) {
@@ -271,6 +284,51 @@ describe("AutoPaperCodexIdleWatcher", () => {
     const result = await new AutoPaperCodexIdleWatcher(deps).tick();
     assert.equal(result.emitted.length, 0);
     assert.equal(result.skipped[0]?.reason, "task_currently_active");
+    assert.equal(deps.ingested.length, 0);
+  });
+
+  it("skips when the task's Codex thread is focused even if current task state is stale", async () => {
+    const deps = createDeps({
+      tasks: [
+        { id: "task_focused_thread", primary_anchor_kind: "codex_thread", primary_anchor_id: "thread_focused" },
+      ],
+      activeTaskId: "task_other",
+      focusedCodex: { codex_thread_id: "thread_focused", ghostty_window_id: "win-focused" },
+      inspections: new Map([
+        ["thread_focused", {
+          thread_id: "thread_focused",
+          exists: true,
+          last_event_at: "2026-05-09T10:00:00.000Z",
+          idle_seconds: 7200,
+          event_count: 1,
+        }],
+      ]),
+    });
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+    assert.equal(result.emitted.length, 0);
+    assert.equal(result.skipped[0]?.reason, "codex_thread_focused");
+    assert.equal(deps.ingested.length, 0);
+  });
+
+  it("skips when the focused terminal is bound to the task", async () => {
+    const deps = createDeps({
+      tasks: [
+        { id: "task_focused_terminal", primary_anchor_kind: "codex_thread", primary_anchor_id: "thread_terminal" },
+      ],
+      focusedCodex: { task_id: "task_focused_terminal", terminal_ref: "ghostty:win-focused" },
+      inspections: new Map([
+        ["thread_terminal", {
+          thread_id: "thread_terminal",
+          exists: true,
+          last_event_at: "2026-05-09T10:00:00.000Z",
+          idle_seconds: 7200,
+          event_count: 1,
+        }],
+      ]),
+    });
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+    assert.equal(result.emitted.length, 0);
+    assert.equal(result.skipped[0]?.reason, "task_focused_by_terminal");
     assert.equal(deps.ingested.length, 0);
   });
 
