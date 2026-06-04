@@ -3,6 +3,134 @@
   "generated_at": "manual",
   "license": "AGPL-3.0-only",
   "status_labels": ["stable_enough", "dogfood", "experimental", "mixed"],
+  "schemas": {
+    "FollowsWindowExclusionCreateRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "anyOf": [
+        { "required": ["app_bundle"] },
+        { "required": ["appBundle"] },
+        { "required": ["title_substring"] },
+        { "required": ["titleSubstring"] }
+      ],
+      "properties": {
+        "app_bundle": { "type": "string", "minLength": 1 },
+        "appBundle": { "type": "string", "minLength": 1 },
+        "title_substring": { "type": "string", "minLength": 1 },
+        "titleSubstring": { "type": "string", "minLength": 1 }
+      }
+    },
+    "FollowsWindowExclusionRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exclusion_id", "created_at"],
+      "properties": {
+        "exclusion_id": { "type": "string" },
+        "app_bundle": { "type": "string" },
+        "title_substring": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "FollowsWindowExclusionResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ok", "exclusion", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "exclusion": { "$ref": "#/components/schemas/FollowsWindowExclusionRecord" },
+        "request_id": { "type": "string" }
+      }
+    },
+    "FollowsWindowExclusionsListResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ok", "exclusions", "count", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "exclusions": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/FollowsWindowExclusionRecord" }
+        },
+        "count": { "type": "integer", "minimum": 0 },
+        "request_id": { "type": "string" }
+      }
+    },
+    "TaskWindowClaimCreateRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "anyOf": [
+        { "required": ["task_id"] },
+        { "required": ["taskId"] }
+      ],
+      "allOf": [{
+        "anyOf": [
+          { "required": ["window_id"] },
+          { "required": ["windowId"] },
+          { "required": ["app_bundle"] },
+          { "required": ["appBundle"] },
+          { "required": ["title_prefix"] },
+          { "required": ["titlePrefix"] },
+          { "required": ["process_root_pid"] },
+          { "required": ["processRootPid"] }
+        ]
+      }],
+      "properties": {
+        "task_id": { "type": "string", "minLength": 1 },
+        "taskId": { "type": "string", "minLength": 1 },
+        "window_id": { "type": "string", "minLength": 1 },
+        "windowId": { "type": "string", "minLength": 1 },
+        "app_bundle": { "type": "string", "minLength": 1 },
+        "appBundle": { "type": "string", "minLength": 1 },
+        "title_prefix": { "type": "string", "minLength": 1 },
+        "titlePrefix": { "type": "string", "minLength": 1 },
+        "process_root_pid": { "type": "integer", "minimum": 1 },
+        "processRootPid": { "type": "integer", "minimum": 1 },
+        "source": { "type": "string", "minLength": 1 },
+        "ttl_ms": { "type": "integer", "minimum": 1 },
+        "ttlMs": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "TaskWindowClaimRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "task_id", "created_at"],
+      "properties": {
+        "claim_id": { "type": "string" },
+        "task_id": { "type": "string" },
+        "window_id": { "type": "string" },
+        "app_bundle": { "type": "string" },
+        "title_prefix": { "type": "string" },
+        "process_root_pid": { "type": "integer", "minimum": 1 },
+        "source": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "expires_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "TaskWindowClaimResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ok", "claim", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "claim": { "$ref": "#/components/schemas/TaskWindowClaimRecord" },
+        "request_id": { "type": "string" }
+      }
+    },
+    "TaskWindowClaimsListResponse": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["ok", "claims", "count", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "claims": {
+          "type": "array",
+          "items": { "$ref": "#/components/schemas/TaskWindowClaimRecord" }
+        },
+        "count": { "type": "integer", "minimum": 0 },
+        "request_id": { "type": "string" }
+      }
+    }
+  },
   "primitives": [
     {
       "id": "runtime_spine",
@@ -71,8 +199,26 @@
       "status": "dogfood",
       "summary": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots.",
       "http": [
-        { "method": "POST", "path": "/task-window-claims", "route_file": "app/orchestrator/src/routes/task_window_claims.ts" },
-        { "method": "GET", "path": "/task-window-claims", "route_file": "app/orchestrator/src/routes/task_window_claims.ts" }
+        {
+          "method": "POST",
+          "path": "/task-window-claims",
+          "route_file": "app/orchestrator/src/routes/task_window_claims.ts",
+          "request_schema": "TaskWindowClaimCreateRequest",
+          "response_schema": "TaskWindowClaimResponse"
+        },
+        {
+          "method": "GET",
+          "path": "/task-window-claims",
+          "route_file": "app/orchestrator/src/routes/task_window_claims.ts",
+          "response_schema": "TaskWindowClaimsListResponse",
+          "query_parameters": [
+            {
+              "name": "task_id",
+              "description": "Optional task id filter.",
+              "schema": { "type": "string" }
+            }
+          ]
+        }
       ],
       "cli": ["bin/task-window-spawn"],
       "code": [
@@ -94,9 +240,25 @@
       "status": "dogfood",
       "summary": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded.",
       "http": [
-        { "method": "POST", "path": "/follows-windows/exclude", "route_file": "app/orchestrator/src/routes/follows_windows.ts" },
-        { "method": "GET", "path": "/follows-windows/exclusions", "route_file": "app/orchestrator/src/routes/follows_windows.ts" },
-        { "method": "DELETE", "path": "/follows-windows/exclusions/:id", "route_file": "app/orchestrator/src/routes/follows_windows.ts" }
+        {
+          "method": "POST",
+          "path": "/follows-windows/exclude",
+          "route_file": "app/orchestrator/src/routes/follows_windows.ts",
+          "request_schema": "FollowsWindowExclusionCreateRequest",
+          "response_schema": "FollowsWindowExclusionResponse"
+        },
+        {
+          "method": "GET",
+          "path": "/follows-windows/exclusions",
+          "route_file": "app/orchestrator/src/routes/follows_windows.ts",
+          "response_schema": "FollowsWindowExclusionsListResponse"
+        },
+        {
+          "method": "DELETE",
+          "path": "/follows-windows/exclusions/:id",
+          "route_file": "app/orchestrator/src/routes/follows_windows.ts",
+          "response_schema": "FollowsWindowExclusionResponse"
+        }
       ],
       "code": ["app/orchestrator/src/agents/follows_window_orchestrator.ts", "app/orchestrator/src/routes/follows_windows.ts"],
       "proofs": ["app/orchestrator/src/agents/follows_window_orchestrator.test.ts"]

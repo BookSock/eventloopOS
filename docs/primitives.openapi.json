@@ -370,18 +370,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/FollowsWindowExclusionCreateRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/FollowsWindowExclusionResponse"
                 }
               }
             },
@@ -416,7 +416,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/FollowsWindowExclusionsListResponse"
                 }
               }
             },
@@ -461,7 +461,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/FollowsWindowExclusionResponse"
                 }
               }
             },
@@ -1287,12 +1287,23 @@
       "get": {
         "description": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots.",
         "operationId": "task_window_claims_get_task_window_claims",
+        "parameters": [
+          {
+            "description": "Optional task id filter.",
+            "in": "query",
+            "name": "task_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskWindowClaimsListResponse"
                 }
               }
             },
@@ -1324,18 +1335,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/TaskWindowClaimCreateRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/TaskWindowClaimResponse"
                 }
               }
             },
@@ -1907,6 +1918,330 @@
             "type": "string"
           }
         }
+      },
+      "FollowsWindowExclusionCreateRequest": {
+        "additionalProperties": true,
+        "anyOf": [
+          {
+            "required": [
+              "app_bundle"
+            ]
+          },
+          {
+            "required": [
+              "appBundle"
+            ]
+          },
+          {
+            "required": [
+              "title_substring"
+            ]
+          },
+          {
+            "required": [
+              "titleSubstring"
+            ]
+          }
+        ],
+        "properties": {
+          "appBundle": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "app_bundle": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "titleSubstring": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title_substring": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "FollowsWindowExclusionRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "app_bundle": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "exclusion_id": {
+            "type": "string"
+          },
+          "title_substring": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "exclusion_id",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "FollowsWindowExclusionResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "exclusion": {
+            "$ref": "#/components/schemas/FollowsWindowExclusionRecord"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "exclusion",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "FollowsWindowExclusionsListResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "exclusions": {
+            "items": {
+              "$ref": "#/components/schemas/FollowsWindowExclusionRecord"
+            },
+            "type": "array"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "exclusions",
+          "count",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "TaskWindowClaimCreateRequest": {
+        "additionalProperties": true,
+        "allOf": [
+          {
+            "anyOf": [
+              {
+                "required": [
+                  "window_id"
+                ]
+              },
+              {
+                "required": [
+                  "windowId"
+                ]
+              },
+              {
+                "required": [
+                  "app_bundle"
+                ]
+              },
+              {
+                "required": [
+                  "appBundle"
+                ]
+              },
+              {
+                "required": [
+                  "title_prefix"
+                ]
+              },
+              {
+                "required": [
+                  "titlePrefix"
+                ]
+              },
+              {
+                "required": [
+                  "process_root_pid"
+                ]
+              },
+              {
+                "required": [
+                  "processRootPid"
+                ]
+              }
+            ]
+          }
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "task_id"
+            ]
+          },
+          {
+            "required": [
+              "taskId"
+            ]
+          }
+        ],
+        "properties": {
+          "appBundle": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "app_bundle": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "processRootPid": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "process_root_pid": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "source": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "taskId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "titlePrefix": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title_prefix": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "ttlMs": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "ttl_ms": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "windowId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "window_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "TaskWindowClaimRecord": {
+        "additionalProperties": false,
+        "properties": {
+          "app_bundle": {
+            "type": "string"
+          },
+          "claim_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "process_root_pid": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "source": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "title_prefix": {
+            "type": "string"
+          },
+          "window_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "claim_id",
+          "task_id",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "TaskWindowClaimResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "claim": {
+            "$ref": "#/components/schemas/TaskWindowClaimRecord"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "claim",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "TaskWindowClaimsListResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "claims": {
+            "items": {
+              "$ref": "#/components/schemas/TaskWindowClaimRecord"
+            },
+            "type": "array"
+          },
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "claims",
+          "count",
+          "request_id"
+        ],
+        "type": "object"
       }
     }
   },

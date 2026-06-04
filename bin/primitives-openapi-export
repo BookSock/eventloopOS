@@ -8,10 +8,9 @@ const args = process.argv.slice(2);
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: bin/primitives-openapi-export [--check] [--self-test] [catalog.json] [openapi.json]
 
-Exports a deterministic OpenAPI 3.1 skeleton from docs/primitives.catalog.json.
-The export is intentionally conservative: it lists stable route names,
-parameters, request bodies, and primitive metadata without inventing full schemas
-that route validators do not yet expose.
+Exports deterministic OpenAPI 3.1 from docs/primitives.catalog.json.
+Routes can opt into concrete schemas with request_schema, response_schema,
+query_parameters, and root-level schemas entries.
 `);
   process.exit(0);
 }
@@ -87,6 +86,7 @@ function openapiFromCatalog(catalog) {
         routePath,
         openapiPath,
         routeFile: readString(route.route_file),
+        route,
       });
     }
   }
@@ -116,6 +116,7 @@ function openapiFromCatalog(catalog) {
             message: { type: "string" },
           },
         },
+        ...readSchemas(catalog.schemas),
       },
     },
     "x-eventloopos-catalog": {
@@ -141,7 +142,7 @@ function operationForRoute(input) {
         description: "Successful response. See route implementation and tests for exact envelope.",
         content: {
           "application/json": {
-            schema: { $ref: "#/components/schemas/FreeformJsonObject" },
+            schema: schemaRefOrFreeform(input.route.response_schema),
           },
         },
       },
@@ -158,16 +159,19 @@ function operationForRoute(input) {
     "x-eventloopos-status": status,
     "x-eventloopos-route-file": input.routeFile,
   };
+  const requestSchema = schemaRef(input.route.request_schema);
   if (["post", "put", "patch"].includes(input.method)) {
     operation.requestBody = {
-      required: false,
+      required: requestSchema ? true : false,
       content: {
         "application/json": {
-          schema: { $ref: "#/components/schemas/FreeformJsonObject" },
+          schema: requestSchema ?? { $ref: "#/components/schemas/FreeformJsonObject" },
         },
       },
     };
   }
+  const queryParameters = queryParametersForRoute(input.route.query_parameters);
+  if (queryParameters.length > 0) operation.parameters.push(...queryParameters);
   if (operation.parameters.length === 0) delete operation.parameters;
   return operation;
 }
@@ -187,6 +191,42 @@ function pathParameters(routePath) {
     });
   }
   return params;
+}
+
+function queryParametersForRoute(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter(isRecord)
+    .map((parameter) => {
+      const name = readString(parameter.name);
+      if (!name) return undefined;
+      return {
+        name,
+        in: "query",
+        required: parameter.required === true,
+        description: readString(parameter.description),
+        schema: isRecord(parameter.schema) ? sortObject(parameter.schema) : { type: "string" },
+      };
+    })
+    .filter(Boolean);
+}
+
+function readSchemas(value) {
+  if (!isRecord(value)) return {};
+  return sortObject(value);
+}
+
+function schemaRefOrFreeform(value) {
+  return schemaRef(value) ?? { $ref: "#/components/schemas/FreeformJsonObject" };
+}
+
+function schemaRef(value) {
+  if (typeof value === "string" && value.trim()) {
+    const name = value.trim();
+    return { $ref: name.startsWith("#/") ? name : `#/components/schemas/${name}` };
+  }
+  if (isRecord(value)) return sortObject(value);
+  return undefined;
 }
 
 function operationId(primitiveId, method, routePath) {
@@ -231,11 +271,30 @@ function runSelfTest() {
       summary: "Task primitive.",
       http: [
         { method: "GET", path: "/tasks/:id/layout", route_file: "routes/tasks.ts" },
-        { method: "POST", path: "/tasks", route_file: "routes/tasks.ts" },
+        {
+          method: "POST",
+          path: "/tasks",
+          route_file: "routes/tasks.ts",
+          request_schema: "CreateTaskRequest",
+          response_schema: "CreateTaskResponse",
+          query_parameters: [{ name: "dry_run", schema: { type: "boolean" } }],
+        },
       ],
       code: ["routes/tasks.ts"],
       proofs: ["routes/tasks.test.ts"],
     }],
+    schemas: {
+      CreateTaskRequest: {
+        type: "object",
+        required: ["task_id"],
+        properties: { task_id: { type: "string" } },
+      },
+      CreateTaskResponse: {
+        type: "object",
+        required: ["ok"],
+        properties: { ok: { type: "boolean" } },
+      },
+    },
   };
   fs.writeFileSync(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`);
   const generated = openapiFromCatalog(catalog);
@@ -251,6 +310,15 @@ function runSelfTest() {
   const postTasks = checked.paths["/tasks"]?.post;
   if (!postTasks?.requestBody) {
     throw new Error("self-test did not add JSON request body for POST");
+  }
+  if (postTasks.requestBody.content["application/json"].schema.$ref !== "#/components/schemas/CreateTaskRequest") {
+    throw new Error("self-test did not wire request schema ref");
+  }
+  if (postTasks.responses["200"].content["application/json"].schema.$ref !== "#/components/schemas/CreateTaskResponse") {
+    throw new Error("self-test did not wire response schema ref");
+  }
+  if (postTasks.parameters?.[0]?.name !== "dry_run") {
+    throw new Error("self-test did not wire query parameter");
   }
   fs.rmSync(root, { recursive: true, force: true });
   console.log("primitives-openapi-export self-test passed");
