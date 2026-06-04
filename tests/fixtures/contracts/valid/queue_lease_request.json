@@ -1,0 +1,8 @@
+{
+  "schema": "QueueLeaseRequest",
+  "data": {
+    "lease_owner": "mac_queue_app",
+    "lease_ms": 30000,
+    "exclude_queue_item_id": "qit_current"
+  }
+}

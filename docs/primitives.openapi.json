@@ -1725,7 +1725,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/QueueListResponse"
                 }
               }
             },
@@ -1759,18 +1759,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/QueueLeaseRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/QueueNextResponse"
                 }
               }
             },
@@ -1805,7 +1805,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/QueueNextResponse"
                 }
               }
             },
@@ -1904,18 +1904,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/QueueDeferRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/QueueActionResponse"
                 }
               }
             },
@@ -1959,18 +1959,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/QueueDoneRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/QueueActionResponse"
                 }
               }
             },
@@ -2014,18 +2014,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/QueueIgnoreRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/QueueActionResponse"
                 }
               }
             },
@@ -2069,18 +2069,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/QueueLeaseRenewRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/QueueLeaseRenewResponse"
                 }
               }
             },
@@ -2169,18 +2169,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FreeformJsonObject"
+                "$ref": "#/components/schemas/QueuePriorityRequest"
               }
             }
           },
-          "required": false
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/FreeformJsonObject"
+                  "$ref": "#/components/schemas/QueuePriorityResponse"
                 }
               }
             },
@@ -3824,6 +3824,391 @@
         "required": [
           "active",
           "updated_at"
+        ],
+        "type": "object"
+      },
+      "QueueActionDecision": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "done",
+              "defer",
+              "ignore"
+            ],
+            "type": "string"
+          },
+          "actor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "decided_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "due_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "queue_item_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "review_packet_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "queue_item_id",
+          "review_packet_id",
+          "action",
+          "actor_id",
+          "decided_at"
+        ],
+        "type": "object"
+      },
+      "QueueActionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "$ref": "#/components/schemas/QueueActionDecision"
+          },
+          "item": {
+            "$ref": "#/components/schemas/QueueItemWithPacket"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "item",
+          "decision",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "QueueDeferRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "const": "defer",
+            "type": "string"
+          },
+          "actor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "due_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "workspaceSnapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          },
+          "workspace_snapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          }
+        },
+        "required": [
+          "action",
+          "due_at"
+        ],
+        "type": "object"
+      },
+      "QueueDoneRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "const": "done",
+            "type": "string"
+          },
+          "actor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspaceSnapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          },
+          "workspace_snapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "QueueIgnoreRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "const": "ignore",
+            "type": "string"
+          },
+          "actor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspaceSnapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          },
+          "workspace_snapshot": {
+            "$ref": "#/components/schemas/WorkspaceSnapshot"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "type": "object"
+      },
+      "QueueItemWithPacket": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "due_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "lease_expires_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "lease_owner": {
+            "type": "string"
+          },
+          "priority_reasons": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "priority_score": {
+            "type": "number"
+          },
+          "review_packet": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "review_packet_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "ready",
+              "leased",
+              "deferred",
+              "done",
+              "dead"
+            ],
+            "type": "string"
+          },
+          "task_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "review_packet_id",
+          "state",
+          "priority_score",
+          "priority_reasons",
+          "created_at",
+          "updated_at",
+          "review_packet"
+        ],
+        "type": "object"
+      },
+      "QueueLeaseRenewRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "exclude_queue_item_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "lease_ms": {
+            "maximum": 1800000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "lease_owner": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "lease_owner"
+        ],
+        "type": "object"
+      },
+      "QueueLeaseRenewResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/QueueItemWithPacket"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "item",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "QueueLeaseRequest": {
+        "additionalProperties": true,
+        "properties": {
+          "exclude_queue_item_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "lease_ms": {
+            "maximum": 1800000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "lease_owner": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "QueueListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "count": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QueueItemWithPacket"
+            },
+            "type": "array"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "items",
+          "count",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "QueueNextResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "item": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/QueueItemWithPacket"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "item",
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "QueuePriorityRequest": {
+        "additionalProperties": true,
+        "anyOf": [
+          {
+            "required": [
+              "delta"
+            ]
+          },
+          {
+            "required": [
+              "score"
+            ]
+          }
+        ],
+        "properties": {
+          "actor_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "delta": {
+            "type": "number"
+          },
+          "reason": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "score": {
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "type": "object"
+      },
+      "QueuePriorityResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/QueueItemWithPacket"
+          },
+          "ok": {
+            "const": true,
+            "type": "boolean"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "item",
+          "request_id"
         ],
         "type": "object"
       },

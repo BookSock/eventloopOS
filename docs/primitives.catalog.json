@@ -209,6 +209,153 @@
         "request_id": { "type": "string", "minLength": 1 }
       }
     },
+    "QueueItemWithPacket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "review_packet_id", "state", "priority_score", "priority_reasons", "created_at", "updated_at", "review_packet"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "review_packet_id": { "type": "string", "minLength": 1 },
+        "task_id": { "type": "string", "minLength": 1 },
+        "state": { "type": "string", "enum": ["ready", "leased", "deferred", "done", "dead"] },
+        "priority_score": { "type": "number" },
+        "priority_reasons": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "due_at": { "type": "string", "format": "date-time" },
+        "lease_owner": { "type": "string" },
+        "lease_expires_at": { "type": "string", "format": "date-time" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" },
+        "review_packet": { "type": "object", "additionalProperties": true }
+      }
+    },
+    "QueueListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "count", "request_id"],
+      "properties": {
+        "items": { "type": "array", "items": { "$ref": "#/components/schemas/QueueItemWithPacket" } },
+        "count": { "type": "integer", "minimum": 0 },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "QueueNextResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["item", "request_id"],
+      "properties": {
+        "item": { "oneOf": [{ "$ref": "#/components/schemas/QueueItemWithPacket" }, { "type": "null" }] },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "QueueLeaseRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "lease_owner": { "type": "string", "minLength": 1 },
+        "lease_ms": { "type": "integer", "minimum": 1, "maximum": 1800000 },
+        "exclude_queue_item_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "QueueLeaseRenewRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["lease_owner"],
+      "properties": {
+        "lease_owner": { "type": "string", "minLength": 1 },
+        "lease_ms": { "type": "integer", "minimum": 1, "maximum": 1800000 },
+        "exclude_queue_item_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "QueueLeaseRenewResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "item", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "item": { "$ref": "#/components/schemas/QueueItemWithPacket" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "QueueDoneRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["action"],
+      "properties": {
+        "action": { "type": "string", "const": "done" },
+        "actor_id": { "type": "string", "minLength": 1 },
+        "workspace_snapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "workspaceSnapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" }
+      }
+    },
+    "QueueDeferRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["action", "due_at"],
+      "properties": {
+        "action": { "type": "string", "const": "defer" },
+        "due_at": { "type": "string", "format": "date-time" },
+        "actor_id": { "type": "string", "minLength": 1 },
+        "workspace_snapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "workspaceSnapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" }
+      }
+    },
+    "QueueIgnoreRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["action"],
+      "properties": {
+        "action": { "type": "string", "const": "ignore" },
+        "actor_id": { "type": "string", "minLength": 1 },
+        "workspace_snapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" },
+        "workspaceSnapshot": { "$ref": "#/components/schemas/WorkspaceSnapshot" }
+      }
+    },
+    "QueueActionDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "queue_item_id", "review_packet_id", "action", "actor_id", "decided_at"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "queue_item_id": { "type": "string", "minLength": 1 },
+        "review_packet_id": { "type": "string", "minLength": 1 },
+        "action": { "type": "string", "enum": ["done", "defer", "ignore"] },
+        "actor_id": { "type": "string", "minLength": 1 },
+        "due_at": { "type": "string", "format": "date-time" },
+        "decided_at": { "type": "string", "format": "date-time" }
+      }
+    },
+    "QueueActionResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "item", "decision", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "item": { "$ref": "#/components/schemas/QueueItemWithPacket" },
+        "decision": { "$ref": "#/components/schemas/QueueActionDecision" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "QueuePriorityRequest": {
+      "type": "object",
+      "additionalProperties": true,
+      "anyOf": [{ "required": ["delta"] }, { "required": ["score"] }],
+      "properties": {
+        "delta": { "type": "number" },
+        "score": { "type": "number", "minimum": 0 },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "actor_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "QueuePriorityResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ok", "item", "request_id"],
+      "properties": {
+        "ok": { "type": "boolean", "const": true },
+        "item": { "$ref": "#/components/schemas/QueueItemWithPacket" },
+        "request_id": { "type": "string", "minLength": 1 }
+      }
+    },
     "FollowsWindowExclusionCreateRequest": {
       "type": "object",
       "additionalProperties": true,
@@ -563,16 +710,63 @@
         { "method": "POST", "path": "/events", "route_file": "app/orchestrator/src/routes/events.ts" },
         { "method": "GET", "path": "/events/:id", "route_file": "app/orchestrator/src/routes/events.ts" },
         { "method": "GET", "path": "/review-packets/:id", "route_file": "app/orchestrator/src/routes/events.ts" },
-        { "method": "GET", "path": "/queue", "route_file": "app/orchestrator/src/routes/queue.ts" },
-        { "method": "GET", "path": "/queue/next", "route_file": "app/orchestrator/src/routes/queue.ts" },
-        { "method": "POST", "path": "/queue/lease-next", "route_file": "app/orchestrator/src/routes/queue.ts" },
-        { "method": "POST", "path": "/queue/:id/lease/renew", "route_file": "app/orchestrator/src/routes/queue.ts" },
-        { "method": "POST", "path": "/queue/:id/done", "route_file": "app/orchestrator/src/routes/queue.ts" },
-        { "method": "POST", "path": "/queue/:id/defer", "route_file": "app/orchestrator/src/routes/queue.ts" },
-        { "method": "POST", "path": "/queue/:id/ignore", "route_file": "app/orchestrator/src/routes/queue.ts" },
+        {
+          "method": "GET",
+          "path": "/queue",
+          "route_file": "app/orchestrator/src/routes/queue.ts",
+          "response_schema": "QueueListResponse",
+          "parameters": [{ "name": "state", "in": "query", "schema": { "type": "string", "enum": ["ready", "leased", "deferred", "done", "dead"] } }]
+        },
+        {
+          "method": "GET",
+          "path": "/queue/next",
+          "route_file": "app/orchestrator/src/routes/queue.ts",
+          "response_schema": "QueueNextResponse"
+        },
+        {
+          "method": "POST",
+          "path": "/queue/lease-next",
+          "route_file": "app/orchestrator/src/routes/queue.ts",
+          "request_schema": "QueueLeaseRequest",
+          "response_schema": "QueueNextResponse"
+        },
+        {
+          "method": "POST",
+          "path": "/queue/:id/lease/renew",
+          "route_file": "app/orchestrator/src/routes/queue.ts",
+          "request_schema": "QueueLeaseRenewRequest",
+          "response_schema": "QueueLeaseRenewResponse"
+        },
+        {
+          "method": "POST",
+          "path": "/queue/:id/done",
+          "route_file": "app/orchestrator/src/routes/queue.ts",
+          "request_schema": "QueueDoneRequest",
+          "response_schema": "QueueActionResponse"
+        },
+        {
+          "method": "POST",
+          "path": "/queue/:id/defer",
+          "route_file": "app/orchestrator/src/routes/queue.ts",
+          "request_schema": "QueueDeferRequest",
+          "response_schema": "QueueActionResponse"
+        },
+        {
+          "method": "POST",
+          "path": "/queue/:id/ignore",
+          "route_file": "app/orchestrator/src/routes/queue.ts",
+          "request_schema": "QueueIgnoreRequest",
+          "response_schema": "QueueActionResponse"
+        },
         { "method": "POST", "path": "/queue/:id/actions/recommended", "route_file": "app/orchestrator/src/routes/queue.ts" },
         { "method": "GET", "path": "/queue/:id/lineage", "route_file": "app/orchestrator/src/routes/queue.ts" },
-        { "method": "POST", "path": "/queue/:id/priority", "route_file": "app/orchestrator/src/routes/queue.ts" }
+        {
+          "method": "POST",
+          "path": "/queue/:id/priority",
+          "route_file": "app/orchestrator/src/routes/queue.ts",
+          "request_schema": "QueuePriorityRequest",
+          "response_schema": "QueuePriorityResponse"
+        }
       ],
       "code": [
         "app/orchestrator/src/routes/events.ts",

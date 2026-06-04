@@ -1,0 +1,8 @@
+{
+  "schema": "QueueDeferRequest",
+  "data": {
+    "action": "defer",
+    "actor_id": "mac_queue_app",
+    "due_at": "2026-05-06T18:13:00Z"
+  }
+}

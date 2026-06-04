@@ -1,0 +1,7 @@
+{
+  "schema": "QueueIgnoreRequest",
+  "data": {
+    "action": "ignore",
+    "actor_id": "mac_queue_app"
+  }
+}

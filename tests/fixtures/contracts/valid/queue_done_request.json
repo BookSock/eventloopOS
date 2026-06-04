@@ -1,0 +1,7 @@
+{
+  "schema": "QueueDoneRequest",
+  "data": {
+    "action": "done",
+    "actor_id": "mac_queue_app"
+  }
+}

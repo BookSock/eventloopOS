@@ -707,6 +707,133 @@ export const QueueItemSchema = z
   .strict();
 export type QueueItem = z.infer<typeof QueueItemSchema>;
 
+export const QueueItemWithPacketSchema = QueueItemSchema.extend({
+  review_packet: ReviewPacketSchema
+}).strict();
+export type QueueItemWithPacket = z.infer<typeof QueueItemWithPacketSchema>;
+
+export const QueueListResponseSchema = z
+  .object({
+    items: z.array(QueueItemWithPacketSchema),
+    count: z.number().int().nonnegative(),
+    request_id: id
+  })
+  .strict();
+export type QueueListResponse = z.infer<typeof QueueListResponseSchema>;
+
+export const QueueNextResponseSchema = z
+  .object({
+    item: QueueItemWithPacketSchema.nullable(),
+    request_id: id
+  })
+  .strict();
+export type QueueNextResponse = z.infer<typeof QueueNextResponseSchema>;
+
+export const QueueLeaseRequestSchema = z
+  .object({
+    lease_owner: id.optional(),
+    lease_ms: z.number().int().positive().max(1_800_000).optional(),
+    exclude_queue_item_id: id.optional()
+  })
+  .passthrough();
+export type QueueLeaseRequest = z.infer<typeof QueueLeaseRequestSchema>;
+
+export const QueueLeaseRenewRequestSchema = QueueLeaseRequestSchema.extend({
+  lease_owner: id
+}).passthrough();
+export type QueueLeaseRenewRequest = z.infer<typeof QueueLeaseRenewRequestSchema>;
+
+export const QueueLeaseRenewResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    item: QueueItemWithPacketSchema,
+    request_id: id
+  })
+  .strict();
+export type QueueLeaseRenewResponse = z.infer<typeof QueueLeaseRenewResponseSchema>;
+
+const QueueWorkspaceSnapshotMixin = {
+  actor_id: id.optional(),
+  workspace_snapshot: WorkspaceSnapshotSchema.optional(),
+  workspaceSnapshot: WorkspaceSnapshotSchema.optional()
+};
+
+export const QueueDoneRequestSchema = z
+  .object({
+    action: z.literal("done"),
+    ...QueueWorkspaceSnapshotMixin
+  })
+  .passthrough();
+export type QueueDoneRequest = z.infer<typeof QueueDoneRequestSchema>;
+
+export const QueueDeferRequestSchema = z
+  .object({
+    action: z.literal("defer"),
+    due_at: isoDateTime,
+    ...QueueWorkspaceSnapshotMixin
+  })
+  .passthrough();
+export type QueueDeferRequest = z.infer<typeof QueueDeferRequestSchema>;
+
+export const QueueIgnoreRequestSchema = z
+  .object({
+    action: z.literal("ignore"),
+    ...QueueWorkspaceSnapshotMixin
+  })
+  .passthrough();
+export type QueueIgnoreRequest = z.infer<typeof QueueIgnoreRequestSchema>;
+
+export const QueueActionDecisionSchema = z
+  .object({
+    id,
+    queue_item_id: id,
+    review_packet_id: id,
+    action: z.enum(["done", "defer", "ignore"]),
+    actor_id: id,
+    due_at: isoDateTime.optional(),
+    decided_at: isoDateTime
+  })
+  .strict();
+export type QueueActionDecision = z.infer<typeof QueueActionDecisionSchema>;
+
+export const QueueActionResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    item: QueueItemWithPacketSchema,
+    decision: QueueActionDecisionSchema,
+    request_id: id
+  })
+  .strict();
+export type QueueActionResponse = z.infer<typeof QueueActionResponseSchema>;
+
+export const QueuePriorityRequestSchema = z
+  .object({
+    delta: z.number().finite().optional(),
+    score: z.number().finite().nonnegative().optional(),
+    reason: z.string().min(1).max(80).optional(),
+    actor_id: id.optional()
+  })
+  .passthrough()
+  .superRefine((request, ctx) => {
+    if (request.delta === undefined && request.score === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "priority request must include delta or score",
+        path: ["delta"]
+      });
+    }
+  });
+export type QueuePriorityRequest = z.infer<typeof QueuePriorityRequestSchema>;
+
+export const QueuePriorityResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    item: QueueItemWithPacketSchema,
+    request_id: id
+  })
+  .strict();
+export type QueuePriorityResponse = z.infer<typeof QueuePriorityResponseSchema>;
+
 export const RouteDecisionSchema = z
   .object({
     id,
@@ -900,6 +1027,19 @@ export const ContractSchemas = {
   TaskMessage: TaskMessageSchema,
   ReviewPacket: ReviewPacketSchema,
   QueueItem: QueueItemSchema,
+  QueueItemWithPacket: QueueItemWithPacketSchema,
+  QueueListResponse: QueueListResponseSchema,
+  QueueNextResponse: QueueNextResponseSchema,
+  QueueLeaseRequest: QueueLeaseRequestSchema,
+  QueueLeaseRenewRequest: QueueLeaseRenewRequestSchema,
+  QueueLeaseRenewResponse: QueueLeaseRenewResponseSchema,
+  QueueDoneRequest: QueueDoneRequestSchema,
+  QueueDeferRequest: QueueDeferRequestSchema,
+  QueueIgnoreRequest: QueueIgnoreRequestSchema,
+  QueueActionDecision: QueueActionDecisionSchema,
+  QueueActionResponse: QueueActionResponseSchema,
+  QueuePriorityRequest: QueuePriorityRequestSchema,
+  QueuePriorityResponse: QueuePriorityResponseSchema,
   RouteDecision: RouteDecisionSchema,
   OwnershipLock: OwnershipLockSchema,
   HookDecision: HookDecisionSchema,

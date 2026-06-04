@@ -1,0 +1,11 @@
+{
+  "schema": "QueueActionDecision",
+  "data": {
+    "id": "dec_qit_feedback_001",
+    "queue_item_id": "qit_feedback_001",
+    "review_packet_id": "pkt_feedback_001",
+    "action": "done",
+    "actor_id": "mac_queue_app",
+    "decided_at": "2026-05-06T17:20:00Z"
+  }
+}

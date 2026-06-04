@@ -1,0 +1,7 @@
+{
+  "schema": "QueueLeaseRenewRequest",
+  "data": {
+    "lease_owner": "mac_queue_app",
+    "lease_ms": 30000
+  }
+}

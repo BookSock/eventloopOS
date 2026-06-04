@@ -1,0 +1,7 @@
+{
+  "schema": "QueueNextResponse",
+  "data": {
+    "item": null,
+    "request_id": "req_queue_next"
+  }
+}

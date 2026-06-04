@@ -1,0 +1,35 @@
+{
+  "schema": "QueueLeaseRenewResponse",
+  "data": {
+    "ok": true,
+    "item": {
+      "id": "qit_feedback_001",
+      "review_packet_id": "pkt_feedback_001",
+      "task_id": "task_blog_feedback",
+      "state": "leased",
+      "priority_score": 86,
+      "priority_reasons": ["external send approval"],
+      "lease_owner": "mac_queue_app",
+      "lease_expires_at": "2026-05-06T17:43:00Z",
+      "created_at": "2026-05-06T17:13:00Z",
+      "updated_at": "2026-05-06T17:13:00Z",
+      "review_packet": {
+        "id": "pkt_feedback_001",
+        "task_id": "task_blog_feedback",
+        "title": "Approve customer reply draft",
+        "summary": "Agent drafted a reply based on Slack feedback.",
+        "decision_needed": "Approve sending reply or edit draft first.",
+        "risk_level": "medium",
+        "confidence": "high",
+        "risk_tags": ["external_send"],
+        "evidence": [{ "id": "evref_draft_001", "kind": "artifact", "title": "Reply draft", "ref": "raw_reply_draft_001" }],
+        "context": [],
+        "recommended_action": { "id": "act_done_001", "type": "mark_done", "label": "Mark done", "requires_confirmation": false, "side_effect": "none", "payload": {} },
+        "alternate_actions": [],
+        "created_at": "2026-05-06T17:12:00Z",
+        "updated_at": "2026-05-06T17:12:00Z"
+      }
+    },
+    "request_id": "req_queue_renew"
+  }
+}
