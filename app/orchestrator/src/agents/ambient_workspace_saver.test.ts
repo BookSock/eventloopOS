@@ -916,4 +916,90 @@ describe("ambient_workspace_saver", () => {
     assert.deepEqual(taskSnapshotWrites[0].snapshot, layoutWrites[0].snapshot);
     assert.deepEqual(claims, [{ taskId: "task_alpha", windowId: "1", source: "ambient_tagged_window" }]);
   });
+
+  it("runtime adapter uses task sessions when claiming agent-spawned windows", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 2,
+      windows: [
+        { id: 1, app: "TextEdit", title: "Task A reply", workspace: "paper-a", pid: 100 },
+        {
+          id: 2,
+          app: "Google Chrome",
+          appBundleId: "com.google.Chrome",
+          title: "Task B Playwright report",
+          workspace: "paper-a",
+          pid: 500,
+        },
+      ],
+    };
+    const obs = makeFakeObservability();
+    const claims: Array<{ taskId: string; windowId?: string; appBundle?: string; titlePrefix?: string; source?: string }> = [];
+    const writes: Array<{ taskId: string; snapshot: WorkspaceSnapshot }> = [];
+    let nowMs = Date.parse("2026-05-10T15:00:00.000Z");
+    const runtime = {
+      workspace: makeFakeWorkspace(snapshot),
+      observability: obs.recorder,
+      now: () => new Date(nowMs),
+      taskSessions: {
+        listSessions: async () => [
+          { id: "task_session_b", task_id: "task_paper_b", provider: "codex", pid: 500 },
+        ],
+      },
+      store: {
+        getCurrentTaskState: async () => ({ current_task_id: "task_paper_a" }),
+        updateTaskLayout: async (taskId: string, nextSnapshot: WorkspaceSnapshot) => {
+          writes.push({ taskId, snapshot: nextSnapshot });
+        },
+        saveTaskWorkspaceSnapshot: async (input: { taskId: string; snapshot: WorkspaceSnapshot }) => {
+          writes.push({ taskId: input.taskId, snapshot: input.snapshot });
+          return { task_id: input.taskId, snapshot: input.snapshot };
+        },
+        claimTaskWindow: async (input: {
+          taskId: string;
+          windowId?: string;
+          appBundle?: string;
+          titlePrefix?: string;
+          source?: string;
+        }) => {
+          claims.push({
+            taskId: input.taskId,
+            windowId: input.windowId,
+            appBundle: input.appBundle,
+            titlePrefix: input.titlePrefix,
+            source: input.source,
+          });
+          return { task_id: input.taskId };
+        },
+        listTaskWindowClaims: async () => claims.map((claim) => ({
+          task_id: claim.taskId,
+          window_id: claim.windowId,
+          app_bundle: claim.appBundle,
+          title_prefix: claim.titlePrefix,
+          source: claim.source,
+        })),
+        getManualModeState: async () => ({ active: false }),
+      },
+    } as unknown as Runtime;
+    const saver = createAmbientWorkspaceSaverFromRuntime(runtime, { debounceMs: 3_000 });
+
+    assert.ok(saver, "runtime adapter should create saver when workspace is configured");
+    assert.equal((await saver.tick()).decision, "debounced");
+    assert.deepEqual(claims, [
+      {
+        taskId: "task_paper_b",
+        windowId: "2",
+        appBundle: "com.google.Chrome",
+        titlePrefix: "task b playwright report",
+        source: "ambient_process_tree",
+      },
+    ]);
+
+    nowMs += 5_000;
+    assert.equal((await saver.tick()).decision, "committed");
+    assert.deepEqual(writes[0]?.snapshot.windows.map((window) => window.id), [1]);
+    assert.equal(writes[0]?.snapshot.focusedWindowId, undefined);
+    assert.equal(obs.counters.get("task_window_claims_process_tree_total"), 1);
+  });
 });

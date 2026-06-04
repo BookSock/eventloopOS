@@ -99,6 +99,7 @@ let ambientWorkspaceSaver: AmbientWorkspaceSaver | undefined;
 if (process.env.EVENTLOOPOS_AMBIENT_WORKSPACE_SAVE === "1" && workspace) {
   const runtime = createRuntime({
     store: gatewayRuntime.store,
+    taskSessions,
     workspace,
     observability,
   });
