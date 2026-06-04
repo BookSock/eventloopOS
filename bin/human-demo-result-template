@@ -29,12 +29,34 @@ if (args.includes("--self-test")) {
     readyManifestPath: "artifacts/lab-runs/20260603T205150Z-human-demo-ready/manifest.json",
     readyScreenshotPath: "artifacts/lab-runs/20260603T205150Z-human-demo-ready/screen-sharing.png",
     manifest,
+    ready: {
+      checks: {
+        queue_latency_ok: true,
+        workspace_latency_ok: true,
+        hotkey_feedback_latency_ok: true,
+      },
+      queue_latency_required: true,
+      workspace_latency_required: true,
+      hotkey_latency_required: true,
+      queue_latency: {
+        manifest_path: "artifacts/lab-runs/20260603T205150Z-human-demo-ready/queue-latency.json",
+      },
+      workspace_latency: {
+        manifest_path: "artifacts/lab-runs/20260603T205150Z-human-demo-ready/workspace-latency.json",
+      },
+      hotkey_feedback_latency: {
+        manifest_path: "artifacts/lab-runs/20260603T205150Z-human-demo-ready/hotkey-latency.json",
+      },
+    },
   });
   assertIncludes(rendered, "Human demo date: 2026-06-03");
   assertIncludes(rendered, "Proof manifest: artifacts/lab-runs/20260603-132623-human-demo/manifest.json");
   assertIncludes(rendered, "Screenshot: artifacts/lab-runs/20260603-132623-human-demo/screen-sharing.png");
   assertIncludes(rendered, "Readiness manifest: artifacts/lab-runs/20260603T205150Z-human-demo-ready/manifest.json");
   assertIncludes(rendered, "Readiness screenshot: artifacts/lab-runs/20260603T205150Z-human-demo-ready/screen-sharing.png");
+  assertIncludes(rendered, "Readiness queue latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/queue-latency.json ok=true required=true");
+  assertIncludes(rendered, "Readiness workspace latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/workspace-latency.json ok=true required=true");
+  assertIncludes(rendered, "Readiness hotkey latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/hotkey-latency.json ok=true required=true");
   assertIncludes(rendered, "Automated proof: ok=true, queue_count=2, ambient_autosave=true");
   console.log("human-demo-result-template self-test passed");
   process.exit(0);
@@ -64,7 +86,9 @@ const template = renderTemplate({
   readyManifestPath,
   readyScreenshotPath,
   manifest,
+  ready,
 });
+const readiness = readinessSummary(ready);
 if (outputPath) {
   const absoluteOutputPath = path.resolve(repoRoot, outputPath);
   fs.mkdirSync(path.dirname(absoluteOutputPath), { recursive: true });
@@ -75,6 +99,12 @@ const result = {
   screenshot_path: screenshotPath,
   readiness_manifest_path: readyManifestPath,
   readiness_screenshot_path: readyScreenshotPath,
+  readiness_queue_latency_path: readiness.queue.path,
+  readiness_workspace_latency_path: readiness.workspace.path,
+  readiness_hotkey_latency_path: readiness.hotkey.path,
+  readiness_queue_latency_ok: readiness.queue.ok,
+  readiness_workspace_latency_ok: readiness.workspace.ok,
+  readiness_hotkey_latency_ok: readiness.hotkey.ok,
   output_path: outputPath,
   ok: manifest.ok === true,
   queue_count: manifest.proofs?.demo_queue?.count ?? null,
@@ -149,16 +179,20 @@ function findScreenshotPath(runDir) {
   return "";
 }
 
-function renderTemplate({ manifestPath, screenshotPath, readyManifestPath, readyScreenshotPath, manifest }) {
+function renderTemplate({ manifestPath, screenshotPath, readyManifestPath, readyScreenshotPath, manifest, ready }) {
   const date = manifest.generated_at ? manifest.generated_at.slice(0, 10) : "";
   const queueCount = manifest.proofs?.demo_queue?.count ?? "";
   const ambientOk = manifest.proofs?.ambient_autosave?.ok === true ? "true" : "false";
+  const readiness = readinessSummary(ready);
   return `Human demo date: ${date}
 Mac: Mac Studio
 Proof manifest: ${manifestPath}
 Screenshot: ${screenshotPath}
 Readiness manifest: ${readyManifestPath ?? ""}
 Readiness screenshot: ${readyScreenshotPath ?? ""}
+Readiness queue latency: ${readiness.queue.path} ok=${readiness.queue.ok} required=${readiness.queue.required}
+Readiness workspace latency: ${readiness.workspace.path} ok=${readiness.workspace.ok} required=${readiness.workspace.required}
+Readiness hotkey latency: ${readiness.hotkey.path} ok=${readiness.hotkey.ok} required=${readiness.hotkey.required}
 Automated proof: ok=${manifest.ok === true}, queue_count=${queueCount}, ambient_autosave=${ambientOk}
 
 Pass/fail:
@@ -170,12 +204,37 @@ Pass/fail:
 - Rectangle hotkeys feel usable:
 - Manual Mode entry/return works:
 - Queue footer feedback is visible and current:
+- Queue/master latency readiness gate passed:
+- Workspace capture/restore-plan latency readiness gate passed:
+- Hotkey feedback latency readiness gate passed or skipped intentionally:
 
 Friction:
 - 
 
 Ship/block decision:
 `;
+}
+
+function readinessSummary(ready) {
+  return {
+    queue: readinessGate(ready, "queue_latency", "queue_latency_ok", "queue_latency_required", true),
+    workspace: readinessGate(ready, "workspace_latency", "workspace_latency_ok", "workspace_latency_required", true),
+    hotkey: readinessGate(ready, "hotkey_feedback_latency", "hotkey_feedback_latency_ok", "hotkey_latency_required", false),
+  };
+}
+
+function readinessGate(ready, sectionKey, checkKey, requiredKey, defaultRequired) {
+  const section = ready?.[sectionKey];
+  const required = typeof ready?.[requiredKey] === "boolean" ? ready[requiredKey] : defaultRequired;
+  const skipped = section?.skipped === true;
+  const pathValue = typeof section?.manifest_path === "string" ? section.manifest_path : "";
+  const pathOrSkipped = skipped ? "skipped" : pathValue;
+  const checkOk = ready?.checks?.[checkKey] === true || section?.ok === true;
+  return {
+    path: pathOrSkipped,
+    ok: checkOk || (skipped && required === false),
+    required,
+  };
 }
 
 function assertIncludes(value, expected) {

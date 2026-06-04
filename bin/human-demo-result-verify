@@ -138,6 +138,11 @@ function verifyResultText(text) {
   const passFail = parsePassFail(lines);
   const friction = sectionText(lines, "Friction:", "Ship/block decision:").trim();
   const decision = fieldOrSectionText(lines, "Ship/block decision:", undefined).trim();
+  const readinessLatency = {
+    queue: fieldOrSectionText(lines, "Readiness queue latency:", "Readiness workspace latency:").trim(),
+    workspace: fieldOrSectionText(lines, "Readiness workspace latency:", "Readiness hotkey latency:").trim(),
+    hotkey: fieldOrSectionText(lines, "Readiness hotkey latency:", "Automated proof:").trim(),
+  };
   const expectedLabels = [
     "Starting state on demo-customer with Queue visible",
     "Ctrl-Option-R restores Customer paper",
@@ -147,6 +152,9 @@ function verifyResultText(text) {
     "Rectangle hotkeys feel usable",
     "Manual Mode entry/return works",
     "Queue footer feedback is visible and current",
+    "Queue/master latency readiness gate passed",
+    "Workspace capture/restore-plan latency readiness gate passed",
+    "Hotkey feedback latency readiness gate passed or skipped intentionally",
   ];
   const missingLabels = expectedLabels.filter((label) => !Object.hasOwn(passFail, label));
   const blankLabels = expectedLabels.filter((label) => Object.hasOwn(passFail, label) && passFail[label].trim() === "");
@@ -155,6 +163,9 @@ function verifyResultText(text) {
     all_expected_pass_fail_items_present: missingLabels.length === 0,
     all_pass_fail_items_filled: blankLabels.length === 0,
     pass_fail_items_passed_or_accepted: blockingLabels.length === 0,
+    readiness_queue_latency_ok: latencyLineOk(readinessLatency.queue),
+    readiness_workspace_latency_ok: latencyLineOk(readinessLatency.workspace),
+    readiness_hotkey_latency_ok: latencyLineOk(readinessLatency.hotkey),
     friction_has_no_blocker: frictionHasNoBlocker(friction),
     ship_block_decision_accepts: decisionAccepts(decision),
   };
@@ -168,6 +179,7 @@ function verifyResultText(text) {
       blank_labels: blankLabels,
       blocking_labels: blockingLabels,
     },
+    readiness_latency: readinessLatency,
     friction,
     ship_block_decision: decision,
   };
@@ -213,6 +225,15 @@ function isAcceptablePassFail(value) {
   const mentionsFailure = /\b(fail|failed|no|broken|miss|missed|wrong)\b/.test(normalized);
   const accepted = /\b(non-blocking|not blocking|accepted|accept|known)\b/.test(normalized);
   return mentionsFailure && accepted;
+}
+
+function latencyLineOk(value) {
+  const normalized = normalize(value);
+  if (!normalized || !/\bok=true\b/.test(normalized)) return false;
+  if (/\brequired=true\b/.test(normalized)) {
+    return !normalized.includes("skipped");
+  }
+  return true;
 }
 
 function frictionHasNoBlocker(value) {
@@ -265,6 +286,9 @@ Proof manifest: artifacts/lab-runs/demo/manifest.json
 Screenshot: artifacts/lab-runs/demo/screen-sharing.png
 Readiness manifest: artifacts/lab-runs/ready/manifest.json
 Readiness screenshot: artifacts/lab-runs/ready/screen-sharing.png
+Readiness queue latency: artifacts/lab-runs/ready/queue-latency.json ok=true required=true
+Readiness workspace latency: artifacts/lab-runs/ready/workspace-latency.json ok=true required=true
+Readiness hotkey latency: artifacts/lab-runs/ready/hotkey-latency.json ok=true required=true
 Automated proof: ok=true, queue_count=2, ambient_autosave=true
 
 Pass/fail:
@@ -276,6 +300,9 @@ Pass/fail:
 - Rectangle hotkeys feel usable: pass
 - Manual Mode entry/return works: pass
 - Queue footer feedback is visible and current: pass
+- Queue/master latency readiness gate passed: pass
+- Workspace capture/restore-plan latency readiness gate passed: pass
+- Hotkey feedback latency readiness gate passed or skipped intentionally: pass
 
 Friction:
 - none
@@ -284,6 +311,10 @@ Ship/block decision: ship
 `;
   const ok = verifyResultText(filled);
   assert.equal(ok.failed_checks.length, 0);
+  const missingLatency = verifyResultText(filled.replace("Readiness queue latency: artifacts/lab-runs/ready/queue-latency.json ok=true required=true\n", ""));
+  assert.ok(missingLatency.failed_checks.includes("readiness_queue_latency_ok"));
+  const skippedRequiredLatency = verifyResultText(filled.replace("Readiness workspace latency: artifacts/lab-runs/ready/workspace-latency.json ok=true required=true", "Readiness workspace latency: skipped ok=true required=true"));
+  assert.ok(skippedRequiredLatency.failed_checks.includes("readiness_workspace_latency_ok"));
   const blank = filled.replace("ship", "").replace("pass", "");
   const bad = verifyResultText(blank);
   assert.ok(bad.failed_checks.includes("all_pass_fail_items_filled"));

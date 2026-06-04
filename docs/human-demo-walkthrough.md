@@ -32,9 +32,12 @@ This does not restart or reseed the demo. It checks the current lab dogfood stac
 verifies the latest human-demo proof artifact, captures only the local Screen
 Sharing window, and writes `artifacts/lab-runs/*-human-demo-ready/READY.md`.
 Run `bin/human-demo-ready` after the queue app has Accessibility permission.
-On macOS it includes a live hotkey-to-feedback p95 latency gate in the
-readiness artifact by running the latency probe on the Mac Studio. Use
-`--skip-hotkey-latency` only while bootstrapping permission setup.
+It also writes read-only queue/master latency and workspace capture/restore-plan
+latency manifests, so demo readiness proves the Queue path and workspace path
+are responsive without mutating the active paper. On macOS it includes a live
+hotkey-to-feedback p95 latency gate in the readiness artifact by running the
+latency probe on the Mac Studio. Use `--skip-hotkey-latency` only while
+bootstrapping permission setup.
 
 Latest known-good proof:
 
@@ -121,6 +124,9 @@ Proof manifest:
 Screenshot:
 Readiness manifest:
 Readiness screenshot:
+Readiness queue latency:  ok= required=
+Readiness workspace latency:  ok= required=
+Readiness hotkey latency:  ok= required=
 
 Pass/fail:
 - Starting state on demo-customer with Queue visible:
@@ -131,6 +137,9 @@ Pass/fail:
 - Rectangle hotkeys feel usable:
 - Manual Mode entry/return works:
 - Queue footer feedback is visible and current:
+- Queue/master latency readiness gate passed:
+- Workspace capture/restore-plan latency readiness gate passed:
+- Hotkey feedback latency readiness gate passed or skipped intentionally:
 
 Friction:
 - 
