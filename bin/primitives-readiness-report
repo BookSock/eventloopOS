@@ -83,7 +83,7 @@ function summarizePrimitive(primitive, repoRoot) {
   if (proofs.length === 0) gaps.push("missing proof references");
   if (http.length > 0 && !http.every((route) => route.response_schema)) gaps.push("http response schema missing");
   const hardeningGaps = [];
-  if ((http.length > 0 || cli.length > 0) && selfTests.length === 0) hardeningGaps.push("missing dedicated self-test command");
+  if (selfTests.length === 0) hardeningGaps.push("missing dedicated self-test command");
 
   return {
     id: String(primitive.id ?? ""),
@@ -196,10 +196,27 @@ function runSelfTest() {
   }));
   const good = buildReadinessReport(catalogPath, root);
   assert.equal(good.ok, true);
+  assert.equal(good.strict_ok, true);
   assert.equal(good.primitive_count, 1);
   assert.equal(good.totals.http_routes, 1);
   assert.equal(good.primitives[0].category, "os_control");
   assert.match(renderReadinessReport(good), /workspace_control/);
+
+  fs.writeFileSync(catalogPath, JSON.stringify({
+    schema_version: 1,
+    primitives: [{
+      id: "runtime_spine",
+      title: "Runtime Spine",
+      status: "stable_enough",
+      summary: "Flat runtime dependency record.",
+      code: ["code.ts"],
+      proofs: ["proof.test.ts"],
+    }],
+  }));
+  const missingSelfTest = buildReadinessReport(catalogPath, root);
+  assert.equal(missingSelfTest.ok, true);
+  assert.equal(missingSelfTest.strict_ok, false);
+  assert.ok(missingSelfTest.hardening_gaps.some((gap) => gap.gap.includes("missing dedicated self-test command")));
 
   fs.writeFileSync(catalogPath, JSON.stringify({
     schema_version: 1,
