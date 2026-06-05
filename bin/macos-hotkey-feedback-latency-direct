@@ -91,6 +91,14 @@ process.stdout.write((match ? match[1] : "").replace(/\s+/g, " ").trim());
 ' "$1"
 }
 
+feedback_seq_of() {
+  node -e '
+const input = process.argv[1] || "";
+const match = input.match(/feedback_seq=([0-9]+)/);
+process.stdout.write(match ? match[1] : "");
+' "$1"
+}
+
 read_status() {
   if [[ -n "$harness_status_path" && -s "$harness_status_path" ]]; then
     node -e '
@@ -160,10 +168,13 @@ for ((run = 1; run <= runs; run += 1)); do
   ok=1
   latency=""
   before_feedback=""
+  before_feedback_seq=""
   after_feedback=""
+  after_feedback_seq=""
   error=""
   if before_status="$(read_status_retry 10000 2>&1)"; then
     before_feedback="$(feedback_of "$before_status")"
+    before_feedback_seq="$(feedback_seq_of "$before_status")"
     start_ms="$(now_ms)"
     if press_error="$(press_hotkey 2>&1)"; then
       deadline_ms=$((start_ms + budget_ms * 3))
@@ -176,11 +187,15 @@ for ((run = 1; run <= runs; run += 1)); do
         fi
         if after_status="$(read_status 2>&1)"; then
           after_feedback="$(feedback_of "$after_status")"
+          after_feedback_seq="$(feedback_seq_of "$after_status")"
           if [[ -n "$expected_text" ]]; then
             if [[ "$after_feedback" == *"$expected_text"* || "$after_status" == *"$expected_text"* ]]; then
               latency=$((current_ms - start_ms))
               break
             fi
+          elif [[ -n "$before_feedback_seq" && -n "$after_feedback_seq" && "$after_feedback_seq" -gt "$before_feedback_seq" ]]; then
+            latency=$((current_ms - start_ms))
+            break
           elif [[ -n "$after_feedback" && "$after_feedback" != "$before_feedback" ]]; then
             latency=$((current_ms - start_ms))
             break
@@ -196,7 +211,7 @@ for ((run = 1; run <= runs; run += 1)); do
     ok=0
     error="$before_status"
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$run" "$ok" "$latency" "$before_feedback" "$after_feedback" "$error" >>"$samples_tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$run" "$ok" "$latency" "$before_feedback" "$before_feedback_seq" "$after_feedback" "$after_feedback_seq" "$error" >>"$samples_tsv"
   sleep 0.5
 done
 
@@ -206,7 +221,7 @@ STARTED_AT="$started_at" FINISHED_AT="$finished_at" PROCESS_NAME="$process_name"
 const fs = require("fs");
 const rows = fs.readFileSync(process.env.SAMPLES_TSV, "utf8").trim().split(/\n/).filter(Boolean);
 const samples = rows.map((row) => {
-  const [run, ok, latency, before, after, error] = row.split("\t");
+  const [run, ok, latency, before, beforeSeq, after, afterSeq, error] = row.split("\t");
   const sample = {
     run: Number(run),
     ok: ok === "1",
@@ -215,7 +230,9 @@ const samples = rows.map((row) => {
   };
   if (latency) sample.timings_ms.hotkey_to_feedback = Number(latency);
   if (before) sample.before_feedback = before;
+  if (beforeSeq) sample.before_feedback_seq = Number(beforeSeq);
   if (after) sample.after_feedback = after;
+  if (afterSeq) sample.after_feedback_seq = Number(afterSeq);
   if (error) sample.errors.push(error);
   return sample;
 });

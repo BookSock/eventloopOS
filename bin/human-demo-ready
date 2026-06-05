@@ -47,6 +47,8 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=1 forces hotkey latency on
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=0 skips hotkey latency
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_TARGET=local runs latency on this Mac instead of the lab Mac
+  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD default: ctrl-option-r
+  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT optional expected feedback substring
   EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=auto|local|lab default: auto
     auto captures local Screen Sharing window first, then falls back to lab Mac desktop only
 `);
@@ -252,17 +254,30 @@ function numberOption(flag, defaultValue) {
 }
 
 function runHotkeyLatencyStep(manifestPath, envOverride) {
+  const hotkeyArgs = hotkeyLatencyArgs();
   if (process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_TARGET === "local") {
     return runStep("hotkey feedback latency", "node", [
       "bin/macos-hotkey-feedback-latency",
       "--manifest",
       manifestPath,
+      ...hotkeyArgs,
     ], envOverride);
   }
   return runStep("hotkey feedback latency", "bin/lab-mac-hotkey-feedback-latency", [
     "--manifest",
     manifestPath,
+    ...hotkeyArgs,
   ], envOverride);
+}
+
+function hotkeyLatencyArgs() {
+  const args = [
+    "--hotkey",
+    process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD ?? "ctrl-option-r",
+  ];
+  const expected = process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT;
+  if (expected) args.push("--expect", expected);
+  return args;
 }
 
 function runQueueLatencyStep(manifestPath, envOverride) {
@@ -667,6 +682,7 @@ function runSelfTest() {
     hotkey_feedback_latency: { skipped: true },
   });
   assert.ok(readyMarkdown.includes("Suggested result file: artifacts/human-demo-results/demo-human-demo-result.md"));
+  assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-r"]);
   assert.equal(remoteRepoFromEnv({ LAB_MAC_USER: "claw" }), "/Users/claw/dev/2026/eventloopOS");
   assert.equal(remoteRepoFromEnv({ LAB_MAC_USER: "demo", LAB_MAC_EVENTLOOP_PATH: "~/src/eventloopOS" }), "/Users/demo/src/eventloopOS");
   assert.equal(remoteRepoFromEnv({ LAB_MAC_EVENTLOOP_PATH: "/tmp/repo" }), "/tmp/repo");

@@ -1846,8 +1846,8 @@
           "name": "hotkey_to_feedback",
           "p95Ms": 10000,
           "proof": "bin/macos-hotkey-feedback-latency",
-          "scope": "macos_queue_app",
-          "hotkey": "Ctrl-Option-J"
+          "scope": "macos_queue_app_safe_restore_feedback",
+          "hotkey": "Ctrl-Option-R"
         }
       ],
       "routes": []

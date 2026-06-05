@@ -920,7 +920,9 @@ Proof scripts:
 - `bin/lab-mac-human-demo-setup`
 - `bin/workspace-latency-proof`
 - `bin/queue-latency-proof`
-- `bin/macos-hotkey-feedback-latency`
+- `bin/macos-hotkey-feedback-latency`; human-demo readiness uses the
+  non-mutating restore-feedback path (`Ctrl-Option-R` with no selected paper)
+  so latency proof does not advance or mark demo queue items.
 - `bin/primitives-readiness-report`
 - `bin/task-workspace-memory-proof-smoke`
 - `bin/workspace-task-switch-proof-smoke`

@@ -2750,10 +2750,11 @@
       "summary": "Swift macOS queue UI, hotkeys, manual mode, restore, voice capture, and master command shell.",
       "responsiveness_critical": true,
       "latency_budgets": [
-        { "name": "hotkey_to_feedback", "p95_ms": 10000, "proof": "bin/macos-hotkey-feedback-latency", "hotkey": "Ctrl-Option-J", "scope": "macos_queue_app" }
+        { "name": "hotkey_to_feedback", "p95_ms": 10000, "proof": "bin/macos-hotkey-feedback-latency", "hotkey": "Ctrl-Option-R", "scope": "macos_queue_app_safe_restore_feedback" }
       ],
       "hotkeys": [
         "Ctrl-Option-J",
+        "Ctrl-Option-R",
         "Ctrl-Option-E",
         "Ctrl-Option-Return",
         "Ctrl-Option-H",
