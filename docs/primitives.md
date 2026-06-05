@@ -35,7 +35,7 @@ Validate both with
 Generate a builder-facing coverage/readiness summary with
 `bin/primitives-readiness-report docs/primitives.catalog.json` or use
 `--json` for machine-readable audit output.
-Current catalog summary: 18 primitives, 80 HTTP routes, 8 CLI commands, 19
+Current catalog summary: 18 primitives, 80 HTTP routes, 8 CLI commands, 20
 self-tests, 74 proof refs, 11 latency budgets.
 Strict readiness is expected to stay green: every cataloged primitive
 has a `self_tests` command, and the shared primitive operation-helper test
@@ -193,6 +193,7 @@ Proof:
 - `app/orchestrator/src/workspace/controller.test.ts`
 - `docs/workspace-backend-adapter.md`
 - `bin/lab-mac-geometry-proof`
+- `bin/lab-mac-geometry-proof --self-test`
 - `bin/task-workspace-memory-proof-smoke`
 - latest Mac Studio human demo manifest under `artifacts/lab-runs/*-human-demo/manifest.json`
 

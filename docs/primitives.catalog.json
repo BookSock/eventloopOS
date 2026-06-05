@@ -2222,7 +2222,10 @@
         "bin/task-workspace-memory-proof-smoke",
         "examples/primitives/restore-my-desk.mjs"
       ],
-      "self_tests": ["pnpm --filter @eventloopos/shared run test:primitive-ops"]
+      "self_tests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops",
+        "bin/lab-mac-geometry-proof --self-test"
+      ]
     },
     {
       "id": "task_workspace_memory",

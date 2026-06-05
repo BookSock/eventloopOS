@@ -4,6 +4,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+if (process.argv.includes("--self-test")) {
+  await runSelfTest();
+  process.exit(0);
+}
+
 const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4480";
 const stamp = new Date().toISOString().replace(/[-:.]/g, "").slice(0, 15);
 const title = process.env.EVENTLOOPOS_GEOMETRY_PROOF_TITLE ?? `eventloopOS Geometry Shared Window Proof ${stamp}.txt`;
@@ -130,4 +135,99 @@ function assertNear(actual, expected, label) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function runSelfTest() {
+  const fake = makeFakeGeometryHarness();
+  const target = {
+    id: 42,
+    app: "TextEdit",
+    appBundleId: "com.apple.TextEdit",
+    title: "eventloopOS Geometry Shared Window Proof self-test.txt",
+    monitorId: 1,
+    layout: "floating",
+  };
+  const paperAFrame = { x: 60, y: 80, width: 560, height: 360 };
+  const paperBFrame = { x: 900, y: 140, width: 680, height: 520 };
+  fake.setWindow({ ...target, workspace: "eventloop-proof-start", frame: { x: 12, y: 24, width: 400, height: 300 } });
+
+  const paperA = {
+    backend: "aerospace",
+    activeWorkspace: "eventloop-proof-a",
+    focusedWindowId: target.id,
+    windows: [{ ...target, workspace: "eventloop-proof-a", frame: paperAFrame }],
+  };
+  const paperB = {
+    backend: "aerospace",
+    activeWorkspace: "eventloop-proof-b",
+    focusedWindowId: target.id,
+    windows: [{ ...target, workspace: "eventloop-proof-b", frame: paperBFrame }],
+  };
+
+  await fake.restore(paperA);
+  assertSelfTestWindow(fake.capture().windows[0], "eventloop-proof-a", paperAFrame, "paperA");
+  await fake.restore(paperB);
+  assertSelfTestWindow(fake.capture().windows[0], "eventloop-proof-b", paperBFrame, "paperB");
+  await fake.restore(paperA);
+  assertSelfTestWindow(fake.capture().windows[0], "eventloop-proof-a", paperAFrame, "paperA2");
+
+  const manifest = fake.manifest({ paperAFrame, paperBFrame });
+  if (manifest.restore_count !== 3) throw new Error(`expected 3 restore calls, got ${manifest.restore_count}`);
+  if (!manifest.shared_window_id || manifest.shared_window_id !== target.id) {
+    throw new Error(`shared window id missing: ${JSON.stringify(manifest)}`);
+  }
+  if (manifest.workspace_sequence.join(",") !== "eventloop-proof-a,eventloop-proof-b,eventloop-proof-a") {
+    throw new Error(`workspace sequence mismatch: ${JSON.stringify(manifest.workspace_sequence)}`);
+  }
+  console.log("lab-mac-geometry-proof self-test passed");
+}
+
+function makeFakeGeometryHarness() {
+  let currentWindow;
+  const restores = [];
+  return {
+    setWindow(window) {
+      currentWindow = JSON.parse(JSON.stringify(window));
+    },
+    capture() {
+      return {
+        backend: "aerospace",
+        activeWorkspace: currentWindow.workspace,
+        focusedWindowId: currentWindow.id,
+        windows: [JSON.parse(JSON.stringify(currentWindow))],
+      };
+    },
+    async restore(snapshot) {
+      const window = snapshot.windows[0];
+      if (!window || window.id !== currentWindow.id) throw new Error(`restore target mismatch: ${JSON.stringify(snapshot)}`);
+      currentWindow = JSON.parse(JSON.stringify(window));
+      restores.push({
+        activeWorkspace: snapshot.activeWorkspace,
+        frame: window.frame,
+        windowId: window.id,
+      });
+      return { ok: true, plan: { commands: [] }, receipt: { commands: [] } };
+    },
+    manifest(extra) {
+      return {
+        ok: true,
+        kind: "eventloopos.geometry_proof_self_test",
+        shared_window_id: currentWindow.id,
+        restore_count: restores.length,
+        workspace_sequence: restores.map((restore) => restore.activeWorkspace),
+        frame_sequence: restores.map((restore) => restore.frame),
+        ...extra,
+      };
+    },
+  };
+}
+
+function assertSelfTestWindow(window, workspace, frame, label) {
+  if (!window) throw new Error(`${label}: missing window`);
+  if (window.workspace !== workspace) throw new Error(`${label}: expected workspace ${workspace}, got ${window.workspace}`);
+  for (const key of ["x", "y", "width", "height"]) {
+    if (window.frame?.[key] !== frame[key]) {
+      throw new Error(`${label}: expected frame ${key} ${frame[key]}, got ${window.frame?.[key]}`);
+    }
+  }
 }

@@ -351,7 +351,7 @@ describe("primitive catalog SDK boundary", () => {
 
     expect(selection.missingPrimitiveIds).toEqual([]);
     expect(selection.selectedPrimitiveIds).toHaveLength(18);
-    expect(selection.commands.length).toBe(10);
+    expect(selection.commands.length).toBe(11);
     expect(selection.commands).toContainEqual({
       command: "pnpm --filter @eventloopos/orchestrator run test:runtime-spine",
       primitiveIds: ["runtime_spine"]
@@ -364,10 +364,16 @@ describe("primitive catalog SDK boundary", () => {
     const filtered = selectPrimitiveSelfTestCommands(catalog, ["workspace_control", "missing", "workspace_control"]);
     expect(filtered.selectedPrimitiveIds).toEqual(["workspace_control"]);
     expect(filtered.missingPrimitiveIds).toEqual(["missing"]);
-    expect(filtered.commands).toEqual([{
-      command: "pnpm --filter @eventloopos/shared run test:primitive-ops",
-      primitiveIds: ["workspace_control"]
-    }]);
+    expect(filtered.commands).toEqual([
+      {
+        command: "bin/lab-mac-geometry-proof --self-test",
+        primitiveIds: ["workspace_control"]
+      },
+      {
+        command: "pnpm --filter @eventloopos/shared run test:primitive-ops",
+        primitiveIds: ["workspace_control"]
+      }
+    ]);
   });
 
   it("selects primitive latency budgets by builder-facing filters", () => {
@@ -427,10 +433,16 @@ describe("primitive catalog SDK boundary", () => {
         responsivenessCritical: true
       })
     ]);
-    expect(workspacePlan.selfTestCommands).toEqual([{
-      command: "pnpm --filter @eventloopos/shared run test:primitive-ops",
-      primitiveIds: ["workspace_control"]
-    }]);
+    expect(workspacePlan.selfTestCommands).toEqual([
+      {
+        command: "bin/lab-mac-geometry-proof --self-test",
+        primitiveIds: ["workspace_control"]
+      },
+      {
+        command: "pnpm --filter @eventloopos/shared run test:primitive-ops",
+        primitiveIds: ["workspace_control"]
+      }
+    ]);
     expect(workspacePlan.latencyBudgets.map((budget) => budget.name)).toEqual([
       "workspace_capture",
       "workspace_restore_plan",
