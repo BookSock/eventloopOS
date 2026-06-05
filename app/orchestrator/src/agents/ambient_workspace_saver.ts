@@ -26,9 +26,6 @@ export type CurrentTaskState = {
   currentTaskId: string | null;
 };
 
-// TODO(phase-2-integration): replace this duck-typed shape with the real
-// `runtime.store.getCurrentTaskState` / `runtime.store.updateTaskLayout`
-// signatures once Phase 2 lands.
 export type CurrentTaskStateReader = () => Promise<CurrentTaskState> | CurrentTaskState;
 export type TaskLayoutWriter = (taskId: string, snapshot: WorkspaceSnapshot) => Promise<unknown> | unknown;
 export type ManualModeReader = () => Promise<boolean> | boolean;
@@ -682,10 +679,6 @@ async function readTaskWindowClaims(deps: AmbientWorkspaceSaverDeps): Promise<re
   return Array.from(await deps.getTaskWindowClaims());
 }
 
-// Adapter that lets the orchestrator wire its (Phase-2-pending) store-level
-// helpers into the saver without forcing the saver to know about Runtime
-// shape. Today this is a thin best-effort lookup; once Phase 2 lands, the
-// // TODO(phase-2-integration) sites can be tightened to direct calls.
 export function createAmbientWorkspaceSaverFromRuntime(
   runtime: Runtime,
   overrides: {
@@ -695,67 +688,21 @@ export function createAmbientWorkspaceSaverFromRuntime(
 ): AmbientWorkspaceSaver | undefined {
   if (!runtime.workspace) return undefined;
   const workspace = runtime.workspace;
-
-  const store = runtime.store as unknown as {
-    getCurrentTaskState?: () =>
-      | Promise<CurrentTaskState | { current_task_id?: string | null }>
-      | CurrentTaskState
-      | { current_task_id?: string | null };
-    updateTaskLayout?: (taskId: string, snapshot: WorkspaceSnapshot, now: Date) => Promise<unknown> | unknown;
-    saveTaskWorkspaceSnapshot?: (input: {
-      taskId: string;
-      snapshot: WorkspaceSnapshot;
-      capturedAt: Date;
-      actorId?: string;
-    }) => Promise<unknown>;
-    listFollowsWindows?: (input: { now: Date; ttlMs: number; minWorkspaceCount: number }) => Promise<Array<{ window_id: string }>>;
-    listTaskWindowClaims?: (input: { now: Date }) => Promise<TaskWindowClaim[]>;
-    claimTaskWindow?: (input: {
-      taskId: string;
-      windowId?: string;
-      appBundle?: string;
-      titlePrefix?: string;
-      processRootPid?: number;
-      source?: string;
-      now: Date;
-      ttlMs?: number;
-    }) => Promise<unknown>;
-  };
+  const store = runtime.store;
 
   const getCurrentTaskState: CurrentTaskStateReader = async () => {
-    // TODO(phase-2-integration): once `store.getCurrentTaskState` is real,
-    // call it directly. Until then, treat absence as "no current task" so the
-    // saver is a no-op and only emits the unbounded skip event.
-    if (typeof store.getCurrentTaskState === "function") {
-      const state = await store.getCurrentTaskState();
-      const currentTaskId =
-        "currentTaskId" in state
-          ? state.currentTaskId
-          : "current_task_id" in state
-            ? state.current_task_id
-            : null;
-      return {
-        currentTaskId: currentTaskId ?? null,
-      };
-    }
-    return { currentTaskId: null };
+    const state = await store.getCurrentTaskState();
+    return { currentTaskId: state.current_task_id ?? null };
   };
 
   const updateTaskLayout: TaskLayoutWriter = async (taskId, snapshot) => {
-    let updated: unknown;
-    if (typeof store.updateTaskLayout === "function") {
-      updated = await store.updateTaskLayout(taskId, snapshot, runtime.now());
-    }
-    if (typeof store.saveTaskWorkspaceSnapshot === "function") {
-      const saved = await store.saveTaskWorkspaceSnapshot({
-        taskId,
-        snapshot,
-        capturedAt: runtime.now(),
-        actorId: "ambient-workspace-saver",
-      });
-      return saved;
-    }
-    return updated;
+    await store.updateTaskLayout(taskId, snapshot, runtime.now());
+    return await store.saveTaskWorkspaceSnapshot({
+      taskId,
+      snapshot,
+      capturedAt: runtime.now(),
+      actorId: "ambient-workspace-saver",
+    });
   };
 
   const isManualModeActive: ManualModeReader = async () => {
@@ -763,36 +710,24 @@ export function createAmbientWorkspaceSaverFromRuntime(
     return state.active === true;
   };
 
-  const recordWindowObservation: WindowWorkspaceObservationWriter | undefined =
-    typeof (runtime.store as unknown as { recordWindowWorkspaceObservation?: unknown }).recordWindowWorkspaceObservation === "function"
-      ? (input) => runtime.store.recordWindowWorkspaceObservation(input)
-      : undefined;
-  const getFollowsWindowIds: FollowsWindowIdReader | undefined =
-    typeof store.listFollowsWindows === "function"
-      ? async () => {
-          const ttlMs = Number(process.env.EVENTLOOPOS_FOLLOWS_TTL_MS ?? 24 * 60 * 60 * 1_000);
-          const minWorkspaceCount = Number(process.env.EVENTLOOPOS_FOLLOWS_THRESHOLD ?? 3);
-          const follows = await store.listFollowsWindows!({ now: runtime.now(), ttlMs, minWorkspaceCount });
-          return follows.map((follow) => follow.window_id);
-        }
-      : undefined;
-  const getTaskWindowClaims: TaskWindowClaimReader | undefined =
-    typeof store.listTaskWindowClaims === "function"
-      ? async () => store.listTaskWindowClaims!({ now: runtime.now() })
-      : undefined;
-  const claimTaskWindow: TaskWindowClaimWriter | undefined =
-    typeof store.claimTaskWindow === "function"
-      ? (input) => store.claimTaskWindow!({
-          taskId: input.taskId,
-          windowId: input.windowId,
-          appBundle: input.appBundle,
-          titlePrefix: input.titlePrefix,
-          processRootPid: input.processRootPid,
-          source: input.source,
-          now: input.now,
-          ttlMs: input.ttlMs,
-        })
-      : undefined;
+  const recordWindowObservation: WindowWorkspaceObservationWriter = (input) => store.recordWindowWorkspaceObservation(input);
+  const getFollowsWindowIds: FollowsWindowIdReader = async () => {
+    const ttlMs = Number(process.env.EVENTLOOPOS_FOLLOWS_TTL_MS ?? 24 * 60 * 60 * 1_000);
+    const minWorkspaceCount = Number(process.env.EVENTLOOPOS_FOLLOWS_THRESHOLD ?? 3);
+    const follows = await store.listFollowsWindows({ now: runtime.now(), ttlMs, minWorkspaceCount });
+    return follows.map((follow) => follow.window_id);
+  };
+  const getTaskWindowClaims: TaskWindowClaimReader = async () => store.listTaskWindowClaims({ now: runtime.now() });
+  const claimTaskWindow: TaskWindowClaimWriter = (input) => store.claimTaskWindow({
+    taskId: input.taskId,
+    windowId: input.windowId,
+    appBundle: input.appBundle,
+    titlePrefix: input.titlePrefix,
+    processRootPid: input.processRootPid,
+    source: input.source,
+    now: input.now,
+    ttlMs: input.ttlMs,
+  });
   const listTaskSessions: TaskSessionReader | undefined =
     typeof runtime.taskSessions?.listSessions === "function"
       ? async () => runtime.taskSessions?.listSessions?.() ?? []

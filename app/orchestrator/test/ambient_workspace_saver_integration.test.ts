@@ -18,12 +18,9 @@ import type { AerospaceWindow, WorkspaceSnapshot } from "../src/workspace/aerosp
 // Phase 4 — proves the ambient workspace saver wires into the gateway runtime
 // and persists a layout snapshot keyed by current_task_id.
 //
-// Phase 2 (POST /tasks + getCurrentTaskState + updateTaskLayout +
-// PUT /tasks/:id/layout) is being built in parallel; the saver here uses the
-// runtime adapter's fallback path that calls the existing
-// `store.saveTaskWorkspaceSnapshot` primitive. When Phase 2 lands, the
-// // TODO(phase-2-integration) sites in `ambient_workspace_saver.ts` will
-// switch to the dedicated current_task_state + updateTaskLayout calls.
+// The saver now wires through GatewayStore directly: current task state,
+// updateTaskLayout, task workspace snapshots, task window claims, and follows
+// observations all stay on the same store contract used by HTTP routes.
 
 type FakeWorkspace = WorkspaceController & {
   setSnapshot: (snapshot: WorkspaceSnapshot) => void;
@@ -97,12 +94,11 @@ describe("ambient_workspace_saver — integration", () => {
 
     const saver = createAmbientWorkspaceSaver({
       workspace,
-      // Phase-2-pending interface: in production this is wired to
-      // `runtime.store.getCurrentTaskState`. Here we drive it directly so the
-      // test is independent of Phase 2's merge order.
+      // Drive the current task directly here so this integration test can focus
+      // on debounce/write behavior without going through the task routes.
       getCurrentTaskState: async (): Promise<CurrentTaskState> => ({ currentTaskId }),
-      // Mirror Phase 2's intended `updateTaskLayout` semantics by calling the
-      // existing store primitive that persists per-task layouts.
+      // Mirror runtime adapter semantics by calling the store primitive that
+      // persists per-task layouts.
       updateTaskLayout: async (taskId, snapshot) => {
         await store.saveTaskWorkspaceSnapshot({
           taskId,
@@ -200,7 +196,7 @@ describe("ambient_workspace_saver — integration", () => {
     assert.equal(saver, undefined, "no workspace → no saver");
   });
 
-  it("createAmbientWorkspaceSaverFromRuntime falls back to skipped_unbounded when getCurrentTaskState is not implemented", async () => {
+  it("createAmbientWorkspaceSaverFromRuntime skips unbounded when current task is unset", async () => {
     const observability = createInMemoryObservability();
     const runtime = createRuntime({
       store,
@@ -210,8 +206,6 @@ describe("ambient_workspace_saver — integration", () => {
     const saver = createAmbientWorkspaceSaverFromRuntime(runtime, { pollIntervalMs: 100, debounceMs: 50 });
     assert.ok(saver, "saver should construct when workspace is present");
     const result = await saver!.tick();
-    // Phase 2 not merged → store.getCurrentTaskState is absent → adapter
-    // returns { currentTaskId: null } → skipped_unbounded path.
     assert.equal(result.decision, "skipped_unbounded");
   });
 });

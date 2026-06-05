@@ -47,8 +47,6 @@ export type AutoPaperFocusedCodexReader = {
 };
 
 export type AutoPaperTaskRegistry = {
-  // TODO(phase-2-integration): replace with runtime.store.listTasks() once Phase 2
-  // lands the tasks table + GatewayStore methods.
   listTasks(): Promise<AutoPaperTaskRecord[]>;
   recordTaskPaperEmitted(taskId: string, emittedAt: Date): Promise<void>;
   markTaskDormant?(taskId: string, dormantAt: Date): Promise<unknown>;

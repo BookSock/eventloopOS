@@ -226,10 +226,10 @@ eventloopOS observes: Slack window has been on workspaces {2, 1}. **Marks Slack 
 ## Sequencing for the actual refactor
 
 1. ✓ Spec locked at iteration 3.
-2. **Phase 2: `POST /tasks` + `current_task_id` singleton + `aerospace_workspace_id` column.** (in flight)
-3. **Phase 3: Mac advance hotkey state machine** (desktop-aware). Depends on phase 2.
-4. **Phase 4: Ambient AeroSpace saver.** ✓ shipped (needs phase-2-integration to wire).
-5. **Phase 5: Auto-paper-on-Codex-idle watcher.** ✓ shipped (needs phase-2-integration to wire).
+2. **Phase 2: `POST /tasks` + `current_task_id` singleton + `aerospace_workspace_id` column.** ✓ shipped.
+3. **Phase 3: Mac advance hotkey state machine** (desktop-aware). ✓ shipped.
+4. **Phase 4: Ambient AeroSpace saver.** ✓ shipped and wired through `GatewayStore`.
+5. **Phase 5: Auto-paper-on-Codex-idle watcher.** ✓ shipped and wired through `GatewayStore`.
 6. **Phase 6: Implicit shared-window "follows" layer.** Observe `(window_id × workspace_id)` membership; mark windows seen on 2+ workspaces as `follows`; on every workspace switch, AeroSpace `move-node-to-workspace` the follows windows along. The paper UI floats workspace-independently.
 7. **Phase 7 (future): MCP skill for Codex self-reporting + custom triggers.**
 

@@ -931,6 +931,8 @@ describe("ambient_workspace_saver", () => {
           claims.push({ taskId: input.taskId, windowId: input.windowId, source: input.source });
           return { task_id: input.taskId };
         },
+        recordWindowWorkspaceObservation: async () => ({}),
+        listFollowsWindows: async () => [],
         listTaskWindowClaims: async () => claims.map((claim) => ({
           task_id: claim.taskId,
           window_id: claim.windowId,
@@ -1010,6 +1012,8 @@ describe("ambient_workspace_saver", () => {
           });
           return { task_id: input.taskId };
         },
+        recordWindowWorkspaceObservation: async () => ({}),
+        listFollowsWindows: async () => [],
         listTaskWindowClaims: async () => claims.map((claim) => ({
           task_id: claim.taskId,
           window_id: claim.windowId,

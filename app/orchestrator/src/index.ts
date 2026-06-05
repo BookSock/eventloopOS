@@ -186,54 +186,47 @@ if (process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED === "1") {
   const idleSeconds = parsePositiveInteger(process.env.EVENTLOOPOS_AUTO_PAPER_IDLE_SECONDS);
   const dormantHours = parsePositiveNumber(process.env.EVENTLOOPOS_AUTO_DORMANT_HOURS);
   const registry = createAutoPaperTaskRegistry(gatewayRuntime.store);
-  if (!registry) {
-    console.warn(
-      "EVENTLOOPOS_AUTO_PAPER_ENABLED=1 but the configured store does not yet expose listTasks/recordTaskPaperEmitted (phase 2 not landed). Auto-paper watcher disabled.",
-    );
-  } else {
-    autoPaperWatcher = startAutoPaperCodexIdleWatcher({
-      registry,
-      ingestor: gatewayRuntime.store,
-      manualMode: gatewayRuntime.store,
-      activeTask: gatewayRuntime.store,
-      focusedCodex: runOsascript
-        ? createAutoPaperFocusedCodexReader({
-            runOsascript,
-            codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
-            taskSessions,
-          })
-        : undefined,
-      observability,
-      codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
-      defaultIdleSeconds: idleSeconds,
-      autoDormantSeconds: dormantHours === undefined ? undefined : Math.floor(dormantHours * 60 * 60),
-      intervalMs: tickMs,
-      now: () => new Date(),
-    });
-    console.log(
-      `auto-paper codex idle watcher enabled (tick=${tickMs ?? 30_000}ms, idle_threshold=${idleSeconds ?? 60}s)`,
-    );
-  }
+  autoPaperWatcher = startAutoPaperCodexIdleWatcher({
+    registry,
+    ingestor: gatewayRuntime.store,
+    manualMode: gatewayRuntime.store,
+    activeTask: gatewayRuntime.store,
+    focusedCodex: runOsascript
+      ? createAutoPaperFocusedCodexReader({
+          runOsascript,
+          codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
+          taskSessions,
+        })
+      : undefined,
+    observability,
+    codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
+    defaultIdleSeconds: idleSeconds,
+    autoDormantSeconds: dormantHours === undefined ? undefined : Math.floor(dormantHours * 60 * 60),
+    intervalMs: tickMs,
+    now: () => new Date(),
+  });
+  console.log(
+    `auto-paper codex idle watcher enabled (tick=${tickMs ?? 30_000}ms, idle_threshold=${idleSeconds ?? 60}s)`,
+  );
 }
 
-function createAutoPaperTaskRegistry(store: GatewayStore): AutoPaperTaskRegistry | undefined {
-  // TODO(phase-2-integration): replace this duck-typed adapter with a direct
-  // dependency on GatewayStore.listTasks / recordTaskPaperEmitted once the
-  // tasks table lands.
-  const candidate = store as unknown as {
-    listTasks?: () => Promise<AutoPaperTaskRecord[]>;
-    recordTaskPaperEmitted?: (taskId: string, emittedAt: Date) => Promise<void>;
-    markTaskDormant?: (taskId: string, dormantAt: Date) => Promise<unknown>;
-  };
-  if (typeof candidate.listTasks !== "function" || typeof candidate.recordTaskPaperEmitted !== "function") {
-    return undefined;
-  }
+function createAutoPaperTaskRegistry(store: GatewayStore): AutoPaperTaskRegistry {
   return {
-    listTasks: () => candidate.listTasks!(),
-    recordTaskPaperEmitted: (taskId, emittedAt) => candidate.recordTaskPaperEmitted!(taskId, emittedAt),
-    markTaskDormant: candidate.markTaskDormant
-      ? (taskId, dormantAt) => candidate.markTaskDormant!(taskId, dormantAt)
-      : undefined,
+    listTasks: async () => {
+      const tasks = await store.listTasks();
+      return tasks.map((task): AutoPaperTaskRecord => ({
+        id: task.task_id,
+        primary_anchor_kind: task.primary_anchor_kind,
+        primary_anchor_id: task.primary_anchor_id,
+        auto_paper_idle_seconds: task.auto_paper_idle_seconds,
+        last_paper_emitted_at: task.last_paper_emitted_at,
+        dormant_at: task.dormant_at,
+      }));
+    },
+    recordTaskPaperEmitted: async (taskId, emittedAt) => {
+      await store.recordTaskPaperEmitted(taskId, emittedAt);
+    },
+    markTaskDormant: (taskId, dormantAt) => store.markTaskDormant(taskId, dormantAt),
   };
 }
 
