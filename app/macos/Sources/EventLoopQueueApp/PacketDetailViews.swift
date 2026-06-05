@@ -27,6 +27,8 @@ struct PacketDetail: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             if let packet {
+                PaperBriefingStrip(packet: packet, selectedTaskSessions: selectedTaskSessions)
+
                 VStack(alignment: .leading, spacing: 8) {
                     PacketIdentityStrip(packet: packet, selectedTaskSessions: selectedTaskSessions)
                     HStack(spacing: 12) {
@@ -246,6 +248,49 @@ struct PacketDetail: View {
         }
         .padding(24)
         .accessibilityIdentifier("packet-detail")
+    }
+}
+
+private struct PaperBriefingStrip: View {
+    let packet: ReviewPacket
+    let selectedTaskSessions: [TaskSession]
+
+    private var presentation: QueuePaperBriefingPresentation {
+        QueuePaperBriefingPresentation(packet: packet, selectedTaskSessions: selectedTaskSessions)
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "text.badge.checkmark")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(presentation.title)
+                    .font(.caption.weight(.semibold))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(presentation.decision)
+                    .font(.caption2)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                Text(presentation.context)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("queue-paper-briefing-strip")
+        .accessibilityLabel("\(presentation.title). \(presentation.decision). \(presentation.context)")
     }
 }
 

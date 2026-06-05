@@ -107,14 +107,17 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 9. Click `Review Demo Customer Reply` again.
 10. Press `Ctrl-Option-R`.
 11. Confirm the same TextEdit window returns to the customer position.
-12. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
-13. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
+12. Confirm the Queue detail starts with a compact briefing strip that repeats
+    the current paper title, exact decision needed, task id, priority, and
+    session/binding state.
+13. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
+14. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
     confirm the Queue footer acknowledges `No paper selected.` instead of
     staying silent.
-14. Press `Ctrl-Option-M` to enter Manual Mode.
-15. Open or move a dummy app.
-16. Press `Ctrl-Option-M`.
-17. Confirm eventloopOS restores the saved paper context and Queue remains usable.
+15. Press `Ctrl-Option-M` to enter Manual Mode.
+16. Open or move a dummy app.
+17. Press `Ctrl-Option-M`.
+18. Confirm eventloopOS restores the saved paper context and Queue remains usable.
 
 ## What To Report
 
@@ -123,6 +126,7 @@ Report any of these as product issues:
 - restore sends focus to wrong app,
 - same shared window does not move between paper-specific positions,
 - ambient autosave misses a moved window after waiting 2 to 3 seconds,
+- Queue briefing strip does not make the current decision obvious,
 - Queue is hard to find or blocks work,
 - Rectangle-style hotkeys feel surprising or conflict with another common app,
 - Manual Mode return restores the wrong workspace or loses a user-opened window unexpectedly.
@@ -165,6 +169,7 @@ Pass/fail:
 - Moving shared TextEdit is remembered after 2-3 seconds:
 - Metrics paper brings same TextEdit to metrics position:
 - Customer paper brings same TextEdit back to customer position:
+- Paper briefing strip shows current decision:
 - Rectangle hotkeys feel usable:
 - Manual Mode entry/return works:
 - Queue footer feedback is visible and current:

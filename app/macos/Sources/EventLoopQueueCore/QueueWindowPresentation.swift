@@ -187,6 +187,32 @@ public struct QueuePacketIdentityPresentation: Equatable, Sendable {
     }
 }
 
+public struct QueuePaperBriefingPresentation: Equatable, Sendable {
+    public let title: String
+    public let decision: String
+    public let context: String
+    public let action: String
+
+    public init(packet: ReviewPacket, selectedTaskSessions: [TaskSession] = []) {
+        title = packet.title
+        let trimmedDecision = packet.decisionNeeded.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedAction = packet.recommendedAction.trimmingCharacters(in: .whitespacesAndNewlines)
+        decision = trimmedDecision.isEmpty ? trimmedAction : trimmedDecision
+        action = trimmedAction.isEmpty ? "Pick Done, Defer, Ignore, or Send to Agent." : trimmedAction
+
+        var parts = [packet.taskId ?? "No task linked", "P\(packet.priority)", packet.riskLevel]
+        if let session = selectedTaskSessions.first {
+            parts.append(TaskSessionTargetPresentation(session: session).subtitle)
+        } else if packet.recommendedActionType == "resume_agent" {
+            parts.append("Waiting for bound session")
+        }
+        context = parts
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " | ")
+    }
+}
+
 public func userFacingQueueStatusDetail(_ message: String) -> String {
     let normalized = message
         .replacingOccurrences(of: "\n", with: " ")

@@ -260,4 +260,58 @@ final class QueueWindowPresentationTests: XCTestCase {
         XCTAssertEqual(summary.sendBackLabel, "Waiting for bound session | task_blog_feedback")
         XCTAssertNil(summary.workspaceLabel)
     }
+
+    func testPaperBriefingPrefersDecisionAndShowsBoundSessionContext() {
+        let packet = ReviewPacket(
+            id: "packet-review-1",
+            taskId: "task_blog_feedback",
+            title: "Review feedback",
+            summary: "Needs human call.",
+            decisionNeeded: "Decide whether to send the draft now or wait for owner review.",
+            source: "slack://thread/1",
+            priority: 90,
+            riskLevel: "medium",
+            recommendedAction: "Send selected answer to agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+
+        let briefing = QueuePaperBriefingPresentation(
+            packet: packet,
+            selectedTaskSessions: [
+                TaskSession(
+                    id: "codex_thread_abc",
+                    taskId: "task_blog_feedback",
+                    provider: "codex",
+                    status: "running",
+                    name: "Blog feedback agent"
+                )
+            ]
+        )
+
+        XCTAssertEqual(briefing.title, "Review feedback")
+        XCTAssertEqual(briefing.decision, "Decide whether to send the draft now or wait for owner review.")
+        XCTAssertEqual(briefing.action, "Send selected answer to agent")
+        XCTAssertEqual(briefing.context, "task_blog_feedback | P90 | medium | Codex | Running | codex_thread_abc")
+    }
+
+    func testPaperBriefingFallsBackToRecommendedActionAndMissingSessionHint() {
+        let packet = ReviewPacket(
+            id: "packet-review-1",
+            taskId: "task_blog_feedback",
+            title: "Review feedback",
+            summary: "Needs human call.",
+            source: "slack://thread/1",
+            priority: 90,
+            riskLevel: "medium",
+            recommendedAction: "Send selected answer to agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+
+        let briefing = QueuePaperBriefingPresentation(packet: packet)
+
+        XCTAssertEqual(briefing.decision, "Send selected answer to agent")
+        XCTAssertEqual(briefing.context, "task_blog_feedback | P90 | medium | Waiting for bound session")
+    }
 }
