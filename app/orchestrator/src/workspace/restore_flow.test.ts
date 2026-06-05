@@ -9,6 +9,99 @@ import { restoreWorkspacePlan, type WorkspaceSnapshot } from "./aerospace.js";
 import { parseWorkspaceSnapshot, type WorkspaceController } from "./controller.js";
 
 describe("workspace restore flow routes", () => {
+  it("uses verified restore execution when the workspace controller supports it", async () => {
+    const calls: string[] = [];
+    const snapshot = {
+      backend: "aerospace" as const,
+      activeWorkspace: "eventloop-blog",
+      focusedWindowId: 21,
+      windows: [
+        { id: 21, app: "Ghostty", title: "codex", workspace: "eventloop-blog" },
+      ],
+    };
+    const parsedSnapshot = {
+      ...snapshot,
+      frameCapture: undefined,
+      windows: snapshot.windows.map((window) => ({
+        ...window,
+        monitorId: undefined,
+        pid: undefined,
+        appBundleId: undefined,
+        layout: undefined,
+        frame: undefined,
+      })),
+    };
+    const plan = {
+      skipped: [],
+      commands: [
+        { command: "aerospace" as const, args: ["move-node-to-workspace", "--window-id", "21", "eventloop-blog"] },
+        { command: "aerospace" as const, args: ["workspace", "eventloop-blog"] },
+      ],
+    };
+    const receipt = {
+      skipped: [],
+      commands: [
+        { command: "aerospace" as const, args: ["move-node-to-workspace", "--window-id", "21", "eventloop-blog"], stdout: "", stderr: "" },
+        { command: "aerospace" as const, args: ["workspace", "eventloop-blog"], stdout: "", stderr: "" },
+        { command: "aerospace" as const, args: ["workspace", "eventloop-blog"], stdout: "", stderr: "" },
+      ],
+    };
+    const workspace: WorkspaceController = {
+      status() {
+        calls.push("status");
+        return { available: true, backend: "aerospace" };
+      },
+      capture() {
+        calls.push("capture");
+        return snapshot;
+      },
+      planRestore() {
+        calls.push("planRestore");
+        throw new Error("verified restore path should plan internally");
+      },
+      executeRestorePlan() {
+        calls.push("executeRestorePlan");
+        throw new Error("verified restore path should not fall back");
+      },
+      executeRestorePlanVerified(snapshotInput) {
+        calls.push("executeRestorePlanVerified");
+        assert.deepEqual(snapshotInput, parsedSnapshot);
+        return {
+          plan,
+          receipt,
+          attempts: 2,
+          verified: true,
+        };
+      },
+    };
+    const store = createInMemoryGatewayStore(emptyStore());
+    const runtime = createRuntime({
+      store,
+      workspace,
+      workspaceExecuteEnabled: true,
+      observability: createInMemoryObservability(),
+      now: () => new Date("2026-05-07T12:00:00.000Z"),
+    });
+
+    const restore = await handleWorkspaceRoute({
+      runtime,
+      now: new Date("2026-05-07T12:00:00.000Z"),
+      method: "POST",
+      pathname: "/workspace/restore",
+      readJsonBody: async () => ({ ok: true, value: { confirm_execute: true, snapshot } }),
+      requestId: "req_verified_restore",
+      idempotencyKey: "idem_verified_restore",
+    });
+
+    assert.equal(restore?.status, 200);
+    assert.equal(restore?.ok, true);
+    assert.equal(restore.body.restore_attempts, 2);
+    assert.equal(restore.body.restore_verified, true);
+    assert.deepEqual((restore.body.receipt as typeof receipt).commands, receipt.commands);
+    assert.deepEqual((await store.getWorkspaceRestoreReceipt("idem_verified_restore"))?.receipt, receipt);
+    assert.deepEqual(calls, ["executeRestorePlanVerified"]);
+  });
+
   it("proves capture, planning, disabled execution, and status without moving windows", async () => {
     const calls: string[] = [];
     const snapshot = {

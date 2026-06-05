@@ -1,6 +1,7 @@
 import {
   AerospaceWorkspaceAdapter,
   parseAerospaceWindows,
+  restoreWorkspaceResidualPlan,
   restoreWorkspacePlan,
   type AerospaceWindow,
   type ExecFunction,
@@ -16,13 +17,29 @@ export type WorkspaceController = {
   capture(): Promise<WorkspaceSnapshot> | WorkspaceSnapshot;
   planRestore(snapshot: WorkspaceSnapshot, currentWindows?: AerospaceWindow[]): Promise<RestorePlan> | RestorePlan;
   executeRestorePlan?(plan: RestorePlan): Promise<RestoreExecutionReceipt> | RestoreExecutionReceipt;
+  executeRestorePlanVerified?(
+    snapshot: WorkspaceSnapshot,
+    currentWindows?: AerospaceWindow[],
+  ): Promise<VerifiedRestoreExecution> | VerifiedRestoreExecution;
+};
+
+export type VerifiedRestoreExecution = {
+  plan: RestorePlan;
+  receipt: RestoreExecutionReceipt;
+  attempts: number;
+  verified: boolean;
+  residualPlan?: RestorePlan;
 };
 
 export class AerospaceWorkspaceController implements WorkspaceController {
   private readonly adapter: AerospaceWorkspaceAdapter;
+  private readonly restoreVerifySettleMs: number;
+  private readonly restoreVerifyRetries: number;
 
-  constructor(exec: ExecFunction) {
+  constructor(exec: ExecFunction, options: { restoreVerifySettleMs?: number; restoreVerifyRetries?: number } = {}) {
     this.adapter = new AerospaceWorkspaceAdapter(exec);
+    this.restoreVerifySettleMs = options.restoreVerifySettleMs ?? 350;
+    this.restoreVerifyRetries = options.restoreVerifyRetries ?? 4;
   }
 
   async status(): Promise<WorkspaceCapabilityStatus> {
@@ -41,6 +58,45 @@ export class AerospaceWorkspaceController implements WorkspaceController {
   async executeRestorePlan(plan: RestorePlan): Promise<RestoreExecutionReceipt> {
     return await this.adapter.executeRestorePlan(plan);
   }
+
+  async executeRestorePlanVerified(snapshot: WorkspaceSnapshot, currentWindows?: AerospaceWindow[]): Promise<VerifiedRestoreExecution> {
+    const plan = await this.planRestore(snapshot, currentWindows);
+    let receipt = await this.executeRestorePlan(plan);
+    let attempts = plan.commands.length > 0 ? 1 : 0;
+    let residualPlan = await this.verifyRestorePlan(snapshot);
+
+    for (let retry = 0; residualPlan.commands.length > 0 && retry < this.restoreVerifyRetries; retry += 1) {
+      await sleep(this.restoreVerifySettleMs);
+      const retryReceipt = await this.executeRestorePlan(residualPlan);
+      receipt = mergeRestoreReceipts(receipt, retryReceipt);
+      attempts += residualPlan.commands.length > 0 ? 1 : 0;
+      residualPlan = await this.verifyRestorePlan(snapshot);
+    }
+
+    return {
+      plan,
+      receipt,
+      attempts,
+      verified: residualPlan.commands.length === 0 && residualPlan.skipped.length === 0,
+      residualPlan: residualPlan.commands.length === 0 && residualPlan.skipped.length === 0 ? undefined : residualPlan,
+    };
+  }
+
+  private async verifyRestorePlan(snapshot: WorkspaceSnapshot): Promise<RestorePlan> {
+    await sleep(this.restoreVerifySettleMs);
+    return restoreWorkspaceResidualPlan(snapshot, await this.adapter.capture());
+  }
+}
+
+function mergeRestoreReceipts(left: RestoreExecutionReceipt, right: RestoreExecutionReceipt): RestoreExecutionReceipt {
+  return {
+    commands: [...left.commands, ...right.commands],
+    skipped: [...left.skipped, ...right.skipped],
+  };
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export function parseWorkspaceSnapshot(input: unknown): WorkspaceSnapshot {

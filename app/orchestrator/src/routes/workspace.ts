@@ -1,5 +1,6 @@
 import type { Runtime } from "../runtime.js";
 import { parseRestoreExecuteRequest, parseRestorePlanRequest } from "../workspace/controller.js";
+import type { RestoreExecutionReceipt, RestorePlan } from "../workspace/aerospace.js";
 import type { RouteResult } from "./types.js";
 
 export type JsonBodyReader = () => Promise<{ ok: true; value: unknown } | { ok: false; message: string }>;
@@ -87,8 +88,16 @@ export async function handleWorkspaceRoute(input: {
 
     try {
       const requestBody = parseRestoreExecuteRequest(parsed.value);
-      const plan = await workspace.planRestore(requestBody.snapshot, requestBody.currentWindows);
-      const receipt = await workspace.executeRestorePlan(plan);
+      let execution: WorkspaceRestoreExecution;
+      if (workspace.executeRestorePlanVerified) {
+        execution = await workspace.executeRestorePlanVerified(requestBody.snapshot, requestBody.currentWindows);
+      } else {
+        execution = {
+          plan: await workspace.planRestore(requestBody.snapshot, requestBody.currentWindows),
+        };
+      }
+      const plan = execution.plan;
+      const receipt = execution.receipt ?? await workspace.executeRestorePlan(plan);
       await store.recordWorkspaceRestoreReceipt({
         idempotencyKey: input.idempotencyKey,
         plan,
@@ -103,6 +112,9 @@ export async function handleWorkspaceRoute(input: {
         execute_supported: true,
         idempotency_key: input.idempotencyKey,
         idempotency_replayed: false,
+        restore_attempts: execution.attempts,
+        restore_verified: execution.verified,
+        residual_plan: execution.residualPlan,
         request_id: input.requestId,
       });
     } catch (caught) {
@@ -124,3 +136,11 @@ function error(status: number, code: string, message: string): RouteResult {
 function schemaError(message: string): RouteResult {
   return error(400, "schema_error", message);
 }
+
+type WorkspaceRestoreExecution = {
+  plan: RestorePlan;
+  receipt?: RestoreExecutionReceipt;
+  attempts?: number;
+  verified?: boolean;
+  residualPlan?: RestorePlan;
+};

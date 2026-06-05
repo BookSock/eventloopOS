@@ -3064,6 +3064,53 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertTrue(workspaceClient.restoreIdempotencyKeys[0].hasPrefix("mac_workspace_restore_"))
     }
 
+    func testSelectedWorkspaceRestoreAutoExecutionSetsCurrentTaskForSelectedPaper() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+        let plan = WorkspaceRestorePlan(
+            commands: [WorkspaceCommand(command: "aerospace", args: ["workspace", "eventloop-blog"])],
+            skipped: []
+        )
+        let packet = ReviewPacket(
+            id: "packet-with-task-workspace",
+            taskId: "task_blog",
+            title: "Review with workspace",
+            summary: "Needs workspace restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: snapshot
+        )
+        let client = FakeQueueClient(packets: [packet])
+        client.setFakeTasks([
+            TaskRecord(
+                taskId: "task_blog",
+                primaryAnchorKind: .codexThread,
+                primaryAnchorId: "thr_blog",
+                createdAt: Date(timeIntervalSince1970: 0),
+                updatedAt: Date(timeIntervalSince1970: 0)
+            ),
+        ])
+        let workspaceClient = FakeWorkspaceClient(
+            planEnvelope: WorkspaceRestorePlanEnvelope(plan: plan, executeSupported: true)
+        )
+        let viewModel = QueueViewModel(
+            client: client,
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-with-task-workspace")
+
+        await viewModel.prepareSelectedWorkspaceRestore()
+
+        XCTAssertEqual(client.setCurrentTaskRequests, ["task_blog"])
+        XCTAssertEqual(viewModel.currentTask?.taskId, "task_blog")
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [snapshot])
+    }
+
     func testSelectedWorkspaceRestoreRequiresPacketSnapshot() async {
         let packet = ReviewPacket(
             id: "packet-no-workspace",

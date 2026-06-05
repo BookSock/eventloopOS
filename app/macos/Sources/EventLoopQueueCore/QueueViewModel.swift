@@ -467,7 +467,12 @@ public final class QueueViewModel: ObservableObject {
     }
 
     private func syncSelectedCurrentTaskIfPossible() async {
-        guard let taskId = selectedTaskId else {
+        await syncCurrentTaskForPacketIfPossible(selectedPacketID)
+    }
+
+    private func syncCurrentTaskForPacketIfPossible(_ packetId: String?) async {
+        guard let packetId,
+              let taskId = packets.first(where: { $0.id == packetId })?.taskId else {
             return
         }
         do {
@@ -911,6 +916,9 @@ public final class QueueViewModel: ObservableObject {
             }
             if let packetId, packets.contains(where: { $0.id == packetId }) {
                 selectedPacketID = packetId
+                if !clearCurrentTask {
+                    await syncCurrentTaskForPacketIfPossible(packetId)
+                }
             }
             advanceToast = toastForSwitch
         } catch {
@@ -932,7 +940,8 @@ public final class QueueViewModel: ObservableObject {
             _ = try await client.complete(packetId: packetId, workspaceSnapshot: captured)
             try await restorePaperWorkspaceOrSwitch(packetId: nextSelectionPacketId, fallbackWorkspaceId: workspaceId)
             if let returnToTaskId {
-                _ = try await client.setCurrentTask(taskId: returnToTaskId)
+                let state = try await client.setCurrentTask(taskId: returnToTaskId)
+                currentTask = state.task
             } else if clearCurrentTask {
                 _ = try await client.setCurrentTask(taskId: nil)
                 currentTask = nil
@@ -940,6 +949,9 @@ public final class QueueViewModel: ObservableObject {
             packets = (try? await client.fetchQueue()) ?? packets.filter { $0.id != packetId }
             if let nextSelectionPacketId, packets.contains(where: { $0.id == nextSelectionPacketId }) {
                 selectedPacketID = nextSelectionPacketId
+                if returnToTaskId == nil && !clearCurrentTask {
+                    await syncCurrentTaskForPacketIfPossible(nextSelectionPacketId)
+                }
             }
             advanceToast = toast
         } catch {
@@ -1924,7 +1936,10 @@ public final class QueueViewModel: ObservableObject {
             let response = try await workspaceClient.restorePlan(snapshot: snapshot, currentWindows: nil)
             workspaceRestoreState = .planned(response.plan)
             if response.executeSupported && !response.plan.commands.isEmpty {
-                await executeWorkspaceRestore(snapshot: snapshot, idempotencyPrefix: "mac_workspace_restore")
+                let restored = await executeWorkspaceRestore(snapshot: snapshot, idempotencyPrefix: "mac_workspace_restore")
+                if restored {
+                    await syncSelectedCurrentTaskIfPossible()
+                }
             }
         } catch {
             workspaceRestoreState = .failed(error.localizedDescription)

@@ -340,6 +340,69 @@ export function restoreWorkspacePlan(snapshot: WorkspaceSnapshot, currentWindows
   };
 }
 
+export function restoreWorkspaceResidualPlan(snapshot: WorkspaceSnapshot, currentSnapshot: WorkspaceSnapshot): RestorePlan {
+  if (snapshot.backend !== "aerospace") {
+    throw new Error(`aerospace restore planner cannot restore ${snapshot.backend} snapshots`);
+  }
+
+  const currentWindowsById = new Map(currentSnapshot.windows.map((window) => [window.id, window]));
+  const commands: AerospaceCommand[] = [];
+  const frameCommands: AerospaceCommand[] = [];
+  const skipped: RestoreSkip[] = [];
+
+  for (const window of snapshot.windows) {
+    const current = currentWindowsById.get(window.id);
+    if (!current) {
+      skipped.push({
+        reason: "stale_window_id",
+        windowId: window.id,
+        workspace: window.workspace,
+      });
+      continue;
+    }
+
+    if (
+      typeof window.monitorId === "number" &&
+      typeof current.monitorId === "number" &&
+      window.monitorId !== current.monitorId
+    ) {
+      commands.push(moveToMonitorPlan(window.id, window.monitorId));
+    }
+
+    if (current.workspace !== window.workspace) {
+      commands.push(moveToWorkspacePlan(window.id, window.workspace));
+    }
+    if (window.layout !== undefined && window.layout !== current.layout) {
+      commands.push(layoutWindowPlan(window.id, window.layout));
+    } else if (window.frame !== undefined && current.layout !== "floating") {
+      commands.push(layoutWindowPlan(window.id, "floating"));
+    }
+    if (needsFrameRestore(window, current)) {
+      const framePlan = restoreWindowFramePlan(window);
+      if (framePlan) frameCommands.push(framePlan);
+    }
+  }
+
+  if (snapshot.activeWorkspace !== undefined && currentSnapshot.activeWorkspace !== snapshot.activeWorkspace) {
+    commands.push(focusWorkspacePlan(snapshot.activeWorkspace));
+  }
+
+  commands.push(...frameCommands);
+
+  if (
+    snapshot.focusedWindowId !== undefined &&
+    currentWindowsById.has(snapshot.focusedWindowId) &&
+    currentSnapshot.focusedWindowId !== snapshot.focusedWindowId
+  ) {
+    commands.push(focusWindowPlan(snapshot.focusedWindowId));
+  }
+
+  return {
+    commands,
+    skipped,
+  };
+}
+
 export function parseAerospaceWindows(json: string | unknown): AerospaceWindow[] {
   const parsed = typeof json === "string" ? parseJson(json) : json;
 
@@ -589,61 +652,69 @@ function captureWindowFramesAppleScript(windows: AerospaceWindow[]): string {
       .filter((value) => value.length > 0),
   );
   const titles = uniqueStrings(windows.flatMap(windowFrameTitleCandidates));
-  const processCondition = appleScriptOrCondition("bundleId", bundleIds, "appName", appNames);
   const titleCondition = appleScriptOrCondition("windowName", titles);
+  const processLoops = [
+    ...bundleIds.map((bundleId) =>
+      captureWindowFramesProcessLoop(`application processes whose bundle identifier is ${appleScriptString(bundleId)}`, titleCondition),
+    ),
+    ...appNames.map((appName) =>
+      captureWindowFramesProcessLoop(`application processes whose name is ${appleScriptString(appName)}`, titleCondition),
+    ),
+  ];
 
   return `
 set outputRows to {}
 tell application "System Events"
-  repeat with candidateProcess in (application processes whose visible is true)
-    try
-      set appName to name of candidateProcess as text
-      set bundleId to bundle identifier of candidateProcess as text
-      if ${processCondition} then
-        repeat with candidateWindow in windows of candidateProcess
-          try
-            set windowName to name of candidateWindow as text
-            if windowName is not "" and ${titleCondition} then
-              set windowPosition to position of candidateWindow
-              set windowSize to size of candidateWindow
-              set end of outputRows to appName & tab & bundleId & tab & windowName & tab & (item 1 of windowPosition as text) & tab & (item 2 of windowPosition as text) & tab & (item 1 of windowSize as text) & tab & (item 2 of windowSize as text)
-            end if
-          end try
-        end repeat
-      end if
-    end try
-  end repeat
+${processLoops.join("\n")}
 end tell
 set AppleScript's text item delimiters to linefeed
 return outputRows as text
 `.trim();
 }
 
+function captureWindowFramesProcessLoop(processQuery: string, titleCondition: string): string {
+  return `
+  repeat with candidateProcess in (${processQuery})
+    try
+      set appName to name of candidateProcess as text
+      set bundleId to bundle identifier of candidateProcess as text
+      repeat with candidateWindow in windows of candidateProcess
+        try
+          set windowName to name of candidateWindow as text
+          if windowName is not "" and (${titleCondition}) then
+            set windowPosition to position of candidateWindow
+            set windowSize to size of candidateWindow
+            set end of outputRows to appName & tab & bundleId & tab & windowName & tab & (item 1 of windowPosition as text) & tab & (item 2 of windowPosition as text) & tab & (item 1 of windowSize as text) & tab & (item 2 of windowSize as text)
+          end if
+        end try
+      end repeat
+    end try
+  end repeat`.trimEnd();
+}
+
 function restoreWindowFrameAppleScript(window: AerospaceWindow): string {
   const frame = window.frame;
   if (!frame) throw new Error("window frame is required");
-  const appMatcher = window.appBundleId
-    ? `bundle identifier of candidateProcess as text is ${appleScriptString(window.appBundleId)}`
-    : `name of candidateProcess as text is ${appleScriptString(window.app)}`;
+  const processQuery = window.appBundleId
+    ? `application processes whose bundle identifier is ${appleScriptString(window.appBundleId)}`
+    : `application processes whose name is ${appleScriptString(window.app)}`;
   const titleMatcher = appleScriptOrCondition("windowName", windowFrameTitleCandidates(window));
 
   return `
 -- eventloopOS generated frame restore
 tell application "System Events"
-  repeat with candidateProcess in (application processes whose visible is true)
+  repeat with candidateProcess in (${processQuery})
     try
-      if ${appMatcher} then
-        repeat with candidateWindow in windows of candidateProcess
-          try
-            set windowName to name of candidateWindow as text
-            if ${titleMatcher} then
-              set position of candidateWindow to {${frame.x}, ${frame.y}}
-              set size of candidateWindow to {${frame.width}, ${frame.height}}
-              return "ok"
-            end if
-          end try
-        end repeat
-      end if
+      repeat with candidateWindow in windows of candidateProcess
+        try
+          set windowName to name of candidateWindow as text
+          if (${titleMatcher}) then
+            set position of candidateWindow to {${frame.x}, ${frame.y}}
+            set size of candidateWindow to {${frame.width}, ${frame.height}}
+            return "ok"
+          end if
+        end try
+      end repeat
     end try
   end repeat
 end tell
@@ -682,6 +753,20 @@ function readWorkspaceFocusSettleMs(): number {
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed < 0 || parsed > 5_000) return 350;
   return parsed;
+}
+
+function needsFrameRestore(target: AerospaceWindow, current: AerospaceWindow): boolean {
+  if (target.frame === undefined) return false;
+  if (current.frame === undefined) return true;
+  return !framesNear(current.frame, target.frame, 8);
+}
+
+function framesNear(actual: WindowFrame, expected: WindowFrame, tolerance: number): boolean {
+  return ["x", "y", "width", "height"].every((key) => {
+    const field = key as keyof WindowFrame;
+    const delta = Math.abs(actual[field] - expected[field]);
+    return Number.isFinite(delta) && delta <= tolerance;
+  });
 }
 
 function shouldSettleAfterWorkspaceFocus(command: AerospaceCommand, remaining: AerospaceCommand[]): boolean {

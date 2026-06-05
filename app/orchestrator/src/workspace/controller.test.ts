@@ -95,6 +95,66 @@ describe("workspace controller", () => {
     assert.deepEqual(plan.skipped, []);
   });
 
+  it("verified restore retries until captured workspace and focus match", async () => {
+    let activeWorkspace = "manual";
+    let focusedWindowId = 55;
+    let windowWorkspace = "manual";
+    let workspaceCommandCount = 0;
+    let focusCommandCount = 0;
+    const executed: string[][] = [];
+    const exec: ExecFunction = async (command, args) => {
+      if (command === "aerospace" && args[0] === "list-workspaces") return { stdout: `${activeWorkspace}\n` };
+      if (command === "aerospace" && args[0] === "list-windows" && args.includes("--focused")) {
+        return { stdout: JSON.stringify([{ "window-id": focusedWindowId, workspace: activeWorkspace }]) };
+      }
+      if (command === "aerospace" && args[0] === "list-windows") {
+        return {
+          stdout: JSON.stringify([
+            { "window-id": 44, "app-name": "TextEdit", "window-title": "Shared Note", workspace: windowWorkspace },
+          ]),
+        };
+      }
+      if (command === "osascript") return { stdout: "" };
+
+      executed.push(args);
+      if (args[0] === "move-node-to-workspace") windowWorkspace = args[3] ?? windowWorkspace;
+      if (args[0] === "workspace") {
+        workspaceCommandCount += 1;
+        if (workspaceCommandCount >= 2) activeWorkspace = args[1] ?? activeWorkspace;
+      }
+      if (args[0] === "focus") {
+        focusCommandCount += 1;
+        if (focusCommandCount >= 2) focusedWindowId = Number(args[2]);
+      }
+      return { stdout: "", stderr: "" };
+    };
+    const controller = new AerospaceWorkspaceController(exec, {
+      restoreVerifySettleMs: 0,
+      restoreVerifyRetries: 2,
+    });
+
+    const result = await controller.executeRestorePlanVerified(
+      {
+        backend: "aerospace",
+        activeWorkspace: "paper-a",
+        focusedWindowId: 44,
+        windows: [{ id: 44, app: "TextEdit", title: "Shared Note", workspace: "paper-a" }],
+      },
+      [{ id: 44, app: "TextEdit", title: "Shared Note", workspace: "manual" }],
+    );
+
+    assert.equal(result.verified, true);
+    assert.equal(result.attempts, 2);
+    assert.equal(result.residualPlan, undefined);
+    assert.deepEqual(executed, [
+      ["move-node-to-workspace", "--window-id", "44", "paper-a"],
+      ["workspace", "paper-a"],
+      ["focus", "--window-id", "44"],
+      ["workspace", "paper-a"],
+      ["focus", "--window-id", "44"],
+    ]);
+  });
+
   it("rejects non-AeroSpace snapshots in the AeroSpace restore planner", async () => {
     const controller = new AerospaceWorkspaceController(async () => {
       throw new Error("exec should not be called when current windows supplied");

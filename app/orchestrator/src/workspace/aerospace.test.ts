@@ -11,6 +11,7 @@ import {
   parseWindowFrameObservations,
   parseAerospaceWindows,
   restoreWindowFramePlan,
+  restoreWorkspaceResidualPlan,
   restoreWorkspacePlan,
   type ExecFunction,
   type WorkspaceSnapshot,
@@ -480,6 +481,86 @@ describe("Aerospace workspace adapter", () => {
 
     assert.match(planA.commands.find((command) => command.command === "osascript")?.args[1] ?? "", /\{10, 20\}/);
     assert.match(planB.commands.find((command) => command.command === "osascript")?.args[1] ?? "", /\{700, 100\}/);
+  });
+
+  it("residual restore is empty when active workspace, focus, layout, and frame already match", () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 44,
+      windows: [
+        {
+          id: 44,
+          app: "TextEdit",
+          appBundleId: "com.apple.TextEdit",
+          title: "Shared Note",
+          workspace: "paper-a",
+          layout: "floating",
+          frame: { x: 10, y: 20, width: 500, height: 300 },
+        },
+      ],
+    };
+
+    const plan = restoreWorkspaceResidualPlan(snapshot, {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 44,
+      windows: [
+        {
+          id: 44,
+          app: "TextEdit",
+          appBundleId: "com.apple.TextEdit",
+          title: "Shared Note",
+          workspace: "paper-a",
+          layout: "floating",
+          frame: { x: 14, y: 17, width: 505, height: 294 },
+        },
+      ],
+    });
+
+    assert.deepEqual(plan, { commands: [], skipped: [] });
+  });
+
+  it("residual restore retries only active workspace, focus, and unmet frame drift", () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 44,
+      windows: [
+        {
+          id: 44,
+          app: "TextEdit",
+          appBundleId: "com.apple.TextEdit",
+          title: "Shared Note",
+          workspace: "paper-a",
+          layout: "floating",
+          frame: { x: 10, y: 20, width: 500, height: 300 },
+        },
+      ],
+    };
+
+    const plan = restoreWorkspaceResidualPlan(snapshot, {
+      backend: "aerospace",
+      activeWorkspace: "paper-b",
+      focusedWindowId: 55,
+      windows: [
+        {
+          id: 44,
+          app: "TextEdit",
+          appBundleId: "com.apple.TextEdit",
+          title: "Shared Note",
+          workspace: "paper-a",
+          layout: "floating",
+          frame: { x: 80, y: 90, width: 500, height: 300 },
+        },
+      ],
+    });
+
+    assert.equal(plan.skipped.length, 0);
+    assert.deepEqual(plan.commands[0], { command: "aerospace", args: ["workspace", "paper-a"] });
+    assert.equal(plan.commands[1]?.command, "osascript");
+    assert.match(plan.commands[1]?.args[1] ?? "", /set position of candidateWindow to \{10, 20\}/);
+    assert.deepEqual(plan.commands[2], { command: "aerospace", args: ["focus", "--window-id", "44"] });
   });
 
   it("executes only generated safe restore commands", async () => {

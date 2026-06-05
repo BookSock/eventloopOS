@@ -289,6 +289,8 @@ final class QueueViewModelAdvanceTests: XCTestCase {
 
         await viewModel.advance()
 
+        XCTAssertEqual(client.setCurrentTaskRequests, ["task_b"])
+        XCTAssertEqual(viewModel.currentTask?.taskId, "task_b")
         XCTAssertEqual(aero.switchedWorkspaces, [])
         XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [paperWorkspace])
         XCTAssertTrue(workspaceClient.restoreIdempotencyKeys.first?.hasPrefix("mac_advance_restore_pkt_b_") ?? false)
@@ -360,10 +362,21 @@ final class QueueViewModelAdvanceTests: XCTestCase {
             aeroSpaceClient: aero,
             codexForegroundResolver: resolver
         )
+        client.setFakeTasks([
+            TaskRecord(
+                taskId: "task_demo",
+                primaryAnchorKind: .codexThread,
+                primaryAnchorId: "thr_demo",
+                createdAt: Date(timeIntervalSince1970: 0),
+                updatedAt: Date(timeIntervalSince1970: 0)
+            ),
+        ])
 
         await viewModel.advance()
 
         XCTAssertEqual(viewModel.selectedPacketID, "pkt_demo")
+        XCTAssertEqual(client.setCurrentTaskRequests, ["task_demo"])
+        XCTAssertEqual(viewModel.currentTask?.taskId, "task_demo")
         XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [paperWorkspace])
         XCTAssertEqual(viewModel.state, .loaded)
         XCTAssertEqual(client.createTaskRequests.count, 0)
