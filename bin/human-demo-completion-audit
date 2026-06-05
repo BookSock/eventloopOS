@@ -51,12 +51,14 @@ function buildAudit(root, options = {}) {
   const readinessPath = latestReadinessManifestPath(root);
   const readiness = readinessPath ? readJson(path.resolve(root, readinessPath)) : undefined;
   const resultPath = options.resultPath ?? latestResultPath(root);
+  const resultAudit = inspectHumanResult(root, resultPath);
   const verificationPath = options.verificationPath ?? latestVerificationPath(root, resultPath);
   const verification = verificationPath ? readJson(path.resolve(root, verificationPath)) : undefined;
   const checks = {
     readiness_manifest_present: Boolean(readinessPath),
     readiness_ok: readiness?.ok === true,
     human_result_recorded: Boolean(resultPath && fs.existsSync(path.resolve(root, resultPath))),
+    human_result_filled: resultAudit.filled === true,
     verification_manifest_present: Boolean(verificationPath),
     verification_ok: verification?.ok === true || verification?.passed === true,
     verification_matches_result: verificationMatchesResult(root, verification, resultPath),
@@ -70,12 +72,13 @@ function buildAudit(root, options = {}) {
     kind: "eventloopos.human_demo_completion_audit",
     generated_at: new Date().toISOString(),
     ok: failedChecks.length === 0,
-    status: failedChecks.length === 0 ? "complete" : "pending_human_gate",
+    status: completionStatus(failedChecks),
     failed_checks: failedChecks,
     checks,
     readiness_manifest_path: readinessPath,
     readiness_generated_at: readiness?.generated_at ?? readiness?.checked_at ?? null,
     result_path: resultPath,
+    result_audit: resultAudit,
     verification_manifest_path: verificationPath,
     verification_verified_at: verification?.verified_at ?? null,
     verification_lab_status_manifest_path: verification?.lab_status?.manifest_path ?? null,
@@ -136,6 +139,107 @@ function verificationMatchesResult(root, verification, resultPath) {
   return actual === expected;
 }
 
+function inspectHumanResult(root, resultPath) {
+  const defaultAudit = {
+    exists: false,
+    filled: false,
+    blank_pass_fail_labels: [],
+    missing_pass_fail_labels: expectedPassFailLabels(),
+    friction_filled: false,
+    ship_block_decision_filled: false,
+  };
+  if (!resultPath) return defaultAudit;
+  const absolutePath = path.resolve(root, resultPath);
+  if (!fs.existsSync(absolutePath)) return defaultAudit;
+  const text = fs.readFileSync(absolutePath, "utf8");
+  const lines = text.split(/\r?\n/);
+  const passFail = parsePassFail(lines);
+  const expectedLabels = expectedPassFailLabels();
+  const missingPassFailLabels = expectedLabels.filter((label) => !Object.hasOwn(passFail, label));
+  const blankPassFailLabels = expectedLabels.filter((label) => Object.hasOwn(passFail, label) && passFail[label].trim() === "");
+  const friction = sectionText(lines, "Friction:", "Ship/block decision:").trim();
+  const decision = fieldOrSectionText(lines, "Ship/block decision:", undefined).trim();
+  const frictionFilled = friction !== "" && friction !== "-";
+  const shipBlockDecisionFilled = decision !== "" && decision !== "-";
+  return {
+    exists: true,
+    filled: missingPassFailLabels.length === 0
+      && blankPassFailLabels.length === 0
+      && frictionFilled
+      && shipBlockDecisionFilled,
+    blank_pass_fail_labels: blankPassFailLabels,
+    missing_pass_fail_labels: missingPassFailLabels,
+    friction_filled: frictionFilled,
+    ship_block_decision_filled: shipBlockDecisionFilled,
+  };
+}
+
+function expectedPassFailLabels() {
+  return [
+    "Starting state on demo-customer with Queue visible",
+    "Ctrl-Option-R restores Customer paper",
+    "Moving shared TextEdit is remembered after 2-3 seconds",
+    "Metrics paper brings same TextEdit to metrics position",
+    "Customer paper brings same TextEdit back to customer position",
+    "Rectangle hotkeys feel usable",
+    "Manual Mode entry/return works",
+    "Queue footer feedback is visible and current",
+    "Queue/master latency readiness gate passed",
+    "Workspace capture/restore-plan latency readiness gate passed",
+    "Hotkey feedback latency readiness gate passed or skipped intentionally",
+  ];
+}
+
+function parsePassFail(lines) {
+  const text = sectionText(lines, "Pass/fail:", "Friction:");
+  const items = {};
+  for (const line of text.split(/\r?\n/)) {
+    const match = line.match(/^\s*-\s*(.+?):\s*(.*)$/);
+    if (!match) continue;
+    items[match[1].trim()] = match[2].trim();
+  }
+  return items;
+}
+
+function sectionText(lines, startMarker, endMarker) {
+  const start = lines.findIndex((line) => line.trim() === startMarker);
+  if (start === -1) return "";
+  const afterStart = start + 1;
+  const end = endMarker
+    ? lines.findIndex((line, index) => index > start && line.trim() === endMarker)
+    : lines.length;
+  return lines.slice(afterStart, end === -1 ? lines.length : end).join("\n");
+}
+
+function fieldOrSectionText(lines, startMarker, endMarker) {
+  const start = lines.findIndex((line) => line.trim() === startMarker || line.trim().startsWith(startMarker));
+  if (start === -1) return "";
+  const trimmed = lines[start].trim();
+  const inline = trimmed.slice(startMarker.length).trim();
+  if (inline) return inline;
+  const afterStart = start + 1;
+  const end = endMarker
+    ? lines.findIndex((line, index) => index > start && line.trim() === endMarker)
+    : lines.length;
+  return lines.slice(afterStart, end === -1 ? lines.length : end).join("\n");
+}
+
+function completionStatus(failedChecks) {
+  if (failedChecks.length === 0) return "complete";
+  if (failedChecks.includes("human_result_recorded") || failedChecks.includes("human_result_filled")) {
+    return "pending_human_result";
+  }
+  if (
+    failedChecks.includes("verification_manifest_present")
+    || failedChecks.includes("verification_ok")
+    || failedChecks.includes("verification_matches_result")
+    || failedChecks.includes("lab_status_checked_and_ok")
+  ) {
+    return "pending_verification";
+  }
+  return "pending_readiness";
+}
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
@@ -168,7 +272,27 @@ function runSelfTest() {
 
   const resultPath = path.join(root, "artifacts", "human-demo-results", "20260605T001000Z-human-demo-result.md");
   fs.mkdirSync(path.dirname(resultPath), { recursive: true });
-  fs.writeFileSync(resultPath, "filled human result\n", "utf8");
+  fs.writeFileSync(resultPath, `Human demo date: 2026-06-05
+
+Pass/fail:
+- Starting state on demo-customer with Queue visible: pass
+- Ctrl-Option-R restores Customer paper: pass
+- Moving shared TextEdit is remembered after 2-3 seconds: pass
+- Metrics paper brings same TextEdit to metrics position: pass
+- Customer paper brings same TextEdit back to customer position: pass
+- Rectangle hotkeys feel usable: pass
+- Manual Mode entry/return works: pass
+- Queue footer feedback is visible and current: pass
+- Queue/master latency readiness gate passed: ok=true
+- Workspace capture/restore-plan latency readiness gate passed: ok=true
+- Hotkey feedback latency readiness gate passed or skipped intentionally: ok=true
+
+Friction:
+none
+
+Ship/block decision:
+ship
+`, "utf8");
   const relativeResultPath = path.relative(root, resultPath);
   const verificationPath = path.join(root, "artifacts", "human-demo-verifications", "20260605T001100Z-human-demo-result-verify", "manifest.json");
   writeJson(verificationPath, {
@@ -182,6 +306,41 @@ function runSelfTest() {
   assert.equal(complete.ok, true);
   assert.equal(complete.status, "complete");
 
+  fs.writeFileSync(resultPath, `Pass/fail:
+- Starting state on demo-customer with Queue visible:
+
+Friction:
+-
+
+Ship/block decision:
+`, "utf8");
+  const blankResult = buildAudit(root);
+  assert.equal(blankResult.ok, false);
+  assert.equal(blankResult.status, "pending_human_result");
+  assert.ok(blankResult.failed_checks.includes("human_result_filled"));
+  assert.ok(blankResult.result_audit.blank_pass_fail_labels.includes("Starting state on demo-customer with Queue visible"));
+
+  fs.writeFileSync(resultPath, `Human demo date: 2026-06-05
+
+Pass/fail:
+- Starting state on demo-customer with Queue visible: pass
+- Ctrl-Option-R restores Customer paper: pass
+- Moving shared TextEdit is remembered after 2-3 seconds: pass
+- Metrics paper brings same TextEdit to metrics position: pass
+- Customer paper brings same TextEdit back to customer position: pass
+- Rectangle hotkeys feel usable: pass
+- Manual Mode entry/return works: pass
+- Queue footer feedback is visible and current: pass
+- Queue/master latency readiness gate passed: ok=true
+- Workspace capture/restore-plan latency readiness gate passed: ok=true
+- Hotkey feedback latency readiness gate passed or skipped intentionally: ok=true
+
+Friction:
+none
+
+Ship/block decision:
+ship
+`, "utf8");
   const mismatched = buildAudit(root, {
     resultPath: relativeResultPath,
     verificationPath: path.relative(root, verificationPath),
