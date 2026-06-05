@@ -286,6 +286,14 @@ export type PrimitiveLatencyBudgetSummary = {
   hotkey?: string;
 };
 
+export type PrimitiveProofPlan = {
+  selectedPrimitiveIds: string[];
+  missingPrimitiveIds: string[];
+  primitives: PrimitiveCapabilitySummary[];
+  selfTestCommands: PrimitiveSelfTestCommand[];
+  latencyBudgets: PrimitiveLatencyBudgetSummary[];
+};
+
 export type PrimitiveRequestBuildInput = {
   catalog: PrimitiveCatalog;
   method: PrimitiveHttpMethod | Lowercase<PrimitiveHttpMethod>;
@@ -1178,6 +1186,28 @@ export function selectPrimitiveLatencyBudgets(
     }
   }
   return budgets;
+}
+
+export function buildPrimitiveProofPlan(catalog: PrimitiveCatalog, filter: PrimitiveCapabilityFilter = {}): PrimitiveProofPlan {
+  const knownIds = new Set(catalog.primitives.map((primitive) => primitive.id));
+  const requestedIds = Array.from(new Set((filter.ids ?? []).filter(isNonEmptyString)));
+  const missingPrimitiveIds = requestedIds.filter((id) => !knownIds.has(id));
+  const primitives = selectPrimitiveCapabilities(catalog, filter);
+  const selectedPrimitiveIds = primitives.map((primitive) => primitive.id);
+  const selfTestSelection = selectPrimitiveSelfTestCommands(catalog, [
+    ...selectedPrimitiveIds,
+    ...missingPrimitiveIds
+  ]);
+  return {
+    selectedPrimitiveIds,
+    missingPrimitiveIds: selfTestSelection.missingPrimitiveIds,
+    primitives,
+    selfTestCommands: selfTestSelection.commands,
+    latencyBudgets: selectPrimitiveLatencyBudgets(catalog, {
+      ...filter,
+      ids: selectedPrimitiveIds
+    })
+  };
 }
 
 function summarizePrimitiveCapability(primitive: PrimitiveDefinition): PrimitiveCapabilitySummary {

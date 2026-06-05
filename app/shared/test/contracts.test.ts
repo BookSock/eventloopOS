@@ -21,6 +21,7 @@ import {
 } from "../src/index.js";
 import {
   bindPrimitiveOperationsClient,
+  buildPrimitiveProofPlan,
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
   createPrimitiveOperationsClient,
@@ -403,6 +404,44 @@ describe("primitive catalog SDK boundary", () => {
       "master_fan_out_dry_run",
       "hotkey_to_feedback"
     ]);
+  });
+
+  it("builds primitive proof plans for builder-facing subsets", () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+
+    const workspacePlan = buildPrimitiveProofPlan(catalog, { ids: ["workspace_control", "missing"] });
+    expect(workspacePlan.selectedPrimitiveIds).toEqual(["workspace_control"]);
+    expect(workspacePlan.missingPrimitiveIds).toEqual(["missing"]);
+    expect(workspacePlan.primitives).toEqual([
+      expect.objectContaining({
+        id: "workspace_control",
+        routeCount: 4,
+        responsivenessCritical: true
+      })
+    ]);
+    expect(workspacePlan.selfTestCommands).toEqual([{
+      command: "pnpm --filter @eventloopos/shared run test:primitive-ops",
+      primitiveIds: ["workspace_control"]
+    }]);
+    expect(workspacePlan.latencyBudgets.map((budget) => budget.name)).toEqual([
+      "workspace_capture",
+      "workspace_restore_plan",
+      "workspace_restore_execute"
+    ]);
+
+    const criticalPlan = buildPrimitiveProofPlan(catalog, {
+      requireResponsivenessCritical: true,
+      requireLatencyBudgets: true
+    });
+    expect(criticalPlan.missingPrimitiveIds).toEqual([]);
+    expect(criticalPlan.selectedPrimitiveIds).toEqual([
+      "workspace_control",
+      "queue_paper_routing",
+      "master_command_router",
+      "mac_app_hotkeys"
+    ]);
+    expect(criticalPlan.selfTestCommands.length).toBeGreaterThanOrEqual(2);
+    expect(criticalPlan.latencyBudgets).toHaveLength(8);
   });
 
   it("rejects primitive routes that drift back to freeform mutating bodies", () => {

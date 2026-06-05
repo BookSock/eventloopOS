@@ -21,6 +21,7 @@ if (args.includes("-h") || args.includes("--help") || args.length === 0) {
   node examples/primitives/discover-primitives.mjs self-tests --id workspace_control
   node examples/primitives/discover-primitives.mjs self-tests --category os_control --json
   node examples/primitives/discover-primitives.mjs latency-budgets --require-responsive --json
+  node examples/primitives/discover-primitives.mjs proof-plan --id workspace_control --json
   node examples/primitives/discover-primitives.mjs list --catalog docs/primitives.catalog.json
 
 Small example app for discovering reusable eventloopOS primitive surfaces before
@@ -29,13 +30,15 @@ building against them. It consumes the shared primitive SDK exported at
 and filters by status, category, route count, self-test coverage, proof
 coverage, and latency-budget coverage. The self-tests command shows which
 cataloged proof commands to run for a primitive subset. The latency-budgets
-command shows the p95 responsiveness budgets and proof hooks.
+command shows the p95 responsiveness budgets and proof hooks. The proof-plan
+command returns the selected primitives, their runnable self-test commands, and
+latency proof hooks in one builder-facing bundle.
 `);
   process.exit(0);
 }
 
 const options = parseArgs(args);
-if (!["list", "self-tests", "latency-budgets"].includes(options.command)) die(`unknown command: ${options.command}`);
+if (!["list", "self-tests", "latency-budgets", "proof-plan"].includes(options.command)) die(`unknown command: ${options.command}`);
 
 const sdk = await loadPrimitiveSdk();
 const catalogPath = path.resolve(options.catalog ?? "docs/primitives.catalog.json");
@@ -74,7 +77,7 @@ if (options.command === "list") {
   } else {
     printSelfTestTable(commands, selfTests.missingPrimitiveIds);
   }
-} else {
+} else if (options.command === "latency-budgets") {
   const budgets = sdk.selectPrimitiveLatencyBudgets(catalog, {
     ids: options.ids,
     statuses: options.statuses,
@@ -96,6 +99,31 @@ if (options.command === "list") {
     }, null, 2));
   } else {
     printLatencyBudgetTable(budgets);
+  }
+} else {
+  const plan = sdk.buildPrimitiveProofPlan(catalog, primitiveCapabilityFilter(options));
+  const primitives = plan.primitives.map(toExampleCapability);
+  const commands = plan.selfTestCommands.map((command) => ({
+    command: command.command,
+    primitive_ids: command.primitiveIds,
+  }));
+  const budgets = plan.latencyBudgets.map(toExampleLatencyBudget);
+  if (options.json) {
+    console.log(JSON.stringify({
+      ok: plan.missingPrimitiveIds.length === 0,
+      catalog: catalogPath,
+      catalog_summary: toExampleCatalogSummary(catalogSummary),
+      selected_primitive_ids: plan.selectedPrimitiveIds,
+      missing_primitive_ids: plan.missingPrimitiveIds,
+      primitive_count: primitives.length,
+      self_test_command_count: commands.length,
+      latency_budget_count: budgets.length,
+      primitives,
+      self_tests: commands,
+      latency_budgets: budgets,
+    }, null, 2));
+  } else {
+    printProofPlanTable(primitives, commands, budgets, plan.missingPrimitiveIds);
   }
 }
 
@@ -130,7 +158,11 @@ function toExampleCatalogSummary(summary) {
 }
 
 function selectCapabilities(sdk, catalog, options) {
-  return sdk.selectPrimitiveCapabilities(catalog, {
+  return sdk.selectPrimitiveCapabilities(catalog, primitiveCapabilityFilter(options)).map(toExampleCapability);
+}
+
+function primitiveCapabilityFilter(options) {
+  return {
     ids: options.ids,
     statuses: options.statuses,
     categories: options.categories,
@@ -140,7 +172,7 @@ function selectCapabilities(sdk, catalog, options) {
     requireProofs: options.requireProofs,
     requireLatencyBudgets: options.requireLatencyBudgets,
     requireResponsivenessCritical: options.requireResponsive,
-  }).map(toExampleCapability);
+  };
 }
 
 function toExampleCapability(primitive) {
@@ -252,6 +284,26 @@ function printLatencyBudgetTable(budgets) {
   }
 }
 
+function printProofPlanTable(primitives, commands, budgets, missingPrimitiveIds) {
+  if (missingPrimitiveIds.length > 0) {
+    console.error(`missing primitives: ${missingPrimitiveIds.join(", ")}`);
+  }
+  if (primitives.length === 0) {
+    console.log("no matching primitive proof plan");
+    return;
+  }
+  console.log(["section", "id", "detail", "extra"].join("\t"));
+  for (const primitive of primitives) {
+    console.log(["primitive", primitive.id, primitive.status, primitive.category].join("\t"));
+  }
+  for (const command of commands) {
+    console.log(["self_test", command.command, command.primitive_ids.join(","), ""].join("\t"));
+  }
+  for (const budget of budgets) {
+    console.log(["latency_budget", budget.primitive_id, budget.name, `${budget.p95_ms}ms`].join("\t"));
+  }
+}
+
 function parsePositiveInteger(value, flag) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0) die(`${flag} must be a non-negative integer`);
@@ -302,7 +354,8 @@ function hasPrimitiveSdkExports(sdk) {
     && typeof sdk.summarizePrimitiveCatalog === "function"
     && typeof sdk.selectPrimitiveCapabilities === "function"
     && typeof sdk.selectPrimitiveSelfTestCommands === "function"
-    && typeof sdk.selectPrimitiveLatencyBudgets === "function";
+    && typeof sdk.selectPrimitiveLatencyBudgets === "function"
+    && typeof sdk.buildPrimitiveProofPlan === "function";
 }
 
 function runSelfTest(sdk) {
@@ -389,4 +442,16 @@ function runSelfTest(sdk) {
     p95_ms: 5000,
     proof: "proof.ts",
   }]);
+  assert.deepEqual(sdk.buildPrimitiveProofPlan(catalog, {
+    ids: ["workspace_control", "missing"],
+  }), {
+    selectedPrimitiveIds: ["workspace_control"],
+    missingPrimitiveIds: ["missing"],
+    primitives: [sdk.selectPrimitiveCapabilities(catalog, { ids: ["workspace_control"] })[0]],
+    selfTestCommands: [{
+      command: "pnpm test",
+      primitiveIds: ["workspace_control"],
+    }],
+    latencyBudgets: sdk.selectPrimitiveLatencyBudgets(catalog, { ids: ["workspace_control"] }),
+  });
 }

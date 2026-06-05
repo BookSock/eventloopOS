@@ -13,13 +13,14 @@ node examples/primitives/discover-primitives.mjs list --category os_control --re
 node examples/primitives/discover-primitives.mjs list --require-responsive --require-latency-budgets
 node examples/primitives/discover-primitives.mjs self-tests --id workspace_control
 node examples/primitives/discover-primitives.mjs latency-budgets --require-responsive
+node examples/primitives/discover-primitives.mjs proof-plan --id workspace_control --json
 node examples/primitives/agent-attention-queue.mjs list
 node examples/primitives/window-hotkey-router.mjs claim --task-id task_demo --window-id 123
 ```
 
 Examples:
 
-- `discover-primitives.mjs`: inspect the primitive catalog, self-test command coverage, and latency budgets through the shared `@eventloopos/shared/primitives` SDK before choosing which API surfaces to build on. If `app/shared/dist` is missing in a clean checkout, it builds the shared package on demand.
+- `discover-primitives.mjs`: inspect the primitive catalog, self-test command coverage, latency budgets, and combined proof plans through the shared `@eventloopos/shared/primitives` SDK before choosing which API surfaces to build on. If `app/shared/dist` is missing in a clean checkout, it builds the shared package on demand.
 - `restore-my-desk.mjs`: save, preview, and restore a workspace snapshot.
 - `agent-attention-queue.mjs`: list, boost, and defer attention papers.
 - `window-hotkey-router.mjs`: attach external hotkeys to task-window claims and follows-window rules.

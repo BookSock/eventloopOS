@@ -26,6 +26,9 @@ ids, and the primitive ids covered by each de-duplicated command.
 `selectPrimitiveLatencyBudgets` returns cataloged p95 budgets and proof hooks by
 the same builder-facing filters, so responsiveness guarantees are machine
 discoverable instead of prose-only.
+`buildPrimitiveProofPlan` combines those selectors into one verification plan:
+selected primitive ids, missing requested ids, capability rows, de-duplicated
+self-test commands, and latency proof hooks.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.
@@ -70,8 +73,8 @@ external hotkeys to task-window/follows rules. The discovery example consumes
 the shared `@eventloopos/shared/primitives` SDK instead of duplicating catalog
 parsing, can also print self-test commands for a primitive subset, and builds
 `app/shared/dist` on demand for clean checkouts. It can also print latency
-budgets for responsiveness-critical primitives. Root `pnpm typecheck` runs their
-self-tests.
+budgets for responsiveness-critical primitives or a combined proof plan for a
+builder-selected primitive subset. Root `pnpm typecheck` runs their self-tests.
 
 Status labels:
 

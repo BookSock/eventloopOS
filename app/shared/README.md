@@ -23,6 +23,7 @@ HTTP route, and each mutating route must either declare a request schema or
 ```ts
 import {
   parsePrimitiveCatalog,
+  buildPrimitiveProofPlan,
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
   createPrimitiveOperationsClient,
@@ -52,6 +53,7 @@ console.log(selectPrimitiveCapabilities(catalog, {
 }));
 console.log(selectPrimitiveSelfTestCommands(catalog, ["workspace_control"]));
 console.log(selectPrimitiveLatencyBudgets(catalog, { requireResponsivenessCritical: true }));
+console.log(buildPrimitiveProofPlan(catalog, { ids: ["workspace_control"] }));
 console.log(route?.request_schema);
 console.log(route ? routeHasRequestBody(route) : false);
 
@@ -112,6 +114,10 @@ command covers.
 `selectPrimitiveLatencyBudgets` returns the cataloged p95 budget rows and proof
 hooks by the same builder-facing primitive filters, so tools can surface or run
 responsiveness checks for selected API surfaces.
+`buildPrimitiveProofPlan` combines the selected capability rows, missing
+primitive ids, de-duplicated self-test commands, and latency proof hooks in one
+object for builders that need a single verification plan before using a
+primitive subset.
 `createPrimitiveOperationsClient` layers small typed convenience methods over
 the same validated routes for common master-command, manual-mode,
 task-workspace, queue, workspace, task-session, Codex/Claude agent,
