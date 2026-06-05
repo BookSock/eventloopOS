@@ -74,6 +74,7 @@ function summarizePrimitive(primitive, repoRoot) {
   const proofs = arrayOfStrings(primitive.proofs);
   const cli = arrayOfStrings(primitive.cli);
   const selfTests = arrayOfStrings(primitive.self_tests);
+  const declaredGaps = arrayOfStrings(primitive.gaps);
   const latencyBudgets = Array.isArray(primitive.latency_budgets) ? primitive.latency_budgets : [];
   const latencyProofs = latencyBudgets
     .map((budget) => typeof budget?.proof === "string" ? budget.proof : "")
@@ -90,7 +91,7 @@ function summarizePrimitive(primitive, repoRoot) {
   if (code.length === 0) gaps.push("missing code/doc references");
   if (proofs.length === 0) gaps.push("missing proof references");
   if (http.length > 0 && !http.every((route) => route.response_schema)) gaps.push("http response schema missing");
-  const hardeningGaps = [];
+  const hardeningGaps = declaredGaps.map((gap) => `catalog gap: ${gap}`);
   if (selfTests.length === 0) hardeningGaps.push("missing dedicated self-test command");
   if (primitive.responsiveness_critical === true && latencyBudgets.length === 0) {
     hardeningGaps.push("missing latency budget for responsiveness-critical primitive");
@@ -255,6 +256,24 @@ function runSelfTest() {
   assert.equal(missingSelfTest.strict_ok, false);
   assert.ok(missingSelfTest.hardening_gaps.some((gap) => gap.gap.includes("missing dedicated self-test command")));
   assert.ok(missingSelfTest.hardening_gaps.some((gap) => gap.gap.includes("missing latency budget")));
+
+  fs.writeFileSync(catalogPath, JSON.stringify({
+    schema_version: 1,
+    primitives: [{
+      id: "ambient_autosave",
+      title: "Ambient Autosave",
+      status: "dogfood",
+      summary: "Capture active task workspace.",
+      code: ["code.ts"],
+      proofs: ["proof.test.ts"],
+      self_tests: ["bin/proof --self-test"],
+      gaps: ["Unclaimed detached windows need explicit ownership signal."],
+    }],
+  }));
+  const declaredGap = buildReadinessReport(catalogPath, root);
+  assert.equal(declaredGap.ok, true);
+  assert.equal(declaredGap.strict_ok, false);
+  assert.ok(declaredGap.hardening_gaps.some((gap) => gap.gap.includes("catalog gap: Unclaimed detached windows")));
 
   fs.writeFileSync(catalogPath, JSON.stringify({
     schema_version: 1,

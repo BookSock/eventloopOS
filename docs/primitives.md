@@ -273,9 +273,11 @@ Guarantees today:
 Why it matters: this is the primitive that makes window layout memory feel
 automatic instead of like a manual "save workspace" button.
 
-Known gap: unclaimed LaunchServices-detached apps can still lose useful
-parent-process ancestry, so wrappers should claim `process_root_pid`, tag the
-window, or emit routed resources for those launches.
+Caller contract: LaunchServices-detached apps that do not preserve useful
+parent-process ancestry must provide an ownership signal. Supported signals are
+`bin/task-window-spawn`, `process_root_pid`, a `[task:...]` window title tag, or
+a routed window resource. Without one of those signals, eventloopOS deliberately
+does not guess ownership for reused browser/app windows.
 
 Proof:
 
@@ -283,8 +285,8 @@ Proof:
 - Mac Studio human demo `proofs.ambient_autosave.ok=true`
 
 Status: dogfood. Claimed foreign windows are filtered from active-paper saves
-and rehomed when their owner task has a known workspace. Unclaimed detached app
-launches still need wrappers, tags, or routed resources before public API.
+and rehomed when their owner task has a known workspace. Detached app launches
+are safe when callers use the ownership contract above.
 
 ## Task Window Claims
 
