@@ -48,6 +48,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var followsWindows: [FollowsWindowRecord] = []
     private var followsWindowExclusions: [FollowsWindowExclusion] = []
     private var fakeAutoBindRunCount: Int = 0
+    private let masterCommandError: Error?
     private let masterCommandResult: MasterCommandResult?
     private var tasks: [TaskRecord] = []
     private var taskLayouts: [String: WorkspaceSnapshot] = [:]
@@ -109,6 +110,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         contextRestoreStatusResult: Result<ContextRestoreRequest, Error>? = nil,
         contextRestoreStatusResults: [Result<ContextRestoreRequest, Error>] = [],
         queueLineageResult: Result<QueueLineage, Error>? = nil,
+        masterCommandError: Error? = nil,
         masterCommandResult: MasterCommandResult? = nil
     ) {
         self.packets = packets.sorted { $0.priority > $1.priority }
@@ -119,6 +121,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         self.contextRestoreStatusResult = contextRestoreStatusResult ?? contextRestoreRequestResult
         self.contextRestoreStatusResults = contextRestoreStatusResults
         self.queueLineageResult = queueLineageResult
+        self.masterCommandError = masterCommandError
         self.masterCommandResult = masterCommandResult
     }
 
@@ -441,6 +444,9 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public func sendMasterCommand(text: String, taskHint: String?) async throws -> MasterCommandResult {
         await sleepMasterActionDelayIfNeeded()
+        if let masterCommandError {
+            throw masterCommandError
+        }
         return lock.withLock {
             masterCommands.append((text: text, taskHint: taskHint))
             if let masterCommandResult {

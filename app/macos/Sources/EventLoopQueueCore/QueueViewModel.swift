@@ -2115,7 +2115,7 @@ public final class QueueViewModel: ObservableObject {
     }
 
     private static func shortStatusMessage(_ value: String, maxLength: Int = 96) -> String {
-        let normalized = value
+        let normalized = userFacingStatusMessage(value)
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard normalized.count > maxLength else {
@@ -2123,6 +2123,26 @@ public final class QueueViewModel: ObservableObject {
         }
         let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
         return "\(normalized[..<index])..."
+    }
+
+    private static func userFacingStatusMessage(_ value: String) -> String {
+        let normalized = value
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        for prefix in ["Queue request failed with HTTP ", "Workspace request failed with HTTP "] {
+            guard normalized.hasPrefix(prefix) else {
+                continue
+            }
+            let rest = normalized.dropFirst(prefix.count)
+            guard let colonIndex = rest.firstIndex(of: ":") else {
+                return "HTTP \(rest)".trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let status = rest[..<colonIndex]
+            let messageStart = rest.index(after: colonIndex)
+            let message = rest[messageStart...].trimmingCharacters(in: .whitespacesAndNewlines)
+            return message.isEmpty ? "HTTP \(status)" : message
+        }
+        return normalized
     }
 
     private static func masterCommandRoutedStatus(_ result: MasterCommandResult) -> String {

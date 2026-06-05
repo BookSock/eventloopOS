@@ -1225,6 +1225,29 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Master command queued: Review master note"))
     }
 
+    func testMasterCommandFailureToastShowsServerMessageWithoutHTTPPrefix() async {
+        let client = FakeQueueClient(
+            packets: [],
+            masterCommandError: QueueClientError.httpStatusMessage(
+                409,
+                "idempotency_conflict: duplicate idempotency key"
+            )
+        )
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.sendMasterCommand(text: "Route launch note", taskHint: "task_launch")
+
+        XCTAssertEqual(client.sentMasterCommands.count, 0)
+        XCTAssertEqual(
+            viewModel.masterCommandState,
+            .failed("Queue request failed with HTTP 409: idempotency_conflict: duplicate idempotency key")
+        )
+        XCTAssertEqual(
+            viewModel.advanceToast,
+            .actionComplete("Master command failed: idempotency_conflict: duplicate idempotency key")
+        )
+    }
+
     func testRapidMasterCommandDeduplicatesWhileSending() async {
         let client = FakeQueueClient(packets: [])
         client.setMasterActionDelayNanoseconds(200_000_000)
@@ -2957,6 +2980,38 @@ final class QueueViewModelTests: XCTestCase {
             return
         }
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restored."))
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+    }
+
+    func testWorkspaceRestoreFailureToastShowsServerMessageWithoutHTTPPrefix() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+        let packet = ReviewPacket(
+            id: "packet-with-workspace",
+            title: "Review with workspace",
+            summary: "Needs workspace restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: snapshot
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            restoreError: QueueClientError.httpStatusMessage(422, "schema_error: snapshot is required")
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: [packet]),
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-with-workspace")
+
+        await viewModel.confirmSelectedWorkspaceRestore()
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .failed("Queue request failed with HTTP 422: schema_error: snapshot is required"))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restore failed: schema_error: snapshot is required"))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }
 
