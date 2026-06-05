@@ -26,6 +26,9 @@ ids, and the primitive ids covered by each de-duplicated command.
 `selectPrimitiveLatencyBudgets` returns cataloged p95 budgets and proof hooks by
 the same builder-facing filters, so responsiveness guarantees are machine
 discoverable instead of prose-only.
+`bin/primitives-latency-audit --strict` checks whether those speed-critical
+budget hooks have recent green proof manifests under `artifacts/`, so stale
+latency evidence cannot be mistaken for current product responsiveness.
 `buildPrimitiveProofPlan` combines those selectors into one verification plan:
 selected primitive ids, missing requested ids, capability rows, de-duplicated
 self-test commands, and latency proof hooks.
@@ -46,6 +49,8 @@ tarball only contains runtime package files (`dist`, README, package metadata)
 with every `main`/`types`/`exports` target present.
 Responsiveness-critical primitives must also carry explicit p95 latency budgets
 linked to runnable proof commands.
+Use `bin/primitives-latency-audit --json` to inspect which proof command needs
+refreshing when a budget has no current green manifest.
 `bin/primitives-self-test-runner` executes the cataloged self-test commands
 once per unique command and records a manifest that maps each proof back to the
 primitive ids it covers. Root `pnpm typecheck` runs both the list-only manifest

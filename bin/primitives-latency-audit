@@ -1,0 +1,349 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+process.chdir(repoRoot);
+
+const args = process.argv.slice(2);
+const jsonOnly = args.includes("--json");
+const strict = args.includes("--strict");
+const catalogPath = positionalArg() ?? "docs/primitives.catalog.json";
+const maxAgeHours = positiveNumber(valueAfter("--max-age-hours"), 168);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/primitives-latency-audit [--json] [--strict] [--max-age-hours N] [catalog.json]
+
+Checks whether cataloged primitive latency budgets have recent green proof
+manifests. This is evidence audit, not live measurement. Run the proof commands
+listed in failed checks to refresh stale or missing speed evidence.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  console.log("primitives-latency-audit self-test passed");
+  process.exit(0);
+}
+
+const audit = buildLatencyAudit({
+  repoRoot,
+  catalogPath,
+  artifactsRoot: path.join(repoRoot, "artifacts"),
+  maxAgeHours,
+  now: new Date(),
+});
+
+if (jsonOnly) {
+  console.log(JSON.stringify(audit, null, 2));
+} else {
+  console.log(`primitive latency evidence: ${audit.ok ? "ok" : "needs refresh"}`);
+  console.log(`budgets: ${audit.budget_count}, proofs: ${audit.proof_count}, recent green: ${audit.recent_green_count}`);
+  if (audit.failed_checks.length > 0) console.log(`failed checks: ${audit.failed_checks.join(", ")}`);
+  for (const proof of audit.proofs) {
+    const status = proof.ok ? "ok" : proof.failed_checks.join(",");
+    console.log(`- ${proof.proof}: ${status} (${proof.manifest_path ?? "missing"})`);
+  }
+}
+
+if (strict && audit.ok !== true) process.exit(1);
+
+function buildLatencyAudit({ repoRoot, catalogPath, artifactsRoot, maxAgeHours, now }) {
+  const catalog = JSON.parse(fs.readFileSync(path.resolve(repoRoot, catalogPath), "utf8"));
+  const budgets = latencyBudgetsFromCatalog(catalog);
+  const manifests = collectCandidateManifests(artifactsRoot);
+  const byProof = groupBudgetsByProof(budgets);
+  const proofs = Array.from(byProof.entries()).sort(([left], [right]) => left.localeCompare(right)).map(([proof, proofBudgets]) => {
+    const manifest = latestMatchingManifest(repoRoot, manifests, proof);
+    return auditProof({
+      repoRoot,
+      proof,
+      budgets: proofBudgets,
+      manifest,
+      maxAgeHours,
+      now,
+    });
+  });
+  const failedChecks = proofs.flatMap((proof) => proof.failed_checks.map((check) => `${proof.proof}:${check}`));
+  return {
+    schema_version: 1,
+    kind: "eventloopos.primitives_latency_audit",
+    generated_at: now.toISOString(),
+    catalog: catalogPath,
+    max_age_hours: maxAgeHours,
+    ok: failedChecks.length === 0,
+    budget_count: budgets.length,
+    proof_count: proofs.length,
+    recent_green_count: proofs.filter((proof) => proof.ok).length,
+    failed_checks: failedChecks,
+    proofs,
+  };
+}
+
+function latencyBudgetsFromCatalog(catalog) {
+  const rows = [];
+  for (const primitive of catalog.primitives ?? []) {
+    for (const budget of primitive.latency_budgets ?? []) {
+      rows.push({
+        primitive_id: primitive.id,
+        primitive_title: primitive.title,
+        name: budget.name,
+        p95_ms: budget.p95_ms,
+        proof: budget.proof,
+        route: budget.route,
+        hotkey: budget.hotkey,
+        scope: budget.scope,
+      });
+    }
+  }
+  return rows;
+}
+
+function groupBudgetsByProof(budgets) {
+  const grouped = new Map();
+  for (const budget of budgets) {
+    if (!grouped.has(budget.proof)) grouped.set(budget.proof, []);
+    grouped.get(budget.proof).push(budget);
+  }
+  return grouped;
+}
+
+function auditProof({ repoRoot, proof, budgets, manifest, maxAgeHours, now }) {
+  const failedChecks = [];
+  if (!manifest) {
+    failedChecks.push("missing_manifest");
+  }
+  const manifestValue = manifest?.value;
+  if (manifestValue && manifestValue.ok !== true) {
+    failedChecks.push("manifest_not_ok");
+  }
+  const observedAt = manifestValue ? manifestTime(manifestValue, manifest.path) : undefined;
+  const ageHours = observedAt ? (now.getTime() - observedAt.getTime()) / 3_600_000 : undefined;
+  if (ageHours === undefined) {
+    failedChecks.push("missing_manifest_time");
+  } else if (ageHours > maxAgeHours) {
+    failedChecks.push("stale_manifest");
+  }
+  const budgetRows = budgets.map((budget) => {
+    const p95 = manifestValue?.summary?.[budget.name]?.p95_ms;
+    const failedBudget = Array.isArray(manifestValue?.failed_budgets)
+      ? manifestValue.failed_budgets.find((entry) => entry?.name === budget.name)
+      : undefined;
+    const checks = {
+      summary_present: typeof p95 === "number" && Number.isFinite(p95),
+      p95_within_budget: typeof p95 === "number" && p95 <= budget.p95_ms,
+      not_failed_budget: failedBudget === undefined,
+    };
+    const rowFailed = Object.entries(checks).filter(([, ok]) => ok !== true).map(([key]) => key);
+    for (const check of rowFailed) failedChecks.push(`${budget.name}.${check}`);
+    return {
+      ...budget,
+      observed_p95_ms: p95 ?? null,
+      failed_checks: rowFailed,
+      ok: rowFailed.length === 0,
+    };
+  });
+  return {
+    proof,
+    expected_kind: expectedKindForProof(proof),
+    manifest_path: manifest ? path.relative(repoRoot, manifest.path) : undefined,
+    manifest_kind: manifestValue?.kind ?? null,
+    observed_at: observedAt?.toISOString() ?? null,
+    age_hours: ageHours === undefined ? null : round(ageHours),
+    ok: failedChecks.length === 0,
+    failed_checks: Array.from(new Set(failedChecks)),
+    budgets: budgetRows,
+  };
+}
+
+function latestMatchingManifest(repoRoot, manifests, proof) {
+  const expectedKind = expectedKindForProof(proof);
+  const candidates = manifests
+    .filter((manifest) => {
+      if (manifest.value?.kind === expectedKind) return true;
+      return pathLooksLikeProof(manifest.path, proof);
+    })
+    .sort((left, right) => {
+      const leftTime = manifestTime(left.value, left.path)?.getTime() ?? 0;
+      const rightTime = manifestTime(right.value, right.path)?.getTime() ?? 0;
+      if (leftTime !== rightTime) return leftTime - rightTime;
+      return left.path.localeCompare(right.path);
+    });
+  return candidates.at(-1);
+}
+
+function collectCandidateManifests(artifactsRoot) {
+  if (!fs.existsSync(artifactsRoot)) return [];
+  const files = [];
+  walk(artifactsRoot, files);
+  return files
+    .filter((filePath) => {
+      const base = path.basename(filePath);
+      return base === "manifest.json" || base.endsWith("-latency.json");
+    })
+    .map((filePath) => {
+      try {
+        return { path: filePath, value: JSON.parse(fs.readFileSync(filePath, "utf8")) };
+      } catch {
+        return undefined;
+      }
+    })
+    .filter(Boolean);
+}
+
+function walk(dir, files) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const filePath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      walk(filePath, files);
+    } else if (entry.isFile()) {
+      files.push(filePath);
+    }
+  }
+}
+
+function expectedKindForProof(proof) {
+  if (proof.endsWith("queue-latency-proof")) return "eventloopos.queue_latency_proof";
+  if (proof.endsWith("workspace-latency-proof")) return "eventloopos.workspace_latency_proof";
+  if (proof.endsWith("manual-mode-latency-proof")) return "eventloopos.manual_mode_latency_proof";
+  if (proof.endsWith("macos-hotkey-feedback-latency")) return "eventloopos.macos_hotkey_feedback_latency";
+  return undefined;
+}
+
+function pathLooksLikeProof(filePath, proof) {
+  const normalizedPath = filePath.toLowerCase();
+  if (proof.endsWith("queue-latency-proof")) return normalizedPath.includes("queue-latency");
+  if (proof.endsWith("workspace-latency-proof")) return normalizedPath.includes("workspace-latency");
+  if (proof.endsWith("manual-mode-latency-proof")) return normalizedPath.includes("manual-mode-latency");
+  if (proof.endsWith("macos-hotkey-feedback-latency")) return normalizedPath.includes("hotkey-latency") || normalizedPath.includes("hotkey-feedback-latency");
+  return false;
+}
+
+function manifestTime(manifest, filePath) {
+  for (const key of ["finished_at", "generated_at", "started_at", "checked_at", "verified_at"]) {
+    const value = manifest?.[key];
+    if (typeof value === "string") {
+      const date = new Date(value);
+      if (Number.isFinite(date.getTime())) return date;
+    }
+  }
+  const stat = fs.statSync(filePath);
+  return stat.mtime;
+}
+
+function positionalArg() {
+  return args.find((arg, index) => {
+    if (arg.startsWith("-")) return false;
+    const previous = args[index - 1];
+    return previous !== "--max-age-hours";
+  });
+}
+
+function valueAfter(flag) {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) {
+    console.error(`Missing value for ${flag}`);
+    process.exit(2);
+  }
+  return value;
+}
+
+function positiveNumber(value, fallback) {
+  if (value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.error(`Expected positive number, got ${value}`);
+    process.exit(2);
+  }
+  return parsed;
+}
+
+function round(value) {
+  return Math.round(value * 10) / 10;
+}
+
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function runSelfTest() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-primitives-latency-audit-"));
+  const catalogPath = path.join(root, "catalog.json");
+  fs.writeFileSync(catalogPath, JSON.stringify({
+    schema_version: 1,
+    primitives: [{
+      id: "queue_paper_routing",
+      title: "Queue And Paper Routing",
+      status: "stable_enough",
+      summary: "Route events quickly.",
+      code: ["code.ts"],
+      proofs: ["proof.test.ts"],
+      latency_budgets: [
+        { name: "queue_list", p95_ms: 800, proof: "bin/queue-latency-proof" },
+        { name: "master_fan_out_dry_run", p95_ms: 1200, proof: "bin/queue-latency-proof" },
+      ],
+    }],
+  }));
+  const artifactsRoot = path.join(root, "artifacts");
+  const manifestPath = path.join(artifactsRoot, "queue-latency", "20260605T000000Z", "manifest.json");
+  writeJson(manifestPath, {
+    kind: "eventloopos.queue_latency_proof",
+    ok: true,
+    finished_at: "2026-06-05T00:00:00.000Z",
+    failed_budgets: [],
+    summary: {
+      queue_list: { p95_ms: 100 },
+      master_fan_out_dry_run: { p95_ms: 200 },
+    },
+  });
+  const ok = buildLatencyAudit({
+    repoRoot: root,
+    catalogPath,
+    artifactsRoot,
+    maxAgeHours: 24,
+    now: new Date("2026-06-05T01:00:00.000Z"),
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(ok.budget_count, 2);
+  assert.equal(ok.proof_count, 1);
+
+  const stale = buildLatencyAudit({
+    repoRoot: root,
+    catalogPath,
+    artifactsRoot,
+    maxAgeHours: 0.5,
+    now: new Date("2026-06-05T01:00:00.000Z"),
+  });
+  assert.equal(stale.ok, false);
+  assert.ok(stale.failed_checks.includes("bin/queue-latency-proof:stale_manifest"));
+
+  writeJson(manifestPath, {
+    kind: "eventloopos.queue_latency_proof",
+    ok: true,
+    finished_at: "2026-06-05T01:00:00.000Z",
+    failed_budgets: [{ name: "queue_list", p95_ms: 900, budget_ms: 800 }],
+    summary: {
+      queue_list: { p95_ms: 900 },
+      master_fan_out_dry_run: { p95_ms: 200 },
+    },
+  });
+  const slow = buildLatencyAudit({
+    repoRoot: root,
+    catalogPath,
+    artifactsRoot,
+    maxAgeHours: 24,
+    now: new Date("2026-06-05T01:01:00.000Z"),
+  });
+  assert.equal(slow.ok, false);
+  assert.ok(slow.failed_checks.includes("bin/queue-latency-proof:queue_list.p95_within_budget"));
+  assert.ok(slow.failed_checks.includes("bin/queue-latency-proof:queue_list.not_failed_budget"));
+
+  fs.rmSync(root, { recursive: true, force: true });
+}
