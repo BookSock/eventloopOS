@@ -378,6 +378,17 @@ export type PrimitiveOperationHttpClient = PrimitiveHttpClient & {
   ): Promise<T>;
 };
 
+export type PrimitiveOperationHelperRoute = {
+  helper: string;
+  method: PrimitiveHttpMethod;
+  path: string;
+  operation?: string;
+  primitiveId?: string;
+  primitiveTitle?: string;
+  primitiveCategory?: string;
+  primitiveStatus?: string;
+};
+
 export type PrimitiveQueueListOptions = {
   state?: "ready" | "leased" | "deferred" | "done" | "dead";
 };
@@ -1366,6 +1377,138 @@ export function bindPrimitiveOperationsClient(client: PrimitiveHttpClient): Prim
     }
   };
 }
+
+type PrimitiveOperationHelperInvocation = {
+  helper: string;
+  invoke(ops: PrimitiveOperationsClient): Promise<unknown>;
+};
+
+export async function listPrimitiveOperationHelpers(catalog?: PrimitiveCatalog): Promise<PrimitiveOperationHelperRoute[]> {
+  let currentHelper = "";
+  const observed: PrimitiveOperationHelperRoute[] = [];
+  const operationByRoute = new Map<string, PrimitiveOperationRoute>();
+  if (catalog) {
+    for (const operation of listPrimitiveOperations(catalog)) {
+      operationByRoute.set(`${operation.route.method} ${operation.route.path}`, operation);
+    }
+  }
+  const ops = bindPrimitiveOperationsClient({
+    async request<T = unknown>(method: PrimitiveHttpMethod | Lowercase<PrimitiveHttpMethod>, path: string) {
+      const normalizedMethod = String(method).toUpperCase() as PrimitiveHttpMethod;
+      const operation = operationByRoute.get(`${normalizedMethod} ${path}`);
+      observed.push({
+        helper: currentHelper,
+        method: normalizedMethod,
+        path,
+        operation: operation?.operation,
+        primitiveId: operation?.primitiveId,
+        primitiveTitle: operation?.primitiveTitle,
+        primitiveCategory: operation?.primitiveCategory,
+        primitiveStatus: operation?.primitiveStatus
+      });
+      return {} as T;
+    }
+  });
+
+  for (const helper of primitiveOperationHelperInvocations) {
+    currentHelper = helper.helper;
+    await helper.invoke(ops);
+  }
+
+  return observed;
+}
+
+const primitiveOperationHelperInvocations: PrimitiveOperationHelperInvocation[] = [
+  { helper: "master.fanOut", invoke: (ops) => ops.master.fanOut({ message: "demo" } as MasterFanOutRequest) },
+  { helper: "manualMode.get", invoke: (ops) => ops.manualMode.get() },
+  { helper: "manualMode.set", invoke: (ops) => ops.manualMode.set({ active: true } as ManualModeSetRequest) },
+  { helper: "tasks.create", invoke: (ops) => ops.tasks.create({} as CreateTaskRequest) },
+  { helper: "tasks.list", invoke: (ops) => ops.tasks.list() },
+  { helper: "tasks.get", invoke: (ops) => ops.tasks.get("task_demo") },
+  { helper: "tasks.getLayout", invoke: (ops) => ops.tasks.getLayout("task_demo") },
+  { helper: "tasks.updateLayout", invoke: (ops) => ops.tasks.updateLayout("task_demo", { backend: "aerospace", windows: [] } as WorkspaceSnapshot) },
+  { helper: "tasks.saveWorkspaceSnapshot", invoke: (ops) => ops.tasks.saveWorkspaceSnapshot("task_demo", {} as TaskWorkspaceSnapshotSaveRequest) },
+  { helper: "tasks.current", invoke: (ops) => ops.tasks.current() },
+  { helper: "tasks.setCurrent", invoke: (ops) => ops.tasks.setCurrent({ task_id: "task_demo" } as CurrentTaskSetRequest) },
+  { helper: "queue.ingestEvent", invoke: (ops) => ops.queue.ingestEvent({} as EventIngestRequest) },
+  { helper: "queue.getEvent", invoke: (ops) => ops.queue.getEvent("evt_demo") },
+  { helper: "queue.getReviewPacket", invoke: (ops) => ops.queue.getReviewPacket("pkt_demo") },
+  { helper: "queue.list", invoke: (ops) => ops.queue.list({ state: "ready" }) },
+  { helper: "queue.next", invoke: (ops) => ops.queue.next() },
+  { helper: "queue.leaseNext", invoke: (ops) => ops.queue.leaseNext({} as QueueLeaseRequest) },
+  { helper: "queue.renewLease", invoke: (ops) => ops.queue.renewLease("qit_demo", {} as QueueLeaseRenewRequest) },
+  { helper: "queue.done", invoke: (ops) => ops.queue.done("qit_demo", { actor_id: "human_demo" }) },
+  { helper: "queue.defer", invoke: (ops) => ops.queue.defer("qit_demo", { due_at: "2026-05-06T18:00:00Z" }) },
+  { helper: "queue.ignore", invoke: (ops) => ops.queue.ignore("qit_demo", { actor_id: "human_demo" }) },
+  { helper: "queue.recommendedAction", invoke: (ops) => ops.queue.recommendedAction("qit_demo", {} as QueueRecommendedActionRequest) },
+  { helper: "queue.lineage", invoke: (ops) => ops.queue.lineage("qit_demo", { limit: 10 }) },
+  { helper: "queue.priority", invoke: (ops) => ops.queue.priority("qit_demo", {} as QueuePriorityRequest) },
+  { helper: "taskWindowClaims.create", invoke: (ops) => ops.taskWindowClaims.create({} as TaskWindowClaimCreateRequest) },
+  { helper: "taskWindowClaims.list", invoke: (ops) => ops.taskWindowClaims.list() },
+  { helper: "taskSessions.list", invoke: (ops) => ops.taskSessions.list() },
+  { helper: "taskSessions.start", invoke: (ops) => ops.taskSessions.start({} as TaskSessionStartRequest) },
+  { helper: "taskSessions.get", invoke: (ops) => ops.taskSessions.get("session_demo") },
+  { helper: "taskSessions.followup", invoke: (ops) => ops.taskSessions.followup("session_demo", {} as TaskSessionFollowupRequest) },
+  { helper: "taskSessions.replacement", invoke: (ops) => ops.taskSessions.replacement("session_demo", {} as TaskSessionReplacementRequest) },
+  { helper: "taskSessions.bindTask", invoke: (ops) => ops.taskSessions.bindTask("session_demo", {} as TaskSessionBindingRequest) },
+  { helper: "taskSessions.listMessages", invoke: (ops) => ops.taskSessions.listMessages() },
+  {
+    helper: "taskSessions.reconcileAttempted",
+    invoke: (ops) => ops.taskSessions.reconcileAttempted({} as TaskMessagesReconcileAttemptedRequest)
+  },
+  { helper: "agents.codex.autoBind", invoke: (ops) => ops.agents.codex.autoBind() },
+  { helper: "agents.codex.resolveForeground", invoke: (ops) => ops.agents.codex.resolveForeground() },
+  { helper: "agents.codex.inspect", invoke: (ops) => ops.agents.codex.inspect("codex_thread_demo") },
+  { helper: "agents.claude.inspect", invoke: (ops) => ops.agents.claude.inspect("claude_session_demo") },
+  { helper: "readingQueue.list", invoke: (ops) => ops.readingQueue.list() },
+  { helper: "readingQueue.promote", invoke: (ops) => ops.readingQueue.promote({} as ReadingQueuePromoteRequest) },
+  { helper: "readingQueue.autoPromote", invoke: (ops) => ops.readingQueue.autoPromote({} as ReadingQueueAutoPromoteRequest) },
+  { helper: "onboarding.scan", invoke: (ops) => ops.onboarding.scan() },
+  { helper: "onboarding.approve", invoke: (ops) => ops.onboarding.approve({} as OnboardingApprovalRequest) },
+  { helper: "onboarding.approveBatch", invoke: (ops) => ops.onboarding.approveBatch({} as OnboardingApprovalBatchRequest) },
+  { helper: "onboarding.reject", invoke: (ops) => ops.onboarding.reject({} as OnboardingRejectionRequest) },
+  { helper: "contexts.list", invoke: (ops) => ops.contexts.list() },
+  { helper: "contexts.restorePlan", invoke: (ops) => ops.contexts.restorePlan({} as ContextRestorePlanRequest) },
+  { helper: "contexts.createRestoreRequest", invoke: (ops) => ops.contexts.createRestoreRequest({} as ContextRestorePlanRequest) },
+  { helper: "contexts.nextRestoreRequest", invoke: (ops) => ops.contexts.nextRestoreRequest() },
+  { helper: "contexts.claimNextRestoreRequest", invoke: (ops) => ops.contexts.claimNextRestoreRequest({} as ContextRestoreClaimRequest) },
+  { helper: "contexts.getRestoreRequest", invoke: (ops) => ops.contexts.getRestoreRequest("ctx_restore_demo") },
+  {
+    helper: "contexts.markRestoreRequestDone",
+    invoke: (ops) => ops.contexts.markRestoreRequestDone("ctx_restore_demo", {} as ContextRestoreFinishRequest)
+  },
+  {
+    helper: "contexts.markRestoreRequestFailed",
+    invoke: (ops) => ops.contexts.markRestoreRequestFailed("ctx_restore_demo", {} as ContextRestoreFinishRequest)
+  },
+  { helper: "contexts.retryRestoreRequest", invoke: (ops) => ops.contexts.retryRestoreRequest("ctx_restore_demo") },
+  { helper: "triggers.list", invoke: (ops) => ops.triggers.list() },
+  { helper: "triggers.create", invoke: (ops) => ops.triggers.create({} as PaperTriggerCreateRequest) },
+  { helper: "triggers.get", invoke: (ops) => ops.triggers.get("trg_demo") },
+  { helper: "triggers.patch", invoke: (ops) => ops.triggers.patch("trg_demo", {} as PaperTriggerPatchRequest) },
+  { helper: "triggers.delete", invoke: (ops) => ops.triggers.delete("trg_demo") },
+  { helper: "agentSources.poll", invoke: (ops) => ops.agentSources.poll({} as McpPollRequest) },
+  { helper: "agentSources.listMcpSources", invoke: (ops) => ops.agentSources.listMcpSources() },
+  { helper: "agentSources.pollAllAndRoute", invoke: (ops) => ops.agentSources.pollAllAndRoute({} as McpPollAllAndRouteRequest) },
+  { helper: "agentSources.getMcpSource", invoke: (ops) => ops.agentSources.getMcpSource("local-events") },
+  { helper: "agentSources.pollMcpSource", invoke: (ops) => ops.agentSources.pollMcpSource("local-events") },
+  { helper: "agentSources.previewMcpSource", invoke: (ops) => ops.agentSources.previewMcpSource("local-events") },
+  { helper: "agentSources.pollAndRouteMcpSource", invoke: (ops) => ops.agentSources.pollAndRouteMcpSource("local-events") },
+  { helper: "agentSources.upsertAgentRun", invoke: (ops) => ops.agentSources.upsertAgentRun({} as AgentRunUpsertRequest) },
+  { helper: "agentSources.getAgentRun", invoke: (ops) => ops.agentSources.getAgentRun("agent_run_demo") },
+  { helper: "agentSources.submitVoiceCommand", invoke: (ops) => ops.agentSources.submitVoiceCommand({} as VoiceCommandRequest) },
+  { helper: "observability.health", invoke: (ops) => ops.observability.health() },
+  { helper: "observability.metrics", invoke: (ops) => ops.observability.metrics() },
+  { helper: "observability.activity", invoke: (ops) => ops.observability.activity() },
+  { helper: "followsWindows.list", invoke: (ops) => ops.followsWindows.list({ min_workspace_count: 2 }) },
+  { helper: "followsWindows.exclude", invoke: (ops) => ops.followsWindows.exclude({} as FollowsWindowExclusionCreateRequest) },
+  { helper: "followsWindows.listExclusions", invoke: (ops) => ops.followsWindows.listExclusions() },
+  { helper: "followsWindows.deleteExclusion", invoke: (ops) => ops.followsWindows.deleteExclusion("fwex_demo") },
+  { helper: "workspace.status", invoke: (ops) => ops.workspace.status() },
+  { helper: "workspace.capture", invoke: (ops) => ops.workspace.capture() },
+  { helper: "workspace.restorePlan", invoke: (ops) => ops.workspace.restorePlan({} as WorkspaceRestorePlanRequest) },
+  { helper: "workspace.restore", invoke: (ops) => ops.workspace.restore({} as WorkspaceRestoreRequest, "idem_workspace_restore") }
+];
 
 export function summarizePrimitiveCatalog(catalog: PrimitiveCatalog): PrimitiveCatalogSummary {
   const routes = primitiveRoutes(catalog);

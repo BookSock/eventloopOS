@@ -111,6 +111,10 @@ follows-window, reading-queue, onboarding, context-restore, and trigger
 operations, plus MCP/source-hook, voice-command, agent-run, and observability
 routes. Shared tests compare operation-helper route coverage against every
 cataloged HTTP route so SDK drift is caught by `pnpm typecheck`.
+`listPrimitiveOperationHelpers(catalog)` returns the helper-path to operation-id
+manifest for that same convenience layer, including method/path, primitive id,
+category, and status. Builder tools can use it to generate docs, wrappers, or
+agent tool descriptions from the SDK surface without reading TypeScript source.
 
 Runnable examples live in `examples/primitives/`: discover reusable primitive
 surfaces, restore a saved desk, inspect and rerank an attention queue, and wire
@@ -127,13 +131,17 @@ shared proof-plan and operation-list helpers: prerequisites, proof commands,
 route operation ids, schemas, and latency budgets for selected primitive ids or
 categories without needing a live orchestrator.
 `node examples/primitives/operation-id-client.mjs list --category os_control`,
+`node examples/primitives/operation-id-client.mjs helpers --category os_control`,
 `node examples/primitives/operation-id-client.mjs describe workspace_control_get_workspace_status`,
 and `node examples/primitives/operation-id-client.mjs workspace_control_get_workspace_status --json`
 let builders discover operation ids, inspect schemas/budgets, then call a
-cataloged route through the shared operation-id HTTP client. The live queue,
-workspace, and window-hotkey examples now use the same shared operation client
-instead of hand-rolled fetch calls, so example apps exercise catalog validation,
-typed response parsing, idempotency headers, and request timeouts.
+cataloged route through the shared operation-id HTTP client. The `helpers`
+subcommand prints the typed convenience-method mapping, so wrappers can target
+`ops.workspace.capture()`-style helpers or raw operation ids from the same
+catalog. The live queue, workspace, and window-hotkey examples now use the same
+shared operation client instead of hand-rolled fetch calls, so example apps
+exercise catalog validation, typed response parsing, idempotency headers, and
+request timeouts.
 Root `pnpm typecheck` runs their self-tests and
 `bin/primitives-examples-audit` prevents example drift back to custom HTTP
 clients.

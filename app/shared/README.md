@@ -190,6 +190,11 @@ task-window-claim, follows-window, reading-queue, onboarding, context-restore,
 trigger, MCP/source-hook, voice-command, agent-run, and observability
 operations. Shared tests compare those operation helpers against every
 cataloged HTTP route so route/helper drift is visible.
+`listPrimitiveOperationHelpers(catalog)` returns a machine-readable manifest of
+those convenience methods, including helper path, operation id, method, route,
+primitive id, category, and status. Use it when generating wrappers, tool
+descriptions, or docs from the SDK surface instead of scraping TypeScript
+source.
 The catalog uses `pnpm --filter @eventloopos/shared run test:primitive-ops` as
 the command-level self-test for HTTP/API primitives.
 

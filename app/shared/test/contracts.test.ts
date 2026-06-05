@@ -30,6 +30,7 @@ import {
   createPrimitiveOperationHttpClient,
   createPrimitiveOperationsClient,
   getPrimitiveOperation,
+  listPrimitiveOperationHelpers,
   listPrimitiveOperations,
   isPrimitiveHttpError,
   isPrimitiveRequestBuildError,
@@ -1227,6 +1228,30 @@ describe("primitive catalog SDK boundary", () => {
     });
     expect(calls.find((call) => call.path === "/follows-windows")?.input).toMatchObject({
       query: { min_workspace_count: 2 }
+    });
+  });
+
+  it("lists typed operation helper metadata for every cataloged HTTP route", async () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const helpers = await listPrimitiveOperationHelpers(catalog);
+    const helperRoutes = new Set(helpers.map((helper) => `${helper.method} ${helper.path}`));
+    const catalogRoutes = new Set(primitiveRoutes(catalog).map((route) => `${route.method} ${route.path}`));
+
+    expect(helperRoutes).toEqual(catalogRoutes);
+    expect(helpers).toHaveLength(primitiveRoutes(catalog).length);
+    expect(new Set(helpers.map((helper) => helper.helper)).size).toBe(helpers.length);
+    expect(helpers.every((helper) => helper.operation && helper.primitiveId && helper.primitiveCategory)).toBe(true);
+    expect(helpers.find((helper) => helper.helper === "workspace.capture")).toMatchObject({
+      method: "POST",
+      path: "/workspace/capture",
+      operation: "workspace_control_post_workspace_capture",
+      primitiveId: "workspace_control",
+      primitiveCategory: "os_control"
+    });
+    expect(helpers.find((helper) => helper.helper === "queue.done")).toMatchObject({
+      method: "POST",
+      path: "/queue/:id/done",
+      operation: "queue_paper_routing_post_queue_by_id_done"
     });
   });
 });

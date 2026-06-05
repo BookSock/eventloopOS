@@ -15,6 +15,7 @@ if (args.includes("--self-test")) {
 if (args.includes("-h") || args.includes("--help") || args.length === 0) {
   console.log(`Usage:
   node examples/primitives/operation-id-client.mjs list [--category os_control] [--json]
+  node examples/primitives/operation-id-client.mjs helpers [--category os_control] [--json]
   node examples/primitives/operation-id-client.mjs describe workspace_control_get_workspace_status --json
   node examples/primitives/operation-id-client.mjs queue_paper_routing_get_queue_by_id_lineage --path-param id=qit_feedback_001 --query limit=25 --json
   node examples/primitives/operation-id-client.mjs workspace_control_get_workspace_status --url http://127.0.0.1:4377
@@ -41,6 +42,16 @@ if (options.command === "list") {
     console.log(JSON.stringify({ ok: true, count: operations.length, operations }, null, 2));
   } else {
     printOperations(operations);
+  }
+  process.exit(0);
+}
+
+if (options.command === "helpers") {
+  const helpers = await listHelpers(sdk, catalog, options);
+  if (options.json) {
+    console.log(JSON.stringify({ ok: true, count: helpers.length, helpers }, null, 2));
+  } else {
+    printHelpers(helpers);
   }
   process.exit(0);
 }
@@ -72,15 +83,15 @@ if (options.json) {
 
 function parseArgs(argv) {
   const options = {
-    command: ["list", "describe"].includes(argv[0]) ? argv[0] : "call",
-    operation: argv[0] === "describe" ? argv[1] : argv[0] === "list" ? undefined : argv[0],
+    command: ["list", "helpers", "describe"].includes(argv[0]) ? argv[0] : "call",
+    operation: argv[0] === "describe" ? argv[1] : ["list", "helpers"].includes(argv[0]) ? undefined : argv[0],
     pathParams: {},
     query: {},
     strictQuery: true,
     categories: [],
     statuses: [],
   };
-  if (options.command !== "list" && (!options.operation || options.operation.startsWith("--"))) die("missing operation id");
+  if (!["list", "helpers"].includes(options.command) && (!options.operation || options.operation.startsWith("--"))) die("missing operation id");
   const startIndex = options.command === "call" ? 1 : options.command === "describe" ? 2 : 1;
   for (let index = startIndex; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -113,6 +124,14 @@ function listOperations(sdk, catalog, options) {
   return sdk.listPrimitiveOperations(catalog, filter)
     .map(operationSummary)
     .sort((left, right) => left.operation.localeCompare(right.operation));
+}
+
+async function listHelpers(sdk, catalog, options) {
+  const helpers = await sdk.listPrimitiveOperationHelpers(catalog);
+  return helpers
+    .filter((helper) => options.categories.length === 0 || options.categories.includes(helper.primitiveCategory))
+    .filter((helper) => options.statuses.length === 0 || options.statuses.includes(helper.primitiveStatus))
+    .sort((left, right) => left.helper.localeCompare(right.helper));
 }
 
 function describeOperation(sdk, catalog, operationId) {
@@ -152,6 +171,12 @@ function operationDetail(route) {
 function printOperations(operations) {
   for (const operation of operations) {
     console.log(`${operation.operation}\t${operation.method} ${operation.path}\t${operation.primitive_id}`);
+  }
+}
+
+function printHelpers(helpers) {
+  for (const helper of helpers) {
+    console.log(`${helper.helper}\t${helper.operation}\t${helper.method} ${helper.path}`);
   }
 }
 
@@ -216,6 +241,22 @@ async function runSelfTest() {
   });
 
   assert.deepEqual(parseArgs([
+    "helpers",
+    "--category",
+    "os_control",
+    "--json",
+  ]), {
+    command: "helpers",
+    operation: undefined,
+    pathParams: {},
+    query: {},
+    strictQuery: true,
+    categories: ["os_control"],
+    statuses: [],
+    json: true,
+  });
+
+  assert.deepEqual(parseArgs([
     "list",
     "--category",
     "os_control",
@@ -257,6 +298,15 @@ async function runSelfTest() {
     describeOperation(sdk, catalog, "workspace_control_get_workspace_status").response_schema,
     "WorkspaceStatusResponse"
   );
+
+  const helpers = await listHelpers(sdk, catalog, {
+    categories: ["os_control"],
+    statuses: [],
+  });
+  assert.deepEqual(helpers.map((helper) => helper.helper), [
+    "workspace.capture",
+    "workspace.status",
+  ]);
 
   const response = await client.requestOperation("workspace_control_get_workspace_status");
   assert.deepEqual(response.status, { available: true, backend: "aerospace" });
