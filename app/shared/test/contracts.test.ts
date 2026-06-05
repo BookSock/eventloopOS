@@ -620,8 +620,9 @@ describe("primitive catalog SDK boundary", () => {
       const primitiveError = error as PrimitiveRequestBuildError;
       expect(primitiveError.kind).toBe("missing_path_param");
       expect(primitiveError.parameter).toBe("id");
-      expect(primitiveErrorSummary(error)).toMatchObject({
+      expect(primitiveErrorSummary(error)).toEqual({
         name: "PrimitiveRequestBuildError",
+        message: "Missing primitive path parameter: id",
         method: "GET",
         path: "/tasks/:id",
         kind: "missing_path_param",
@@ -660,8 +661,9 @@ describe("primitive catalog SDK boundary", () => {
       const primitiveError = error as PrimitiveRequestBuildError;
       expect(primitiveError.kind).toBe("unknown_query_param");
       expect(primitiveError.parameter).toBe("sttae");
-      expect(primitiveErrorSummary(error)).toMatchObject({
+      expect(primitiveErrorSummary(error)).toEqual({
         name: "PrimitiveRequestBuildError",
+        message: "Unknown primitive query parameter: sttae",
         method: "GET",
         path: "/queue",
         kind: "unknown_query_param",
@@ -752,8 +754,9 @@ describe("primitive catalog SDK boundary", () => {
       expect(primitiveError.responseText).toContain("duplicate idempotency key");
       expect(isPrimitiveHttpError(error, { status: 409, code: "idempotency_conflict", method: "post" })).toBe(true);
       expect(isPrimitiveHttpError(error, { status: 409, code: "manual_mode_active" })).toBe(false);
-      expect(primitiveErrorSummary(error)).toMatchObject({
+      expect(primitiveErrorSummary(error)).toEqual({
         name: "PrimitiveHttpError",
+        message: "Primitive route failed: POST /onboarding/approvals/batch HTTP 409",
         method: "POST",
         path: "/onboarding/approvals/batch",
         status: 409,
@@ -824,8 +827,9 @@ describe("primitive catalog SDK boundary", () => {
       expect(primitiveError.method).toBe("GET");
       expect(primitiveError.path).toBe("/health");
       expect(observedSignal?.aborted).toBe(true);
-      expect(primitiveErrorSummary(error)).toMatchObject({
+      expect(primitiveErrorSummary(error)).toEqual({
         name: "PrimitiveTimeoutError",
+        message: "Primitive route timed out after 5ms: GET /health",
         method: "GET",
         path: "/health",
         timeoutMs: 5
