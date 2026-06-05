@@ -1389,9 +1389,9 @@ export function selectPrimitiveCapabilities(
   catalog: PrimitiveCatalog,
   filter: PrimitiveCapabilityFilter = {}
 ): PrimitiveCapabilitySummary[] {
-  const idSet = filter.ids ? new Set(filter.ids) : undefined;
-  const statusSet = filter.statuses ? new Set(filter.statuses) : undefined;
-  const categorySet = filter.categories ? new Set(filter.categories) : undefined;
+  const idSet = filter.ids && filter.ids.length > 0 ? new Set(filter.ids) : undefined;
+  const statusSet = filter.statuses && filter.statuses.length > 0 ? new Set(filter.statuses) : undefined;
+  const categorySet = filter.categories && filter.categories.length > 0 ? new Set(filter.categories) : undefined;
   const minRouteCount = filter.minRouteCount ?? 0;
   return summarizePrimitiveCatalog(catalog).primitives.filter((primitive) => {
     if (idSet && !idSet.has(primitive.id)) return false;

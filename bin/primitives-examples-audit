@@ -54,6 +54,7 @@ function auditPrimitiveExamples(examplesDir) {
     requireIncludes(loader, "export async function createPrimitiveExampleOperationClient", "loader must export createPrimitiveExampleOperationClient", errors);
     requireIncludes(loader, "createPrimitiveOperationsClient", "loader must create shared primitive operations client", errors);
     requireIncludes(loader, "createPrimitiveOperationHttpClient", "loader must create shared primitive operation-id HTTP client", errors);
+    requireIncludes(loader, "listPrimitiveOperations", "loader must expose shared primitive operation-list helper", errors);
     requireIncludes(loader, "pnpm\", [\"--filter\", \"@eventloopos/shared\", \"build\"]", "loader must build shared SDK on demand", errors);
   }
 
@@ -72,7 +73,7 @@ function auditPrimitiveExamples(examplesDir) {
       }
       if (file === "operation-id-client.mjs") {
         requireIncludes(text, "createPrimitiveExampleOperationClient", "operation-id-client must use shared operation-id client loader", errors);
-        requireIncludes(text, "buildPrimitiveApiIndex", "operation-id-client must expose catalog-backed operation discovery", errors);
+        requireIncludes(text, "listPrimitiveOperations", "operation-id-client must expose catalog-backed operation discovery through shared SDK helper", errors);
         requireIncludes(text, "describeOperation", "operation-id-client must describe operation ids before live calls", errors);
         requireIncludes(text, "listOperations", "operation-id-client must list operation ids before live calls", errors);
         requireIncludes(text, "requestOperation", "operation-id-client must call primitives by operation id", errors);
@@ -120,6 +121,7 @@ export async function createPrimitiveExampleOperationClient() {}
 const command = ["pnpm", ["--filter", "@eventloopos/shared", "build"]];
 const helper = "createPrimitiveOperationsClient";
 const operationHelper = "createPrimitiveOperationHttpClient";
+const listHelper = "listPrimitiveOperations";
 `);
   fs.writeFileSync(path.join(examplesDir, "discover-primitives.mjs"), `
 import { loadPrimitiveSdk } from "./lib/primitive-sdk-loader.mjs";
@@ -134,7 +136,7 @@ if (process.argv.includes("--self-test")) {}
 `);
   fs.writeFileSync(path.join(examplesDir, "operation-id-client.mjs"), `
 import { loadPrimitiveSdk, createPrimitiveExampleOperationClient } from "./lib/primitive-sdk-loader.mjs";
-const indexHelper = "buildPrimitiveApiIndex";
+const operationListHelper = "listPrimitiveOperations";
 function describeOperation() {}
 function listOperations() {}
 const call = "requestOperation";

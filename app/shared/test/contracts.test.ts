@@ -523,11 +523,15 @@ describe("primitive catalog SDK boundary", () => {
   it("resolves compact primitive operation ids back to validated requests", () => {
     const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
     const operations = listPrimitiveOperations(catalog);
+    const emptyFilterOperations = listPrimitiveOperations(catalog, { categories: [], statuses: [], ids: [] });
     const osControlOperations = listPrimitiveOperations(catalog, { categories: ["os_control"] });
     const criticalOperations = listPrimitiveOperations(catalog, { requireResponsivenessCritical: true });
     const operation = getPrimitiveOperation(catalog, "queue_paper_routing_get_queue_by_id_lineage");
 
     expect(operations).toHaveLength(summarizePrimitiveCatalog(catalog).routeCount);
+    expect(emptyFilterOperations.map((candidate) => candidate.operation)).toEqual(
+      operations.map((candidate) => candidate.operation)
+    );
     expect(osControlOperations).toHaveLength(20);
     expect(osControlOperations.map((candidate) => candidate.operation)).toContain("workspace_control_get_workspace_status");
     expect(osControlOperations.map((candidate) => candidate.primitiveId)).not.toContain("queue_paper_routing");

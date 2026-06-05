@@ -107,46 +107,43 @@ function parseArgs(argv) {
 }
 
 function listOperations(sdk, catalog, options) {
-  const index = sdk.buildPrimitiveApiIndex(catalog);
-  return index.primitives
-    .filter((primitive) => options.categories.length === 0 || options.categories.includes(primitive.category))
-    .filter((primitive) => options.statuses.length === 0 || options.statuses.includes(primitive.status))
-    .flatMap((primitive) => primitive.routes.map((route) => operationSummary(primitive, route)))
+  const filter = {};
+  if (options.categories.length > 0) filter.categories = options.categories;
+  if (options.statuses.length > 0) filter.statuses = options.statuses;
+  return sdk.listPrimitiveOperations(catalog, filter)
+    .map(operationSummary)
     .sort((left, right) => left.operation.localeCompare(right.operation));
 }
 
 function describeOperation(sdk, catalog, operationId) {
-  const index = sdk.buildPrimitiveApiIndex(catalog);
-  for (const primitive of index.primitives) {
-    const route = primitive.routes.find((candidate) => candidate.operation === operationId);
-    if (route) return operationDetail(primitive, route);
-  }
-  return undefined;
+  const operation = sdk.listPrimitiveOperations(catalog)
+    .find((candidate) => candidate.operation === operationId);
+  return operation ? operationDetail(operation) : undefined;
 }
 
-function operationSummary(primitive, route) {
+function operationSummary(route) {
   return {
     operation: route.operation,
-    primitive_id: primitive.id,
-    primitive_title: primitive.title,
-    category: primitive.category,
-    status: primitive.status,
-    method: route.method,
-    path: route.path,
-    request_schema: route.requestSchema ?? null,
-    response_schema: route.responseSchema,
-    query_parameters: route.queryParameters,
-    request_body: route.requestBody,
+    primitive_id: route.primitiveId,
+    primitive_title: route.primitiveTitle,
+    category: route.primitiveCategory,
+    status: route.primitiveStatus,
+    method: route.route.method,
+    path: route.route.path,
+    request_schema: route.route.request_schema ?? null,
+    response_schema: route.route.response_schema,
+    query_parameters: route.route.query_parameters ?? [],
+    request_body: route.route.request_body_required === true || Boolean(route.route.request_schema),
   };
 }
 
-function operationDetail(primitive, route) {
+function operationDetail(route) {
   return {
-    ...operationSummary(primitive, route),
-    route_file: route.routeFile,
-    latency_budgets: route.latencyBudgets.map((budget) => ({
+    ...operationSummary(route),
+    route_file: route.route.route_file,
+    latency_budgets: (route.route.latency_budgets ?? []).map((budget) => ({
       name: budget.name,
-      p95_ms: budget.p95Ms,
+      p95_ms: budget.p95_ms,
       proof: budget.proof,
     })),
   };

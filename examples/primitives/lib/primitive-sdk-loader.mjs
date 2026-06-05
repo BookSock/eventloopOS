@@ -55,7 +55,7 @@ export async function createPrimitiveExampleOperationClient({
 } = {}) {
   const sdk = await loadPrimitiveSdk([
     "parsePrimitiveCatalog",
-    "buildPrimitiveApiIndex",
+    "listPrimitiveOperations",
     "createPrimitiveOperationHttpClient",
   ]);
   const catalog = readPrimitiveCatalog(sdk, catalogPath);
@@ -82,6 +82,7 @@ function defaultPrimitiveSdkExports() {
     "selectPrimitiveLatencyBudgets",
     "buildPrimitiveProofPlan",
     "buildPrimitiveApiIndex",
+    "listPrimitiveOperations",
     "createPrimitiveOperationHttpClient",
     "createPrimitiveOperationsClient",
   ];
