@@ -72,6 +72,7 @@ async function runDoctor(options, deps = {}) {
   checks.push(commandCheck(commandRunner, "mcp_source_templates", "node", ["bin/mcp-source-templates-audit", "--include-local"]));
   checks.push(commandCheck(commandRunner, "primitive_self_tests", "node", ["bin/primitives-self-test-runner", "--catalog", "docs/primitives.catalog.json"]));
   checks.push(commandCheck(commandRunner, "discover_primitives_example", "node", ["examples/primitives/discover-primitives.mjs", "--self-test"]));
+  checks.push(commandCheck(commandRunner, "primitive_workbench_walkthrough_example", "node", ["examples/primitives/primitive-workbench-walkthrough.mjs", "--self-test"]));
   checks.push(commandCheck(commandRunner, "restore_my_desk_example", "node", ["examples/primitives/restore-my-desk.mjs", "--self-test"]));
   checks.push(commandCheck(commandRunner, "agent_attention_queue_example", "node", ["examples/primitives/agent-attention-queue.mjs", "--self-test"]));
   checks.push(commandCheck(commandRunner, "window_hotkey_router_example", "node", ["examples/primitives/window-hotkey-router.mjs", "--self-test"]));
@@ -511,6 +512,7 @@ async function runSelfTest() {
   assert.ok(manifest.checks.some((check) => check.name === "shared_sdk_pack_audit"));
   assert.ok(manifest.checks.some((check) => check.name === "mcp_source_templates"));
   assert.ok(manifest.checks.some((check) => check.name === "primitive_self_tests"));
+  assert.ok(manifest.checks.some((check) => check.name === "primitive_workbench_walkthrough_example"));
   assert.ok(manifest.checks.some((check) => check.name === "live_workspace_status"));
   assert.equal(manifest.primitive_readiness.strict_ok, true);
   assert.equal(manifest.primitive_readiness.primitive_count, 2);
