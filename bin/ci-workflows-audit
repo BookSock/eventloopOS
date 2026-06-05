@@ -79,6 +79,7 @@ export async function auditWorkflows(root) {
   requireIncludes(texts.secretScan, "timeout-minutes: 10", "secret-scan.yml must keep bounded runtime", errors);
   rejectIncludes(texts.secretScan, "paths-ignore:", "secret-scan.yml must stay broad; secrets can land in docs/fixtures", errors);
 
+  auditSharedWorkflowGuards("ai-review-template.yml", texts.aiReview, errors);
   requireIncludes(texts.aiReview, "types: [labeled]", "ai-review-template.yml must only run on PR label events", errors);
   requireIncludes(texts.aiReview, "github.event.label.name == 'needs-ai-review'", "ai-review-template.yml must be opt-in by label", errors);
   requireIncludes(texts.aiReview, "pull-requests: write", "ai-review-template.yml must scope write permission to PR comments", errors);
@@ -206,6 +207,9 @@ name: AI Review Template
 on:
   pull_request:
     types: [labeled]
+concurrency:
+  group: ai-review-template-\${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 jobs:
   template-review:
     if: github.event.label.name == 'needs-ai-review'
@@ -238,6 +242,14 @@ run pnpm test:e2e:event-loop
     const fail = await auditWorkflows(tmp);
     assert.equal(fail.ok, false);
     assert.ok(fail.errors.includes("ci.yml must cancel in-progress stale runs"));
+
+    writeFixture(workflows, "ci.yml", (await readFile(badCi, "utf8")).replace("cancel-in-progress: false", "cancel-in-progress: true"));
+    const aiReview = path.join(workflows, "ai-review-template.yml");
+    writeFixture(workflows, "ai-review-template.yml", (await readFile(aiReview, "utf8")).replace("cancel-in-progress: true", "cancel-in-progress: false"));
+    const noisyAiReview = await auditWorkflows(tmp);
+    assert.equal(noisyAiReview.ok, false);
+    assert.ok(noisyAiReview.errors.includes("ai-review-template.yml must cancel in-progress stale runs"));
+    writeFixture(workflows, "ai-review-template.yml", (await readFile(aiReview, "utf8")).replace("cancel-in-progress: false", "cancel-in-progress: true"));
 
     writeFixture(workflows, "ci.yml", (await readFile(badCi, "utf8")).replace("runs-on: ubuntu-latest", "runs-on: macos-latest"));
     const paidRunnerRisk = await auditWorkflows(tmp);
