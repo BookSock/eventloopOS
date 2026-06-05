@@ -20,6 +20,51 @@ final class AdvanceToastBannerPresentationTests: XCTestCase {
         XCTAssertNotEqual(first.pulseOpacity, second.pulseOpacity)
     }
 
+    func testActionCompleteSuccessKeepsGreenCheckmark() {
+        let presentation = AdvanceToastBannerPresentation.make(
+            toast: .actionComplete("Done. Next paper ready."),
+            queueCount: 1,
+            feedbackSequence: 1
+        )
+
+        XCTAssertEqual(presentation.icon, "checkmark.circle.fill")
+        XCTAssertEqual(presentation.foregroundRole, .success)
+    }
+
+    func testPausedAndFailedActionMessagesUseWarningRole() {
+        let paused = AdvanceToastBannerPresentation.make(
+            toast: .actionComplete("Queue paused. Try again."),
+            queueCount: 1,
+            feedbackSequence: 1
+        )
+        let manualMode = AdvanceToastBannerPresentation.make(
+            toast: .actionComplete("Manual Mode active. Press Ctrl-Option-M to return."),
+            queueCount: 1,
+            feedbackSequence: 1
+        )
+        let failed = AdvanceToastBannerPresentation.make(
+            toast: .actionComplete("Workspace restore failed: schema_error"),
+            queueCount: 1,
+            feedbackSequence: 1
+        )
+
+        XCTAssertEqual(paused.icon, "exclamationmark.triangle.fill")
+        XCTAssertEqual(paused.foregroundRole, .warning)
+        XCTAssertEqual(manualMode.foregroundRole, .warning)
+        XCTAssertEqual(failed.foregroundRole, .warning)
+    }
+
+    func testNoSelectionActionMessagesUseMutedRole() {
+        let presentation = AdvanceToastBannerPresentation.make(
+            toast: .actionComplete("No paper selected."),
+            queueCount: 1,
+            feedbackSequence: 1
+        )
+
+        XCTAssertEqual(presentation.icon, "exclamationmark.circle")
+        XCTAssertEqual(presentation.foregroundRole, .muted)
+    }
+
     func testDeferredMessageReflectsQueueState() {
         let dueAt = Date(timeIntervalSince1970: 1_767_040_000)
         let empty = AdvanceToastBannerPresentation.make(

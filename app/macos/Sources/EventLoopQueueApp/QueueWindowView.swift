@@ -798,8 +798,8 @@ struct AdvanceToastBannerPresentation: Equatable {
             return "pause.circle.fill"
         case .noForegroundCodex, .queueEmpty:
             return "tray"
-        case .actionComplete:
-            return "checkmark.circle.fill"
+        case let .actionComplete(message):
+            return actionCompleteIcon(for: message)
         case .deferredUntil:
             return "clock.fill"
         case .enteredLimbo:
@@ -819,9 +819,44 @@ struct AdvanceToastBannerPresentation: Equatable {
             return .warning
         case .noForegroundCodex, .queueEmpty, .enteredLimbo:
             return .muted
-        case .actionComplete, .deferredUntil, .taskCreated, .switchedToPaper, .returnedToTask:
+        case let .actionComplete(message):
+            return actionCompleteRole(for: message)
+        case .deferredUntil, .taskCreated, .switchedToPaper, .returnedToTask:
             return .success
         }
+    }
+
+    private static func actionCompleteIcon(for message: String) -> String {
+        switch actionCompleteRole(for: message) {
+        case .warning:
+            return "exclamationmark.triangle.fill"
+        case .muted:
+            return "exclamationmark.circle"
+        case .success:
+            return "checkmark.circle.fill"
+        }
+    }
+
+    private static func actionCompleteRole(for message: String) -> AdvanceToastForegroundRole {
+        let lowered = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if lowered.isEmpty {
+            return .muted
+        }
+        if lowered.contains("queue paused")
+            || lowered.contains("manual mode active")
+            || lowered.contains("failed")
+            || lowered.contains("not ready")
+            || lowered.contains("required") {
+            return .warning
+        }
+        if lowered.contains("no paper selected")
+            || lowered.contains("no ready paper")
+            || lowered.contains("no other paper")
+            || lowered.contains("no saved workspace")
+            || lowered.contains("already running") {
+            return .muted
+        }
+        return .success
     }
 }
 
