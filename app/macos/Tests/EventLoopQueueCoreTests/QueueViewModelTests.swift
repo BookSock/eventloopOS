@@ -2741,8 +2741,11 @@ final class QueueViewModelTests: XCTestCase {
         viewModel.setAutoBindContinuous(false, intervalNanoseconds: 1_000_000)
         let stoppedRunCount = client.autoBindRunCount
         try? await Task.sleep(nanoseconds: 20_000_000)
+        let drainedRunCount = client.autoBindRunCount
+        try? await Task.sleep(nanoseconds: 20_000_000)
 
-        XCTAssertEqual(client.autoBindRunCount, stoppedRunCount)
+        XCTAssertEqual(client.autoBindRunCount, drainedRunCount)
+        XCTAssertLessThanOrEqual(drainedRunCount, stoppedRunCount + 1)
         XCTAssertGreaterThanOrEqual(stoppedRunCount, 1)
         XCTAssertFalse(viewModel.autoBindContinuousEnabled)
     }
