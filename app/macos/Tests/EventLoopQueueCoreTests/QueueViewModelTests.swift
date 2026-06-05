@@ -69,6 +69,23 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertGreaterThan(viewModel.feedbackSequence, beforeFeedbackSequence)
     }
 
+    func testPullNextPaperShowsManualModeFeedbackForManualModeLeaseConflict() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-blog-feedback")
+        client.setNextLeaseError(QueueClientError.httpStatusMessage(
+            409,
+            "manual_mode_active: queue is paused while manual mode is active"
+        ))
+
+        await viewModel.pullNextPaper()
+
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Press Ctrl-Option-M to return."))
+    }
+
     func testRepeatedAdvanceToastAssignmentsIncrementFeedbackSequence() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
@@ -588,6 +605,23 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Action saved. Queue paused; no next paper claimed."))
     }
 
+    func testDoneAndNextShowsManualModeFeedbackForManualModeLeaseConflict() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+        client.setNextLeaseError(QueueClientError.httpStatusMessage(
+            409,
+            "manual_mode_active: queue is paused while manual mode is active"
+        ))
+
+        await viewModel.doneAndNext()
+
+        XCTAssertEqual(client.completedPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Action saved. Manual Mode active; no next paper claimed."))
+    }
+
     func testDeferSelectedPacketShowsSuccessToastWhenNextPaperExists() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
@@ -923,6 +957,22 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state, .loaded)
         XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Queue paused. Try again."))
+    }
+
+    func testMoveToNextShowsManualModeFeedbackForManualModeLeaseConflict() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+        client.setNextLeaseError(QueueClientError.httpStatusMessage(
+            409,
+            "manual_mode_active: queue is paused while manual mode is active"
+        ))
+
+        await viewModel.moveToNext()
+
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Press Ctrl-Option-M to return."))
     }
 
     func testExecuteRecommendedActionCompletesSelectedPacketAndAdvances() async {

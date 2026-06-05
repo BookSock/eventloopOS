@@ -132,6 +132,7 @@ Report any of these as product issues:
 - Manual Mode return restores the wrong workspace or loses a user-opened window unexpectedly.
 - Queue footer feedback stays stale or does not acknowledge restore/manual actions.
 - Queue hotkeys do nothing silently when no paper is selected.
+- A 409/manual-mode pause should surface as "Manual Mode active. Press Ctrl-Option-M to return.", not as a raw HTTP error.
 
 ## Result Template
 

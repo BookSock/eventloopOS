@@ -110,6 +110,19 @@ public enum QueueClientError: Error, Equatable, LocalizedError {
             nil
         }
     }
+
+    public var responseMessage: String? {
+        switch self {
+        case let .httpStatusMessage(_, message):
+            message
+        case .invalidResponse, .httpStatus, .packetNotFound:
+            nil
+        }
+    }
+
+    public var isManualModeConflict: Bool {
+        statusCode == 409 && responseMessage?.lowercased().contains("manual_mode_active") == true
+    }
 }
 
 public struct HTTPQueueClient: QueueClient {

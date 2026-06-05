@@ -581,6 +581,20 @@ public final class QueueViewModel: ObservableObject {
         return false
     }
 
+    private func queuePausedToast(for error: Error) -> AdvanceToast {
+        if let queueError = error as? QueueClientError, queueError.isManualModeConflict {
+            return .actionComplete("Manual Mode active. Press Ctrl-Option-M to return.")
+        }
+        return .actionComplete("Queue paused. Try again.")
+    }
+
+    private func actionSavedQueuePausedToast(for error: Error) -> AdvanceToast {
+        if let queueError = error as? QueueClientError, queueError.isManualModeConflict {
+            return .actionComplete("Action saved. Manual Mode active; no next paper claimed.")
+        }
+        return .actionComplete("Action saved. Queue paused; no next paper claimed.")
+    }
+
     public func pullNextPaper() async {
         guard beginPaperAction("Switching papers...") else { return }
         defer { finishPaperAction() }
@@ -604,8 +618,8 @@ public final class QueueViewModel: ObservableObject {
             packets = try await client.fetchQueue()
             selectedPacketID = leasedPacket?.id ?? packets.first?.id
             state = .loaded
-            if leaseResult.conflict {
-                advanceToast = .actionComplete("Queue paused. Try again.")
+            if let conflictError = leaseResult.conflictError {
+                advanceToast = queuePausedToast(for: conflictError)
             } else if selectedPacketID == nil, packets.isEmpty {
                 advanceToast = .queueEmpty
             } else if let packetId = selectedPacketID {
@@ -621,30 +635,30 @@ public final class QueueViewModel: ObservableObject {
         await requestSelectedBrowserContextRestoresIfNeeded()
     }
 
-    private func leaseNextPaperPreservingSelection(selectedID: String?) async throws -> (packet: ReviewPacket?, conflict: Bool) {
+    private func leaseNextPaperPreservingSelection(selectedID: String?) async throws -> (packet: ReviewPacket?, conflictError: Error?) {
         if let selectedID, packets.contains(where: { $0.id == selectedID }) {
             do {
                 _ = try await client.renewLease(packetId: selectedID)
-                return (selectedPacket, false)
+                return (selectedPacket, nil)
             } catch {
                 do {
-                    return (try await client.next(after: nil), false)
+                    return (try await client.next(after: nil), nil)
                 } catch {
                     guard isQueueConflict(error) else {
                         throw error
                     }
-                    return (selectedPacket, true)
+                    return (selectedPacket, error)
                 }
             }
         }
 
         do {
-            return (try await client.next(after: nil), false)
+            return (try await client.next(after: nil), nil)
         } catch {
             guard isQueueConflict(error) else {
                 throw error
             }
-            return (nil, true)
+            return (nil, error)
         }
     }
 
@@ -1083,7 +1097,7 @@ public final class QueueViewModel: ObservableObject {
             packets = (try? await client.fetchQueue()) ?? packets
             selectedPacketID = packets.first?.id
             state = .loaded
-            advanceToast = packets.isEmpty ? successToast : .actionComplete("Action saved. Queue paused; no next paper claimed.")
+            advanceToast = packets.isEmpty ? successToast : actionSavedQueuePausedToast(for: error)
             await loadTaskSessionsForSelectedPacketIfNeeded()
             await prepareSelectedWorkspaceRestore()
             await requestSelectedBrowserContextRestoresIfNeeded()
@@ -2120,7 +2134,7 @@ public final class QueueViewModel: ObservableObject {
                 packets = (try? await client.fetchQueue()) ?? packets
                 selectedPacketID = packets.first?.id ?? selectedPacketID
                 state = .loaded
-                advanceToast = .actionComplete("Queue paused. Try again.")
+                advanceToast = queuePausedToast(for: error)
                 return
             }
             state = .failed(error.localizedDescription)
