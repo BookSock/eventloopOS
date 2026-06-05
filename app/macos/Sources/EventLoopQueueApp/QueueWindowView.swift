@@ -700,7 +700,7 @@ private struct AdvanceToastBanner: View {
             HStack(spacing: 8) {
                 RoundedRectangle(cornerRadius: 2)
                     .fill(foreground(for: presentation.foregroundRole))
-                    .frame(width: 3)
+                    .frame(width: 3, height: 24)
                     .opacity(presentation.pulseOpacity)
                 Label {
                     Text(presentation.message)
@@ -782,14 +782,10 @@ struct AdvanceToastBannerPresentation: Equatable {
         }
     }
 
-    private static func paperBriefingMessage(packetId: String, title: String, decision: String) -> String {
+    private static func paperBriefingMessage(packetId: String, title: String, decision _: String) -> String {
         let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        let decision = decision.trimmingCharacters(in: .whitespacesAndNewlines)
         let paper = title.isEmpty ? packetId : title
-        if decision.isEmpty {
-            return "Showing paper: \(paper)"
-        }
-        return "Showing paper: \(paper). \(decision)"
+        return "Showing paper: \(paper)"
     }
 
     private static func icon(for toast: AdvanceToast) -> String {

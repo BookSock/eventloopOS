@@ -157,12 +157,21 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
       await recordWindowObservations(deps, rawSnapshot, currentTaskId, tickNow);
       await autoClaimTaggedTaskWindows(deps, rawSnapshot, tickNow);
       await autoClaimProcessTreeTaskWindows(deps, rawSnapshot, tickNow);
-      const snapshot = await filterSnapshotForTaskSaveWithProcessAncestry(
+      const followsWindowIds = await readFollowsWindowIds(deps);
+      const taskWindowClaims = await readTaskWindowClaims(deps);
+      let snapshot = await filterSnapshotForTaskSaveWithProcessAncestry(
         deps,
         rawSnapshot,
-        await readFollowsWindowIds(deps),
+        followsWindowIds,
         currentTaskId,
-        await readTaskWindowClaims(deps),
+        taskWindowClaims,
+      );
+      snapshot = await recaptureMissingActiveWorkspaceFrames(
+        deps,
+        snapshot,
+        followsWindowIds,
+        currentTaskId,
+        taskWindowClaims,
       );
       const fingerprint = snapshotFingerprint(snapshot);
       const lastFingerprint = lastSavedSnapshotByTask.get(currentTaskId);
@@ -516,6 +525,57 @@ async function filterSnapshotForTaskSaveWithProcessAncestry(
     ...snapshot,
     windows,
     focusedWindowId,
+  };
+}
+
+async function recaptureMissingActiveWorkspaceFrames(
+  deps: AmbientWorkspaceSaverDeps,
+  snapshot: WorkspaceSnapshot,
+  followsWindowIds: ReadonlySet<string>,
+  currentTaskId: string,
+  taskWindowClaims: readonly TaskWindowClaim[],
+): Promise<WorkspaceSnapshot> {
+  const activeWorkspace = snapshot.activeWorkspace;
+  if (!activeWorkspace) return snapshot;
+  const missingFrameWindowIds = snapshot.windows
+    .filter((window) => window.workspace === activeWorkspace && window.frame === undefined)
+    .map((window) => window.id)
+    .filter(isPositiveInteger);
+  if (missingFrameWindowIds.length === 0) return snapshot;
+
+  const recapturedRaw = await deps.workspace.capture({
+    frameWindowIds: missingFrameWindowIds,
+    focusFrameWorkspaces: true,
+    restoreFrameCaptureFocus: true,
+  });
+  const recaptured = await filterSnapshotForTaskSaveWithProcessAncestry(
+    deps,
+    recapturedRaw,
+    followsWindowIds,
+    currentTaskId,
+    taskWindowClaims,
+  );
+  const recapturedById = new Map(recaptured.windows.map((window) => [window.id, window]));
+  let mergedFrameCount = 0;
+  const windows = snapshot.windows.map((window) => {
+    if (window.frame !== undefined) return window;
+    const recapturedWindow = recapturedById.get(window.id);
+    if (recapturedWindow?.frame === undefined) return window;
+    mergedFrameCount += 1;
+    return { ...window, frame: recapturedWindow.frame };
+  });
+
+  if (mergedFrameCount === 0) return snapshot;
+  const focusedWindowId =
+    snapshot.focusedWindowId !== undefined && windows.some((window) => window.id === snapshot.focusedWindowId)
+      ? snapshot.focusedWindowId
+      : undefined;
+
+  return {
+    ...snapshot,
+    windows,
+    focusedWindowId,
+    frameCapture: recaptured.frameCapture ?? snapshot.frameCapture,
   };
 }
 

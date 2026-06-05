@@ -95,7 +95,7 @@ final class AdvanceToastBannerPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.foregroundRole, .warning)
     }
 
-    func testPaperSwitchToastShowsDecisionBriefing() {
+    func testPaperSwitchToastStaysCompactBecauseBriefingStripOwnsDecision() {
         let presentation = AdvanceToastBannerPresentation.make(
             toast: .switchedToPaper(
                 packetId: "qit_demo_customer",
@@ -108,8 +108,9 @@ final class AdvanceToastBannerPresentationTests: XCTestCase {
 
         XCTAssertEqual(
             presentation.message,
-            "Showing paper: Customer reply. Decide whether to send or ask agent for another pass."
+            "Showing paper: Customer reply"
         )
+        XCTAssertFalse(presentation.message.contains("Decide whether"))
         XCTAssertEqual(presentation.icon, "doc.text.magnifyingglass")
         XCTAssertEqual(presentation.foregroundRole, .success)
     }

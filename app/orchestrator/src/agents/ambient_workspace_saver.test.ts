@@ -11,9 +11,10 @@ import type { WorkspaceSnapshot } from "../workspace/aerospace.js";
 import type { Runtime } from "../runtime.js";
 
 type FakeWorkspace = {
-  capture: () => WorkspaceSnapshot;
+  capture: (options?: unknown) => WorkspaceSnapshot;
   setSnapshot: (snapshot: WorkspaceSnapshot) => void;
   captureCount: () => number;
+  captureOptions?: () => unknown[];
 };
 
 function makeFakeWorkspace(initial: WorkspaceSnapshot): FakeWorkspace {
@@ -29,6 +30,30 @@ function makeFakeWorkspace(initial: WorkspaceSnapshot): FakeWorkspace {
     },
     captureCount() {
       return calls;
+    },
+  };
+}
+
+function makeSequencedWorkspace(snapshots: WorkspaceSnapshot[]): FakeWorkspace {
+  let calls = 0;
+  const optionsLog: unknown[] = [];
+  let current = clone(snapshots[0] ?? makeSnapshot([]));
+  return {
+    capture(options?: unknown) {
+      optionsLog.push(options);
+      const next = snapshots[Math.min(calls, snapshots.length - 1)];
+      calls += 1;
+      if (next) current = clone(next);
+      return clone(current);
+    },
+    setSnapshot(next) {
+      current = clone(next);
+    },
+    captureCount() {
+      return calls;
+    },
+    captureOptions() {
+      return optionsLog;
     },
   };
 }
@@ -180,6 +205,66 @@ describe("ambient_workspace_saver", () => {
     assert.ok(
       obs.activities.some((a) => a.type === "ambient_workspace_save_committed" && a.task_id === "task_alpha"),
       "should emit committed event",
+    );
+  });
+
+  it("recaptures missing active-paper frames before saving new windows", async () => {
+    const missingFrame = {
+      backend: "aerospace",
+      activeWorkspace: "main",
+      focusedWindowId: 2,
+      windows: [
+        {
+          id: 1,
+          app: "Google Chrome",
+          title: "Customer",
+          workspace: "main",
+          layout: "floating" as const,
+          frame: { x: 10, y: 20, width: 300, height: 240 },
+        },
+        {
+          id: 2,
+          app: "TextEdit",
+          title: "Scratch",
+          workspace: "main",
+          layout: "floating" as const,
+        },
+      ],
+    } satisfies WorkspaceSnapshot;
+    const withFrame = {
+      ...missingFrame,
+      windows: missingFrame.windows.map((window) =>
+        window.id === 2
+          ? { ...window, frame: { x: 500, y: 160, width: 720, height: 480 } }
+          : window,
+      ),
+      frameCapture: { status: "captured" as const, timeoutMs: 2_500, observed: 1 },
+    } satisfies WorkspaceSnapshot;
+    const workspace = makeSequencedWorkspace([missingFrame, withFrame, withFrame, withFrame]);
+    const writes: Array<{ taskId: string; snapshot: WorkspaceSnapshot }> = [];
+    const saver = createAmbientWorkspaceSaver({
+      workspace,
+      getCurrentTaskState: async () => ({ currentTaskId: "task_customer", currentTaskWorkspaceId: "main" }),
+      updateTaskLayout: async (taskId, snapshot) => {
+        writes.push({ taskId, snapshot });
+      },
+      isManualModeActive: () => false,
+      debounceMs: 0,
+      now: () => new Date("2026-05-10T15:00:00.000Z"),
+    });
+
+    assert.equal((await saver.tick()).decision, "debounced");
+    assert.deepEqual(workspace.captureOptions?.()[1], {
+      frameWindowIds: [2],
+      focusFrameWorkspaces: true,
+      restoreFrameCaptureFocus: true,
+    });
+
+    assert.equal((await saver.tick()).decision, "committed");
+    assert.equal(writes.length, 1);
+    assert.deepEqual(
+      writes[0].snapshot.windows.find((window) => window.id === 2)?.frame,
+      { x: 500, y: 160, width: 720, height: 480 },
     );
   });
 
