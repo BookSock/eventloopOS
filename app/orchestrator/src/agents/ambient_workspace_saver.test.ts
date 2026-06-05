@@ -183,6 +183,45 @@ describe("ambient_workspace_saver", () => {
     );
   });
 
+  it("skips when current task is bound to a different AeroSpace workspace", async () => {
+    const workspace = makeFakeWorkspace(makeSnapshot([1, 2], {
+      activeWorkspace: "lab-ops",
+      focusedWindowId: 1,
+    }));
+    const obs = makeFakeObservability();
+    const writes: Array<{ taskId: string; snapshot: WorkspaceSnapshot }> = [];
+    const saver = createAmbientWorkspaceSaver({
+      workspace,
+      getCurrentTaskState: async () => ({
+        currentTaskId: "task_demo_customer",
+        currentTaskWorkspaceId: "demo-customer",
+      }),
+      updateTaskLayout: async (taskId, snapshot) => {
+        writes.push({ taskId, snapshot });
+      },
+      isManualModeActive: () => false,
+      observability: obs.recorder,
+      now: () => new Date("2026-05-10T15:00:00.000Z"),
+    });
+
+    const result = await saver.tick();
+
+    assert.deepEqual(result, {
+      decision: "skipped_workspace_mismatch",
+      taskId: "task_demo_customer",
+      activeWorkspace: "lab-ops",
+      taskWorkspace: "demo-customer",
+    });
+    assert.equal(writes.length, 0);
+    assert.equal(workspace.captureCount(), 1, "must capture once to learn active workspace");
+    assert.ok(
+      obs.activities.some((a) =>
+        a.type === "ambient_workspace_save_skipped_workspace_mismatch" && a.task_id === "task_demo_customer"
+      ),
+      "should emit skipped_workspace_mismatch event",
+    );
+  });
+
   it("resets debounce window when snapshot keeps changing", async () => {
     const workspace = makeFakeWorkspace(makeSnapshot([1]));
     const writes: Array<{ taskId: string; snapshot: WorkspaceSnapshot }> = [];

@@ -327,7 +327,7 @@ public final class QueueViewModel: ObservableObject {
             if let selectedPacketID, packets.contains(where: { $0.id == selectedPacketID }) {
                 self.selectedPacketID = selectedPacketID
             } else {
-                selectedPacketID = nil
+                selectedPacketID = packets.first?.id
             }
             state = .loaded
         } catch {

@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class QueueViewModelTests: XCTestCase {
-    func testLoadQueueShowsStackWithoutActivePaper() async {
+    func testLoadQueueSelectsFirstPaperWithoutLeasing() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
 
@@ -11,8 +11,8 @@ final class QueueViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.state, .loaded)
         XCTAssertEqual(viewModel.packets.count, 3)
-        XCTAssertNil(viewModel.selectedPacketID)
-        XCTAssertNil(viewModel.selectedPacket)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(viewModel.selectedPacket?.id, "packet-blog-feedback")
         XCTAssertEqual(client.leasedPacketIds, [])
     }
 
@@ -20,6 +20,7 @@ final class QueueViewModelTests: XCTestCase {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
         await viewModel.loadQueue()
+        viewModel.selectedPacketID = nil
 
         await viewModel.doneAndNext()
         let firstFeedbackSequence = viewModel.feedbackSequence
@@ -90,6 +91,7 @@ final class QueueViewModelTests: XCTestCase {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
         await viewModel.loadQueue()
+        viewModel.selectedPacketID = nil
         client.setNextLeaseError(QueueClientError.httpStatus(409))
 
         await viewModel.pullNextPaper()
@@ -1008,6 +1010,7 @@ final class QueueViewModelTests: XCTestCase {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: [actionablePacket, nonActionablePacket]))
 
         await viewModel.loadQueue()
+        viewModel.selectedPacketID = nil
 
         XCTAssertFalse(viewModel.canExecuteSelectedRecommendedAction)
         XCTAssertNil(viewModel.selectedRecommendedActionBlockReason)
@@ -1771,9 +1774,19 @@ final class QueueViewModelTests: XCTestCase {
             recommendedActionType: "mark_done",
             createdAt: Date(timeIntervalSince1970: 0)
         )
-        let viewModel = QueueViewModel(client: FakeQueueClient(packets: [packet]))
+        let selectedPacket = ReviewPacket(
+            id: "qit_selected",
+            taskId: "task_selected",
+            title: "Selected",
+            summary: "Already viewed",
+            source: "test",
+            priority: 600,
+            recommendedAction: "Action",
+            recommendedActionType: "mark_done",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let viewModel = QueueViewModel(client: FakeQueueClient(packets: [selectedPacket, packet]))
         await viewModel.refreshQueue()
-        viewModel.selectedPacketID = nil
 
         XCTAssertEqual(viewModel.changeBadge(for: packet), .new)
     }
@@ -2531,7 +2544,7 @@ final class QueueViewModelTests: XCTestCase {
         viewModel.stopAutomaticQueueRefresh()
 
         XCTAssertEqual(viewModel.packets.map(\.id), ["packet-blog-feedback"])
-        XCTAssertNil(viewModel.selectedPacketID)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
         XCTAssertEqual(client.leasedPacketIds, [])
     }
 
@@ -2607,7 +2620,7 @@ final class QueueViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.mode, .manual)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
-        XCTAssertNil(viewModel.selectedPacketID)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
         XCTAssertEqual(viewModel.packets.count, 3)
 
         await viewModel.returnToEventLoopMode()

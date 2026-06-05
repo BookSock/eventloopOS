@@ -20,6 +20,7 @@ Environment:
                                     default: 0; test-only simulated TCC denial
   LAB_MAC_CAPTURE_INJECT_ACCESSIBILITY_DENIED
                                     default: 0; test-only simulated Accessibility denial
+  LAB_MAC_CAPTURE_WORKSPACE        optional AeroSpace workspace to focus before capture
 EOF
 }
 
@@ -43,6 +44,7 @@ url="${LAB_DOGFOOD_URL:-http://127.0.0.1:4480}"
 video_seconds="${LAB_MAC_CAPTURE_VIDEO_SECONDS:-0}"
 inject_screen_denied="${LAB_MAC_CAPTURE_INJECT_SCREEN_DENIED:-0}"
 inject_accessibility_denied="${LAB_MAC_CAPTURE_INJECT_ACCESSIBILITY_DENIED:-0}"
+target_workspace="${LAB_MAC_CAPTURE_WORKSPACE:-}"
 remote="${lab_user}@${lab_host}"
 case "$eventloop_path" in
   "~"/*) remote_repo="/Users/$lab_user/${eventloop_path#"~/"}" ;;
@@ -51,7 +53,7 @@ case "$eventloop_path" in
 esac
 
 ssh -i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8 "$remote" \
-  "bash -s -- '$remote_repo' '$remote_run' '$label' '$video_seconds' '$url' '$inject_screen_denied' '$inject_accessibility_denied'" <<'REMOTE'
+  "bash -s -- '$remote_repo' '$remote_run' '$label' '$video_seconds' '$url' '$inject_screen_denied' '$inject_accessibility_denied' '$target_workspace'" <<'REMOTE'
 set -euo pipefail
 
 repo="$1"
@@ -61,6 +63,7 @@ video_seconds="$4"
 url="$5"
 inject_screen_denied="$6"
 inject_accessibility_denied="$7"
+target_workspace="$8"
 capture_dir="$repo/$run/captures/$label"
 
 export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -125,6 +128,12 @@ ps -axo pid,ppid,comm,args >"$capture_dir/ps.txt" 2>"$capture_dir/ps.err" || tru
 aerospace list-windows --all --json --format "%{window-id}%{app-name}%{window-title}%{window-layout}%{workspace}" \
   >"$capture_dir/windows.json" 2>"$capture_dir/windows.err" || true
 aerospace list-workspaces --focused >"$capture_dir/focused-workspace.txt" 2>"$capture_dir/focused-workspace.err" || true
+printf "%s\n" "$target_workspace" >"$capture_dir/target-workspace.txt"
+if [[ -n "$target_workspace" ]]; then
+  aerospace workspace "$target_workspace" >"$capture_dir/target-workspace.out" 2>"$capture_dir/target-workspace.err" || true
+  sleep 0.3
+  aerospace list-workspaces --focused >"$capture_dir/focused-workspace-after-target.txt" 2>"$capture_dir/focused-workspace-after-target.err" || true
+fi
 
 if [[ "$inject_accessibility_denied" == "1" ]]; then
   accessibility_error="System Events cannot inspect eventloopOS Queue because the controlling app is denied Accessibility in lab fault injection. Grant Terminal or sshd-keygen-wrapper in System Settings > Privacy & Security > Accessibility, then rerun the Queue UI proof."
@@ -507,6 +516,7 @@ export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/
 capture_dir="$capture_dir"
 video_seconds="$video_seconds"
 inject_accessibility_denied="$inject_accessibility_denied"
+target_workspace="$target_workspace"
 if [[ "\$inject_accessibility_denied" != "1" ]]; then
 osascript >"\$capture_dir/gui-open-queue.out" 2>"\$capture_dir/gui-open-queue.err" <<'APPLESCRIPT' || true
 on existingQueueWindowCount()
@@ -635,7 +645,61 @@ set AppleScript's text item delimiters to linefeed
 return allLines as string
 APPLESCRIPT
 fi
+osascript >"\$capture_dir/gui-terminal-minimize.out" 2>"\$capture_dir/gui-terminal-minimize.err" <<'APPLESCRIPT' || true
+set minimizedCaptureWindows to 0
+tell application "Terminal"
+  repeat with candidateWindow in windows
+    try
+      if (name of candidateWindow as string) contains "gui-screencapture.command" then
+        set miniaturized of candidateWindow to true
+        set minimizedCaptureWindows to minimizedCaptureWindows + 1
+      end if
+    end try
+  end repeat
+end tell
+delay 0.4
+tell application "System Events"
+  if exists process "eventloopOS Queue" then
+    tell process "eventloopOS Queue"
+      if (count of windows) is greater than 0 then
+        perform action "AXRaise" of window 1
+      end if
+    end tell
+  end if
+end tell
+return "minimized_capture_windows=" & (minimizedCaptureWindows as string)
+APPLESCRIPT
+if [[ -n "\$target_workspace" ]]; then
+  aerospace workspace "\$target_workspace" >"\$capture_dir/gui-target-workspace.out" 2>"\$capture_dir/gui-target-workspace.err" || true
+  sleep 1
+fi
+osascript >"\$capture_dir/gui-demo-raise.out" 2>"\$capture_dir/gui-demo-raise.err" <<'APPLESCRIPT' || true
+set raisedWindows to 0
+tell application "System Events"
+  repeat with processName in {"Google Chrome", "TextEdit", "eventloopOS Queue"}
+    set processNameText to processName as string
+    if exists process processNameText then
+      tell process processNameText
+        set frontmost to true
+        delay 0.2
+        repeat with candidateWindow in windows
+          try
+            set windowName to name of candidateWindow as string
+            if windowName contains "Human Demo" or windowName contains "eventloopOS Queue" or processNameText is "eventloopOS Queue" then
+              perform action "AXRaise" of candidateWindow
+              set raisedWindows to raisedWindows + 1
+            end if
+          end try
+        end repeat
+      end tell
+    end if
+  end repeat
+end tell
+return "raised_windows=" & (raisedWindows as string)
+APPLESCRIPT
+aerospace list-workspaces --focused >"\$capture_dir/focused-workspace-before-gui-screencapture.txt" 2>"\$capture_dir/focused-workspace-before-gui-screencapture.err" || true
 screencapture -x "\$capture_dir/screen.png" >"\$capture_dir/gui-screencapture.out" 2>"\$capture_dir/gui-screencapture.err" || true
+aerospace list-workspaces --focused >"\$capture_dir/focused-workspace-after-capture.txt" 2>"\$capture_dir/focused-workspace-after-capture.err" || true
 if [[ "\$video_seconds" =~ ^[0-9]+$ && "\$video_seconds" -gt 0 ]]; then
   screencapture -x -v -V "\$video_seconds" "\$capture_dir/screen.mov" >"\$capture_dir/gui-screenrecord.out" 2>"\$capture_dir/gui-screenrecord.err" || true
 fi
@@ -753,6 +817,15 @@ summary.queue_app = {
 summary.gui_fallback = {
   used: true,
   done: fs.existsSync(path.join(process.env.CAPTURE_DIR, "gui-screencapture.done")),
+  terminal_minimize: read("gui-terminal-minimize.out"),
+  terminal_minimize_error: read("gui-terminal-minimize.err"),
+  demo_raise: read("gui-demo-raise.out"),
+  demo_raise_error: read("gui-demo-raise.err"),
+  target_workspace: read("target-workspace.txt"),
+  target_workspace_after_gui_switch: read("gui-target-workspace.out"),
+  target_workspace_error: read("gui-target-workspace.err"),
+  focused_workspace_before_gui_screencapture: read("focused-workspace-before-gui-screencapture.txt"),
+  focused_workspace_after_capture: read("focused-workspace-after-capture.txt"),
 };
 fs.writeFileSync(file, `${JSON.stringify(summary, null, 2)}\n`);
 NODE

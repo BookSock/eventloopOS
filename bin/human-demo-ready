@@ -81,7 +81,9 @@ const latestHumanDemoFreshness = demoProofFreshness(templateJson?.generated_at, 
 const latestHumanDemoScreenshot = imageArtifactSummary(templateJson?.screenshot_path ?? "");
 
 let screenshot;
+let screenshotStage;
 if (!skipScreenshot) {
+  screenshotStage = runLabDemoScreenshotStageStep(env);
   screenshot = runScreenshotStep(path.join(runDir, "screen-sharing.png"), env);
 }
 const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
@@ -107,7 +109,7 @@ const checks = {
   latest_human_demo_screenshot_ok: latestHumanDemoScreenshot.ok === true,
   latest_human_demo_queue_has_two_papers: Number(templateJson?.queue_count ?? 0) >= 2,
   ambient_autosave_proof_ok: templateJson?.ambient_autosave_ok === true,
-  screen_sharing_capture_ok: skipScreenshot || screenshot?.ok === true,
+  screen_sharing_capture_ok: skipScreenshot || (screenshotStage?.ok === true && screenshot?.ok === true),
   queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
   workspace_latency_ok: !workspaceLatencyEnabled || (workspaceLatency?.status === 0 && workspaceLatencyManifest?.ok === true),
   hotkey_feedback_latency_ok: !hotkeyLatencyEnabled || (hotkeyLatency?.status === 0 && hotkeyLatencyManifest?.ok === true),
@@ -151,6 +153,9 @@ const manifest = {
     freshness: latestHumanDemoFreshness,
   } : undefined,
   screen_sharing_capture: screenshot ? screenshot : {
+    skipped: true,
+  },
+  screenshot_stage: screenshotStage ? screenshotStage : {
     skipped: true,
   },
   queue_latency: queueLatency ? {
@@ -199,6 +204,7 @@ const output = {
   hotkey_latency_required: manifest.hotkey_latency_required,
   latest_human_demo: manifest.latest_human_demo,
   screen_sharing_capture: manifest.screen_sharing_capture,
+  screenshot_stage: manifest.screenshot_stage,
   queue_latency: manifest.queue_latency,
   workspace_latency: manifest.workspace_latency,
   hotkey_feedback_latency: manifest.hotkey_feedback_latency,
@@ -214,12 +220,13 @@ if (jsonOnly) {
 
 process.exit(manifest.ok ? 0 : 1);
 
-function runStep(name, command, commandArgs, envOverride) {
+function runStep(name, command, commandArgs, envOverride, options = {}) {
   const result = spawnSync(command, commandArgs, {
     cwd: repoRoot,
     env: envOverride,
     encoding: "utf8",
     shell: false,
+    input: options.input,
   });
   const safeName = name.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "").toLowerCase();
   const stdoutPath = path.join(runDir, "steps", `${safeName}.stdout`);
@@ -251,6 +258,231 @@ function numberOption(flag, defaultValue) {
     process.exit(2);
   }
   return parsed;
+}
+
+function runLabDemoScreenshotStageStep(envOverride) {
+  const labHost = envOverride.LAB_MAC_HOST ?? "100.71.111.25";
+  const labUser = envOverride.LAB_MAC_USER ?? "claw";
+  const labKey = envOverride.LAB_MAC_KEY ?? path.join(osHome(), ".ssh", "eventloop_lab_mac");
+  const remoteRepo = remoteRepoFromEnv(envOverride);
+  const remote = `${labUser}@${labHost}`;
+  const step = runStep("stage lab demo screenshot", "ssh", [
+    "-i",
+    labKey,
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=20",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=8",
+    remote,
+    "bash",
+    "-s",
+    "--",
+    remoteRepo,
+    envOverride.LAB_DOGFOOD_URL,
+  ], envOverride, {
+    input: labDemoScreenshotStageScript(),
+  });
+  const parsed = extractJsonObject(step.stdout);
+  return {
+    ok: step.status === 0 && parsed?.ok === true,
+    target: "lab",
+    exit_code: step.status,
+    result: parsed,
+    stdout_path: step.stdout_path,
+    stderr_path: step.stderr_path,
+  };
+}
+
+function labDemoScreenshotStageScript() {
+  return `set -euo pipefail
+repo="$1"
+url="$2"
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+EVENTLOOPOS_STAGE_URL="$url" node --input-type=module <<'NODE'
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+
+const base = process.env.EVENTLOOPOS_STAGE_URL ?? "http://127.0.0.1:4480";
+
+const queue = await getJson("/queue");
+const items = Array.isArray(queue.items) ? queue.items : [];
+const customer = items.find((item) => item.task_id === "task_demo_customer" && item.state === "ready")
+  ?? items.find((item) => item.task_id === "task_demo_customer")
+  ?? items.find((item) => item.task_id === "task_demo_metrics" && item.state === "ready")
+  ?? items.find((item) => item.task_id === "task_demo_metrics");
+if (!customer) throw new Error("missing demo queue item");
+
+const context = Array.isArray(customer.review_packet?.context) ? customer.review_packet.context : [];
+const snapshot = latestDemoProofSnapshot(customer.task_id)
+  ?? context.find((entry) => entry?.kind === "workspace_snapshot")?.snapshot;
+if (!snapshot) throw new Error(\`missing workspace snapshot for \${customer.id}\`);
+
+const taskBody = await getJson(\`/tasks/\${customer.task_id}\`).catch(() => undefined);
+const taskWorkspace = taskBody?.task?.aerospace_workspace_id;
+if (taskWorkspace) snapshot.activeWorkspace = taskWorkspace;
+
+const current = await postJson("/workspace/capture", {});
+const restore = await postJson("/workspace/restore", {
+  confirm_execute: true,
+  snapshot,
+  current_windows: current.snapshot?.windows ?? [],
+}, {
+  "idempotency-key": \`human-demo-screenshot-stage-\${Date.now()}\`,
+});
+
+const workspace = snapshot.activeWorkspace ?? taskWorkspace ?? (customer.task_id === "task_demo_metrics" ? "demo-metrics" : "demo-customer");
+execFileSync("aerospace", ["workspace", workspace], { stdio: "ignore" });
+const focusedWindowIds = focusDemoWindows(snapshot);
+const raisedWindowCount = raiseDemoApps();
+execFileSync("aerospace", ["workspace", workspace], { stdio: "ignore" });
+await delay(800);
+
+console.log(JSON.stringify({
+  ok: true,
+  task_id: customer.task_id,
+  queue_item_id: customer.id,
+  workspace,
+  focused_window_ids: focusedWindowIds,
+  raised_window_count: raisedWindowCount,
+  restore_command_count: restore.plan?.commands?.length ?? 0,
+}));
+
+function latestDemoProofSnapshot(taskId) {
+  const labRuns = path.join(process.cwd(), "artifacts", "lab-runs");
+  let candidates = [];
+  try {
+    candidates = fs.readdirSync(labRuns, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name.endsWith("-human-demo"))
+      .map((entry) => path.join(labRuns, entry.name, "manifest.json"))
+      .filter((candidate) => fs.existsSync(candidate))
+      .sort()
+      .reverse();
+  } catch {
+    return undefined;
+  }
+  for (const candidate of candidates) {
+    try {
+      const manifest = JSON.parse(fs.readFileSync(candidate, "utf8"));
+      const proof = taskId === "task_demo_metrics"
+        ? manifest?.proofs?.metrics_restore
+        : manifest?.proofs?.final_ready_customer_restore ?? manifest?.proofs?.ready_customer_restore;
+      const windows = Array.isArray(proof?.windows) ? proof.windows : [];
+      if (proof?.ok === true && proof?.expected_active_workspace && windows.length > 0) {
+        return {
+          backend: "aerospace",
+          activeWorkspace: proof.expected_active_workspace,
+          focusedWindowId: windows[0]?.id,
+          windows,
+        };
+      }
+    } catch {
+      // Try older proof manifest.
+    }
+  }
+  return undefined;
+}
+
+function focusDemoWindows(snapshot) {
+  const focusIds = [];
+  const windows = Array.isArray(snapshot.windows) ? snapshot.windows : [];
+  const chrome = windows.find((window) => /Google Chrome/i.test(window.app) && /Human Demo/i.test(window.title));
+  const textEdit = windows.find((window) => /TextEdit/i.test(window.app) && /Human Demo Shared Notes/i.test(window.title));
+  for (const window of [chrome, textEdit]) {
+    if (!window?.id) continue;
+    focusWindow(window.id, focusIds);
+  }
+  const queueId = currentAerospaceWindows()
+    .find((window) => /eventloopOS Queue/i.test(\`\${window["app-name"] ?? ""} \${window["window-title"] ?? ""}\`))?.["window-id"];
+  if (queueId) focusWindow(queueId, focusIds);
+  return focusIds;
+}
+
+function focusWindow(windowId, output) {
+  try {
+    execFileSync("aerospace", ["focus", "--window-id", String(windowId)], { stdio: "ignore" });
+    output.push(Number(windowId));
+  } catch {
+    // Focus is best-effort for screenshot staging; restore already did the
+    // important workspace/window move work.
+  }
+}
+
+function raiseDemoApps() {
+  const script = [
+    "set raisedWindows to 0",
+    "tell application \\"System Events\\"",
+    "  repeat with processName in {\\"Google Chrome\\", \\"TextEdit\\", \\"eventloopOS Queue\\"}",
+    "    set processNameText to processName as string",
+    "    if exists process processNameText then",
+    "      tell process processNameText",
+    "        set frontmost to true",
+    "        delay 0.2",
+    "        repeat with candidateWindow in windows",
+    "          try",
+    "            set windowName to name of candidateWindow as string",
+    "            if windowName contains \\"Human Demo\\" or windowName contains \\"eventloopOS Queue\\" or processNameText is \\"eventloopOS Queue\\" then",
+    "              perform action \\"AXRaise\\" of candidateWindow",
+    "              set raisedWindows to raisedWindows + 1",
+    "            end if",
+    "          end try",
+    "        end repeat",
+    "      end tell",
+    "    end if",
+    "  end repeat",
+    "end tell",
+    "return raisedWindows as string",
+  ].join("\\n");
+  try {
+    const output = execFileSync("osascript", [], { input: script, encoding: "utf8" }).trim();
+    return Number.parseInt(output, 10) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function currentAerospaceWindows() {
+  try {
+    return JSON.parse(execFileSync("aerospace", [
+      "list-windows",
+      "--all",
+      "--json",
+      "--format",
+      "%{window-id}%{app-name}%{window-title}%{workspace}",
+    ], { encoding: "utf8" }));
+  } catch {
+    return [];
+  }
+}
+
+async function getJson(pathname) {
+  const response = await fetch(\`\${base}\${pathname}\`);
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(\`\${pathname} failed HTTP \${response.status}: \${JSON.stringify(body)}\`);
+  return body;
+}
+
+async function postJson(pathname, body, headers = {}) {
+  const response = await fetch(\`\${base}\${pathname}\`, {
+    method: "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: JSON.stringify(body),
+  });
+  const responseBody = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(\`\${pathname} failed HTTP \${response.status}: \${JSON.stringify(responseBody)}\`);
+  return responseBody;
+}
+NODE
+`;
 }
 
 function runHotkeyLatencyStep(manifestPath, envOverride) {
@@ -361,13 +593,17 @@ function runLocalScreenSharingCapture(localOutputPath, envOverride) {
 
 function runLabDesktopCapture(envOverride, fallbackReason) {
   const label = "human-demo-ready";
-  const step = runStep("lab desktop capture", "bin/lab-mac-desktop-capture", [runDir, label], envOverride);
+  const captureEnv = {
+    ...envOverride,
+    LAB_MAC_CAPTURE_WORKSPACE: screenshotStage?.result?.workspace ?? envOverride.LAB_MAC_CAPTURE_WORKSPACE ?? "",
+  };
+  const step = runStep("lab desktop capture", "bin/lab-mac-desktop-capture", [runDir, label], captureEnv);
   const remoteCapturePath = lastNonEmptyLine(step.stdout);
   const localCaptureDir = remoteCapturePath && !remoteCapturePath.startsWith("/")
     ? remoteCapturePath
     : path.join(runDir, "captures", label);
   const sync = remoteCapturePath
-    ? syncLabCapture(remoteCapturePath, localCaptureDir, envOverride)
+    ? syncLabCapture(remoteCapturePath, localCaptureDir, captureEnv)
     : { ok: false, reason: "missing_remote_capture_path" };
   const output = path.join(localCaptureDir, "screen.png");
   const image = imageArtifactSummary(output);
@@ -683,6 +919,10 @@ function runSelfTest() {
   });
   assert.ok(readyMarkdown.includes("Suggested result file: artifacts/human-demo-results/demo-human-demo-result.md"));
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-r"]);
+  assert.ok(labDemoScreenshotStageScript().includes("task_demo_customer"));
+  assert.ok(labDemoScreenshotStageScript().includes("latestDemoProofSnapshot"));
+  assert.ok(labDemoScreenshotStageScript().includes("raiseDemoApps"));
+  assert.ok(labDemoScreenshotStageScript().includes("/workspace/restore"));
   assert.equal(remoteRepoFromEnv({ LAB_MAC_USER: "claw" }), "/Users/claw/dev/2026/eventloopOS");
   assert.equal(remoteRepoFromEnv({ LAB_MAC_USER: "demo", LAB_MAC_EVENTLOOP_PATH: "~/src/eventloopOS" }), "/Users/demo/src/eventloopOS");
   assert.equal(remoteRepoFromEnv({ LAB_MAC_EVENTLOOP_PATH: "/tmp/repo" }), "/tmp/repo");

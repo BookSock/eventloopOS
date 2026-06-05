@@ -24,6 +24,7 @@ const TASK_SNAPSHOT_BUNDLE_BLOCKLIST = new Set([
 
 export type CurrentTaskState = {
   currentTaskId: string | null;
+  currentTaskWorkspaceId?: string;
 };
 
 export type CurrentTaskStateReader = () => Promise<CurrentTaskState> | CurrentTaskState;
@@ -79,6 +80,7 @@ export type AmbientWorkspaceSaverDeps = {
 export type AmbientSaveTickResult =
   | { decision: "skipped_unbounded" }
   | { decision: "skipped_manual_mode" }
+  | { decision: "skipped_workspace_mismatch"; taskId: string; activeWorkspace?: string; taskWorkspace: string }
   | { decision: "skipped_unchanged"; taskId: string }
   | { decision: "debounced"; taskId: string; pendingSince: string }
   | { decision: "committed"; taskId: string; capturedAt: string }
@@ -132,6 +134,26 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
       }
 
       const rawSnapshot = await deps.workspace.capture();
+      const taskWorkspaceId = taskState.currentTaskWorkspaceId?.trim();
+      if (taskWorkspaceId && rawSnapshot.activeWorkspace && rawSnapshot.activeWorkspace !== taskWorkspaceId) {
+        pending = undefined;
+        await emit({
+          type: "ambient_workspace_save_skipped_workspace_mismatch",
+          summary: `Ambient workspace save skipped: active workspace ${rawSnapshot.activeWorkspace} is not ${taskWorkspaceId} for ${currentTaskId}`,
+          taskId: currentTaskId,
+          tickNow,
+          details: {
+            active_workspace: rawSnapshot.activeWorkspace,
+            task_workspace: taskWorkspaceId,
+          },
+        });
+        return {
+          decision: "skipped_workspace_mismatch",
+          taskId: currentTaskId,
+          activeWorkspace: rawSnapshot.activeWorkspace,
+          taskWorkspace: taskWorkspaceId,
+        };
+      }
       await recordWindowObservations(deps, rawSnapshot, currentTaskId, tickNow);
       await autoClaimTaggedTaskWindows(deps, rawSnapshot, tickNow);
       await autoClaimProcessTreeTaskWindows(deps, rawSnapshot, tickNow);
@@ -692,7 +714,14 @@ export function createAmbientWorkspaceSaverFromRuntime(
 
   const getCurrentTaskState: CurrentTaskStateReader = async () => {
     const state = await store.getCurrentTaskState();
-    return { currentTaskId: state.current_task_id ?? null };
+    const currentTaskId = state.current_task_id ?? null;
+    const task = currentTaskId && typeof store.getTask === "function"
+      ? await store.getTask(currentTaskId)
+      : undefined;
+    return {
+      currentTaskId,
+      currentTaskWorkspaceId: task?.aerospace_workspace_id,
+    };
   };
 
   const updateTaskLayout: TaskLayoutWriter = async (taskId, snapshot) => {

@@ -29,15 +29,17 @@ bin/human-demo-ready
 ```
 
 This does not restart or reseed the demo. It checks the current lab dogfood
-stack, verifies the latest human-demo proof artifact, captures the local Screen
-Sharing window first, falls back to a lab Mac desktop capture if that local
-window is unavailable, runs queue/workspace latency probes on the lab Mac by
-default, and writes `artifacts/lab-runs/*-human-demo-ready/READY.md`.
+stack, verifies the latest human-demo proof artifact, stages the live lab Mac
+back to the Customer demo paper, captures the local Screen Sharing window first,
+falls back to a lab Mac desktop capture if that local window is unavailable,
+runs queue/workspace latency probes on the lab Mac by default, and writes
+`artifacts/lab-runs/*-human-demo-ready/READY.md`.
 The screenshot capture gate verifies the chosen artifact exists and has
-readable PNG/JPEG dimensions, so readiness cannot pass from an empty or invalid
-screenshot file. The default `auto` mode never captures the controller Mac
-desktop: the first attempt is a Screen Sharing window capture, and the fallback
-captures the remote lab Mac desktop over SSH. Use
+readable PNG/JPEG dimensions, and the lab staging gate must pass, so readiness
+cannot pass from an empty, invalid, or wrong-workspace screenshot file. The
+default `auto` mode never captures the controller Mac desktop: the first attempt
+is a Screen Sharing window capture after the lab has been staged, and the
+fallback captures the remote lab Mac desktop over SSH. Use
 `EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=local` to require only the local
 Screen Sharing window, or `EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=lab` to use
 only the lab Mac desktop capture.
