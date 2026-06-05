@@ -4,6 +4,7 @@ import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
+import { humanDemoPassFailLabels, renderFilledHumanDemoPassFail } from "./lib/human-demo-checklist.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 process.chdir(repoRoot);
@@ -143,22 +144,9 @@ function verifyResultText(text) {
     workspace: fieldOrSectionText(lines, "Readiness workspace latency:", "Readiness hotkey latency:").trim(),
     hotkey: fieldOrSectionText(lines, "Readiness hotkey latency:", "Automated proof:").trim(),
   };
-  const expectedLabels = [
-    "Starting state on demo-customer with Queue visible",
-    "Ctrl-Option-R restores Customer paper",
-    "Moving shared TextEdit is remembered after 2-3 seconds",
-    "Metrics paper brings same TextEdit to metrics position",
-    "Customer paper brings same TextEdit back to customer position",
-    "Rectangle hotkeys feel usable",
-    "Manual Mode entry/return works",
-    "Queue footer feedback is visible and current",
-    "Queue/master latency readiness gate passed",
-    "Workspace capture/restore-plan latency readiness gate passed",
-    "Hotkey feedback latency readiness gate passed or skipped intentionally",
-  ];
-  const missingLabels = expectedLabels.filter((label) => !Object.hasOwn(passFail, label));
-  const blankLabels = expectedLabels.filter((label) => Object.hasOwn(passFail, label) && passFail[label].trim() === "");
-  const blockingLabels = expectedLabels.filter((label) => Object.hasOwn(passFail, label) && passFail[label].trim() !== "" && !isAcceptablePassFail(passFail[label]));
+  const missingLabels = humanDemoPassFailLabels.filter((label) => !Object.hasOwn(passFail, label));
+  const blankLabels = humanDemoPassFailLabels.filter((label) => Object.hasOwn(passFail, label) && passFail[label].trim() === "");
+  const blockingLabels = humanDemoPassFailLabels.filter((label) => Object.hasOwn(passFail, label) && passFail[label].trim() !== "" && !isAcceptablePassFail(passFail[label]));
   const checks = {
     all_expected_pass_fail_items_present: missingLabels.length === 0,
     all_pass_fail_items_filled: blankLabels.length === 0,
@@ -292,17 +280,7 @@ Readiness hotkey latency: artifacts/lab-runs/ready/hotkey-latency.json ok=true r
 Automated proof: ok=true, queue_count=2, ambient_autosave=true
 
 Pass/fail:
-- Starting state on demo-customer with Queue visible: pass
-- Ctrl-Option-R restores Customer paper: pass
-- Moving shared TextEdit is remembered after 2-3 seconds: pass
-- Metrics paper brings same TextEdit to metrics position: pass
-- Customer paper brings same TextEdit back to customer position: pass
-- Rectangle hotkeys feel usable: pass
-- Manual Mode entry/return works: pass
-- Queue footer feedback is visible and current: pass
-- Queue/master latency readiness gate passed: pass
-- Workspace capture/restore-plan latency readiness gate passed: pass
-- Hotkey feedback latency readiness gate passed or skipped intentionally: pass
+${renderFilledHumanDemoPassFail("pass")}
 
 Friction:
 - none

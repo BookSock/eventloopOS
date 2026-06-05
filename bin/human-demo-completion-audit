@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import { humanDemoPassFailLabels, renderFilledHumanDemoPassFail } from "./lib/human-demo-checklist.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 process.chdir(repoRoot);
@@ -175,19 +176,7 @@ function inspectHumanResult(root, resultPath) {
 }
 
 function expectedPassFailLabels() {
-  return [
-    "Starting state on demo-customer with Queue visible",
-    "Ctrl-Option-R restores Customer paper",
-    "Moving shared TextEdit is remembered after 2-3 seconds",
-    "Metrics paper brings same TextEdit to metrics position",
-    "Customer paper brings same TextEdit back to customer position",
-    "Rectangle hotkeys feel usable",
-    "Manual Mode entry/return works",
-    "Queue footer feedback is visible and current",
-    "Queue/master latency readiness gate passed",
-    "Workspace capture/restore-plan latency readiness gate passed",
-    "Hotkey feedback latency readiness gate passed or skipped intentionally",
-  ];
+  return humanDemoPassFailLabels;
 }
 
 function parsePassFail(lines) {
@@ -275,17 +264,7 @@ function runSelfTest() {
   fs.writeFileSync(resultPath, `Human demo date: 2026-06-05
 
 Pass/fail:
-- Starting state on demo-customer with Queue visible: pass
-- Ctrl-Option-R restores Customer paper: pass
-- Moving shared TextEdit is remembered after 2-3 seconds: pass
-- Metrics paper brings same TextEdit to metrics position: pass
-- Customer paper brings same TextEdit back to customer position: pass
-- Rectangle hotkeys feel usable: pass
-- Manual Mode entry/return works: pass
-- Queue footer feedback is visible and current: pass
-- Queue/master latency readiness gate passed: ok=true
-- Workspace capture/restore-plan latency readiness gate passed: ok=true
-- Hotkey feedback latency readiness gate passed or skipped intentionally: ok=true
+${renderFilledHumanDemoPassFail("ok=true")}
 
 Friction:
 none
@@ -323,17 +302,7 @@ Ship/block decision:
   fs.writeFileSync(resultPath, `Human demo date: 2026-06-05
 
 Pass/fail:
-- Starting state on demo-customer with Queue visible: pass
-- Ctrl-Option-R restores Customer paper: pass
-- Moving shared TextEdit is remembered after 2-3 seconds: pass
-- Metrics paper brings same TextEdit to metrics position: pass
-- Customer paper brings same TextEdit back to customer position: pass
-- Rectangle hotkeys feel usable: pass
-- Manual Mode entry/return works: pass
-- Queue footer feedback is visible and current: pass
-- Queue/master latency readiness gate passed: ok=true
-- Workspace capture/restore-plan latency readiness gate passed: ok=true
-- Hotkey feedback latency readiness gate passed or skipped intentionally: ok=true
+${renderFilledHumanDemoPassFail("ok=true")}
 
 Friction:
 none

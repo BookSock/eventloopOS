@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from "node:fs";
 import path from "node:path";
+import { renderHumanDemoPassFailTemplate } from "./lib/human-demo-checklist.mjs";
 
 const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const args = process.argv.slice(2);
@@ -228,17 +229,7 @@ Readiness hotkey latency: ${readiness.hotkey.path} ok=${readiness.hotkey.ok} req
 Automated proof: ok=${manifest.ok === true}, queue_count=${queueCount}, ambient_autosave=${ambientOk}
 
 Pass/fail:
-- Starting state on demo-customer with Queue visible:
-- Ctrl-Option-R restores Customer paper:
-- Moving shared TextEdit is remembered after 2-3 seconds:
-- Metrics paper brings same TextEdit to metrics position:
-- Customer paper brings same TextEdit back to customer position:
-- Rectangle hotkeys feel usable:
-- Manual Mode entry/return works:
-- Queue footer feedback is visible and current:
-- Queue/master latency readiness gate passed:
-- Workspace capture/restore-plan latency readiness gate passed:
-- Hotkey feedback latency readiness gate passed or skipped intentionally:
+${renderHumanDemoPassFailTemplate()}
 
 Friction:
 - 
