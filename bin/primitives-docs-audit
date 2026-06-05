@@ -50,6 +50,7 @@ function auditPrimitiveDocs(catalogPath, docsPath, repoRoot) {
   requireIncludes(docs, "Responsiveness-critical primitives must also carry explicit p95 latency budgets", "missing responsiveness latency-budget invariant wording", errors);
   requireIncludes(docs, "buildPrimitiveProofPlan", "missing primitive proof-plan SDK helper wording", errors);
   requireIncludes(docs, "discover-primitives.mjs proof-plan", "missing discovery proof-plan command wording", errors);
+  requireIncludes(docs, "full catalog self-test manifest", "missing full primitives self-test runner wording", errors);
   requireIncludes(docs, "bin/primitives-examples-audit", "missing primitives examples audit wording", errors);
   requireIncludes(docs, "master_fan_out_dry_run", "missing master command latency budget wording", errors);
 
@@ -146,6 +147,7 @@ Strict readiness is expected to stay green: every cataloged primitive has a \`se
 Responsiveness-critical primitives must also carry explicit p95 latency budgets linked to runnable proof commands.
 \`buildPrimitiveProofPlan\` combines those selectors into one verification plan.
 Example: node examples/primitives/discover-primitives.mjs proof-plan --id workspace_control --json.
+Root typecheck writes the full catalog self-test manifest.
 Example drift guard: bin/primitives-examples-audit.
 Master command latency budget: master_fan_out_dry_run.
 Current catalog summary: 2 primitives, 1 HTTP routes, 1 CLI commands, 2 self-tests, 3 proof refs, 1 latency budgets.

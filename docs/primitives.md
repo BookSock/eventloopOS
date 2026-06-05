@@ -48,8 +48,10 @@ Responsiveness-critical primitives must also carry explicit p95 latency budgets
 linked to runnable proof commands.
 `bin/primitives-self-test-runner` executes the cataloged self-test commands
 once per unique command and records a manifest that maps each proof back to the
-primitive ids it covers. Builders can run a subset with repeated
-`--primitive <id>` flags when they only want to verify one reusable surface.
+primitive ids it covers. Root `pnpm typecheck` runs both the list-only manifest
+and the full catalog self-test manifest so stale or broken primitive proof
+commands fail early. Builders can run a subset with repeated `--primitive <id>`
+flags when they only want to verify one reusable surface.
 The catalog audit also verifies every catalog schema has a matching
 `@eventloopos/shared` Zod schema, TypeScript type, and ContractSchemas registry
 entry, and that cataloged HTTP routes cannot silently drift back to freeform
