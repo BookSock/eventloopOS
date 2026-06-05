@@ -53,6 +53,18 @@ Cost/noise notes:
 - `.gitignore` excludes `artifacts/`, `dist/`, local config — and `guard-file-size.mjs` catches accidental large-file commits anyway.
 - Status badges in [`README.md`](../README.md) for CI + secret-scan workflows.
 
+### SQL Migrations
+
+- [`bin/sql-migrations-audit`](../bin/sql-migrations-audit) checks Postgres
+  migration filename order, semicolon termination, transaction-wrapper absence,
+  banned destructive statements, and safe `DROP CONSTRAINT IF EXISTS` usage.
+- It also enforces forward-looking idempotency for new migrations (`0022+`):
+  `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, and
+  `ADD COLUMN IF NOT EXISTS`.
+- `pnpm typecheck` runs the audit self-test and audits
+  [`app/orchestrator/migrations`](../app/orchestrator/migrations), so persistence
+  guardrails stay green in local hooks and CI.
+
 ### Bug-To-Fix Latency
 
 - [`bin/bug-fix-latency-audit`](../bin/bug-fix-latency-audit) measures how long
@@ -68,7 +80,6 @@ Cost/noise notes:
 
 These are mentioned in `ai-engineering-principles.md` but not yet wired:
 
-- **SQL linting.** We have raw SQL in migrations; no automated lint.
 - **Semgrep / Bandit static analysis.** No security-static-analysis pass beyond gitleaks (secrets only).
 - **Custom AI-mistake checks.** The principles doc calls out things like "missing `await`", "duplicated components", "bypassed design system" as candidates for codified checks. None of those are codified yet — they live as review intuition.
 - **Real AI-review pass.** Today's `ai-review-template.yml` is a templated comment. A real model-driven review (Codex / Claude) would need an API key + opt-in flow + cost guardrails — explicitly deferred per principles doc ("Don't add a paid Codex API integration without the user opting in").

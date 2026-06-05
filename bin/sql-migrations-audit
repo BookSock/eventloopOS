@@ -1,0 +1,163 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/sql-migrations-audit [--self-test] [migrations-dir]
+
+Audits Postgres migration files for eventloopOS persistence guardrails:
+sequential filenames, semicolon termination, no transaction wrappers, no
+destructive table/column/data drops, safe DROP CONSTRAINT usage, and
+forward-looking idempotency for new migrations (0022+).
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  console.log("sql-migrations-audit self-test passed");
+  process.exit(0);
+}
+
+const migrationsDir = path.resolve(repoRoot, args.find((arg) => !arg.startsWith("--")) ?? "app/orchestrator/migrations");
+const result = auditMigrations(migrationsDir);
+if (!result.ok) {
+  for (const error of result.errors) console.error(error);
+  process.exit(1);
+}
+
+console.log(`sql migrations audit passed: ${result.file_count} files`);
+
+export function auditMigrations(migrationsDir, options = {}) {
+  const errors = [];
+  const idempotencyStart = Number(options.idempotencyStart ?? 22);
+  const files = readdirSync(migrationsDir)
+    .filter((file) => file.endsWith(".sql"))
+    .sort();
+  if (files.length === 0) {
+    return { ok: false, file_count: 0, errors: [`${path.relative(repoRoot, migrationsDir)} has no .sql migrations`] };
+  }
+
+  files.forEach((file, index) => {
+    const expectedPrefix = String(index + 1).padStart(4, "0");
+    const match = /^(\d{4})_[a-z0-9_]+\.sql$/.exec(file);
+    if (!match) {
+      errors.push(`${file}: migration filename must be 0001_slug.sql`);
+    } else if (match[1] !== expectedPrefix) {
+      errors.push(`${file}: expected sequential prefix ${expectedPrefix}`);
+    }
+    const sql = readFileSync(path.join(migrationsDir, file), "utf8");
+    auditMigrationSql(file, sql, errors, { idempotencyStart });
+  });
+
+  return { ok: errors.length === 0, file_count: files.length, errors };
+}
+
+function auditMigrationSql(file, sql, errors, options = {}) {
+  const trimmed = sql.trim();
+  if (!trimmed) {
+    errors.push(`${file}: migration must not be empty`);
+    return;
+  }
+  if (!trimmed.endsWith(";")) {
+    errors.push(`${file}: migration must end with a semicolon`);
+  }
+  if (/\t/.test(sql)) {
+    errors.push(`${file}: migration must use spaces, not tabs`);
+  }
+  if (/\b(BEGIN|COMMIT|ROLLBACK)\b/i.test(stripComments(sql))) {
+    errors.push(`${file}: migrations run inside one transaction; do not include BEGIN/COMMIT/ROLLBACK`);
+  }
+
+  const normalized = normalizeSql(stripComments(sql));
+  const destructiveChecks = [
+    [/\bDROP\s+TABLE\b/i, "DROP TABLE"],
+    [/\bDROP\s+COLUMN\b/i, "DROP COLUMN"],
+    [/\bTRUNCATE\b/i, "TRUNCATE"],
+    [/\bDELETE\s+FROM\b/i, "DELETE FROM"],
+    [/\bUPDATE\s+[a-z_][a-z0-9_]*\b/i, "UPDATE"],
+  ];
+  for (const [pattern, label] of destructiveChecks) {
+    if (pattern.test(normalized)) errors.push(`${file}: destructive SQL is not allowed in migrations: ${label}`);
+  }
+  for (const statement of statements(normalized)) {
+    if (/\bDROP\s+CONSTRAINT\b/i.test(statement) && !/\bDROP\s+CONSTRAINT\s+IF\s+EXISTS\b/i.test(statement)) {
+      errors.push(`${file}: DROP CONSTRAINT must use IF EXISTS`);
+    }
+  }
+
+  const number = Number(file.slice(0, 4));
+  if (number >= Number(options.idempotencyStart ?? 22)) auditForwardLookingIdempotency(file, normalized, errors);
+}
+
+function auditForwardLookingIdempotency(file, normalized, errors) {
+  for (const statement of statements(normalized)) {
+    if (/\bCREATE\s+TABLE\b/i.test(statement) && !/\bCREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\b/i.test(statement)) {
+      errors.push(`${file}: new CREATE TABLE statements must use IF NOT EXISTS`);
+    }
+    if (/\bCREATE\s+(UNIQUE\s+)?INDEX\b/i.test(statement) && !/\bCREATE\s+(UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\b/i.test(statement)) {
+      errors.push(`${file}: new CREATE INDEX statements must use IF NOT EXISTS`);
+    }
+    if (/\bADD\s+COLUMN\b/i.test(statement) && !/\bADD\s+COLUMN\s+IF\s+NOT\s+EXISTS\b/i.test(statement)) {
+      errors.push(`${file}: new ADD COLUMN statements must use IF NOT EXISTS`);
+    }
+  }
+}
+
+function stripComments(sql) {
+  return sql
+    .replace(/--.*$/gm, "")
+    .replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+function normalizeSql(sql) {
+  return sql.replace(/\s+/g, " ").trim();
+}
+
+function statements(sql) {
+  return sql
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+}
+
+function runSelfTest() {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "eventloopos-sql-migrations-audit-"));
+  try {
+    writeFileSync(path.join(tmp, "0001_core.sql"), "CREATE TABLE example (id text PRIMARY KEY);\n");
+    writeFileSync(path.join(tmp, "0002_add_name.sql"), "ALTER TABLE example ADD COLUMN name text;\n");
+    assert.equal(auditMigrations(tmp, { idempotencyStart: 3 }).ok, true);
+
+    writeFileSync(path.join(tmp, "0003_new_safe.sql"), `
+CREATE TABLE IF NOT EXISTS safe_table (id text PRIMARY KEY);
+CREATE INDEX IF NOT EXISTS safe_table_id_idx ON safe_table(id);
+ALTER TABLE safe_table ADD COLUMN IF NOT EXISTS created_at timestamptz;
+`);
+    assert.equal(auditMigrations(tmp, { idempotencyStart: 3 }).ok, true);
+
+    writeFileSync(path.join(tmp, "0004_bad_create.sql"), "CREATE TABLE future_bad (id text PRIMARY KEY);\n");
+    const badCreate = auditMigrations(tmp, { idempotencyStart: 3 });
+    assert.equal(badCreate.ok, false);
+    assert.ok(badCreate.errors.includes("0004_bad_create.sql: new CREATE TABLE statements must use IF NOT EXISTS"));
+    rmSync(path.join(tmp, "0004_bad_create.sql"));
+
+    writeFileSync(path.join(tmp, "0004_bad_drop.sql"), "ALTER TABLE safe_table DROP COLUMN name;\n");
+    const badDrop = auditMigrations(tmp, { idempotencyStart: 3 });
+    assert.equal(badDrop.ok, false);
+    assert.ok(badDrop.errors.includes("0004_bad_drop.sql: destructive SQL is not allowed in migrations: DROP COLUMN"));
+    rmSync(path.join(tmp, "0004_bad_drop.sql"));
+
+    writeFileSync(path.join(tmp, "0005_gap.sql"), "CREATE TABLE IF NOT EXISTS gap (id text PRIMARY KEY);\n");
+    const gap = auditMigrations(tmp, { idempotencyStart: 3 });
+    assert.equal(gap.ok, false);
+    assert.ok(gap.errors.includes("0005_gap.sql: expected sequential prefix 0004"));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
