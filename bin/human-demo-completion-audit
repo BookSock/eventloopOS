@@ -70,6 +70,7 @@ function buildAudit(root, options = {}) {
     readiness_fresh: readinessFreshness.ok === true,
     readiness_screenshot_gate_present: readiness?.checks?.latest_human_demo_screenshot_ok === true
       && readiness?.latest_human_demo?.screenshot_image?.ok === true,
+    readiness_queue_briefing_strip_visible: readiness?.checks?.queue_briefing_strip_visible === true,
     human_result_recorded: Boolean(resultPath && fs.existsSync(path.resolve(root, resultPath))),
     human_result_filled: resultAudit.filled === true,
     verification_manifest_present: Boolean(verificationPath),
@@ -417,7 +418,7 @@ function runSelfTest() {
   const readyManifest = (timestamp) => ({
     ok: true,
     finished_at: timestamp,
-    checks: { latest_human_demo_screenshot_ok: true },
+    checks: { latest_human_demo_screenshot_ok: true, queue_briefing_strip_visible: true },
     latest_human_demo: { screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" } },
   });
   writeJson(readinessPath, readyManifest(new Date().toISOString()));
@@ -494,7 +495,7 @@ ship
   writeJson(readinessPath, {
     ok: true,
     started_at: new Date().toISOString(),
-    checks: { latest_human_demo_screenshot_ok: true },
+    checks: { latest_human_demo_screenshot_ok: true, queue_briefing_strip_visible: true },
     latest_human_demo: { screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" } },
   });
   const startedAtReadiness = buildAudit(root, {
@@ -502,6 +503,20 @@ ship
     verificationPath: path.relative(root, verificationPath),
   });
   assert.equal(startedAtReadiness.checks.readiness_fresh, true);
+
+  writeJson(readinessPath, {
+    ok: true,
+    started_at: new Date().toISOString(),
+    checks: { latest_human_demo_screenshot_ok: true, queue_briefing_strip_visible: false },
+    latest_human_demo: { screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" } },
+  });
+  const missingBriefingStrip = buildAudit(root, {
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(missingBriefingStrip.ok, false);
+  assert.ok(missingBriefingStrip.failed_checks.includes("readiness_queue_briefing_strip_visible"));
+  writeJson(readinessPath, readyManifest(new Date().toISOString()));
 
   fs.writeFileSync(resultPath, `Pass/fail:
 - Starting state on demo-customer with Queue visible:

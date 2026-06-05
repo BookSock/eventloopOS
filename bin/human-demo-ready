@@ -110,6 +110,7 @@ const checks = {
   latest_human_demo_queue_has_two_papers: Number(templateJson?.queue_count ?? 0) >= 2,
   ambient_autosave_proof_ok: templateJson?.ambient_autosave_ok === true,
   screen_sharing_capture_ok: skipScreenshot || (screenshotStage?.ok === true && screenshot?.ok === true),
+  queue_briefing_strip_visible: skipScreenshot || screenshotStage?.result?.queue_briefing_strip_present === true,
   queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
   workspace_latency_ok: !workspaceLatencyEnabled || (workspaceLatency?.status === 0 && workspaceLatencyManifest?.ok === true),
   hotkey_feedback_latency_ok: !hotkeyLatencyEnabled || (hotkeyLatency?.status === 0 && hotkeyLatencyManifest?.ok === true),
@@ -342,6 +343,12 @@ const focusedWindowIds = focusDemoWindows(snapshot);
 const raisedWindowCount = raiseDemoApps();
 execFileSync("aerospace", ["workspace", workspace], { stdio: "ignore" });
 await delay(800);
+const briefingStrip = queueBriefingStripStatus({
+  title: customer.review_packet?.title,
+  decision: customer.review_packet?.decision_needed ?? customer.review_packet?.recommended_action ?? "",
+  taskId: customer.task_id,
+  priority: customer.priority_score,
+});
 
 console.log(JSON.stringify({
   ok: true,
@@ -351,6 +358,9 @@ console.log(JSON.stringify({
   focused_window_ids: focusedWindowIds,
   raised_window_count: raisedWindowCount,
   restore_command_count: restore.plan?.commands?.length ?? 0,
+  queue_briefing_strip_present: briefingStrip.present,
+  queue_briefing_strip_line: briefingStrip.line,
+  queue_briefing_strip_error: briefingStrip.error,
 }));
 
 function latestDemoProofSnapshot(taskId) {
@@ -444,6 +454,78 @@ function raiseDemoApps() {
   } catch {
     return 0;
   }
+}
+
+function queueBriefingStripStatus(expected) {
+  const script = [
+    "tell application \\"System Events\\"",
+    "  if not (exists process \\"eventloopOS Queue\\") then return \\"missing:process\\"",
+    "  tell process \\"eventloopOS Queue\\"",
+    "    if (count of windows) is 0 then return \\"missing:window\\"",
+    "    set allLines to {}",
+    "    set flattenedElements to entire contents of window 1",
+    "    set elementCount to count of flattenedElements",
+    "    if elementCount is greater than 240 then set elementCount to 240",
+    "    repeat with elementIndex from 1 to elementCount",
+    "      set candidateElement to item elementIndex of flattenedElements",
+    "      set identifierText to \\"\\"",
+    "      set nameText to \\"\\"",
+    "      set valueText to \\"\\"",
+    "      try",
+    "        set identifierText to (value of attribute \\"AXIdentifier\\" of candidateElement) as string",
+    "      end try",
+    "      try",
+    "        set nameText to name of candidateElement as string",
+    "      end try",
+    "      try",
+    "        set valueText to value of candidateElement as string",
+    "      end try",
+    "      set end of allLines to identifierText & \\" \\" & nameText & \\" \\" & valueText",
+    "      if identifierText is \\"queue-paper-briefing-strip\\" then return \\"present:identifier:\\" & nameText",
+    "    end repeat",
+    "  end tell",
+    "end tell",
+    "set AppleScript's text item delimiters to linefeed",
+    "return allLines as string",
+  ].join("\\n");
+  try {
+    const output = execFileSync("osascript", [], { input: script, encoding: "utf8" }).trim();
+    if (output.startsWith("present:identifier:")) {
+      return {
+        present: true,
+        line: output,
+      };
+    }
+    const line = matchingBriefingLine(output, expected);
+    return {
+      present: Boolean(line),
+      line: line ?? "missing:briefing_label",
+    };
+  } catch (error) {
+    return {
+      present: false,
+      line: "",
+      error: String(error?.message ?? error),
+    };
+  }
+}
+
+function matchingBriefingLine(output, expected) {
+  const title = String(expected?.title ?? "").trim();
+  const decision = String(expected?.decision ?? "").trim();
+  const taskId = String(expected?.taskId ?? "").trim();
+  const priority = String(expected?.priority ?? "").trim();
+  const expectedParts = [
+    title,
+    decision,
+    taskId,
+    priority ? \`P\${priority}\` : "",
+  ].filter(Boolean);
+  if (expectedParts.length < 3) return undefined;
+  return output
+    .split(/\\r?\\n/)
+    .map((line) => line.replace(/\\s+/g, " ").trim())
+    .find((line) => expectedParts.every((part) => line.includes(part)));
 }
 
 function delay(ms) {
@@ -842,6 +924,7 @@ function renderReadyMarkdown(manifest) {
 - Suggested result file: ${latest?.suggested_result_path ?? ""}
 - Latest proof freshness: ${freshness ? `${freshness.ok ? "ok" : "stale"} age=${freshness.age_hours ?? ""}h max=${freshness.max_age_hours}h${freshness.allowed_stale ? " allowed" : ""}` : ""}
 - Fresh screenshot capture: ${screenshot?.output ?? "skipped"}${screenshot?.capture_mode ? ` mode=${screenshot.capture_mode}` : ""}${screenshot?.image?.dimensions ? ` (${screenshot.image.dimensions}, ${screenshot.image.bytes} bytes)` : ""}
+- Queue briefing strip: ${manifest.checks?.queue_briefing_strip_visible === true ? "visible" : "missing"}
 - Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
 - Workspace latency: ${workspaceLatency?.manifest_path ?? "skipped"}${manifest.workspace_latency_required ? " (required)" : ""}
 - Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}${manifest.hotkey_latency_required ? " (required)" : ""}
@@ -902,6 +985,7 @@ function runSelfTest() {
     ok: true,
     profile: "lab-human-demo",
     url: "http://127.0.0.1:4480",
+    checks: { queue_briefing_strip_visible: true },
     failed_checks: [],
     queue_latency_required: true,
     workspace_latency_required: true,
@@ -922,6 +1006,9 @@ function runSelfTest() {
   assert.ok(labDemoScreenshotStageScript().includes("task_demo_customer"));
   assert.ok(labDemoScreenshotStageScript().includes("latestDemoProofSnapshot"));
   assert.ok(labDemoScreenshotStageScript().includes("raiseDemoApps"));
+  assert.ok(labDemoScreenshotStageScript().includes("queueBriefingStripStatus"));
+  assert.ok(labDemoScreenshotStageScript().includes("matchingBriefingLine"));
+  assert.ok(labDemoScreenshotStageScript().includes("queue-paper-briefing-strip"));
   assert.ok(labDemoScreenshotStageScript().includes("/workspace/restore"));
   assert.equal(remoteRepoFromEnv({ LAB_MAC_USER: "claw" }), "/Users/claw/dev/2026/eventloopOS");
   assert.equal(remoteRepoFromEnv({ LAB_MAC_USER: "demo", LAB_MAC_EVENTLOOP_PATH: "~/src/eventloopOS" }), "/Users/demo/src/eventloopOS");
@@ -947,6 +1034,7 @@ function runSelfTest() {
     ok: true,
     profile: "lab-human-demo",
     url: "http://127.0.0.1:4480",
+    checks: { queue_briefing_strip_visible: true },
     failed_checks: [],
     latest_human_demo: {
       manifest_path: "artifacts/lab-runs/demo/manifest.json",
@@ -968,6 +1056,7 @@ function runSelfTest() {
   assert.match(markdown, /artifacts\/lab-runs\/demo\/manifest\.json/);
   assert.match(markdown, /Latest proof freshness: ok age=1.25h max=24h/);
   assert.match(markdown, /Fresh screenshot capture: artifacts\/lab-runs\/ready\/screen-sharing\.png mode=local_screen_sharing_window \(1280x720, 2048 bytes\)/);
+  assert.match(markdown, /Queue briefing strip: visible/);
   assert.match(markdown, /Hotkey feedback latency: skipped/);
   assert.match(markdown, /Queue latency: artifacts\/lab-runs\/ready\/queue-latency\.json/);
   assert.match(markdown, /Workspace latency: artifacts\/lab-runs\/ready\/workspace-latency\.json/);
