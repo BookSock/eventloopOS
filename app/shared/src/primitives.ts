@@ -586,6 +586,18 @@ export type PrimitiveHttpErrorMatch = {
   method?: PrimitiveHttpMethod | Lowercase<PrimitiveHttpMethod>;
 };
 
+export type PrimitiveRequestBuildErrorMatch = {
+  kind?: PrimitiveRequestBuildErrorKind;
+  parameter?: string;
+  path?: string;
+  method?: PrimitiveHttpMethod | Lowercase<PrimitiveHttpMethod>;
+};
+
+export type PrimitiveRouteErrorMatch = {
+  path?: string;
+  method?: PrimitiveHttpMethod | Lowercase<PrimitiveHttpMethod>;
+};
+
 export type PrimitiveErrorSummary = {
   name: string;
   message: string;
@@ -603,6 +615,42 @@ export function isPrimitiveHttpError(error: unknown, match: PrimitiveHttpErrorMa
   if (!(error instanceof PrimitiveHttpError)) return false;
   if (match.status !== undefined && error.status !== match.status) return false;
   if (match.code !== undefined && error.code !== match.code) return false;
+  if (match.path !== undefined && error.path !== match.path) return false;
+  if (match.method !== undefined && error.method !== normalizePrimitiveMethod(match.method)) return false;
+  return true;
+}
+
+export function isPrimitiveRequestBuildError(
+  error: unknown,
+  match: PrimitiveRequestBuildErrorMatch = {}
+): error is PrimitiveRequestBuildError {
+  if (!(error instanceof PrimitiveRequestBuildError)) return false;
+  if (match.kind !== undefined && error.kind !== match.kind) return false;
+  if (match.parameter !== undefined && error.parameter !== match.parameter) return false;
+  if (match.path !== undefined && error.path !== match.path) return false;
+  if (match.method !== undefined && error.method !== normalizePrimitiveMethod(match.method)) return false;
+  return true;
+}
+
+export function isPrimitiveTimeoutError(error: unknown, match: PrimitiveRouteErrorMatch = {}): error is PrimitiveTimeoutError {
+  if (!(error instanceof PrimitiveTimeoutError)) return false;
+  if (match.path !== undefined && error.path !== match.path) return false;
+  if (match.method !== undefined && error.method !== normalizePrimitiveMethod(match.method)) return false;
+  return true;
+}
+
+export function isPrimitiveResponseParseError(error: unknown, match: PrimitiveRouteErrorMatch = {}): error is PrimitiveResponseParseError {
+  if (!(error instanceof PrimitiveResponseParseError)) return false;
+  if (match.path !== undefined && error.path !== match.path) return false;
+  if (match.method !== undefined && error.method !== normalizePrimitiveMethod(match.method)) return false;
+  return true;
+}
+
+export function isPrimitiveResponseValidationError(
+  error: unknown,
+  match: PrimitiveRouteErrorMatch = {}
+): error is PrimitiveResponseValidationError {
+  if (!(error instanceof PrimitiveResponseValidationError)) return false;
   if (match.path !== undefined && error.path !== match.path) return false;
   if (match.method !== undefined && error.method !== normalizePrimitiveMethod(match.method)) return false;
   return true;

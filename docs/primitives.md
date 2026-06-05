@@ -74,6 +74,10 @@ path/query params, invalid query values, and invalid request bodies. HTTP errors
 expose `status`, server `code`, server detail text, route metadata, and exported
 guard helpers for branching on recoverable cases like manual-mode pauses or
 stale task-session bindings. Timeout errors expose the route and `timeoutMs`.
+The SDK now exports guard helpers for every recoverable primitive error class:
+`isPrimitiveHttpError`, `isPrimitiveRequestBuildError`,
+`isPrimitiveResponseParseError`, `isPrimitiveResponseValidationError`, and
+`isPrimitiveTimeoutError`.
 It also exposes `createPrimitiveOperationsClient`, a small typed convenience
 layer for common master-command, manual-mode, task-workspace, queue,
 workspace, task-session, Codex/Claude agent, task-window-claim,

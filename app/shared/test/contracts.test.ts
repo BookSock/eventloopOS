@@ -26,6 +26,10 @@ import {
   createPrimitiveHttpClient,
   createPrimitiveOperationsClient,
   isPrimitiveHttpError,
+  isPrimitiveRequestBuildError,
+  isPrimitiveResponseParseError,
+  isPrimitiveResponseValidationError,
+  isPrimitiveTimeoutError,
   parsePrimitiveCatalog,
   primitiveErrorSummary,
   PrimitiveHttpError,
@@ -620,6 +624,8 @@ describe("primitive catalog SDK boundary", () => {
       const primitiveError = error as PrimitiveRequestBuildError;
       expect(primitiveError.kind).toBe("missing_path_param");
       expect(primitiveError.parameter).toBe("id");
+      expect(isPrimitiveRequestBuildError(error, { kind: "missing_path_param", parameter: "id", method: "get" })).toBe(true);
+      expect(isPrimitiveRequestBuildError(error, { kind: "unknown_query_param" })).toBe(false);
       expect(primitiveErrorSummary(error)).toEqual({
         name: "PrimitiveRequestBuildError",
         message: "Missing primitive path parameter: id",
@@ -774,7 +780,14 @@ describe("primitive catalog SDK boundary", () => {
       fetch: async () => new Response("not-json", { status: 200 })
     });
 
-    await expect(parseClient.request("POST", "/agents/codex/auto-bind")).rejects.toBeInstanceOf(PrimitiveResponseParseError);
+    try {
+      await parseClient.request("POST", "/agents/codex/auto-bind");
+      throw new Error("expected primitive parse error");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PrimitiveResponseParseError);
+      expect(isPrimitiveResponseParseError(error, { method: "post", path: "/agents/codex/auto-bind" })).toBe(true);
+      expect(isPrimitiveResponseParseError(error, { path: "/health" })).toBe(false);
+    }
 
     const validationClient = createPrimitiveHttpClient({
       catalog,
@@ -793,6 +806,8 @@ describe("primitive catalog SDK boundary", () => {
       expect(primitiveError.route?.path).toBe("/onboarding/approvals/batch");
       expect(primitiveError.payload).toEqual({ ok: true });
       expect(primitiveError.cause).toBeTruthy();
+      expect(isPrimitiveResponseValidationError(error, { method: "POST", path: "/onboarding/approvals/batch" })).toBe(true);
+      expect(isPrimitiveResponseValidationError(error, { method: "GET" })).toBe(false);
     }
   });
 
@@ -827,6 +842,8 @@ describe("primitive catalog SDK boundary", () => {
       expect(primitiveError.method).toBe("GET");
       expect(primitiveError.path).toBe("/health");
       expect(observedSignal?.aborted).toBe(true);
+      expect(isPrimitiveTimeoutError(error, { method: "get", path: "/health" })).toBe(true);
+      expect(isPrimitiveTimeoutError(error, { path: "/queue" })).toBe(false);
       expect(primitiveErrorSummary(error)).toEqual({
         name: "PrimitiveTimeoutError",
         message: "Primitive route timed out after 5ms: GET /health",

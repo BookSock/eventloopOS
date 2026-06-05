@@ -29,8 +29,14 @@ import {
   createPrimitiveOperationsClient,
   getPrimitiveRoute,
   PrimitiveHttpError,
+  isPrimitiveHttpError,
+  isPrimitiveRequestBuildError,
+  isPrimitiveResponseParseError,
+  isPrimitiveResponseValidationError,
+  isPrimitiveTimeoutError,
   PrimitiveResponseParseError,
   PrimitiveResponseValidationError,
+  PrimitiveTimeoutError,
   routeHasRequestBody,
   selectPrimitiveCapabilities,
   selectPrimitiveLatencyBudgets,
@@ -139,18 +145,33 @@ The HTTP client exposes catchable error classes for builder-facing tools:
 
 - `PrimitiveHttpError`: non-2xx response, with `status`, `statusText`,
   `payload`, `responseText`, and `route`.
+- `PrimitiveRequestBuildError`: invalid local request before fetch, with
+  `kind` and optional `parameter`.
 - `PrimitiveResponseParseError`: response body was not valid JSON.
 - `PrimitiveResponseValidationError`: successful JSON response did not match
   the catalog response schema.
+- `PrimitiveTimeoutError`: request exceeded configured timeout, with
+  `timeoutMs`.
+
+Guard helpers are exported for each recoverable error class:
+`isPrimitiveHttpError`, `isPrimitiveRequestBuildError`,
+`isPrimitiveResponseParseError`, `isPrimitiveResponseValidationError`, and
+`isPrimitiveTimeoutError`.
 
 ```ts
 try {
   await client.request("POST", "/onboarding/approvals/batch", { body });
 } catch (error) {
-  if (error instanceof PrimitiveHttpError && error.status === 409) {
-    console.log(error.payload);
+  if (isPrimitiveHttpError(error, { status: 409, code: "idempotency_conflict" })) {
+    console.log(error.detail);
   }
-  if (error instanceof PrimitiveResponseValidationError) {
+  if (isPrimitiveRequestBuildError(error, { kind: "missing_path_param" })) {
+    console.error(error.parameter);
+  }
+  if (isPrimitiveTimeoutError(error, { path: "/workspace/capture" })) {
+    console.error(error.timeoutMs);
+  }
+  if (isPrimitiveResponseValidationError(error)) {
     console.error(error.route?.path, error.cause);
   }
 }
