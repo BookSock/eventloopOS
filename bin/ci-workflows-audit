@@ -61,6 +61,7 @@ export async function auditWorkflows(root) {
   rejectIncludes(texts.ci, "runs-on: macos-latest", "ci.yml must not run standard CI on macOS runners", errors);
   requireIncludes(texts.ci, "EVENTLOOPOS_SKIP_BROWSER_E2E=1 pnpm run ci", "ci.yml must skip browser/live mac work in Linux CI", errors);
   requireIncludes(texts.ci, "paths-ignore:", "ci.yml must ignore docs/artifacts-only changes", errors);
+  requireIncludes(texts.ci, '"*.md"', "ci.yml must ignore root markdown-only changes", errors);
   requireIncludes(texts.ci, '"docs/**/*.md"', "ci.yml must ignore docs markdown-only changes", errors);
   requireIncludes(texts.ci, '"artifacts/**"', "ci.yml must ignore artifact-only changes", errors);
   requireIncludes(texts.ci, "timeout-minutes: 20", "ci.yml must keep bounded runtime", errors);
@@ -139,12 +140,12 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - "README.md"
+      - "*.md"
       - "docs/**/*.md"
       - "artifacts/**"
   pull_request:
     paths-ignore:
-      - "README.md"
+      - "*.md"
       - "docs/**/*.md"
       - "artifacts/**"
   workflow_dispatch:
