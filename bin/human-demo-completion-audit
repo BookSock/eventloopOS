@@ -179,6 +179,7 @@ function latestVerificationPath(root, resultPath) {
     });
     const latestMatching = matching.at(-1);
     if (latestMatching) return path.relative(root, latestMatching);
+    return undefined;
   }
   return path.relative(root, candidates.at(-1));
 }
@@ -360,6 +361,12 @@ function runSelfTest() {
   const oldResultPath = path.join(root, "artifacts", "human-demo-results", "20260601T000000Z-human-demo-result.md");
   fs.mkdirSync(path.dirname(oldResultPath), { recursive: true });
   fs.writeFileSync(oldResultPath, "stale blank result\n", "utf8");
+  writeJson(path.join(root, "artifacts", "human-demo-verifications", "20260601T001100Z-human-demo-result-verify", "manifest.json"), {
+    ok: true,
+    result_path: path.relative(root, oldResultPath),
+    checks: { lab_status_ok: true },
+    lab_status: { ok: true },
+  });
   const demoPath = path.join(root, "artifacts", "lab-runs", "20260605-001000-human-demo", "manifest.json");
   writeJson(demoPath, { ok: true, generated_at: "2026-06-05T00:10:00.000Z" });
 
@@ -368,9 +375,11 @@ function runSelfTest() {
   assert.ok(pending.failed_checks.includes("human_result_recorded"));
   assert.ok(pending.failed_checks.includes("verification_manifest_present"));
   assert.equal(pending.checks.readiness_fresh, true);
+  assert.equal(pending.checks.verification_manifest_present, false);
   assert.ok(pending.readiness_observed_at);
   assert.equal(pending.expected_result_path, "artifacts/human-demo-results/20260605T001000Z-human-demo-result.md");
   assert.equal(pending.result_path, pending.expected_result_path);
+  assert.equal(pending.verification_manifest_path, undefined);
 
   const resultPath = path.join(root, "artifacts", "human-demo-results", "20260605T001000Z-human-demo-result.md");
   fs.mkdirSync(path.dirname(resultPath), { recursive: true });
