@@ -14,8 +14,8 @@ if (args.includes("--self-test")) {
 
 if (args.includes("-h") || args.includes("--help") || args.length === 0) {
   console.log(`Usage:
-  node examples/primitives/operation-id-client.mjs list [--category os_control] [--json]
-  node examples/primitives/operation-id-client.mjs helpers [--category os_control] [--json]
+  node examples/primitives/operation-id-client.mjs list [--category os_control] [--side-effect os_control] [--read-only] [--json]
+  node examples/primitives/operation-id-client.mjs helpers [--category os_control] [--side-effect none] [--read-only] [--json]
   node examples/primitives/operation-id-client.mjs describe workspace_control_get_workspace_status --json
   node examples/primitives/operation-id-client.mjs queue_paper_routing_get_queue_by_id_lineage --path-param id=qit_feedback_001 --query limit=25 --json
   node examples/primitives/operation-id-client.mjs workspace_control_get_workspace_status --url http://127.0.0.1:4377
@@ -90,6 +90,7 @@ function parseArgs(argv) {
     strictQuery: true,
     categories: [],
     statuses: [],
+    sideEffects: [],
   };
   if (!["list", "helpers"].includes(options.command) && (!options.operation || options.operation.startsWith("--"))) die("missing operation id");
   const startIndex = options.command === "call" ? 1 : options.command === "describe" ? 2 : 1;
@@ -102,6 +103,9 @@ function parseArgs(argv) {
     else if (arg === "--timeout-ms") options.timeoutMs = parsePositiveInteger(readValue(argv, ++index, arg), arg);
     else if (arg === "--category") options.categories.push(readValue(argv, ++index, arg));
     else if (arg === "--status") options.statuses.push(readValue(argv, ++index, arg));
+    else if (arg === "--side-effect") options.sideEffects.push(readValue(argv, ++index, arg));
+    else if (arg === "--read-only") options.readOnly = true;
+    else if (arg === "--mutating") options.readOnly = false;
     else if (arg === "--path-param") {
       const [key, value] = parsePair(readValue(argv, ++index, arg), arg);
       options.pathParams[key] = value;
@@ -122,6 +126,8 @@ function listOperations(sdk, catalog, options) {
   if (options.categories.length > 0) filter.categories = options.categories;
   if (options.statuses.length > 0) filter.statuses = options.statuses;
   return sdk.listPrimitiveOperations(catalog, filter)
+    .filter((operation) => options.sideEffects.length === 0 || options.sideEffects.includes(operation.sideEffect))
+    .filter((operation) => options.readOnly === undefined || operation.readOnly === options.readOnly)
     .map(operationSummary)
     .sort((left, right) => left.operation.localeCompare(right.operation));
 }
@@ -131,6 +137,8 @@ async function listHelpers(sdk, catalog, options) {
   return helpers
     .filter((helper) => options.categories.length === 0 || options.categories.includes(helper.primitiveCategory))
     .filter((helper) => options.statuses.length === 0 || options.statuses.includes(helper.primitiveStatus))
+    .filter((helper) => options.sideEffects.length === 0 || options.sideEffects.includes(helper.sideEffect))
+    .filter((helper) => options.readOnly === undefined || helper.readOnly === options.readOnly)
     .sort((left, right) => left.helper.localeCompare(right.helper));
 }
 
@@ -147,6 +155,8 @@ function operationSummary(route) {
     primitive_title: route.primitiveTitle,
     category: route.primitiveCategory,
     status: route.primitiveStatus,
+    side_effect: route.sideEffect,
+    read_only: route.readOnly,
     method: route.route.method,
     path: route.route.path,
     request_schema: route.route.request_schema ?? null,
@@ -170,13 +180,13 @@ function operationDetail(route) {
 
 function printOperations(operations) {
   for (const operation of operations) {
-    console.log(`${operation.operation}\t${operation.method} ${operation.path}\t${operation.primitive_id}`);
+    console.log(`${operation.operation}\t${operation.method} ${operation.path}\t${operation.side_effect}\t${operation.primitive_id}`);
   }
 }
 
 function printHelpers(helpers) {
   for (const helper of helpers) {
-    console.log(`${helper.helper}\t${helper.operation}\t${helper.method} ${helper.path}`);
+    console.log(`${helper.helper}\t${helper.operation}\t${helper.method} ${helper.path}\t${helper.sideEffect}`);
   }
 }
 
@@ -184,6 +194,8 @@ function printOperation(operation) {
   console.log(`${operation.operation}`);
   console.log(`${operation.method} ${operation.path}`);
   console.log(`primitive: ${operation.primitive_id} (${operation.category}/${operation.status})`);
+  console.log(`side_effect: ${operation.side_effect}`);
+  console.log(`read_only: ${operation.read_only}`);
   if (operation.request_schema) console.log(`request: ${operation.request_schema}`);
   console.log(`response: ${operation.response_schema}`);
   if (operation.query_parameters.length > 0) console.log(`query: ${operation.query_parameters.join(", ")}`);
@@ -238,6 +250,7 @@ async function runSelfTest() {
     strictQuery: false,
     categories: [],
     statuses: [],
+    sideEffects: [],
   });
 
   assert.deepEqual(parseArgs([
@@ -253,6 +266,7 @@ async function runSelfTest() {
     strictQuery: true,
     categories: ["os_control"],
     statuses: [],
+    sideEffects: [],
     json: true,
   });
 
@@ -269,7 +283,25 @@ async function runSelfTest() {
     strictQuery: true,
     categories: ["os_control"],
     statuses: [],
+    sideEffects: [],
     json: true,
+  });
+
+  assert.deepEqual(parseArgs([
+    "list",
+    "--side-effect",
+    "none",
+    "--read-only",
+  ]), {
+    command: "list",
+    operation: undefined,
+    pathParams: {},
+    query: {},
+    strictQuery: true,
+    categories: [],
+    statuses: [],
+    sideEffects: ["none"],
+    readOnly: true,
   });
 
   const calls = [];
@@ -288,8 +320,22 @@ async function runSelfTest() {
   const operations = listOperations(sdk, catalog, {
     categories: ["os_control"],
     statuses: [],
+    sideEffects: [],
   });
   assert.deepEqual(operations.map((operation) => operation.operation), [
+    "workspace_control_get_workspace_status",
+    "workspace_control_post_workspace_capture",
+  ]);
+  assert.deepEqual(operations.map((operation) => operation.side_effect), ["none", "none"]);
+
+  const readOnlyOperations = listOperations(sdk, catalog, {
+    categories: [],
+    statuses: [],
+    sideEffects: ["none"],
+    readOnly: true,
+  });
+  assert.deepEqual(readOnlyOperations.map((operation) => operation.operation), [
+    "queue_paper_routing_get_queue",
     "workspace_control_get_workspace_status",
     "workspace_control_post_workspace_capture",
   ]);
@@ -302,6 +348,8 @@ async function runSelfTest() {
   const helpers = await listHelpers(sdk, catalog, {
     categories: ["os_control"],
     statuses: [],
+    sideEffects: ["none"],
+    readOnly: true,
   });
   assert.deepEqual(helpers.map((helper) => helper.helper), [
     "workspace.capture",

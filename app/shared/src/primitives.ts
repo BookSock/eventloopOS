@@ -114,6 +114,9 @@ const schemaReference = z.union([nonEmpty, z.record(z.unknown())]);
 export const PrimitiveHttpMethodSchema = z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 export type PrimitiveHttpMethod = z.infer<typeof PrimitiveHttpMethodSchema>;
 
+export const PrimitiveOperationSideEffectSchema = z.enum(["none", "internal_state", "os_control", "external_agent_or_source"]);
+export type PrimitiveOperationSideEffect = z.infer<typeof PrimitiveOperationSideEffectSchema>;
+
 export const PrimitiveQueryParameterSchema = z
   .object({
     name: nonEmpty,
@@ -301,6 +304,8 @@ export type PrimitiveOperationRoute = {
   primitiveStatus: string;
   primitiveCategory: string;
   primitiveSummary: string;
+  sideEffect: PrimitiveOperationSideEffect;
+  readOnly: boolean;
   route: PrimitiveHttpRoute;
 };
 
@@ -308,6 +313,8 @@ export type PrimitiveApiIndexRoute = {
   method: PrimitiveHttpMethod;
   path: string;
   operation: string;
+  sideEffect: PrimitiveOperationSideEffect;
+  readOnly: boolean;
   requestSchema?: string;
   responseSchema: string;
   requestBody: boolean;
@@ -382,6 +389,8 @@ export type PrimitiveOperationHelperRoute = {
   helper: string;
   method: PrimitiveHttpMethod;
   path: string;
+  sideEffect: PrimitiveOperationSideEffect;
+  readOnly: boolean;
   operation?: string;
   primitiveId?: string;
   primitiveTitle?: string;
@@ -774,6 +783,28 @@ export function routeHasRequestBody(route: PrimitiveHttpRoute): boolean {
   return ["POST", "PUT", "PATCH"].includes(route.method) && route.no_request_body !== true;
 }
 
+export function primitiveRouteSideEffect(route: PrimitiveHttpRoute): PrimitiveOperationSideEffect {
+  if (route.method === "GET") return "none";
+  if (route.path === "/workspace/capture") return "none";
+  if (route.path === "/workspace/restore-plan") return "none";
+  if (route.path === "/contexts/restore-plan") return "none";
+  if (route.path === "/workspace/restore") return "os_control";
+  if (route.path === "/modes/manual") return "os_control";
+  if (route.path.startsWith("/contexts/restore-requests")) return "os_control";
+  if (route.path.startsWith("/task-sessions")) return "external_agent_or_source";
+  if (route.path.startsWith("/task-messages")) return "external_agent_or_source";
+  if (route.path.startsWith("/mcp")) return "external_agent_or_source";
+  if (route.path.startsWith("/agent-runs")) return "external_agent_or_source";
+  if (route.path.startsWith("/agents/")) return "external_agent_or_source";
+  if (route.path.startsWith("/voice/")) return "external_agent_or_source";
+  if (route.path.startsWith("/master/")) return "external_agent_or_source";
+  return "internal_state";
+}
+
+export function primitiveRouteReadOnly(route: PrimitiveHttpRoute): boolean {
+  return primitiveRouteSideEffect(route) === "none";
+}
+
 export function primitiveRoutes(catalog: PrimitiveCatalog): PrimitiveHttpRoute[] {
   return catalog.primitives.flatMap((primitive) => primitive.http ?? []);
 }
@@ -815,6 +846,8 @@ export function listPrimitiveOperations(
       primitiveStatus: primitive.status,
       primitiveCategory: category,
       primitiveSummary: primitive.summary,
+      sideEffect: primitiveRouteSideEffect(route),
+      readOnly: primitiveRouteReadOnly(route),
       route
     }));
   });
@@ -1400,6 +1433,8 @@ export async function listPrimitiveOperationHelpers(catalog?: PrimitiveCatalog):
         helper: currentHelper,
         method: normalizedMethod,
         path,
+        sideEffect: operation?.sideEffect ?? primitiveRouteSideEffect({ method: normalizedMethod, path, route_file: "", response_schema: {} }),
+        readOnly: operation?.readOnly ?? primitiveRouteReadOnly({ method: normalizedMethod, path, route_file: "", response_schema: {} }),
         operation: operation?.operation,
         primitiveId: operation?.primitiveId,
         primitiveTitle: operation?.primitiveTitle,
@@ -1667,6 +1702,8 @@ export function buildPrimitiveApiIndex(catalog: PrimitiveCatalog): PrimitiveApiI
             method: route.method,
             path: route.path,
             operation: primitiveOperationId(primitive.id, route.method, route.path),
+            sideEffect: primitiveRouteSideEffect(route),
+            readOnly: primitiveRouteReadOnly(route),
             requestSchema: schemaReferenceName(route.request_schema),
             responseSchema: schemaReferenceName(route.response_schema) ?? "FreeformJsonObject",
             requestBody: routeHasRequestBody(route),

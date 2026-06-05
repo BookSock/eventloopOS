@@ -41,6 +41,8 @@ import {
   primitiveErrorSummary,
   PrimitiveHttpError,
   primitiveOperationId,
+  primitiveRouteReadOnly,
+  primitiveRouteSideEffect,
   PrimitiveRequestBuildError,
   PrimitiveResponseParseError,
   PrimitiveResponseValidationError,
@@ -513,6 +515,8 @@ describe("primitive catalog SDK boundary", () => {
       method: "POST",
       path: "/workspace/capture",
       operation: "workspace_control_post_workspace_capture",
+      sideEffect: "none",
+      readOnly: true,
       responseSchema: "WorkspaceCaptureResponse",
       requestBody: true,
       routeFile: "app/orchestrator/src/routes/workspace.ts",
@@ -524,8 +528,16 @@ describe("primitive catalog SDK boundary", () => {
       ?.routes.find((route) => route.path === "/queue/:id/lineage");
     expect(lineage).toMatchObject({
       operation: "queue_paper_routing_get_queue_by_id_lineage",
+      sideEffect: "none",
+      readOnly: true,
       queryParameters: ["limit"],
       responseSchema: "QueueLineageResponse"
+    });
+
+    expect(workspace?.routes.find((route) => route.path === "/workspace/restore")).toMatchObject({
+      operation: "workspace_control_post_workspace_restore",
+      sideEffect: "os_control",
+      readOnly: false
     });
   });
 
@@ -549,6 +561,8 @@ describe("primitive catalog SDK boundary", () => {
       operation: "queue_paper_routing_get_queue_by_id_lineage",
       primitiveId: "queue_paper_routing",
       primitiveCategory: "attention_routing",
+      sideEffect: "none",
+      readOnly: true,
       route: {
         method: "GET",
         path: "/queue/:id/lineage"
@@ -557,6 +571,13 @@ describe("primitive catalog SDK boundary", () => {
     expect(primitiveOperationId("queue_paper_routing", "GET", "/queue/:id/lineage")).toBe(
       "queue_paper_routing_get_queue_by_id_lineage"
     );
+
+    expect(primitiveRouteSideEffect(getPrimitiveOperation(catalog, "queue_paper_routing_post_queue_by_id_done")!.route)).toBe("internal_state");
+    expect(primitiveRouteReadOnly(getPrimitiveOperation(catalog, "queue_paper_routing_post_queue_by_id_done")!.route)).toBe(false);
+    expect(getPrimitiveOperation(catalog, "master_command_router_post_master_fan_out")).toMatchObject({
+      sideEffect: "external_agent_or_source",
+      readOnly: false
+    });
 
     const request = buildPrimitiveOperationRequest({
       catalog,
@@ -1246,12 +1267,16 @@ describe("primitive catalog SDK boundary", () => {
       path: "/workspace/capture",
       operation: "workspace_control_post_workspace_capture",
       primitiveId: "workspace_control",
-      primitiveCategory: "os_control"
+      primitiveCategory: "os_control",
+      sideEffect: "none",
+      readOnly: true
     });
     expect(helpers.find((helper) => helper.helper === "queue.done")).toMatchObject({
       method: "POST",
       path: "/queue/:id/done",
-      operation: "queue_paper_routing_post_queue_by_id_done"
+      operation: "queue_paper_routing_post_queue_by_id_done",
+      sideEffect: "internal_state",
+      readOnly: false
     });
   });
 });

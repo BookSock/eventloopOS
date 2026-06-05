@@ -105,6 +105,7 @@ import {
   createPrimitiveOperationHttpClient,
   getPrimitiveOperation,
   listPrimitiveOperations,
+  primitiveRouteSideEffect,
   summarizePrimitiveCatalog
 } from "@eventloopos/shared/primitives";
 
@@ -146,6 +147,8 @@ const catalog = PrimitiveCatalogSchema.parse({
 });
 assert.equal(summarizePrimitiveCatalog(catalog).primitiveCount, 1);
 assert.equal(listPrimitiveOperations(catalog).map((operation) => operation.operation).join(","), "pack_smoke_get_health");
+assert.equal(listPrimitiveOperations(catalog)[0].sideEffect, "none");
+assert.equal(primitiveRouteSideEffect(listPrimitiveOperations(catalog)[0].route), "none");
 assert.equal(getPrimitiveOperation(catalog, "pack_smoke_get_health")?.route.path, "/health");
 assert.equal(buildPrimitiveOperationRequest({
   catalog,

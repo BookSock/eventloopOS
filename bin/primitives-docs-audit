@@ -49,6 +49,9 @@ function auditPrimitiveDocs(catalogPath, docsPath, repoRoot) {
   requireIncludes(docs, "every cataloged primitive has a `self_tests` command", "missing strict self-test invariant wording", errors);
   requireIncludes(docs, "Responsiveness-critical primitives must also carry explicit p95 latency budgets", "missing responsiveness latency-budget invariant wording", errors);
   requireIncludes(docs, "buildPrimitiveProofPlan", "missing primitive proof-plan SDK helper wording", errors);
+  requireIncludes(docs, "x-eventloopos-side-effect", "missing OpenAPI side-effect extension wording", errors);
+  requireIncludes(docs, "primitiveRouteSideEffect", "missing primitive side-effect SDK helper wording", errors);
+  requireIncludes(docs, "--side-effect none --read-only", "missing side-effect/read-only example wording", errors);
   requireIncludes(docs, "discover-primitives.mjs proof-plan", "missing discovery proof-plan command wording", errors);
   requireIncludes(docs, "bin/primitives-builder-gate", "missing primitive builder gate wording", errors);
   requireIncludes(docs, "primitives:builder-gate:release", "missing primitive builder release gate wording", errors);
@@ -154,6 +157,9 @@ Machine-readable catalog: ${catalogPath}. Builder-facing HTTP OpenAPI artifact: 
 Strict readiness is expected to stay green: every cataloged primitive has a \`self_tests\` command.
 Responsiveness-critical primitives must also carry explicit p95 latency budgets linked to runnable proof commands.
 \`buildPrimitiveProofPlan\` combines those selectors into one verification plan.
+OpenAPI route extensions include x-eventloopos-side-effect and x-eventloopos-read-only.
+SDK classifiers include primitiveRouteSideEffect and primitiveRouteReadOnly.
+Example safe listing: node examples/primitives/operation-id-client.mjs list --side-effect none --read-only.
 Example: node examples/primitives/discover-primitives.mjs proof-plan --id workspace_control --json.
 Root typecheck writes the full catalog self-test manifest.
 Run bin/primitives-builder-gate before handing primitive APIs to another tool.

@@ -180,6 +180,10 @@ machine-readable release evidence.
 `docs/primitives.index.json` back into catalog routes and validated requests,
 so generated/LLM-authored builders can discover and call primitives without
 hard-coding method/path pairs.
+Operation rows include `sideEffect` (`none`, `internal_state`, `os_control`, or
+`external_agent_or_source`) and `readOnly`, and the package exports
+`primitiveRouteSideEffect(route)` / `primitiveRouteReadOnly(route)` for tools
+that already hold catalog route objects.
 `createPrimitiveOperationHttpClient` executes those operation ids through the
 same validating HTTP client, preserving timeout, request-build, HTTP-status,
 response-parse, and response-schema errors.
@@ -192,9 +196,9 @@ operations. Shared tests compare those operation helpers against every
 cataloged HTTP route so route/helper drift is visible.
 `listPrimitiveOperationHelpers(catalog)` returns a machine-readable manifest of
 those convenience methods, including helper path, operation id, method, route,
-primitive id, category, and status. Use it when generating wrappers, tool
-descriptions, or docs from the SDK surface instead of scraping TypeScript
-source.
+primitive id, category, status, side-effect label, and read-only flag. Use it
+when generating wrappers, tool descriptions, or docs from the SDK surface
+instead of scraping TypeScript source.
 The catalog uses `pnpm --filter @eventloopos/shared run test:primitive-ops` as
 the command-level self-test for HTTP/API primitives.
 

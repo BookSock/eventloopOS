@@ -55,6 +55,7 @@ function auditPrimitiveExamples(examplesDir) {
     requireIncludes(loader, "createPrimitiveOperationsClient", "loader must create shared primitive operations client", errors);
     requireIncludes(loader, "createPrimitiveOperationHttpClient", "loader must create shared primitive operation-id HTTP client", errors);
     requireIncludes(loader, "listPrimitiveOperations", "loader must expose shared primitive operation-list helper", errors);
+    requireIncludes(loader, "primitiveRouteSideEffect", "loader must force rebuild for side-effect-aware SDKs", errors);
     requireIncludes(loader, "pnpm\", [\"--filter\", \"@eventloopos/shared\", \"build\"]", "loader must build shared SDK on demand", errors);
   }
 
@@ -80,6 +81,8 @@ function auditPrimitiveExamples(examplesDir) {
         requireIncludes(text, "describeOperation", "operation-id-client must describe operation ids before live calls", errors);
         requireIncludes(text, "listOperations", "operation-id-client must list operation ids before live calls", errors);
         requireIncludes(text, "requestOperation", "operation-id-client must call primitives by operation id", errors);
+        requireIncludes(text, "--side-effect", "operation-id-client must expose side-effect filter", errors);
+        requireIncludes(text, "--read-only", "operation-id-client must expose read-only filter", errors);
         requireIncludes(text, "--timeout-ms", "operation-id-client must expose timeout option", errors);
         requireIncludes(text, "examples/primitives/fixtures/workbench-catalog.json", "operation-id-client must have fixture-backed self-test", errors);
       }
@@ -125,6 +128,7 @@ const command = ["pnpm", ["--filter", "@eventloopos/shared", "build"]];
 const helper = "createPrimitiveOperationsClient";
 const operationHelper = "createPrimitiveOperationHttpClient";
 const listHelper = "listPrimitiveOperations";
+const sideEffectHelper = "primitiveRouteSideEffect";
 `);
   fs.writeFileSync(path.join(examplesDir, "discover-primitives.mjs"), `
 import { loadPrimitiveSdk } from "./lib/primitive-sdk-loader.mjs";
@@ -144,7 +148,7 @@ const operationListHelper = "listPrimitiveOperations";
 function describeOperation() {}
 function listOperations() {}
 const call = "requestOperation";
-const usage = "--timeout-ms";
+const usage = "--timeout-ms --side-effect --read-only";
 const fixture = "examples/primitives/fixtures/workbench-catalog.json";
 if (process.argv.includes("--self-test")) {}
 `);

@@ -31,7 +31,11 @@ the same builder-facing filters, so responsiveness guarantees are machine
 discoverable instead of prose-only.
 The generated OpenAPI also carries `x-eventloopos-*` extensions on primitive
 tags and route operations for status, source files, CLI entrypoints, proofs,
-self-tests, responsiveness-critical flags, and matching latency budgets.
+self-tests, responsiveness-critical flags, matching latency budgets,
+`x-eventloopos-side-effect`, and `x-eventloopos-read-only`. Side-effect labels
+are `none`, `internal_state`, `os_control`, and `external_agent_or_source`, so
+builders can keep discovery/read-only flows separate from queue mutations,
+window control, and agent/source fan-out.
 `bin/primitives-latency-audit --strict` checks whether those speed-critical
 budget hooks have recent green proof manifests under `artifacts/`, so stale
 latency evidence cannot be mistaken for current product responsiveness.
@@ -98,6 +102,10 @@ The shared SDK also lists and resolves stable operation ids from
 `buildPrimitiveOperationRequest`, so generated tools can discover and target
 `queue_paper_routing_get_queue_by_id_lineage`-style operations without
 hard-coding method/path pairs.
+Those operation rows include the same `sideEffect` and `readOnly` fields as the
+OpenAPI export. `primitiveRouteSideEffect(route)` and
+`primitiveRouteReadOnly(route)` expose the classifier directly for tools that
+already have catalog route objects.
 `createPrimitiveOperationHttpClient` executes the same operation ids over HTTP
 with request/response validation and typed timeout/status/schema errors.
 The SDK now exports guard helpers for every recoverable primitive error class:
@@ -113,8 +121,9 @@ routes. Shared tests compare operation-helper route coverage against every
 cataloged HTTP route so SDK drift is caught by `pnpm typecheck`.
 `listPrimitiveOperationHelpers(catalog)` returns the helper-path to operation-id
 manifest for that same convenience layer, including method/path, primitive id,
-category, and status. Builder tools can use it to generate docs, wrappers, or
-agent tool descriptions from the SDK surface without reading TypeScript source.
+category, status, side-effect label, and read-only flag. Builder tools can use
+it to generate docs, wrappers, or agent tool descriptions from the SDK surface
+without reading TypeScript source.
 
 Runnable examples live in `examples/primitives/`: discover reusable primitive
 surfaces, restore a saved desk, inspect and rerank an attention queue, and wire
@@ -132,13 +141,16 @@ route operation ids, schemas, and latency budgets for selected primitive ids or
 categories without needing a live orchestrator.
 `node examples/primitives/operation-id-client.mjs list --category os_control`,
 `node examples/primitives/operation-id-client.mjs helpers --category os_control`,
+`node examples/primitives/operation-id-client.mjs list --side-effect none --read-only`,
+`node examples/primitives/operation-id-client.mjs helpers --side-effect os_control`,
 `node examples/primitives/operation-id-client.mjs describe workspace_control_get_workspace_status`,
 and `node examples/primitives/operation-id-client.mjs workspace_control_get_workspace_status --json`
 let builders discover operation ids, inspect schemas/budgets, then call a
 cataloged route through the shared operation-id HTTP client. The `helpers`
 subcommand prints the typed convenience-method mapping, so wrappers can target
 `ops.workspace.capture()`-style helpers or raw operation ids from the same
-catalog. The live queue, workspace, and window-hotkey examples now use the same
+catalog, with side-effect/read-only filters for safe discovery or explicit
+window-control routing. The live queue, workspace, and window-hotkey examples now use the same
 shared operation client instead of hand-rolled fetch calls, so example apps
 exercise catalog validation, typed response parsing, idempotency headers, and
 request timeouts.

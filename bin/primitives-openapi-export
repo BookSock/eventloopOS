@@ -165,6 +165,8 @@ function operationForRoute(input) {
     "x-eventloopos-primitive": input.primitiveId,
     "x-eventloopos-status": status,
     "x-eventloopos-route-file": input.routeFile,
+    "x-eventloopos-side-effect": routeSideEffect(input.route),
+    "x-eventloopos-read-only": routeReadOnly(input.route),
   };
   const budgets = latencyBudgetsForRoute(input.primitive, input.method, input.routePath);
   if (budgets.length > 0) operation["x-eventloopos-latency-budgets"] = budgets;
@@ -203,6 +205,30 @@ function tagForPrimitive(primitive, primitiveId, title) {
 function latencyBudgetsForRoute(primitive, method, routePath) {
   const route = `${method.toUpperCase()} ${routePath}`;
   return latencyBudgetsForPrimitive(primitive).filter((budget) => budget.route === route);
+}
+
+function routeSideEffect(route) {
+  const method = readString(route?.method)?.toUpperCase();
+  const routePath = readString(route?.path) ?? "";
+  if (method === "GET") return "none";
+  if (routePath === "/workspace/capture") return "none";
+  if (routePath === "/workspace/restore-plan") return "none";
+  if (routePath === "/contexts/restore-plan") return "none";
+  if (routePath === "/workspace/restore") return "os_control";
+  if (routePath === "/modes/manual") return "os_control";
+  if (routePath.startsWith("/contexts/restore-requests")) return "os_control";
+  if (routePath.startsWith("/task-sessions")) return "external_agent_or_source";
+  if (routePath.startsWith("/task-messages")) return "external_agent_or_source";
+  if (routePath.startsWith("/mcp")) return "external_agent_or_source";
+  if (routePath.startsWith("/agent-runs")) return "external_agent_or_source";
+  if (routePath.startsWith("/agents/")) return "external_agent_or_source";
+  if (routePath.startsWith("/voice/")) return "external_agent_or_source";
+  if (routePath.startsWith("/master/")) return "external_agent_or_source";
+  return "internal_state";
+}
+
+function routeReadOnly(route) {
+  return routeSideEffect(route) === "none";
 }
 
 function latencyBudgetsForPrimitive(primitive) {
@@ -385,9 +411,15 @@ function runSelfTest() {
   if (!getLayout || getLayout.parameters?.[0]?.name !== "id") {
     throw new Error("self-test did not convert path parameter");
   }
+  if (getLayout["x-eventloopos-side-effect"] !== "none" || getLayout["x-eventloopos-read-only"] !== true) {
+    throw new Error("self-test did not mark GET route as read-only");
+  }
   const postTasks = checked.paths["/tasks"]?.post;
   if (!postTasks?.requestBody) {
     throw new Error("self-test did not add JSON request body for POST");
+  }
+  if (postTasks["x-eventloopos-side-effect"] !== "internal_state" || postTasks["x-eventloopos-read-only"] !== false) {
+    throw new Error("self-test did not mark POST route side effect");
   }
   if (postTasks.requestBody.content["application/json"].schema.$ref !== "#/components/schemas/CreateTaskRequest") {
     throw new Error("self-test did not wire request schema ref");
