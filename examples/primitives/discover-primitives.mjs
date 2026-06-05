@@ -18,42 +18,60 @@ if (args.includes("-h") || args.includes("--help") || args.length === 0) {
   node examples/primitives/discover-primitives.mjs list [--status dogfood] [--category os_control]
   node examples/primitives/discover-primitives.mjs list --min-routes 4 --require-self-tests --require-proofs --json
   node examples/primitives/discover-primitives.mjs list --require-responsive --require-latency-budgets
+  node examples/primitives/discover-primitives.mjs self-tests --id workspace_control
+  node examples/primitives/discover-primitives.mjs self-tests --category os_control --json
   node examples/primitives/discover-primitives.mjs list --catalog docs/primitives.catalog.json
 
 Small example app for discovering reusable eventloopOS primitive surfaces before
 building against them. It consumes the shared primitive SDK exported at
 @eventloopos/shared/primitives, reads the machine-readable primitive catalog,
 and filters by status, category, route count, self-test coverage, proof
-coverage, and latency-budget coverage.
+coverage, and latency-budget coverage. The self-tests command shows which
+cataloged proof commands to run for a primitive subset.
 `);
   process.exit(0);
 }
 
 const options = parseArgs(args);
-if (options.command !== "list") die(`unknown command: ${options.command}`);
+if (!["list", "self-tests"].includes(options.command)) die(`unknown command: ${options.command}`);
 
 const sdk = await loadPrimitiveSdk();
 const catalogPath = path.resolve(options.catalog ?? "docs/primitives.catalog.json");
 const catalog = sdk.parsePrimitiveCatalog(JSON.parse(fs.readFileSync(catalogPath, "utf8")));
 const catalogSummary = sdk.summarizePrimitiveCatalog(catalog);
-const capabilities = selectCapabilities(sdk, catalog, options);
 
-if (options.json) {
-  console.log(JSON.stringify({
-    ok: true,
-    catalog: catalogPath,
-    catalog_summary: {
-      primitives: catalogSummary.primitiveCount,
-      routes: catalogSummary.routeCount,
-      schemas: catalogSummary.schemaCount,
-      latency_budgets: catalogSummary.latencyBudgetCount,
-      responsiveness_critical: catalogSummary.responsivenessCriticalCount,
-    },
-    count: capabilities.length,
-    primitives: capabilities,
-  }, null, 2));
+if (options.command === "list") {
+  const capabilities = selectCapabilities(sdk, catalog, options);
+  if (options.json) {
+    console.log(JSON.stringify({
+      ok: true,
+      catalog: catalogPath,
+      catalog_summary: toExampleCatalogSummary(catalogSummary),
+      count: capabilities.length,
+      primitives: capabilities,
+    }, null, 2));
+  } else {
+    printTable(capabilities);
+  }
 } else {
-  printTable(capabilities);
+  const selfTests = selectSelfTests(sdk, catalog, catalogSummary, options);
+  const commands = selfTests.commands.map((command) => ({
+    command: command.command,
+    primitive_ids: command.primitiveIds,
+  }));
+  if (options.json) {
+    console.log(JSON.stringify({
+      ok: selfTests.missingPrimitiveIds.length === 0,
+      catalog: catalogPath,
+      catalog_summary: toExampleCatalogSummary(catalogSummary),
+      selected_primitive_ids: selfTests.selectedPrimitiveIds,
+      missing_primitive_ids: selfTests.missingPrimitiveIds,
+      count: commands.length,
+      commands,
+    }, null, 2));
+  } else {
+    printSelfTestTable(commands, selfTests.missingPrimitiveIds);
+  }
 }
 
 function parseArgs(argv) {
@@ -74,6 +92,16 @@ function parseArgs(argv) {
     else die(`unknown option: ${arg}`);
   }
   return options;
+}
+
+function toExampleCatalogSummary(summary) {
+  return {
+    primitives: summary.primitiveCount,
+    routes: summary.routeCount,
+    schemas: summary.schemaCount,
+    latency_budgets: summary.latencyBudgetCount,
+    responsiveness_critical: summary.responsivenessCriticalCount,
+  };
 }
 
 function selectCapabilities(sdk, catalog, options) {
@@ -106,6 +134,32 @@ function toExampleCapability(primitive) {
   };
 }
 
+function selectSelfTests(sdk, catalog, catalogSummary, options) {
+  const ids = primitiveIdsForSelfTests(sdk, catalog, catalogSummary, options);
+  return sdk.selectPrimitiveSelfTestCommands(catalog, ids);
+}
+
+function primitiveIdsForSelfTests(sdk, catalog, catalogSummary, options) {
+  if (!hasCapabilityFilters(options)) return options.ids ?? [];
+  const selectedIds = selectCapabilities(sdk, catalog, options).map((primitive) => primitive.id);
+  const knownIds = new Set(catalogSummary.primitives.map((primitive) => primitive.id));
+  const unknownExplicitIds = (options.ids ?? []).filter((id) => !knownIds.has(id));
+  return [...selectedIds, ...unknownExplicitIds];
+}
+
+function hasCapabilityFilters(options) {
+  return Boolean(
+    options.statuses
+      || options.categories
+      || options.minRouteCount !== undefined
+      || options.requireCli
+      || options.requireSelfTests
+      || options.requireProofs
+      || options.requireLatencyBudgets
+      || options.requireResponsive
+  );
+}
+
 function printTable(capabilities) {
   if (capabilities.length === 0) {
     console.log("no matching primitives");
@@ -123,6 +177,20 @@ function printTable(capabilities) {
       primitive.proofs,
       primitive.latency_budgets,
     ].join("\t"));
+  }
+}
+
+function printSelfTestTable(commands, missingPrimitiveIds) {
+  if (missingPrimitiveIds.length > 0) {
+    console.error(`missing primitives: ${missingPrimitiveIds.join(", ")}`);
+  }
+  if (commands.length === 0) {
+    console.log("no matching self-test commands");
+    return;
+  }
+  console.log(["command", "primitive_ids"].join("\t"));
+  for (const command of commands) {
+    console.log([command.command, command.primitive_ids.join(",")].join("\t"));
   }
 }
 
@@ -174,7 +242,8 @@ async function loadPrimitiveSdk() {
 function hasPrimitiveSdkExports(sdk) {
   return typeof sdk.parsePrimitiveCatalog === "function"
     && typeof sdk.summarizePrimitiveCatalog === "function"
-    && typeof sdk.selectPrimitiveCapabilities === "function";
+    && typeof sdk.selectPrimitiveCapabilities === "function"
+    && typeof sdk.selectPrimitiveSelfTestCommands === "function";
 }
 
 function runSelfTest(sdk) {
@@ -214,7 +283,7 @@ function runSelfTest(sdk) {
         http: [],
         code: ["app/orchestrator/src/runtime.ts"],
         cli: [],
-        self_tests: ["pnpm test"],
+        self_tests: ["pnpm runtime"],
         proofs: ["runtime.ts"],
       },
     ],
@@ -232,4 +301,22 @@ function runSelfTest(sdk) {
     requireResponsive: true,
     requireLatencyBudgets: true,
   }).map((primitive) => primitive.id), ["workspace_control"]);
+  assert.deepEqual(selectSelfTests(sdk, catalog, sdk.summarizePrimitiveCatalog(catalog), {
+    command: "self-tests",
+    categories: ["os_control"],
+  }).commands, [{
+    command: "pnpm test",
+    primitiveIds: ["workspace_control"],
+  }]);
+  assert.deepEqual(selectSelfTests(sdk, catalog, sdk.summarizePrimitiveCatalog(catalog), {
+    command: "self-tests",
+    ids: ["runtime_spine", "missing"],
+  }), {
+    selectedPrimitiveIds: ["runtime_spine"],
+    missingPrimitiveIds: ["missing"],
+    commands: [{
+      command: "pnpm runtime",
+      primitiveIds: ["runtime_spine"],
+    }],
+  });
 }

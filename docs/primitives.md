@@ -65,8 +65,9 @@ Runnable examples live in `examples/primitives/`: discover reusable primitive
 surfaces, restore a saved desk, inspect and rerank an attention queue, and wire
 external hotkeys to task-window/follows rules. The discovery example consumes
 the shared `@eventloopos/shared/primitives` SDK instead of duplicating catalog
-parsing, and builds `app/shared/dist` on demand for clean checkouts. Root
-`pnpm typecheck` runs their self-tests.
+parsing, can also print self-test commands for a primitive subset, and builds
+`app/shared/dist` on demand for clean checkouts. Root `pnpm typecheck` runs
+their self-tests.
 
 Status labels:
 

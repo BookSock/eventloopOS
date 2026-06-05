@@ -32,6 +32,7 @@ import {
   PrimitiveResponseValidationError,
   routeHasRequestBody,
   selectPrimitiveCapabilities,
+  selectPrimitiveSelfTestCommands,
   summarizePrimitiveCatalog
 } from "@eventloopos/shared/primitives";
 
@@ -48,6 +49,7 @@ console.log(selectPrimitiveCapabilities(catalog, {
   requireSelfTests: true,
   requireProofs: true
 }));
+console.log(selectPrimitiveSelfTestCommands(catalog, ["workspace_control"]));
 console.log(route?.request_schema);
 console.log(route ? routeHasRequestBody(route) : false);
 
@@ -102,6 +104,9 @@ self-test count, proof count, and request/response schema coverage, so tools can
 pick stable surfaces without parsing prose docs. `selectPrimitiveCapabilities`
 filters those rows by primitive id, status, category, minimum route count, CLI
 availability, self-test coverage, and proof coverage.
+`selectPrimitiveSelfTestCommands` returns selected primitive ids, missing ids,
+and de-duplicated runnable self-test commands with the primitive ids each
+command covers.
 `createPrimitiveOperationsClient` layers small typed convenience methods over
 the same validated routes for common master-command, manual-mode,
 task-workspace, queue, workspace, task-session, Codex/Claude agent,
