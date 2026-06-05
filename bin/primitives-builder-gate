@@ -8,7 +8,7 @@ import path from "node:path";
 const args = process.argv.slice(2);
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/primitives-builder-gate [--json] [--manifest PATH] [--require-latency] [--run-self-tests] [--catalog PATH]
+  console.log(`Usage: bin/primitives-builder-gate [--json] [--manifest PATH] [--require-latency] [--latency-max-age-hours N] [--run-self-tests] [--catalog PATH]
 
 Runs one builder-facing gate for the reusable primitive surface: catalog
 structure, strict readiness, docs, examples, generated OpenAPI, generated
@@ -16,8 +16,9 @@ compact index, shared SDK package audit, optional live latency evidence, and
 optional full catalog self-tests.
 
 Defaults avoid mutable/live evidence so CI can run cheaply. Use
---require-latency on a machine with current artifacts, and --run-self-tests
-when you want to execute every cataloged primitive self-test command.
+--require-latency on a machine with current artifacts, --latency-max-age-hours
+to bound proof freshness, and --run-self-tests when you want to execute every
+cataloged primitive self-test command.
 `);
   process.exit(0);
 }
@@ -49,6 +50,7 @@ function parseArgs(rawArgs) {
     indexPath: "docs/primitives.index.json",
     examplesDir: "examples/primitives",
     requireLatency: false,
+    latencyMaxAgeHours: undefined,
     runSelfTests: false,
     json: false,
     manifestPath: undefined,
@@ -57,6 +59,7 @@ function parseArgs(rawArgs) {
     const arg = rawArgs[index];
     if (arg === "--json") options.json = true;
     else if (arg === "--require-latency") options.requireLatency = true;
+    else if (arg === "--latency-max-age-hours") options.latencyMaxAgeHours = positiveNumber(requireValue(rawArgs, ++index, arg), arg);
     else if (arg === "--run-self-tests") options.runSelfTests = true;
     else if (arg === "--manifest") options.manifestPath = requireValue(rawArgs, ++index, arg);
     else if (arg === "--catalog") options.catalogPath = requireValue(rawArgs, ++index, arg);
@@ -77,6 +80,12 @@ function requireValue(rawArgs, index, flag) {
   const value = rawArgs[index];
   if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value`);
   return value;
+}
+
+function positiveNumber(value, flag) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) throw new Error(`${flag} requires a positive number`);
+  return parsed;
 }
 
 function runBuilderGate(options, runCommand = executeCommand) {
@@ -111,6 +120,7 @@ function runBuilderGate(options, runCommand = executeCommand) {
     index: options.indexPath,
     examples: options.examplesDir,
     require_latency: options.requireLatency,
+    latency_max_age_hours: options.latencyMaxAgeHours ?? null,
     run_self_tests: options.runSelfTests,
     command_count: results.length,
     required_failures: requiredFailures.map((result) => result.name),
@@ -164,10 +174,15 @@ function buildCommands(options) {
     },
   ];
   if (options.requireLatency) {
+    const latencyArgs = ["bin/primitives-latency-audit", "--strict"];
+    if (options.latencyMaxAgeHours !== undefined) {
+      latencyArgs.push("--max-age-hours", String(options.latencyMaxAgeHours));
+    }
+    latencyArgs.push(options.catalogPath);
     commands.push({
       name: "latency_evidence",
       cmd: "node",
-      args: ["bin/primitives-latency-audit", "--strict", options.catalogPath],
+      args: latencyArgs,
       required: true,
     });
   }
@@ -209,7 +224,7 @@ function tailLines(value, maxLines = 20) {
 function renderManifest(manifest) {
   const lines = [
     `primitives builder gate: ${manifest.ok ? "ok" : "failed"}`,
-    `commands: ${manifest.command_count}, require_latency=${manifest.require_latency}, run_self_tests=${manifest.run_self_tests}`,
+    `commands: ${manifest.command_count}, require_latency=${manifest.require_latency}, latency_max_age_hours=${manifest.latency_max_age_hours ?? "default"}, run_self_tests=${manifest.run_self_tests}`,
   ];
   for (const command of manifest.commands) {
     lines.push(`- ${command.ok ? "ok" : "fail"} ${command.name} (${command.duration_ms}ms)`);
@@ -230,6 +245,7 @@ function runSelfTest() {
       indexPath: "index.json",
       examplesDir: "examples",
       requireLatency: true,
+      latencyMaxAgeHours: 24,
       runSelfTests: true,
     },
     () => ({ status: 0, signal: null, stdout: "ok\n", stderr: "" }),
@@ -237,6 +253,8 @@ function runSelfTest() {
   assert.equal(good.ok, true);
   assert.equal(good.command_count, 9);
   assert.ok(good.commands.some((command) => command.name === "latency_evidence"));
+  assert.ok(good.commands.some((command) => command.command.includes("--max-age-hours 24")));
+  assert.equal(good.latency_max_age_hours, 24);
   assert.ok(good.commands.some((command) => command.name === "catalog_self_tests"));
   assert.ok(good.commands.some((command) => command.name === "shared_sdk_pack_audit"));
   assert.match(renderManifest(good), /primitives builder gate: ok/);
@@ -250,6 +268,7 @@ function runSelfTest() {
       indexPath: "index.json",
       examplesDir: "examples",
       requireLatency: false,
+      latencyMaxAgeHours: undefined,
       runSelfTests: false,
     },
     (command) => ({

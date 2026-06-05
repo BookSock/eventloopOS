@@ -60,6 +60,8 @@
     "readiness:artifact-audit:self-test": "node bin/product-readiness-artifact-audit --self-test",
     "primitives:doctor": "node bin/primitives-host-doctor",
     "primitives:builder-gate": "node bin/primitives-builder-gate",
+    "primitives:builder-gate:latency": "node bin/primitives-builder-gate --require-latency --latency-max-age-hours 24",
+    "primitives:builder-gate:release": "node bin/primitives-builder-gate --require-latency --run-self-tests --latency-max-age-hours 24",
     "primitives:self-test": "node bin/primitives-self-test-runner",
     "primitives:doctor:live": "node bin/primitives-host-doctor --require-live",
     "codex:status-proof": "node bin/codex-status-proof",

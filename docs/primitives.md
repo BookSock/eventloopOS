@@ -50,9 +50,12 @@ Run `bin/primitives-builder-gate` when handing the primitive surface to another
 tool or agent: it checks catalog structure, strict readiness, docs, examples,
 OpenAPI freshness, compact-index freshness, shared SDK pack/import shape, and
 the cataloged self-test list in one command. Add `--require-latency` on a
-machine with current latency artifacts, and `--run-self-tests` when the handoff
-should execute every cataloged primitive self-test instead of only proving the
-command list.
+machine with current latency artifacts, `--latency-max-age-hours 24` when the
+handoff must prove same-day responsiveness, and `--run-self-tests` when the
+handoff should execute every cataloged primitive self-test instead of only
+proving the command list. Use `pnpm primitives:builder-gate:release` for a
+release-grade primitive handoff: docs, generated artifacts, SDK pack/import
+shape, full catalog self-tests, and latency evidence no older than 24 hours.
 Current catalog summary: 18 primitives, 80 HTTP routes, 8 CLI commands, 21
 self-tests, 75 proof refs, 11 latency budgets.
 Strict readiness is expected to stay green: every cataloged primitive

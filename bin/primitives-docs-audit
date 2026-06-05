@@ -51,6 +51,8 @@ function auditPrimitiveDocs(catalogPath, docsPath, repoRoot) {
   requireIncludes(docs, "buildPrimitiveProofPlan", "missing primitive proof-plan SDK helper wording", errors);
   requireIncludes(docs, "discover-primitives.mjs proof-plan", "missing discovery proof-plan command wording", errors);
   requireIncludes(docs, "bin/primitives-builder-gate", "missing primitive builder gate wording", errors);
+  requireIncludes(docs, "primitives:builder-gate:release", "missing primitive builder release gate wording", errors);
+  requireIncludes(docs, "--latency-max-age-hours 24", "missing primitive latency freshness gate wording", errors);
   requireIncludes(docs, "shared SDK pack/import shape", "missing shared SDK pack audit wording", errors);
   requireIncludes(docs, "full catalog self-test manifest", "missing full primitives self-test runner wording", errors);
   requireIncludes(docs, "bin/primitives-examples-audit", "missing primitives examples audit wording", errors);
@@ -153,6 +155,7 @@ Responsiveness-critical primitives must also carry explicit p95 latency budgets 
 Example: node examples/primitives/discover-primitives.mjs proof-plan --id workspace_control --json.
 Root typecheck writes the full catalog self-test manifest.
 Run bin/primitives-builder-gate before handing primitive APIs to another tool.
+Release handoff uses pnpm primitives:builder-gate:release with --latency-max-age-hours 24.
 It includes shared SDK pack/import shape.
 Example drift guard: bin/primitives-examples-audit.
 Master command latency budget: master_fan_out_dry_run.

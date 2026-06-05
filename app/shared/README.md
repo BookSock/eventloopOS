@@ -168,8 +168,10 @@ At the repo root, `bin/primitives-builder-gate` is the single pre-handoff
 check for builder-facing primitive work: catalog audit, strict readiness, docs,
 examples, generated OpenAPI, generated compact index, shared SDK pack/import
 shape, and catalog self-test list. Add `--require-latency` to require current
-latency evidence and `--run-self-tests` to execute the full cataloged primitive
-self-test set.
+latency evidence, `--latency-max-age-hours 24` to reject stale responsiveness
+proofs, and `--run-self-tests` to execute the full cataloged primitive
+self-test set. Use `pnpm primitives:builder-gate:release` before a
+builder-facing release handoff.
 `listPrimitiveOperations`, `getPrimitiveOperation`, and
 `buildPrimitiveOperationRequest` expose the stable operation ids from
 `docs/primitives.index.json` back into catalog routes and validated requests,
