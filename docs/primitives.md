@@ -229,6 +229,9 @@ Guarantees today:
   queue clients decode these fields so demo/debug UI can inspect ancestry too
 - expands process-root task-window claims into concrete window claims when a
   background agent launch produces descendant app windows
+- treats existing `process_root_pid` claims as ownership for descendant windows
+  during ambient save, so externally registered roots protect the active paper
+  even when no narrower `window_id` claim can be written
 - follows-window redirect also reads bound task-session PIDs directly, so a
   background agent's descendant window can be moved off the user's current
   paper on the fast follows poll before ambient autosave creates a concrete
@@ -306,7 +309,8 @@ Useful standalone uses:
   those descendants into concrete task-window claims
 - a launch wrapper claims `process_root_pid` before starting a visible browser
   test, then ambient autosave converts the descendant Chrome window into a
-  concrete claim for that background task
+  concrete claim for that background task; if conversion is unavailable, the
+  root claim still filters descendants out of other task saves
 - browser automation can claim Playwright/Chrome report windows before the
   user sees them
 - browser context capture auto-claims Chrome windows when the event attaches to

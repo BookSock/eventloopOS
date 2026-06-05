@@ -664,6 +664,44 @@ describe("ambient_workspace_saver", () => {
     assert.equal(obs.counters.get("task_window_claims_process_tree_total"), 1);
   });
 
+  it("uses existing process-root claims to filter descendants even when no narrower claim can be written", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 2,
+      windows: [
+        { id: 1, app: "Ghostty", title: "Task A notes", workspace: "paper-a", pid: 100 },
+        { id: 2, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "Detached browser", workspace: "paper-a", pid: 520 },
+      ],
+    };
+    const workspace = makeFakeWorkspace(snapshot);
+    const writes: Array<{ taskId: string; snapshot: WorkspaceSnapshot }> = [];
+    let nowMs = Date.parse("2026-05-10T15:00:00.000Z");
+    const saver = createAmbientWorkspaceSaver({
+      workspace,
+      getCurrentTaskState: async () => ({ currentTaskId: "task_paper_a" }),
+      updateTaskLayout: async (taskId, nextSnapshot) => {
+        writes.push({ taskId, snapshot: nextSnapshot });
+      },
+      isManualModeActive: () => false,
+      getTaskWindowClaims: () => [
+        {
+          task_id: "task_paper_b",
+          process_root_pid: 500,
+        },
+      ],
+      getProcessAncestorPids: (pid) => pid === 520 ? [510, 500, 1] : [1],
+      debounceMs: 3_000,
+      now: () => new Date(nowMs),
+    });
+
+    assert.equal((await saver.tick()).decision, "debounced");
+    nowMs += 5_000;
+    assert.equal((await saver.tick()).decision, "committed");
+    assert.deepEqual(writes[0]?.snapshot.windows.map((window) => window.id), [1]);
+    assert.equal(writes[0]?.snapshot.focusedWindowId, undefined);
+  });
+
   it("keeps an inactive task agent-spawned Chrome out of the active paper but saves it for its owner", async () => {
     const snapshots: WorkspaceSnapshot[] = [
       {

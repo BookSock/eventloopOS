@@ -138,7 +138,8 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
       await recordWindowObservations(deps, rawSnapshot, currentTaskId, tickNow);
       await autoClaimTaggedTaskWindows(deps, rawSnapshot, tickNow);
       await autoClaimProcessTreeTaskWindows(deps, rawSnapshot, tickNow);
-      const snapshot = filterSnapshotForTaskSave(
+      const snapshot = await filterSnapshotForTaskSaveWithProcessAncestry(
+        deps,
         rawSnapshot,
         await readFollowsWindowIds(deps),
         currentTaskId,
@@ -455,6 +456,48 @@ export function filterSnapshotForTaskSave(
   };
 }
 
+async function filterSnapshotForTaskSaveWithProcessAncestry(
+  deps: AmbientWorkspaceSaverDeps,
+  snapshot: WorkspaceSnapshot,
+  followsWindowIds: ReadonlySet<string>,
+  currentTaskId: string,
+  taskWindowClaims: readonly TaskWindowClaim[],
+): Promise<WorkspaceSnapshot> {
+  if (!snapshot.activeWorkspace) return snapshot;
+  const readAncestors = deps.getProcessAncestorPids ?? defaultReadProcessAncestorPids;
+  const ancestorCache = new Map<number, Promise<ReadonlySet<number>>>();
+
+  async function windowAncestors(window: AerospaceWindow): Promise<ReadonlySet<number>> {
+    const windowPid = window.pid;
+    if (!isPositiveInteger(windowPid)) return new Set();
+    const cached = ancestorCache.get(windowPid);
+    if (cached) return cached;
+    const next = Promise.resolve(readAncestors(windowPid)).then((pids): ReadonlySet<number> =>
+      new Set([windowPid, ...Array.from(pids, (pid) => Number(pid)).filter(isPositiveInteger)]),
+    );
+    ancestorCache.set(windowPid, next);
+    return next;
+  }
+
+  const windows: WorkspaceSnapshot["windows"] = [];
+  for (const window of snapshot.windows) {
+    if (window.workspace !== snapshot.activeWorkspace && !followsWindowIds.has(String(window.id))) continue;
+    if (!await isTaskSnapshotEligibleWindowWithProcessAncestry(window, currentTaskId, taskWindowClaims, windowAncestors)) continue;
+    windows.push(window);
+  }
+
+  const focusedWindowId =
+    snapshot.focusedWindowId !== undefined && windows.some((window) => window.id === snapshot.focusedWindowId)
+      ? snapshot.focusedWindowId
+      : undefined;
+
+  return {
+    ...snapshot,
+    windows,
+    focusedWindowId,
+  };
+}
+
 function isTaskSnapshotEligibleWindow(
   window: WorkspaceSnapshot["windows"][number],
   currentTaskId?: string,
@@ -469,6 +512,24 @@ function isTaskSnapshotEligibleWindow(
 
   const claimedTaskId = taskIdFromWindowClaims(window, taskWindowClaims);
   return !claimedTaskId || !currentTaskId || claimedTaskId === currentTaskId;
+}
+
+async function isTaskSnapshotEligibleWindowWithProcessAncestry(
+  window: AerospaceWindow,
+  currentTaskId: string,
+  taskWindowClaims: readonly TaskWindowClaim[],
+  readAncestors: (window: AerospaceWindow) => Promise<ReadonlySet<number>>,
+): Promise<boolean> {
+  const app = window.app.trim().toLowerCase();
+  const bundle = typeof window.appBundleId === "string" ? window.appBundleId.trim().toLowerCase() : "";
+  if (TASK_SNAPSHOT_APP_BLOCKLIST.has(app) || TASK_SNAPSHOT_BUNDLE_BLOCKLIST.has(bundle)) return false;
+
+  const taggedTaskId = taskIdFromTaggedWindow(window);
+  if (taggedTaskId && taggedTaskId !== currentTaskId) return false;
+
+  const claimedTaskIds = await taskIdsFromWindowClaimsWithProcessAncestry(window, taskWindowClaims, readAncestors);
+  if (claimedTaskIds.size === 0) return true;
+  return claimedTaskIds.size === 1 && claimedTaskIds.has(currentTaskId);
 }
 
 function taskIdFromTaggedWindow(window: WorkspaceSnapshot["windows"][number]): string | undefined {
@@ -493,6 +554,36 @@ function taskIdFromWindowClaims(window: AerospaceWindow, claims: readonly TaskWi
 function taskWindowClaimMatches(window: AerospaceWindow, claim: TaskWindowClaim): boolean {
   if (claim.window_id && String(window.id) === claim.window_id) return true;
   if (isPositiveInteger(claim.process_root_pid) && window.pid === claim.process_root_pid) return true;
+  return taskWindowIdentityMatches(window, claim);
+}
+
+async function taskIdsFromWindowClaimsWithProcessAncestry(
+  window: AerospaceWindow,
+  claims: readonly TaskWindowClaim[],
+  readAncestors: (window: AerospaceWindow) => Promise<ReadonlySet<number>>,
+): Promise<Set<string>> {
+  const matched = new Set<string>();
+  let ancestors: ReadonlySet<number> | undefined;
+
+  for (const claim of claims) {
+    if (claim.window_id && String(window.id) === claim.window_id) {
+      matched.add(claim.task_id);
+      continue;
+    }
+    if (isPositiveInteger(claim.process_root_pid) && isPositiveInteger(window.pid)) {
+      ancestors ??= await readAncestors(window);
+      if (ancestors.has(claim.process_root_pid)) {
+        matched.add(claim.task_id);
+        continue;
+      }
+    }
+    if (taskWindowIdentityMatches(window, claim)) matched.add(claim.task_id);
+  }
+
+  return matched;
+}
+
+function taskWindowIdentityMatches(window: AerospaceWindow, claim: TaskWindowClaim): boolean {
   const claimBundle = claim.app_bundle?.trim().toLowerCase();
   const windowBundle = window.appBundleId?.trim().toLowerCase() || window.app.trim().toLowerCase();
   const claimTitlePrefix = normalizeTitlePrefix(claim.title_prefix);
