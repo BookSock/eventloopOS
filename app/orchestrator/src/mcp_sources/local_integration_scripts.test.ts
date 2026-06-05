@@ -73,7 +73,8 @@ if (process.argv.includes("list")) {
         cwd: process.cwd(),
         env: {
           ...process.env,
-          EVENTLOOPOS_GMAIL_COMMAND: fakeGwsPath,
+          EVENTLOOPOS_GMAIL_COMMAND: process.execPath,
+          EVENTLOOPOS_GMAIL_COMMAND_ARGS_JSON: JSON.stringify([fakeGwsPath]),
           EVENTLOOPOS_GMAIL_CONFIG_DIR: dir,
           EVENTLOOPOS_GMAIL_USER_ID: "me",
           EVENTLOOPOS_GMAIL_QUERY: "in:inbox is:unread",

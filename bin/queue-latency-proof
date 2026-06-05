@@ -5,6 +5,13 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 
 const args = process.argv.slice(2);
+const DEFAULT_BUDGETS_MS = {
+  health: 500,
+  queue_list: 800,
+  queue_next: 800,
+  queue_lease_next: 1_000,
+  master_fan_out_dry_run: 1_200,
+};
 
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: bin/queue-latency-proof [--url URL] [--runs N] [--read-only] [--manifest PATH]
@@ -17,6 +24,14 @@ Environment:
   EVENTLOOPOS_QUEUE_LATENCY_RUNS default: 10
   EVENTLOOPOS_QUEUE_LATENCY_READ_ONLY=1 skips queue lease-next
 `);
+  process.exit(0);
+}
+
+if (args.includes("--budgets-json")) {
+  console.log(JSON.stringify({
+    kind: "eventloopos.queue_latency_budgets",
+    budgets_ms: DEFAULT_BUDGETS_MS,
+  }, null, 2));
   process.exit(0);
 }
 
@@ -44,13 +59,7 @@ process.exit(manifest.ok ? 0 : 1);
 
 async function measureQueueLatency({ baseUrl, runs, readOnly = false }) {
   const startedAt = new Date().toISOString();
-  const budgetsMs = {
-    health: 500,
-    queue_list: 800,
-    queue_next: 800,
-    queue_lease_next: 1_000,
-    master_fan_out_dry_run: 1_200,
-  };
+  const budgetsMs = { ...DEFAULT_BUDGETS_MS };
   const samples = [];
 
   for (let index = 0; index < runs; index += 1) {

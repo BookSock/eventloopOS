@@ -2,6 +2,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 
 const args = process.argv.slice(2);
 
@@ -170,11 +171,49 @@ function auditLatencyBudget(budget, prefix, repoRoot, errors) {
     errors.push(`${prefix}.proof is required`);
   } else {
     assertPathExists(repoRoot, proof, `${prefix}.proof`, errors);
+    auditLatencyProofBudget(repoRoot, proof, budget, prefix, errors);
   }
   for (const key of ["scope", "route", "hotkey"]) {
     if (budget[key] !== undefined && !readNonEmptyString(budget[key])) {
       errors.push(`${prefix}.${key} must be non-empty when present`);
     }
+  }
+}
+
+function auditLatencyProofBudget(repoRoot, proof, budget, prefix, errors) {
+  const budgets = loadLatencyProofBudgets(repoRoot, proof, prefix, errors);
+  if (!budgets) return;
+  const name = readNonEmptyString(budget.name);
+  if (!name) return;
+  const proofBudget = budgets[name];
+  if (typeof proofBudget !== "number") {
+    errors.push(`${prefix}.proof ${proof} does not export budget for ${name}`);
+    return;
+  }
+  if (proofBudget !== budget.p95_ms) {
+    errors.push(`${prefix}.p95_ms ${budget.p95_ms} does not match ${proof} budget ${name}=${proofBudget}`);
+  }
+}
+
+function loadLatencyProofBudgets(repoRoot, proof, prefix, errors) {
+  const proofPath = path.resolve(repoRoot, proof);
+  try {
+    const stdout = execFileSync(process.execPath, [proofPath, "--budgets-json"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 5_000,
+    });
+    const parsed = JSON.parse(stdout);
+    if (!isRecord(parsed.budgets_ms)) {
+      errors.push(`${prefix}.proof ${proof} --budgets-json missing budgets_ms object`);
+      return undefined;
+    }
+    return parsed.budgets_ms;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    errors.push(`${prefix}.proof ${proof} failed --budgets-json: ${message}`);
+    return undefined;
   }
 }
 
@@ -517,7 +556,17 @@ function runSelfTest() {
   );
   fs.writeFileSync(path.join(root, "code.ts"), "export {}\n");
   fs.writeFileSync(path.join(root, "proof.test.ts"), "export {}\n");
-  fs.writeFileSync(path.join(root, "bin/proof"), "#!/usr/bin/env node\n");
+  fs.writeFileSync(
+    path.join(root, "bin/proof"),
+    [
+      "#!/usr/bin/env node",
+      "if (process.argv.includes('--budgets-json')) {",
+      "  console.log(JSON.stringify({ budgets_ms: { example_tick: 500 } }));",
+      "  process.exit(0);",
+      "}",
+      "",
+    ].join("\n"),
+  );
   fs.writeFileSync(
     path.join(root, "app/shared/src/schemas.ts"),
     [
@@ -712,6 +761,19 @@ function runSelfTest() {
   }
   if (!badLatencyBudgetErrors.some((error) => error.includes("missing-proof"))) {
     throw new Error(`bad latency proof fixture did not fail as expected: ${badLatencyBudgetErrors.join("; ")}`);
+  }
+
+  const driftedLatencyBudget = {
+    ...good,
+    primitives: [{
+      ...good.primitives[0],
+      latency_budgets: [{ name: "example_tick", p95_ms: 501, proof: "bin/proof" }],
+    }],
+  };
+  const driftedLatencyBudgetErrors = [];
+  auditCatalog(driftedLatencyBudget, root, driftedLatencyBudgetErrors);
+  if (!driftedLatencyBudgetErrors.some((error) => error.includes("does not match"))) {
+    throw new Error(`drifted latency budget fixture did not fail as expected: ${driftedLatencyBudgetErrors.join("; ")}`);
   }
 
   fs.writeFileSync(

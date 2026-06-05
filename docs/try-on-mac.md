@@ -280,7 +280,7 @@ For the first real dogfood setup, the most useful private config is usually the 
 cp config/mcp-sources.dogfood.example.json config/mcp-sources.json
 ```
 
-Then set env vars for only the sources you want enabled: `EVENTLOOPOS_AGENT_SLACK_QUERY` for local `agent-slack`, `EVENTLOOPOS_GMAIL_*` plus `gws` for Gmail metadata polling, and `EVENTLOOPOS_TODO_MD_PATHS` for todo files. Run `pnpm run mcp:preview` before `EVENTLOOPOS_DOGFOOD_MCP_POLL=1 pnpm run dev:dogfood` so the queue does not fill with noisy old messages.
+Then set env vars for only the sources you want enabled: `EVENTLOOPOS_AGENT_SLACK_QUERY` for local `agent-slack`, `EVENTLOOPOS_GMAIL_*` plus `gws` for Gmail metadata polling, and `EVENTLOOPOS_TODO_MD_PATHS` for todo files. If the Gmail command needs a wrapper, set `EVENTLOOPOS_GMAIL_COMMAND` to the executable and `EVENTLOOPOS_GMAIL_COMMAND_ARGS_JSON` to a JSON string array of prefix args. Run `pnpm run mcp:preview` before `EVENTLOOPOS_DOGFOOD_MCP_POLL=1 pnpm run dev:dogfood` so the queue does not fill with noisy old messages.
 
 ## Optional Chrome extension
 

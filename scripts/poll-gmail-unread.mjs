@@ -55,7 +55,7 @@ async function runGws(options, args) {
     ...process.env,
     ...(options.configDir ? { GOOGLE_WORKSPACE_CLI_CONFIG_DIR: options.configDir } : {}),
   };
-  const { stdout } = await execFile(options.command, args, {
+  const { stdout } = await execFile(options.command, [...options.commandArgs, ...args], {
     timeout: options.timeoutMs,
     maxBuffer: options.maxBufferBytes,
     env,
@@ -136,6 +136,7 @@ function parseJsonObject(output) {
 function readOptions() {
   return {
     command: process.env.EVENTLOOPOS_GMAIL_COMMAND?.trim() || "gws",
+    commandArgs: jsonStringArray(process.env.EVENTLOOPOS_GMAIL_COMMAND_ARGS_JSON, []),
     configDir: optionalEnv(process.env.EVENTLOOPOS_GMAIL_CONFIG_DIR),
     userId: process.env.EVENTLOOPOS_GMAIL_USER_ID?.trim() || "me",
     query: process.env.EVENTLOOPOS_GMAIL_QUERY?.trim() || "in:inbox is:unread newer_than:7d",
@@ -145,6 +146,16 @@ function readOptions() {
     timeoutMs: positiveInt(process.env.EVENTLOOPOS_GMAIL_TIMEOUT_MS, 15_000),
     maxBufferBytes: positiveInt(process.env.EVENTLOOPOS_GMAIL_MAX_BUFFER_BYTES, 1_000_000),
   };
+}
+
+function jsonStringArray(value, fallback) {
+  if (!value) return fallback;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) && parsed.every((entry) => typeof entry === "string") ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function optionalEnv(value) {

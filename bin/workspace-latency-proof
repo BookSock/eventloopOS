@@ -5,6 +5,13 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 
 const args = process.argv.slice(2);
+const DEFAULT_BUDGETS_MS = {
+  health: 500,
+  queue: 800,
+  workspace_capture: 5_000,
+  workspace_restore_plan: 2_000,
+  workspace_restore_execute: 5_000,
+};
 
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: bin/workspace-latency-proof [--url URL] [--runs N] [--execute] [--manifest PATH]
@@ -16,6 +23,14 @@ Environment:
   EVENTLOOPOS_WORKSPACE_LATENCY_RUNS default: 5
   EVENTLOOPOS_WORKSPACE_LATENCY_EXECUTE default: 0
 `);
+  process.exit(0);
+}
+
+if (args.includes("--budgets-json")) {
+  console.log(JSON.stringify({
+    kind: "eventloopos.workspace_latency_budgets",
+    budgets_ms: DEFAULT_BUDGETS_MS,
+  }, null, 2));
   process.exit(0);
 }
 
@@ -44,13 +59,7 @@ process.exit(manifest.ok ? 0 : 1);
 
 async function measureWorkspaceLatency({ baseUrl, runs, executeRestore }) {
   const startedAt = new Date().toISOString();
-  const budgetsMs = {
-    health: 500,
-    queue: 800,
-    workspace_capture: 5_000,
-    workspace_restore_plan: 2_000,
-    workspace_restore_execute: 5_000,
-  };
+  const budgetsMs = { ...DEFAULT_BUDGETS_MS };
   const samples = [];
 
   for (let index = 0; index < runs; index += 1) {
