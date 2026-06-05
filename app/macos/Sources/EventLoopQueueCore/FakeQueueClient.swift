@@ -42,6 +42,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var readDelayNanoseconds: UInt64 = 0
     private var readingQueueContexts: [ReadingQueueContext] = []
     private var fakeActivityEvents: [ActivityEvent] = []
+    private var fakeActivityFetchCount: Int = 0
     private var followsWindows: [FollowsWindowRecord] = []
     private var followsWindowExclusions: [FollowsWindowExclusion] = []
     private var fakeAutoBindRunCount: Int = 0
@@ -776,12 +777,17 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public func fetchActivity(limit: Int = 30) async throws -> ActivityFeedResult {
         lock.withLock {
-            ActivityFeedResult(count: fakeActivityEvents.count, events: Array(fakeActivityEvents.prefix(limit)))
+            fakeActivityFetchCount += 1
+            return ActivityFeedResult(count: fakeActivityEvents.count, events: Array(fakeActivityEvents.prefix(limit)))
         }
     }
 
     public func setFakeActivity(_ events: [ActivityEvent]) {
         lock.withLock { fakeActivityEvents = events }
+    }
+
+    public var activityFetchCount: Int {
+        lock.withLock { fakeActivityFetchCount }
     }
 
     public func fetchFollowsWindowExclusions() async throws -> FollowsWindowExclusionsListResult {

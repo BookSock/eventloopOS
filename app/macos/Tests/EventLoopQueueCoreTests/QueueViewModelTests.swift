@@ -2387,6 +2387,42 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertLessThan(stoppedRefreshCount, 100)
     }
 
+    func testStopAutomaticActivityRefreshCancelsPendingLoop() async {
+        let client = FakeQueueClient(packets: [])
+        let viewModel = QueueViewModel(client: client)
+
+        viewModel.presentActivity()
+        viewModel.startAutomaticActivityRefresh(intervalNanoseconds: 1_000_000)
+
+        for _ in 0..<50 where client.activityFetchCount < 2 {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        viewModel.stopAutomaticActivityRefresh()
+        let stoppedRefreshCount = client.activityFetchCount
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(client.activityFetchCount, stoppedRefreshCount)
+        XCTAssertGreaterThanOrEqual(stoppedRefreshCount, 1)
+    }
+
+    func testDisableAutoBindContinuousCancelsPendingLoop() async {
+        let client = FakeQueueClient(packets: [])
+        let viewModel = QueueViewModel(client: client)
+
+        viewModel.setAutoBindContinuous(true, intervalNanoseconds: 1_000_000)
+
+        for _ in 0..<50 where client.autoBindRunCount < 2 {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        viewModel.setAutoBindContinuous(false, intervalNanoseconds: 1_000_000)
+        let stoppedRunCount = client.autoBindRunCount
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(client.autoBindRunCount, stoppedRunCount)
+        XCTAssertGreaterThanOrEqual(stoppedRunCount, 1)
+        XCTAssertFalse(viewModel.autoBindContinuousEnabled)
+    }
+
     func testManualModePausesWorkspaceRestoreWithoutClearingQueue() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: SeededQueue.packets))
         await viewModel.loadQueue()
