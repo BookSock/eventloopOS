@@ -1,0 +1,261 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/primitives-builder-gate [--json] [--manifest PATH] [--require-latency] [--run-self-tests] [--catalog PATH]
+
+Runs one builder-facing gate for the reusable primitive surface: catalog
+structure, strict readiness, docs, examples, generated OpenAPI, generated
+compact index, optional live latency evidence, and optional full catalog
+self-tests.
+
+Defaults avoid mutable/live evidence so CI can run cheaply. Use
+--require-latency on a machine with current artifacts, and --run-self-tests
+when you want to execute every cataloged primitive self-test command.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  process.exit(0);
+}
+
+const options = parseArgs(args);
+const manifest = runBuilderGate(options);
+if (options.manifestPath) {
+  fs.mkdirSync(path.dirname(options.manifestPath), { recursive: true });
+  fs.writeFileSync(options.manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+if (options.json) {
+  console.log(JSON.stringify(manifest, null, 2));
+} else {
+  console.log(renderManifest(manifest));
+}
+if (!manifest.ok) process.exit(1);
+
+function parseArgs(rawArgs) {
+  const options = {
+    repoRoot: process.cwd(),
+    catalogPath: "docs/primitives.catalog.json",
+    docsPath: "docs/primitives.md",
+    openapiPath: "docs/primitives.openapi.json",
+    indexPath: "docs/primitives.index.json",
+    examplesDir: "examples/primitives",
+    requireLatency: false,
+    runSelfTests: false,
+    json: false,
+    manifestPath: undefined,
+  };
+  for (let index = 0; index < rawArgs.length; index += 1) {
+    const arg = rawArgs[index];
+    if (arg === "--json") options.json = true;
+    else if (arg === "--require-latency") options.requireLatency = true;
+    else if (arg === "--run-self-tests") options.runSelfTests = true;
+    else if (arg === "--manifest") options.manifestPath = requireValue(rawArgs, ++index, arg);
+    else if (arg === "--catalog") options.catalogPath = requireValue(rawArgs, ++index, arg);
+    else if (arg === "--docs") options.docsPath = requireValue(rawArgs, ++index, arg);
+    else if (arg === "--openapi") options.openapiPath = requireValue(rawArgs, ++index, arg);
+    else if (arg === "--index") options.indexPath = requireValue(rawArgs, ++index, arg);
+    else if (arg === "--examples") options.examplesDir = requireValue(rawArgs, ++index, arg);
+    else if (arg === "--self-test") {
+      continue;
+    } else {
+      throw new Error(`unknown argument: ${arg}`);
+    }
+  }
+  return options;
+}
+
+function requireValue(rawArgs, index, flag) {
+  const value = rawArgs[index];
+  if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value`);
+  return value;
+}
+
+function runBuilderGate(options, runCommand = executeCommand) {
+  const commands = buildCommands(options);
+  const results = commands.map((command) => {
+    const startedAt = new Date().toISOString();
+    const started = process.hrtime.bigint();
+    const result = runCommand(command, options);
+    const durationMs = Number(process.hrtime.bigint() - started) / 1_000_000;
+    return {
+      name: command.name,
+      command: [command.cmd, ...command.args].join(" "),
+      required: command.required,
+      ok: result.status === 0,
+      status: result.status,
+      signal: result.signal ?? null,
+      started_at: startedAt,
+      duration_ms: Number(durationMs.toFixed(1)),
+      stdout_tail: tailLines(result.stdout),
+      stderr_tail: tailLines(result.stderr),
+    };
+  });
+  const requiredFailures = results.filter((result) => result.required && !result.ok);
+  return {
+    schema_version: 1,
+    kind: "eventloopos.primitives_builder_gate",
+    generated_at: new Date().toISOString(),
+    ok: requiredFailures.length === 0,
+    catalog: options.catalogPath,
+    docs: options.docsPath,
+    openapi: options.openapiPath,
+    index: options.indexPath,
+    examples: options.examplesDir,
+    require_latency: options.requireLatency,
+    run_self_tests: options.runSelfTests,
+    command_count: results.length,
+    required_failures: requiredFailures.map((result) => result.name),
+    commands: results,
+  };
+}
+
+function buildCommands(options) {
+  const commands = [
+    {
+      name: "catalog_audit",
+      cmd: "node",
+      args: ["bin/primitives-catalog-audit", options.catalogPath],
+      required: true,
+    },
+    {
+      name: "strict_readiness",
+      cmd: "node",
+      args: ["bin/primitives-readiness-report", "--strict", "--json", options.catalogPath],
+      required: true,
+    },
+    {
+      name: "docs_audit",
+      cmd: "node",
+      args: ["bin/primitives-docs-audit", options.catalogPath, options.docsPath],
+      required: true,
+    },
+    {
+      name: "examples_audit",
+      cmd: "node",
+      args: ["bin/primitives-examples-audit", options.examplesDir],
+      required: true,
+    },
+    {
+      name: "openapi_fresh",
+      cmd: "node",
+      args: ["bin/primitives-openapi-export", "--check", options.catalogPath, options.openapiPath],
+      required: true,
+    },
+    {
+      name: "compact_index_fresh",
+      cmd: "node",
+      args: ["bin/primitives-api-index-export", "--check", options.catalogPath, options.indexPath],
+      required: true,
+    },
+  ];
+  if (options.requireLatency) {
+    commands.push({
+      name: "latency_evidence",
+      cmd: "node",
+      args: ["bin/primitives-latency-audit", "--strict", options.catalogPath],
+      required: true,
+    });
+  }
+  const selfTestManifest = path.join(os.tmpdir(), `eventloopos-primitives-builder-gate-${process.pid}-self-tests.json`);
+  commands.push({
+    name: options.runSelfTests ? "catalog_self_tests" : "catalog_self_tests_list",
+    cmd: "node",
+    args: [
+      "bin/primitives-self-test-runner",
+      ...(options.runSelfTests ? [] : ["--list"]),
+      "--json",
+      "--manifest",
+      selfTestManifest,
+    ],
+    required: true,
+  });
+  return commands;
+}
+
+function executeCommand(command, options) {
+  const result = spawnSync(command.cmd, command.args, {
+    cwd: options.repoRoot,
+    encoding: "utf8",
+    maxBuffer: 10 * 1024 * 1024,
+  });
+  return {
+    status: result.status ?? 1,
+    signal: result.signal,
+    stdout: result.stdout ?? "",
+    stderr: result.stderr ?? (result.error ? result.error.message : ""),
+  };
+}
+
+function tailLines(value, maxLines = 20) {
+  const lines = String(value ?? "").trim().split(/\r?\n/).filter(Boolean);
+  return lines.slice(-maxLines);
+}
+
+function renderManifest(manifest) {
+  const lines = [
+    `primitives builder gate: ${manifest.ok ? "ok" : "failed"}`,
+    `commands: ${manifest.command_count}, require_latency=${manifest.require_latency}, run_self_tests=${manifest.run_self_tests}`,
+  ];
+  for (const command of manifest.commands) {
+    lines.push(`- ${command.ok ? "ok" : "fail"} ${command.name} (${command.duration_ms}ms)`);
+    if (!command.ok) {
+      for (const line of [...command.stdout_tail, ...command.stderr_tail]) lines.push(`  ${line}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function runSelfTest() {
+  const good = runBuilderGate(
+    {
+      repoRoot: "/tmp/fake",
+      catalogPath: "catalog.json",
+      docsPath: "primitives.md",
+      openapiPath: "openapi.json",
+      indexPath: "index.json",
+      examplesDir: "examples",
+      requireLatency: true,
+      runSelfTests: true,
+    },
+    () => ({ status: 0, signal: null, stdout: "ok\n", stderr: "" }),
+  );
+  assert.equal(good.ok, true);
+  assert.equal(good.command_count, 8);
+  assert.ok(good.commands.some((command) => command.name === "latency_evidence"));
+  assert.ok(good.commands.some((command) => command.name === "catalog_self_tests"));
+  assert.match(renderManifest(good), /primitives builder gate: ok/);
+
+  const failed = runBuilderGate(
+    {
+      repoRoot: "/tmp/fake",
+      catalogPath: "catalog.json",
+      docsPath: "primitives.md",
+      openapiPath: "openapi.json",
+      indexPath: "index.json",
+      examplesDir: "examples",
+      requireLatency: false,
+      runSelfTests: false,
+    },
+    (command) => ({
+      status: command.name === "openapi_fresh" ? 1 : 0,
+      signal: null,
+      stdout: command.name === "openapi_fresh" ? "stale openapi\n" : "ok\n",
+      stderr: "",
+    }),
+  );
+  assert.equal(failed.ok, false);
+  assert.deepEqual(failed.required_failures, ["openapi_fresh"]);
+  assert.equal(failed.command_count, 7);
+  assert.ok(failed.commands.some((command) => command.name === "catalog_self_tests_list"));
+  assert.match(renderManifest(failed), /stale openapi/);
+  console.log("primitives-builder-gate self-test passed");
+}

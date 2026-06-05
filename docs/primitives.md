@@ -46,6 +46,12 @@ Validate the compact API index with
 Generate a builder-facing coverage/readiness summary with
 `bin/primitives-readiness-report docs/primitives.catalog.json` or use
 `--json` for machine-readable audit output.
+Run `bin/primitives-builder-gate` when handing the primitive surface to another
+tool or agent: it checks catalog structure, strict readiness, docs, examples,
+OpenAPI freshness, compact-index freshness, and the cataloged self-test list in
+one command. Add `--require-latency` on a machine with current latency
+artifacts, and `--run-self-tests` when the handoff should execute every
+cataloged primitive self-test instead of only proving the command list.
 Current catalog summary: 18 primitives, 80 HTTP routes, 8 CLI commands, 21
 self-tests, 75 proof refs, 11 latency budgets.
 Strict readiness is expected to stay green: every cataloged primitive

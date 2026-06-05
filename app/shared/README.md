@@ -164,6 +164,11 @@ branching when the user has not selected a value.
 primitive ids, de-duplicated self-test commands, and latency proof hooks in one
 object for builders that need a single verification plan before using a
 primitive subset.
+At the repo root, `bin/primitives-builder-gate` is the single pre-handoff
+check for builder-facing primitive work: catalog audit, strict readiness, docs,
+examples, generated OpenAPI, generated compact index, and catalog self-test
+list. Add `--require-latency` to require current latency evidence and
+`--run-self-tests` to execute the full cataloged primitive self-test set.
 `listPrimitiveOperations`, `getPrimitiveOperation`, and
 `buildPrimitiveOperationRequest` expose the stable operation ids from
 `docs/primitives.index.json` back into catalog routes and validated requests,
