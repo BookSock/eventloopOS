@@ -40,6 +40,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var manualModeSetCalls: [(active: Bool, reason: String?)] = []
     private var manualModeGetCallCount: Int = 0
     private var readDelayNanoseconds: UInt64 = 0
+    private var queueActionDelayNanoseconds: UInt64 = 0
     private var masterActionDelayNanoseconds: UInt64 = 0
     private var readingQueueContexts: [ReadingQueueContext] = []
     private var fakeActivityEvents: [ActivityEvent] = []
@@ -229,6 +230,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         lock.withLock { readDelayNanoseconds = delay }
     }
 
+    public func setQueueActionDelayNanoseconds(_ delay: UInt64) {
+        lock.withLock { queueActionDelayNanoseconds = delay }
+    }
+
     public func setMasterActionDelayNanoseconds(_ delay: UInt64) {
         lock.withLock { masterActionDelayNanoseconds = delay }
     }
@@ -260,7 +265,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func complete(packetId: String, workspaceSnapshot: WorkspaceSnapshot? = nil) async throws -> QueueActionResult {
-        try lock.withLock {
+        await sleepQueueActionDelayIfNeeded()
+        return try lock.withLock {
             guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
                 throw QueueClientError.packetNotFound(packetId)
             }
@@ -273,7 +279,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func deferPacket(packetId: String, until dueAt: Date, workspaceSnapshot: WorkspaceSnapshot? = nil) async throws -> QueueActionResult {
-        try lock.withLock {
+        await sleepQueueActionDelayIfNeeded()
+        return try lock.withLock {
             guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
                 throw QueueClientError.packetNotFound(packetId)
             }
@@ -287,7 +294,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func ignorePacket(packetId: String, workspaceSnapshot: WorkspaceSnapshot? = nil) async throws -> QueueActionResult {
-        try lock.withLock {
+        await sleepQueueActionDelayIfNeeded()
+        return try lock.withLock {
             guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
                 throw QueueClientError.packetNotFound(packetId)
             }
@@ -300,7 +308,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func executeRecommendedAction(packetId: String, workspaceSnapshot: WorkspaceSnapshot? = nil) async throws -> QueueActionResult {
-        try lock.withLock {
+        await sleepQueueActionDelayIfNeeded()
+        return try lock.withLock {
             guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
                 throw QueueClientError.packetNotFound(packetId)
             }
@@ -1104,6 +1113,13 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     private func sleepReadDelayIfNeeded() async {
         let delay = lock.withLock { readDelayNanoseconds }
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: delay)
+        }
+    }
+
+    private func sleepQueueActionDelayIfNeeded() async {
+        let delay = lock.withLock { queueActionDelayNanoseconds }
         if delay > 0 {
             try? await Task.sleep(nanoseconds: delay)
         }

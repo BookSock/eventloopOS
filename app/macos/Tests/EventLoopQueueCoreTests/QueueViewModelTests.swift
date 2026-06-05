@@ -88,6 +88,7 @@ final class QueueViewModelTests: XCTestCase {
 
     func testRapidDoneNextDeduplicatesWhileInFlight() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
+        client.setQueueActionDelayNanoseconds(200_000_000)
         let workspaceClient = FakeWorkspaceClient(
             captureSnapshot: SeededQueue.blogFeedbackWorkspace,
             captureDelayNanoseconds: 100_000_000
@@ -116,6 +117,7 @@ final class QueueViewModelTests: XCTestCase {
 
     func testRapidDoneNextShowsSpecificInFlightFeedback() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
+        client.setQueueActionDelayNanoseconds(200_000_000)
         let workspaceClient = FakeWorkspaceClient(
             captureSnapshot: SeededQueue.blogFeedbackWorkspace,
             captureDelayNanoseconds: 100_000_000
