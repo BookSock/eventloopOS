@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "generated_at": "fixture",
+  "license": "AGPL-3.0-only",
+  "status_labels": ["dogfood", "stable_enough"],
+  "schemas": {
+    "WorkspaceStatusResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "execute_supported", "request_id"],
+      "properties": {
+        "status": { "type": "object", "additionalProperties": true },
+        "execute_supported": { "type": "boolean" },
+        "request_id": { "type": "string" }
+      }
+    },
+    "WorkspaceCaptureResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["snapshot", "request_id"],
+      "properties": {
+        "snapshot": { "type": "object", "additionalProperties": true },
+        "request_id": { "type": "string" }
+      }
+    },
+    "QueueListResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items", "count", "request_id"],
+      "properties": {
+        "items": { "type": "array" },
+        "count": { "type": "integer" },
+        "request_id": { "type": "string" }
+      }
+    }
+  },
+  "primitives": [
+    {
+      "id": "workspace_control",
+      "title": "Workspace Control",
+      "status": "dogfood",
+      "summary": "Capture and restore OS windows.",
+      "http": [
+        {
+          "method": "GET",
+          "path": "/workspace/status",
+          "route_file": "app/orchestrator/src/routes/workspace.ts",
+          "response_schema": "WorkspaceStatusResponse",
+          "no_request_body": true
+        },
+        {
+          "method": "POST",
+          "path": "/workspace/capture",
+          "route_file": "app/orchestrator/src/routes/workspace.ts",
+          "response_schema": "WorkspaceCaptureResponse",
+          "no_request_body": true
+        }
+      ],
+      "code": ["app/orchestrator/src/workspace/aerospace.ts"],
+      "proofs": ["bin/workspace-latency-proof"],
+      "self_tests": ["bin/lab-mac-geometry-proof --self-test"],
+      "responsiveness_critical": true,
+      "latency_budgets": [
+        {
+          "name": "workspace_capture",
+          "p95_ms": 5000,
+          "proof": "bin/workspace-latency-proof",
+          "route": "POST /workspace/capture"
+        }
+      ]
+    },
+    {
+      "id": "queue_paper_routing",
+      "title": "Queue And Paper Routing",
+      "status": "stable_enough",
+      "summary": "Route work into prioritized papers.",
+      "http": [
+        {
+          "method": "GET",
+          "path": "/queue",
+          "route_file": "app/orchestrator/src/routes/queue.ts",
+          "response_schema": "QueueListResponse",
+          "query_parameters": [
+            {
+              "name": "state",
+              "schema": {
+                "type": "string",
+                "enum": ["ready", "leased", "deferred", "done", "dead"]
+              }
+            }
+          ]
+        }
+      ],
+      "code": ["app/orchestrator/src/routes/queue.ts"],
+      "proofs": ["bin/queue-latency-proof"],
+      "self_tests": ["pnpm --filter @eventloopos/orchestrator test"],
+      "responsiveness_critical": true,
+      "latency_budgets": [
+        {
+          "name": "queue_list",
+          "p95_ms": 800,
+          "proof": "bin/queue-latency-proof",
+          "route": "GET /queue"
+        }
+      ]
+    }
+  ]
+}

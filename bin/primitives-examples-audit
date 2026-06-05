@@ -37,8 +37,12 @@ function auditPrimitiveExamples(examplesDir) {
     "restore-my-desk.mjs",
     "window-hotkey-router.mjs",
   ];
-  const allExamples = [
+  const discoveryExamples = [
     "discover-primitives.mjs",
+    "primitive-workbench-walkthrough.mjs",
+  ];
+  const allExamples = [
+    ...discoveryExamples,
     ...liveExamples,
   ];
   const loaderPath = path.join(examplesDir, "lib", "primitive-sdk-loader.mjs");
@@ -54,9 +58,13 @@ function auditPrimitiveExamples(examplesDir) {
     const text = readText(path.join(examplesDir, file), errors);
     if (text === undefined) continue;
     requireIncludes(text, "--self-test", `${file} must expose a self-test`, errors);
-    if (file === "discover-primitives.mjs") {
+    if (discoveryExamples.includes(file)) {
       requireIncludes(text, "loadPrimitiveSdk", "discover-primitives must use shared loader", errors);
       rejectIncludes(text, "execFileSync", "discover-primitives must not duplicate shared SDK build loader", errors);
+      if (file === "primitive-workbench-walkthrough.mjs") {
+        requireIncludes(text, "buildPrimitiveApiIndex", "primitive-workbench-walkthrough must use compact primitive API index", errors);
+        requireIncludes(text, "examples/primitives/fixtures/workbench-catalog.json", "primitive-workbench-walkthrough must have fixture-backed self-test", errors);
+      }
       continue;
     }
 
@@ -99,6 +107,13 @@ const helper = "createPrimitiveOperationsClient";
 `);
   fs.writeFileSync(path.join(examplesDir, "discover-primitives.mjs"), `
 import { loadPrimitiveSdk } from "./lib/primitive-sdk-loader.mjs";
+if (process.argv.includes("--self-test")) {}
+`);
+  fs.mkdirSync(path.join(examplesDir, "fixtures"), { recursive: true });
+  fs.writeFileSync(path.join(examplesDir, "primitive-workbench-walkthrough.mjs"), `
+import { loadPrimitiveSdk } from "./lib/primitive-sdk-loader.mjs";
+const helper = "buildPrimitiveApiIndex";
+const fixture = "examples/primitives/fixtures/workbench-catalog.json";
 if (process.argv.includes("--self-test")) {}
 `);
   for (const file of ["agent-attention-queue.mjs", "restore-my-desk.mjs", "window-hotkey-router.mjs"]) {

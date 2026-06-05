@@ -60,6 +60,7 @@ function defaultPrimitiveSdkExports() {
     "selectPrimitiveSelfTestCommands",
     "selectPrimitiveLatencyBudgets",
     "buildPrimitiveProofPlan",
+    "buildPrimitiveApiIndex",
     "createPrimitiveOperationsClient",
   ];
 }
