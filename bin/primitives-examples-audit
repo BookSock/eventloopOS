@@ -72,6 +72,9 @@ function auditPrimitiveExamples(examplesDir) {
       }
       if (file === "operation-id-client.mjs") {
         requireIncludes(text, "createPrimitiveExampleOperationClient", "operation-id-client must use shared operation-id client loader", errors);
+        requireIncludes(text, "buildPrimitiveApiIndex", "operation-id-client must expose catalog-backed operation discovery", errors);
+        requireIncludes(text, "describeOperation", "operation-id-client must describe operation ids before live calls", errors);
+        requireIncludes(text, "listOperations", "operation-id-client must list operation ids before live calls", errors);
         requireIncludes(text, "requestOperation", "operation-id-client must call primitives by operation id", errors);
         requireIncludes(text, "--timeout-ms", "operation-id-client must expose timeout option", errors);
         requireIncludes(text, "examples/primitives/fixtures/workbench-catalog.json", "operation-id-client must have fixture-backed self-test", errors);
@@ -131,6 +134,9 @@ if (process.argv.includes("--self-test")) {}
 `);
   fs.writeFileSync(path.join(examplesDir, "operation-id-client.mjs"), `
 import { loadPrimitiveSdk, createPrimitiveExampleOperationClient } from "./lib/primitive-sdk-loader.mjs";
+const indexHelper = "buildPrimitiveApiIndex";
+function describeOperation() {}
+function listOperations() {}
 const call = "requestOperation";
 const usage = "--timeout-ms";
 const fixture = "examples/primitives/fixtures/workbench-catalog.json";
