@@ -1,35 +1,17 @@
 import assert from "node:assert/strict";
+import { readdir } from "node:fs/promises";
 import { describe, it } from "node:test";
-import { loadMigrations } from "../src/db/migrations.js";
+import { defaultMigrationsDir, loadMigrations } from "../src/db/migrations.js";
 
 describe("Postgres migrations", () => {
   it("include deterministic queue, event idempotency, decisions, and receipts schema", async () => {
     const migrations = await loadMigrations();
     const sql = migrations.map((migration) => migration.sql).join("\n");
+    const expectedMigrationIds = (await readdir(await defaultMigrationsDir()))
+      .filter((file) => file.endsWith(".sql"))
+      .sort();
 
-    assert.deepEqual(migrations.map((migration) => migration.id), [
-      "0001_core_queue.sql",
-      "0002_context_restore_requests.sql",
-      "0003_observability.sql",
-      "0004_context_restore_failures.sql",
-      "0005_mcp_poll_states.sql",
-      "0006_task_messages.sql",
-      "0007_agent_runs.sql",
-      "0008_task_workspace_snapshots.sql",
-      "0009_queue_action_attempts.sql",
-      "0010_task_session_terminal_refs.sql",
-      "0011_onboarding_rejections.sql",
-      "0012_manual_mode_state.sql",
-      "0013_tasks.sql",
-      "0014_tasks_aerospace_workspace.sql",
-      "0015_window_workspace_observations.sql",
-      "0016_paper_triggers.sql",
-      "0017_window_identity_keys.sql",
-      "0018_tasks_dormant_at.sql",
-      "0019_follows_window_exclusions.sql",
-      "0020_task_window_claims.sql",
-      "0021_task_window_claim_process_root_pid.sql",
-    ]);
+    assert.deepEqual(migrations.map((migration) => migration.id), expectedMigrationIds);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS events/);
     assert.match(sql, /UNIQUE \(source, idempotency_key\)/);
     assert.match(sql, /CREATE TABLE IF NOT EXISTS review_packets/);

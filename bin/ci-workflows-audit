@@ -100,6 +100,8 @@ function auditSharedWorkflowGuards(label, text, errors) {
 function auditCiLinux(text, errors) {
   requireIncludes(text, "run pnpm test:contracts", "bin/ci-linux must run shared contract tests before package tests", errors);
   requireIncludes(text, "run pnpm lint", "bin/ci-linux must run workspace lint", errors);
+  requireIncludes(text, "run node bin/ci-workflows-audit", "bin/ci-linux must audit CI workflow guardrails", errors);
+  requireIncludes(text, "run node bin/sql-migrations-audit", "bin/ci-linux must audit migration filenames and SQL guardrails", errors);
   requireIncludes(text, "run pnpm primitives:self-test", "bin/ci-linux must run cataloged primitive self-tests", errors);
   requireIncludes(text, "run pnpm primitives:builder-gate", "bin/ci-linux must run the primitive builder handoff gate", errors);
   requireIncludes(text, "run pnpm --filter @eventloopos/shared typecheck", "bin/ci-linux must typecheck the shared SDK package", errors);
@@ -228,6 +230,8 @@ run() {
 }
 run pnpm test:contracts
 run pnpm lint
+run node bin/ci-workflows-audit
+run node bin/sql-migrations-audit
 run pnpm primitives:self-test
 run pnpm primitives:builder-gate
 run pnpm --filter @eventloopos/shared typecheck
@@ -274,6 +278,14 @@ run pnpm test:e2e:event-loop
     const missingBuilderGate = await auditWorkflows(tmp);
     assert.equal(missingBuilderGate.ok, false);
     assert.ok(missingBuilderGate.errors.includes("bin/ci-linux must run the primitive builder handoff gate"));
+
+    writeFixture(bin, "ci-linux", (await readFile(path.join(bin, "ci-linux"), "utf8")).replace(
+      "run node bin/sql-migrations-audit\n",
+      ""
+    ));
+    const missingMigrationAudit = await auditWorkflows(tmp);
+    assert.equal(missingMigrationAudit.ok, false);
+    assert.ok(missingMigrationAudit.errors.includes("bin/ci-linux must audit migration filenames and SQL guardrails"));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }

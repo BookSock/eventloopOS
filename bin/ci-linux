@@ -9,6 +9,8 @@ run() {
 
 run pnpm test:contracts
 run pnpm lint
+run node bin/ci-workflows-audit
+run node bin/sql-migrations-audit
 run pnpm primitives:self-test
 run pnpm primitives:builder-gate
 
