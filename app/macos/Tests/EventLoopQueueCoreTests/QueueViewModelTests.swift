@@ -2744,6 +2744,103 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertTrue(workspaceClient.restoreIdempotencyKeys[0].hasPrefix("mac_manual_workspace_restore_"))
     }
 
+    func testRapidManualWorkspaceRestoreDoesNotSendSecondRequest() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "manual-workspace")
+            ],
+            activeWorkspace: "manual-workspace"
+        )
+        let receipt = WorkspaceRestoreReceipt(
+            commands: [
+                WorkspaceExecutedCommand(command: "aerospace", args: ["workspace", "manual-workspace"], stdout: "ok")
+            ],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: snapshot,
+            restoreEnvelope: WorkspaceRestoreExecutionEnvelope(
+                ok: true,
+                plan: WorkspaceRestorePlan(commands: [], skipped: []),
+                receipt: receipt,
+                executeSupported: true,
+                idempotencyKey: "idem_fake"
+            ),
+            restoreDelayNanoseconds: 100_000_000
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+
+        await viewModel.enterManualMode()
+        await viewModel.returnToEventLoopModeAndPrepareWorkspaceRestore()
+
+        let firstRestore = Task { @MainActor in
+            await viewModel.confirmManualWorkspaceRestore()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Restoring manual workspace..."))
+
+        let secondRestore = Task { @MainActor in
+            await viewModel.confirmManualWorkspaceRestore()
+        }
+
+        await secondRestore.value
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestoring)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual workspace restore already running..."))
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+
+        await firstRestore.value
+
+        XCTAssertEqual(viewModel.mode, .manual)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual workspace restored."))
+    }
+
+    func testImmediateManualWorkspaceRestoreRepeatReusesRecentReceipt() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "manual-workspace")
+            ],
+            activeWorkspace: "manual-workspace"
+        )
+        let receipt = WorkspaceRestoreReceipt(
+            commands: [
+                WorkspaceExecutedCommand(command: "aerospace", args: ["workspace", "manual-workspace"], stdout: "ok")
+            ],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: snapshot,
+            restoreEnvelope: WorkspaceRestoreExecutionEnvelope(
+                ok: true,
+                plan: WorkspaceRestorePlan(commands: [], skipped: []),
+                receipt: receipt,
+                executeSupported: true,
+                idempotencyKey: "idem_fake"
+            )
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+
+        await viewModel.enterManualMode()
+        await viewModel.returnToEventLoopModeAndPrepareWorkspaceRestore()
+        await viewModel.confirmManualWorkspaceRestore()
+        await viewModel.confirmManualWorkspaceRestore()
+
+        XCTAssertEqual(viewModel.mode, .manual)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestored(receipt))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual workspace already restored."))
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+    }
+
     func testRestoreManualWorkspaceRequiresSavedSnapshot() async {
         let workspaceClient = FakeWorkspaceClient()
         let viewModel = QueueViewModel(

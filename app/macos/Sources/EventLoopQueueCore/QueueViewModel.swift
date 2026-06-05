@@ -2001,16 +2001,45 @@ public final class QueueViewModel: ObservableObject {
             return
         }
 
+        let idempotencyPrefix = "mac_manual_workspace_restore"
+        guard !workspaceRestoreInFlight else {
+            workspaceRestoreState = .alreadyRestoring
+            advanceToast = .actionComplete("Manual workspace restore already running...")
+            return
+        }
+
+        if let recent = lastWorkspaceRestore,
+           recent.idempotencyPrefix == idempotencyPrefix,
+           recent.snapshot == snapshot,
+           Date().timeIntervalSince(recent.completedAt) < workspaceRestoreRepeatWindow {
+            mode = .manual
+            shouldRestoreWorkspace = false
+            workspaceRestoreState = .alreadyRestored(recent.receipt)
+            advanceToast = .actionComplete("Manual workspace already restored.")
+            return
+        }
+
+        workspaceRestoreInFlight = true
+        defer {
+            workspaceRestoreInFlight = false
+        }
+
         do {
             advanceToast = .actionComplete("Restoring manual workspace...")
             let response = try await workspaceClient.restore(
                 snapshot: snapshot,
                 currentWindows: nil,
-                idempotencyKey: "mac_manual_workspace_restore_\(UUID().uuidString)"
+                idempotencyKey: "\(idempotencyPrefix)_\(UUID().uuidString)"
             )
             mode = .manual
             shouldRestoreWorkspace = false
             workspaceRestoreState = .executed(response.receipt)
+            lastWorkspaceRestore = RecentWorkspaceRestore(
+                idempotencyPrefix: idempotencyPrefix,
+                snapshot: snapshot,
+                completedAt: Date(),
+                receipt: response.receipt
+            )
             advanceToast = .actionComplete("Manual workspace restored.")
         } catch {
             workspaceRestoreState = .failed(error.localizedDescription)
