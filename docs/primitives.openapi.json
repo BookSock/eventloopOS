@@ -71,7 +71,7 @@
     },
     {
       "name": "task_window_claims",
-      "description": "Task Window Claims: Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots and can be redirected home."
+      "description": "Task Window Claims: Declare or infer that windows belong to tasks by window identity or process root so foreign windows, including guarded app/title-filtered reused windows, do not pollute active paper snapshots and can be redirected home."
     },
     {
       "name": "task_workspace_memory",
@@ -2800,7 +2800,7 @@
     },
     "/task-window-claims": {
       "get": {
-        "description": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots and can be redirected home.",
+        "description": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows, including guarded app/title-filtered reused windows, do not pollute active paper snapshots and can be redirected home.",
         "operationId": "task_window_claims_get_task_window_claims",
         "parameters": [
           {
@@ -2844,7 +2844,7 @@
         "x-eventloopos-status": "dogfood"
       },
       "post": {
-        "description": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots and can be redirected home.",
+        "description": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows, including guarded app/title-filtered reused windows, do not pollute active paper snapshots and can be redirected home.",
         "operationId": "task_window_claims_post_task_window_claims",
         "requestBody": {
           "content": {

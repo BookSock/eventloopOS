@@ -2305,7 +2305,7 @@
       "id": "task_window_claims",
       "title": "Task Window Claims",
       "status": "dogfood",
-      "summary": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows do not pollute active paper snapshots and can be redirected home.",
+      "summary": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows, including guarded app/title-filtered reused windows, do not pollute active paper snapshots and can be redirected home.",
       "http": [
         {
           "method": "POST",

@@ -45,6 +45,9 @@ Options:
   --source NAME         Claim source. Default task-window-spawn
   --app CONTAINS        Optional app/app_bundle substring filter for new windows
   --title CONTAINS      Optional title substring filter for new windows
+  --claim-existing-matching
+                         Also claim/move already-open windows matching --app/--title.
+                         Requires --app or --title.
 `);
 }
 
@@ -66,6 +69,7 @@ function parseArgs(argv) {
     source: "task-window-spawn",
     appContains: undefined,
     titleContains: undefined,
+    claimExistingMatching: false,
     command: commandArgs[0],
     args: commandArgs.slice(1),
   };
@@ -103,22 +107,34 @@ function parseArgs(argv) {
       case "--title":
         options.titleContains = readValue(optionArgs, ++index, arg).toLowerCase();
         break;
+      case "--claim-existing-matching":
+        options.claimExistingMatching = true;
+        break;
       default:
         throw new Error(`unknown option: ${arg}`);
     }
   }
 
   if (!options.taskId) throw new Error("--task-id is required");
+  validateOptions(options);
   return options;
 }
 
 async function runTaskWindowSpawn(options) {
+  validateOptions(options);
   const before = await captureWorkspace(options);
   const waitStartedAt = Date.now();
   const rootClaims = [];
   const errors = [];
   const taskWorkspace = await readTaskWorkspace(options, options.taskId).catch(() => undefined);
   const focusWorkspace = before.snapshot?.activeWorkspace;
+  const preexisting = await claimExistingMatchingWindows({
+    options,
+    beforeWindows: before.snapshot?.windows ?? [],
+    taskWorkspace,
+    focusWorkspace,
+    errors,
+  });
   let commandDoneAt;
   const commandPromise = runCommand(options.command, options.args, async (child) => {
     if (!isPositiveInteger(child.pid)) return;
@@ -171,6 +187,11 @@ async function runTaskWindowSpawn(options) {
     capture_attempts: waitResult.captureAttempts,
     before_window_count: before.snapshot?.windows?.length ?? 0,
     after_window_count: after.snapshot?.windows?.length ?? 0,
+    preexisting_matching_count: preexisting.matching.length,
+    preexisting_claimed_count: preexisting.claimed.length,
+    preexisting_claimed: preexisting.claimed,
+    preexisting_moved_count: preexisting.moved.length,
+    preexisting_moved: preexisting.moved,
     new_window_count: newWindows.length,
     claimed_count: claimed.length,
     claimed,
@@ -200,46 +221,7 @@ async function watchNewWindows({ options, beforeWindows, taskWorkspace, focusWor
     }
     for (const window of currentNewWindows) {
       newWindows.push(window);
-      try {
-        const claim = await claimWindow(options, {
-          task_id: options.taskId,
-          window_id: String(window.id),
-          app_bundle: readWindowAppBundle(window),
-          title_prefix: readWindowTitle(window),
-          source: options.source,
-          ttl_ms: options.ttlMs,
-        });
-        claimed.push({
-          window_id: String(window.id),
-          app: window.app,
-          app_bundle: readWindowAppBundle(window),
-          title: readWindowTitle(window),
-          claim_id: claim.claim?.claim_id,
-        });
-      } catch (error) {
-        errors.push({
-          window_id: String(window.id),
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-      if (taskWorkspace && window.workspace !== taskWorkspace) {
-        try {
-          await runAerospaceCommand(options, ["move-node-to-workspace", "--window-id", String(window.id), taskWorkspace]);
-          moved.push({
-            window_id: String(window.id),
-            from_workspace: window.workspace,
-            to_workspace: taskWorkspace,
-          });
-          if (focusWorkspace && focusWorkspace !== taskWorkspace) {
-            await runAerospaceCommand(options, ["workspace", focusWorkspace]).catch(() => undefined);
-          }
-        } catch (error) {
-          errors.push({
-            window_id: String(window.id),
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-      }
+      await claimAndMaybeMoveWindow({ options, window, source: options.source, taskWorkspace, focusWorkspace, errors, claimed, moved });
     }
     const doneAt = commandDoneAt();
     if (doneAt !== undefined) {
@@ -255,6 +237,80 @@ async function watchNewWindows({ options, beforeWindows, taskWorkspace, focusWor
   } while (true);
 
   return { after, newWindows, claimed, moved, captureAttempts, firstNewWindowMs };
+}
+
+function validateOptions(options) {
+  if (options.claimExistingMatching === true && !options.appContains && !options.titleContains) {
+    throw new Error("--claim-existing-matching requires --app or --title");
+  }
+}
+
+async function claimExistingMatchingWindows({ options, beforeWindows, taskWorkspace, focusWorkspace, errors }) {
+  const matching = [];
+  const claimed = [];
+  const moved = [];
+  if (options.claimExistingMatching !== true) return { matching, claimed, moved };
+
+  for (const window of beforeWindows) {
+    if (window?.id === undefined) continue;
+    if (!windowMatchesFilters(window, options)) continue;
+    matching.push(window);
+    await claimAndMaybeMoveWindow({
+      options,
+      window,
+      source: `${options.source}:existing_matching`,
+      taskWorkspace,
+      focusWorkspace,
+      errors,
+      claimed,
+      moved,
+    });
+  }
+  return { matching, claimed, moved };
+}
+
+async function claimAndMaybeMoveWindow({ options, window, source, taskWorkspace, focusWorkspace, errors, claimed, moved }) {
+  try {
+    const claim = await claimWindow(options, {
+      task_id: options.taskId,
+      window_id: String(window.id),
+      app_bundle: readWindowAppBundle(window),
+      title_prefix: readWindowTitle(window),
+      source,
+      ttl_ms: options.ttlMs,
+    });
+    claimed.push({
+      window_id: String(window.id),
+      app: window.app,
+      app_bundle: readWindowAppBundle(window),
+      title: readWindowTitle(window),
+      claim_id: claim.claim?.claim_id,
+    });
+  } catch (error) {
+    errors.push({
+      window_id: String(window.id),
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  if (taskWorkspace && window.workspace !== taskWorkspace) {
+    try {
+      await runAerospaceCommand(options, ["move-node-to-workspace", "--window-id", String(window.id), taskWorkspace]);
+      moved.push({
+        window_id: String(window.id),
+        from_workspace: window.workspace,
+        to_workspace: taskWorkspace,
+      });
+      if (focusWorkspace && focusWorkspace !== taskWorkspace) {
+        await runAerospaceCommand(options, ["workspace", focusWorkspace]).catch(() => undefined);
+      }
+    } catch (error) {
+      errors.push({
+        window_id: String(window.id),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }
 
 function runCommand(command, args, onSpawn = async () => {}) {
@@ -491,6 +547,110 @@ async function runSelfTest() {
       ["workspace", "main"],
     ])) {
       throw new Error(`expected move then focus restore, got ${commandJson}`);
+    }
+
+    let guardError;
+    try {
+      await runTaskWindowSpawn({
+        baseUrl,
+        taskId: "task_checkout",
+        settleMs: 0,
+        waitMs: 1,
+        pollMs: 1,
+        requestTimeoutMs: 5_000,
+        ttlMs: 123_000,
+        source: "self-test-guard",
+        appContains: undefined,
+        titleContains: undefined,
+        claimExistingMatching: true,
+        runAerospace: async () => {},
+        command: process.execPath,
+        args: ["-e", ""],
+      });
+    } catch (error) {
+      guardError = error;
+    }
+    if (!String(guardError?.message ?? "").includes("--claim-existing-matching requires --app or --title")) {
+      throw new Error(`expected claim-existing guard error, got ${guardError?.message}`);
+    }
+
+    const existingClaims = [];
+    const existingAerospaceCommands = [];
+    const existingServer = http.createServer(async (request, response) => {
+      const send = (status, body) => {
+        response.writeHead(status, { "content-type": "application/json" });
+        response.end(JSON.stringify(body));
+      };
+      if (request.method === "POST" && request.url === "/workspace/capture") {
+        send(200, {
+          snapshot: {
+            backend: "aerospace",
+            activeWorkspace: "main",
+            windows: [
+              {
+                id: 77,
+                app: "Google Chrome",
+                appBundleId: "com.google.Chrome",
+                title: "Checkout reuse report",
+                workspace: "main",
+              },
+            ],
+          },
+        });
+        return;
+      }
+      if (request.method === "GET" && request.url === "/tasks/task_checkout") {
+        send(200, { ok: true, task: { task_id: "task_checkout", aerospace_workspace_id: "task-checkout" } });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/task-window-claims") {
+        const body = await readRequestJson(request);
+        existingClaims.push(body);
+        send(200, { ok: true, claim: { claim_id: `twc_existing_${body.window_id ?? body.process_root_pid}`, ...body } });
+        return;
+      }
+      send(404, { ok: false });
+    });
+    await new Promise((resolve) => existingServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const existingAddress = existingServer.address();
+      const existingResult = await runTaskWindowSpawn({
+        baseUrl: `http://127.0.0.1:${existingAddress.port}`,
+        taskId: "task_checkout",
+        settleMs: 0,
+        waitMs: 1,
+        pollMs: 1,
+        requestTimeoutMs: 5_000,
+        ttlMs: 123_000,
+        source: "self-test-existing",
+        appContains: "chrome",
+        titleContains: "reuse",
+        claimExistingMatching: true,
+        runAerospace: async (commandArgs) => {
+          existingAerospaceCommands.push(commandArgs);
+        },
+        command: process.execPath,
+        args: ["-e", ""],
+      });
+      if (!existingResult.ok) throw new Error(`existing self-test result not ok: ${JSON.stringify(existingResult)}`);
+      if (existingResult.preexisting_matching_count !== 1) throw new Error(`expected one existing match, got ${existingResult.preexisting_matching_count}`);
+      if (existingResult.preexisting_claimed_count !== 1) throw new Error(`expected one existing claim, got ${existingResult.preexisting_claimed_count}`);
+      if (existingResult.preexisting_moved_count !== 1) throw new Error(`expected one existing moved window, got ${existingResult.preexisting_moved_count}`);
+      if (existingResult.new_window_count !== 0) throw new Error(`expected no new windows, got ${existingResult.new_window_count}`);
+      if (existingClaims[0]?.window_id !== "77") throw new Error(`existing claim window mismatch: ${JSON.stringify(existingClaims[0])}`);
+      if (existingClaims[0]?.source !== "self-test-existing:existing_matching") throw new Error(`existing claim source mismatch: ${JSON.stringify(existingClaims[0])}`);
+      const existingCommandJson = JSON.stringify(existingAerospaceCommands);
+      if (existingCommandJson !== JSON.stringify([
+        ["move-node-to-workspace", "--window-id", "77", "task-checkout"],
+        ["workspace", "main"],
+      ])) {
+        throw new Error(`expected existing move then focus restore, got ${existingCommandJson}`);
+      }
+    } finally {
+      existingServer.closeAllConnections?.();
+      await new Promise((resolve, reject) => {
+        existingServer.close((error) => (error ? reject(error) : resolve()));
+      });
     }
 
     const timeoutServer = http.createServer(async (request, response) => {

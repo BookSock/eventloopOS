@@ -318,6 +318,10 @@ Useful standalone uses:
   human focus; `--wait-ms` covers slow LaunchServices/Chrome startup, and
   `--request-timeout-ms` prevents stalled local HTTP calls from wedging the
   agent/demo
+- if LaunchServices or Chrome reuses an already-open window, the same wrapper
+  can add `--claim-existing-matching --app chrome --title checkout` to claim
+  and rehome only existing windows that pass an explicit app/title filter before
+  running the command
 - a bound Codex/Claude task session exposes `pid`/`agent_pid`/`terminal_pid`,
   and the follows-window orchestrator redirects descendant app windows before
   they can linger on the human's current paper; ambient autosave also converts
@@ -352,7 +356,9 @@ Status: dogfood. Browser context capture has an automatic emitter; generic
 routed window resources are auto-claimed; tagged windows are inferred from OS
 snapshots; process-tree launches are claimed when session pid metadata exists;
 command-wrapped untagged launches are pre-claimed by process root and then by
-window id/title/bundle; claimed windows and bound task-session descendant
+window id/title/bundle, including guarded app/title-filtered claims for
+already-open windows reused by LaunchServices; claimed windows and bound
+task-session descendant
 windows that appear on the active paper are redirected to the owning task
 workspace when possible.
 
