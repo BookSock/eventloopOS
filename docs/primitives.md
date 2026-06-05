@@ -40,6 +40,10 @@ self-tests, 73 proof refs, 8 latency budgets.
 Strict readiness is expected to stay green: every cataloged primitive
 has a `self_tests` command, and the shared primitive operation-helper test
 proves typed helper coverage for every cataloged HTTP route.
+The Linux CI lane also runs `@eventloopos/shared`'s package audit: it builds the
+shared package, runs `pnpm pack --dry-run --json`, and verifies the future SDK
+tarball only contains runtime package files (`dist`, README, package metadata)
+with every `main`/`types`/`exports` target present.
 Responsiveness-critical primitives must also carry explicit p95 latency budgets
 linked to runnable proof commands.
 `bin/primitives-self-test-runner` executes the cataloged self-test commands

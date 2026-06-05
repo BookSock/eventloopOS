@@ -1,0 +1,139 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: node bin/shared-sdk-pack-audit [--self-test]
+
+Runs a dry-run npm package audit for app/shared. The audit verifies that the
+@eventloopos/shared SDK package exports only runtime package artifacts and that
+main/types/exports point at files included in the package tarball.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  console.log("shared-sdk-pack-audit self-test passed");
+  process.exit(0);
+}
+
+const packageJson = readJson(path.join(repoRoot, "app/shared/package.json"));
+const packJson = JSON.parse(execFileSync("pnpm", ["--dir", "app/shared", "pack", "--dry-run", "--json"], {
+  cwd: repoRoot,
+  encoding: "utf8",
+}));
+const result = auditSharedSdkPackage({ packageJson, packJson });
+if (!result.ok) {
+  console.error(`shared SDK package audit failed:\n- ${result.errors.join("\n- ")}`);
+  process.exit(1);
+}
+console.log(JSON.stringify(result, null, 2));
+
+function auditSharedSdkPackage({ packageJson, packJson }) {
+  const files = new Set((packJson.files ?? []).map((file) => file?.path).filter((value) => typeof value === "string"));
+  const errors = [];
+
+  if (packageJson.name !== "@eventloopos/shared") errors.push(`unexpected package name: ${packageJson.name}`);
+  if (packageJson.type !== "module") errors.push("package must remain ESM (`type: module`)");
+  if (!Array.isArray(packageJson.files) || packageJson.files.join(",") !== "dist,README.md") {
+    errors.push('package files whitelist must be exactly ["dist", "README.md"]');
+  }
+
+  for (const required of ["package.json", "README.md", "dist/index.js", "dist/index.d.ts", "dist/primitives.js", "dist/primitives.d.ts", "dist/schemas.js", "dist/schemas.d.ts", "dist/json-schema.js", "dist/json-schema.d.ts"]) {
+    if (!files.has(required)) errors.push(`missing package file: ${required}`);
+  }
+
+  for (const forbidden of Array.from(files).filter((file) => /^(src|test)\//.test(file) || /^(tsconfig|vitest)\./.test(file))) {
+    errors.push(`package includes non-runtime file: ${forbidden}`);
+  }
+
+  for (const exported of exportedPackageFiles(packageJson)) {
+    if (!files.has(exported)) errors.push(`export points to file missing from package: ${exported}`);
+  }
+
+  return {
+    ok: errors.length === 0,
+    package_name: packageJson.name,
+    file_count: files.size,
+    files: Array.from(files).sort(),
+    errors,
+  };
+}
+
+function exportedPackageFiles(packageJson) {
+  const files = new Set();
+  addExportFile(files, packageJson.main);
+  addExportFile(files, packageJson.types);
+  collectExportFiles(files, packageJson.exports);
+  return Array.from(files).sort();
+}
+
+function collectExportFiles(files, value) {
+  if (typeof value === "string") {
+    addExportFile(files, value);
+    return;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  for (const nested of Object.values(value)) collectExportFiles(files, nested);
+}
+
+function addExportFile(files, value) {
+  if (typeof value !== "string" || !value.trim()) return;
+  files.add(value.replace(/^\.\//, ""));
+}
+
+function readJson(filePath) {
+  return JSON.parse(readFileSync(filePath, "utf8"));
+}
+
+function runSelfTest() {
+  const packageJson = {
+    name: "@eventloopos/shared",
+    type: "module",
+    files: ["dist", "README.md"],
+    main: "./dist/index.js",
+    types: "./dist/index.d.ts",
+    exports: {
+      ".": { import: "./dist/index.js", types: "./dist/index.d.ts" },
+      "./primitives": { import: "./dist/primitives.js", types: "./dist/primitives.d.ts" },
+    },
+  };
+  const packJson = {
+    files: [
+      { path: "package.json" },
+      { path: "README.md" },
+      { path: "dist/index.js" },
+      { path: "dist/index.d.ts" },
+      { path: "dist/primitives.js" },
+      { path: "dist/primitives.d.ts" },
+      { path: "dist/schemas.js" },
+      { path: "dist/schemas.d.ts" },
+      { path: "dist/json-schema.js" },
+      { path: "dist/json-schema.d.ts" },
+    ],
+  };
+  assert.equal(auditSharedSdkPackage({ packageJson, packJson }).ok, true);
+
+  const badSource = auditSharedSdkPackage({
+    packageJson,
+    packJson: { files: [...packJson.files, { path: "src/index.ts" }] },
+  });
+  assert.equal(badSource.ok, false);
+  assert.match(badSource.errors.join("\n"), /non-runtime file/);
+
+  const badExport = auditSharedSdkPackage({
+    packageJson: {
+      ...packageJson,
+      exports: { ...packageJson.exports, "./missing": { import: "./dist/missing.js" } },
+    },
+    packJson,
+  });
+  assert.equal(badExport.ok, false);
+  assert.match(badExport.errors.join("\n"), /export points to file missing/);
+}

@@ -12,6 +12,7 @@ run pnpm lint
 run pnpm primitives:self-test
 
 run pnpm --filter @eventloopos/shared typecheck
+run pnpm --filter @eventloopos/shared pack:audit
 run pnpm --filter @eventloopos/browser-extension typecheck
 run pnpm --filter @eventloopos/native-host typecheck
 run pnpm --filter @eventloopos/orchestrator typecheck

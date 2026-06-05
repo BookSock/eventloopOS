@@ -5,6 +5,10 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -21,6 +25,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "pack:audit": "pnpm build && node ../../bin/shared-sdk-pack-audit",
     "test": "vitest run",
     "test:primitive-ops": "vitest run test/contracts.test.ts -t \"primitive operation helpers\"",
     "test:contracts": "pnpm test && pnpm test:fixtures",
