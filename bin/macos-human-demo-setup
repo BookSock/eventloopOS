@@ -669,6 +669,8 @@ async function excludeDemoPaperChromeFromFollows() {
 async function proveAmbientAutosave(paper, baselineSnapshot) {
   const sharedWindowId = baselineSnapshot.focusedWindowId;
   if (typeof sharedWindowId !== "number") throw new Error("ambient autosave proof requires focused shared window id");
+  const baselineShared = baselineSnapshot.windows.find((window) => window.id === sharedWindowId);
+  if (!baselineShared?.frame) throw new Error(`ambient autosave proof requires baseline frame for shared window ${sharedWindowId}`);
   const movedFrame = { x: 820, y: 260, width: 620, height: 430 };
   const movedSnapshot = {
     ...baselineSnapshot,
@@ -677,9 +679,15 @@ async function proveAmbientAutosave(paper, baselineSnapshot) {
     ),
   };
 
+  await restore(baselineSnapshot, "ambient-autosave-baseline");
+  await waitForTaskLayoutFrame(paper.taskId, sharedWindowId, baselineShared.frame, {
+    label: "ambient autosave baseline",
+  });
   await restore(movedSnapshot, "ambient-autosave-move");
   await sleep(1_200);
-  const layoutProof = await waitForTaskLayoutFrame(paper.taskId, sharedWindowId, movedFrame);
+  const layoutProof = await waitForTaskLayoutFrame(paper.taskId, sharedWindowId, movedFrame, {
+    label: "ambient autosave moved frame",
+  });
   const probe = await queueAmbientProbePaper(paper, "moved-window");
   const probeItem = probe.queue_item;
   if (!probeItem?.id) throw new Error("ambient probe did not create queue item");
@@ -714,7 +722,9 @@ async function proveNewWindowAutosave(paper, baselineSnapshot) {
 
   const restoreResult = await restore(snapshotWithScratch, "new-window-autosave-add");
   await sleep(1_200);
-  const layoutProof = await waitForTaskLayoutFrame(paper.taskId, scratchWindow.id, scratchFrame);
+  const layoutProof = await waitForTaskLayoutFrame(paper.taskId, scratchWindow.id, scratchFrame, {
+    label: "new-window ambient autosave",
+  });
   const probe = await queueAmbientProbePaper(paper, "new-window");
   const probeItem = probe.queue_item;
   if (!probeItem?.id) throw new Error("new-window ambient probe did not create queue item");
@@ -776,15 +786,26 @@ async function waitForWindow(app, titlePart) {
   throw new Error(`window ${app} ${titlePart} was not captured: ${JSON.stringify(lastSnapshot?.windows?.map(compactWindow) ?? [])}`);
 }
 
-async function waitForTaskLayoutFrame(taskId, windowId, expectedFrame) {
+async function waitForTaskLayoutFrame(taskId, windowId, expectedFrame, options = {}) {
+  const label = options.label ?? "ambient autosave";
+  const attempts = options.attempts ?? 45;
+  const intervalMs = options.intervalMs ?? 1_000;
   let last;
-  for (let attempt = 1; attempt <= 16; attempt += 1) {
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const response = await fetch(`${orchestratorUrl}/tasks/${encodeURIComponent(taskId)}`);
     const body = await response.json();
     if (!response.ok) throw new Error(`get task ${taskId} HTTP ${response.status}: ${JSON.stringify(body)}`);
     const snapshot = body.layout?.layout;
     const window = snapshot?.windows?.find((candidate) => candidate.id === windowId);
-    last = window?.frame;
+    last = {
+      attempt,
+      updated_at: body.layout?.updated_at,
+      active_workspace: snapshot?.activeWorkspace,
+      focused_window_id: snapshot?.focusedWindowId,
+      window_count: snapshot?.windows?.length ?? 0,
+      window_ids: snapshot?.windows?.map((candidate) => candidate.id) ?? [],
+      frame: window?.frame,
+    };
     if (window?.frame && frameNear(window.frame, expectedFrame)) {
       return {
         ok: true,
@@ -793,9 +814,9 @@ async function waitForTaskLayoutFrame(taskId, windowId, expectedFrame) {
         frame: window.frame,
       };
     }
-    await sleep(1_000);
+    await sleep(intervalMs);
   }
-  throw new Error(`ambient autosave did not update task layout for ${taskId} window ${windowId}; last frame ${JSON.stringify(last)}`);
+  throw new Error(`${label} did not update task layout for ${taskId} window ${windowId}; expected ${JSON.stringify(expectedFrame)}; last ${JSON.stringify(last)}`);
 }
 
 function assertQueueItemWorkspaceFrame(item, windowId, expectedFrame) {
