@@ -76,6 +76,7 @@ const dogfoodManifest = extractJsonObject(dogfood.stdout);
 const template = runStep("human demo result template", "node", ["bin/human-demo-result-template", "--json"], env);
 const templateJson = extractJsonObject(template.stdout);
 const latestHumanDemoFreshness = demoProofFreshness(templateJson?.generated_at, startedAt, demoProofMaxAgeHours, allowStaleDemoProof);
+const latestHumanDemoScreenshot = imageArtifactSummary(templateJson?.screenshot_path ?? "");
 
 let screenshot;
 if (!skipScreenshot) {
@@ -101,6 +102,7 @@ const checks = {
   dogfood_status_ok: dogfood.status === 0 && dogfoodManifest?.ok === true,
   latest_human_demo_proof_ok: template.status === 0 && templateJson?.ok === true,
   latest_human_demo_proof_fresh: latestHumanDemoFreshness.ok === true,
+  latest_human_demo_screenshot_ok: latestHumanDemoScreenshot.ok === true,
   latest_human_demo_queue_has_two_papers: Number(templateJson?.queue_count ?? 0) >= 2,
   ambient_autosave_proof_ok: templateJson?.ambient_autosave_ok === true,
   screen_sharing_capture_ok: skipScreenshot || screenshot?.ok === true,
@@ -138,6 +140,7 @@ const manifest = {
   latest_human_demo: templateJson ? {
     manifest_path: templateJson.manifest_path,
     screenshot_path: templateJson.screenshot_path,
+    screenshot_image: latestHumanDemoScreenshot,
     suggested_result_path: templateJson.suggested_output_path,
     ok: templateJson.ok === true,
     queue_count: templateJson.queue_count,
@@ -477,6 +480,13 @@ function readJsonIfPresent(relativePath) {
 }
 
 function imageArtifactSummary(relativePath) {
+  if (!relativePath) {
+    return {
+      ok: false,
+      path: "",
+      reason: "missing",
+    };
+  }
   const absolutePath = path.resolve(repoRoot, relativePath);
   if (!existsSync(absolutePath)) {
     return {

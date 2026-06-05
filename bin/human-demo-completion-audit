@@ -68,6 +68,8 @@ function buildAudit(root, options = {}) {
     readiness_manifest_present: Boolean(readinessPath),
     readiness_ok: readiness?.ok === true,
     readiness_fresh: readinessFreshness.ok === true,
+    readiness_screenshot_gate_present: readiness?.checks?.latest_human_demo_screenshot_ok === true
+      && readiness?.latest_human_demo?.screenshot_image?.ok === true,
     human_result_recorded: Boolean(resultPath && fs.existsSync(path.resolve(root, resultPath))),
     human_result_filled: resultAudit.filled === true,
     verification_manifest_present: Boolean(verificationPath),
@@ -285,6 +287,17 @@ function completionStatus(failedChecks) {
 function nextActions(failedChecks, resultPath) {
   if (failedChecks.length === 0) return [];
   const actions = [];
+  if (
+    failedChecks.includes("readiness_manifest_present")
+    || failedChecks.includes("readiness_ok")
+    || failedChecks.includes("readiness_fresh")
+    || failedChecks.includes("readiness_screenshot_gate_present")
+  ) {
+    actions.push({
+      id: "refresh_demo_setup_and_readiness",
+      command: "bin/lab-mac-human-demo-setup && bin/human-demo-ready",
+    });
+  }
   if (failedChecks.includes("human_result_recorded")) {
     actions.push({
       id: "write_result_template",
@@ -401,7 +414,13 @@ function writeJson(filePath, value) {
 function runSelfTest() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-human-demo-completion-audit-"));
   const readinessPath = path.join(root, "artifacts", "lab-runs", "20260605T000000Z-human-demo-ready", "manifest.json");
-  writeJson(readinessPath, { ok: true, finished_at: new Date().toISOString() });
+  const readyManifest = (timestamp) => ({
+    ok: true,
+    finished_at: timestamp,
+    checks: { latest_human_demo_screenshot_ok: true },
+    latest_human_demo: { screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" } },
+  });
+  writeJson(readinessPath, readyManifest(new Date().toISOString()));
   const oldResultPath = path.join(root, "artifacts", "human-demo-results", "20260601T000000Z-human-demo-result.md");
   fs.mkdirSync(path.dirname(oldResultPath), { recursive: true });
   fs.writeFileSync(oldResultPath, "stale blank result\n", "utf8");
@@ -464,7 +483,7 @@ ship
   assert.equal(complete.status, "complete");
   assert.deepEqual(complete.next_actions, []);
 
-  writeJson(readinessPath, { ok: true, finished_at: "2000-01-01T00:00:00.000Z" });
+  writeJson(readinessPath, readyManifest("2000-01-01T00:00:00.000Z"));
   const staleReadiness = buildAudit(root, {
     resultPath: relativeResultPath,
     verificationPath: path.relative(root, verificationPath),
@@ -472,7 +491,12 @@ ship
   assert.equal(staleReadiness.ok, false);
   assert.ok(staleReadiness.failed_checks.includes("readiness_fresh"));
   assert.equal(staleReadiness.readiness_freshness.reason, "stale");
-  writeJson(readinessPath, { ok: true, started_at: new Date().toISOString() });
+  writeJson(readinessPath, {
+    ok: true,
+    started_at: new Date().toISOString(),
+    checks: { latest_human_demo_screenshot_ok: true },
+    latest_human_demo: { screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" } },
+  });
   const startedAtReadiness = buildAudit(root, {
     resultPath: relativeResultPath,
     verificationPath: path.relative(root, verificationPath),

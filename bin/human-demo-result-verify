@@ -2,12 +2,14 @@
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { humanDemoPassFailLabels, renderFilledHumanDemoPassFail } from "./lib/human-demo-checklist.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
+let artifactRoot = repoRoot;
 process.chdir(repoRoot);
 
 const args = process.argv.slice(2);
@@ -138,6 +140,12 @@ function utcStamp() {
 
 function verifyResultText(text) {
   const lines = text.split(/\r?\n/);
+  const artifactRefs = {
+    proof_manifest: fieldOrSectionText(lines, "Proof manifest:", "Screenshot:").trim(),
+    proof_screenshot: fieldOrSectionText(lines, "Screenshot:", "Readiness manifest:").trim(),
+    readiness_manifest: fieldOrSectionText(lines, "Readiness manifest:", "Readiness screenshot:").trim(),
+    readiness_screenshot: fieldOrSectionText(lines, "Readiness screenshot:", "Readiness queue latency:").trim(),
+  };
   const passFail = parsePassFail(lines);
   const friction = sectionText(lines, "Friction:", "Ship/block decision:").trim();
   const decision = fieldOrSectionText(lines, "Ship/block decision:", undefined).trim();
@@ -149,7 +157,14 @@ function verifyResultText(text) {
   const missingLabels = humanDemoPassFailLabels.filter((label) => !Object.hasOwn(passFail, label));
   const blankLabels = humanDemoPassFailLabels.filter((label) => Object.hasOwn(passFail, label) && passFail[label].trim() === "");
   const blockingLabels = humanDemoPassFailLabels.filter((label) => Object.hasOwn(passFail, label) && passFail[label].trim() !== "" && !isAcceptablePassFail(passFail[label]));
+  const artifactChecks = {
+    proof_manifest_ok: jsonManifestOk(artifactRefs.proof_manifest),
+    proof_screenshot_ok: imageArtifactOk(artifactRefs.proof_screenshot),
+    readiness_manifest_ok: jsonManifestOk(artifactRefs.readiness_manifest),
+    readiness_screenshot_ok: imageArtifactOk(artifactRefs.readiness_screenshot),
+  };
   const checks = {
+    ...artifactChecks,
     all_expected_pass_fail_items_present: missingLabels.length === 0,
     all_pass_fail_items_filled: blankLabels.length === 0,
     pass_fail_items_passed_or_accepted: blockingLabels.length === 0,
@@ -169,6 +184,7 @@ function verifyResultText(text) {
       blank_labels: blankLabels,
       blocking_labels: blockingLabels,
     },
+    artifact_refs: artifactRefs,
     readiness_latency: readinessLatency,
     friction,
     ship_block_decision: decision,
@@ -207,6 +223,38 @@ function fieldOrSectionText(lines, startMarker, endMarker) {
     ? lines.findIndex((line, index) => index > start && line.trim() === endMarker)
     : lines.length;
   return lines.slice(afterStart, end === -1 ? lines.length : end).join("\n");
+}
+
+function jsonManifestOk(relativePath) {
+  if (!relativePath) return false;
+  try {
+    const value = JSON.parse(fs.readFileSync(resolveArtifactPath(relativePath), "utf8"));
+    return value?.ok === true || value?.passed === true;
+  } catch {
+    return false;
+  }
+}
+
+function imageArtifactOk(relativePath) {
+  if (!relativePath) return false;
+  try {
+    const absolutePath = resolveArtifactPath(relativePath);
+    const stat = fs.statSync(absolutePath);
+    if (!stat.isFile() || stat.size <= 0) return false;
+    const dimensions = parseImageDimensions(fs.readFileSync(absolutePath));
+    return dimensions.width > 0 && dimensions.height > 0;
+  } catch {
+    return false;
+  }
+}
+
+function resolveArtifactPath(relativePath) {
+  const absolutePath = path.resolve(artifactRoot, relativePath);
+  const relativeToRoot = path.relative(artifactRoot, absolutePath);
+  if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot)) {
+    throw new Error(`artifact path escapes repo: ${relativePath}`);
+  }
+  return absolutePath;
 }
 
 function isAcceptablePassFail(value) {
@@ -273,7 +321,74 @@ function firstMatch(value, pattern) {
   return value.match(pattern)?.[1];
 }
 
+function parseImageDimensions(buffer) {
+  if (buffer.length >= 24
+    && buffer[0] === 0x89
+    && buffer[1] === 0x50
+    && buffer[2] === 0x4e
+    && buffer[3] === 0x47
+    && buffer[4] === 0x0d
+    && buffer[5] === 0x0a
+    && buffer[6] === 0x1a
+    && buffer[7] === 0x0a) {
+    return {
+      format: "png",
+      width: buffer.readUInt32BE(16),
+      height: buffer.readUInt32BE(20),
+    };
+  }
+  if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
+    for (let offset = 2; offset + 8 < buffer.length;) {
+      if (buffer[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      const marker = buffer[offset + 1];
+      if (marker === 0xd9 || marker === 0xda) break;
+      const segmentLength = buffer.readUInt16BE(offset + 2);
+      if (segmentLength < 2) throw new Error("invalid_jpeg_segment");
+      if (isJpegStartOfFrame(marker)) {
+        return {
+          format: "jpeg",
+          width: buffer.readUInt16BE(offset + 7),
+          height: buffer.readUInt16BE(offset + 5),
+        };
+      }
+      offset += 2 + segmentLength;
+    }
+  }
+  throw new Error("unsupported_image_format");
+}
+
+function isJpegStartOfFrame(marker) {
+  return (marker >= 0xc0 && marker <= 0xc3)
+    || (marker >= 0xc5 && marker <= 0xc7)
+    || (marker >= 0xc9 && marker <= 0xcb)
+    || (marker >= 0xcd && marker <= 0xcf);
+}
+
+function writeTinyPng(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x00, 0x01,
+    0x00, 0x00, 0x00, 0x01,
+  ]));
+}
+
 function runSelfTest() {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-human-demo-result-verify-"));
+  const previousRepoRoot = process.cwd();
+  const previousArtifactRoot = artifactRoot;
+  artifactRoot = tempRoot;
+  process.chdir(tempRoot);
+  fs.mkdirSync(path.join(tempRoot, "artifacts", "lab-runs", "demo"), { recursive: true });
+  fs.mkdirSync(path.join(tempRoot, "artifacts", "lab-runs", "ready"), { recursive: true });
+  fs.writeFileSync(path.join(tempRoot, "artifacts", "lab-runs", "demo", "manifest.json"), JSON.stringify({ ok: true }), "utf8");
+  fs.writeFileSync(path.join(tempRoot, "artifacts", "lab-runs", "ready", "manifest.json"), JSON.stringify({ ok: true }), "utf8");
+  writeTinyPng(path.join(tempRoot, "artifacts", "lab-runs", "demo", "screen-sharing.png"));
+  writeTinyPng(path.join(tempRoot, "artifacts", "lab-runs", "ready", "screen-sharing.png"));
   const filled = `Human demo date: 2026-06-03
 Mac: Mac Studio
 Proof manifest: artifacts/lab-runs/demo/manifest.json
@@ -297,10 +412,17 @@ Ship/block decision: ship
   assert.equal(ok.failed_checks.length, 0);
   const missingLatency = verifyResultText(filled.replace("Readiness queue latency: artifacts/lab-runs/ready/queue-latency.json ok=true required=true\n", ""));
   assert.ok(missingLatency.failed_checks.includes("readiness_queue_latency_ok"));
+  const missingScreenshot = verifyResultText(filled.replace("Screenshot: artifacts/lab-runs/demo/screen-sharing.png", "Screenshot: "));
+  assert.ok(missingScreenshot.failed_checks.includes("proof_screenshot_ok"));
+  const missingReadinessManifest = verifyResultText(filled.replace("Readiness manifest: artifacts/lab-runs/ready/manifest.json", "Readiness manifest: artifacts/lab-runs/ready/missing.json"));
+  assert.ok(missingReadinessManifest.failed_checks.includes("readiness_manifest_ok"));
   const skippedRequiredLatency = verifyResultText(filled.replace("Readiness workspace latency: artifacts/lab-runs/ready/workspace-latency.json ok=true required=true", "Readiness workspace latency: skipped ok=true required=true"));
   assert.ok(skippedRequiredLatency.failed_checks.includes("readiness_workspace_latency_ok"));
   const blank = filled.replace("ship", "").replace("pass", "");
   const bad = verifyResultText(blank);
   assert.ok(bad.failed_checks.includes("all_pass_fail_items_filled"));
   assert.ok(bad.failed_checks.includes("ship_block_decision_accepts"));
+  artifactRoot = previousArtifactRoot;
+  process.chdir(previousRepoRoot);
+  fs.rmSync(tempRoot, { recursive: true, force: true });
 }

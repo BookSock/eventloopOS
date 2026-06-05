@@ -69,6 +69,14 @@ sync_remote_artifact() {
     "$remote:$remote_repo/$remote_path" "$local_path" >/dev/null
 }
 
+sync_remote_dir() {
+  local remote_path="$1"
+  local local_path="$2"
+  mkdir -p "$local_path"
+  rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" \
+    "$remote:$remote_repo/${remote_path%/}/" "$local_path/" >/dev/null
+}
+
 mkdir -p "$run_dir"
 printf "%s\n" "$remote" >"$run_dir/remote.txt"
 printf "%s\n" "$remote_repo" >"$run_dir/remote-repo.txt"
@@ -99,6 +107,24 @@ if [[ "$skip_screenshot" == "0" ]]; then
   screenshot_exit=$?
   set -e
   printf "%s\n" "$screenshot_exit" >"$run_dir/screen-sharing.exit"
+  if [[ "$screenshot_exit" != "0" || ! -s "$run_dir/screen-sharing.png" ]]; then
+    echo "human demo lab desktop screenshot fallback"
+    set +e
+    bin/lab-mac-desktop-capture "$run_dir" human-demo-setup >"$run_dir/lab-desktop-capture.out" 2>"$run_dir/lab-desktop-capture.err"
+    capture_exit=$?
+    set -e
+    remote_capture_path="$(tail -n 1 "$run_dir/lab-desktop-capture.out")"
+    printf "%s\n" "$capture_exit" >"$run_dir/lab-desktop-capture.exit"
+    if [[ "$capture_exit" == "0" && -n "$remote_capture_path" ]]; then
+      sync_remote_dir "$remote_capture_path" "$run_dir/captures/human-demo-setup"
+      if [[ -s "$run_dir/captures/human-demo-setup/screen.png" ]]; then
+        cp "$run_dir/captures/human-demo-setup/screen.png" "$run_dir/screen-sharing.png"
+        printf "%s\n" "lab_desktop" >"$run_dir/screen-sharing.mode"
+      fi
+    fi
+  else
+    printf "%s\n" "local_screen_sharing_window" >"$run_dir/screen-sharing.mode"
+  fi
 fi
 
 cat "$manifest"

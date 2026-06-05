@@ -137,9 +137,10 @@ bin/human-demo-result-template --write
 ```
 
 The template write refuses stale or incomplete readiness by default, including
-stale latest-demo proof freshness failures. If it says readiness is not green,
-rerun `bin/human-demo-ready` and fix any failed gate before starting the human
-result artifact. It writes
+stale latest-demo proof freshness failures and missing/invalid proof
+screenshots. If it says readiness is not green, rerun
+`bin/lab-mac-human-demo-setup`, then `bin/human-demo-ready`, and fix any failed
+gate before starting the human result artifact. It writes
 `artifacts/human-demo-results/*-human-demo-result.md` with the latest proof
 manifest, proof screenshot, readiness manifest, readiness screenshot, and
 latency manifest paths. Fill the generated file after the hands-on pass. The
@@ -185,7 +186,8 @@ bin/human-demo-result-verify artifacts/human-demo-results/<result>.md --lab-stat
 
 The verifier writes `artifacts/human-demo-verifications/*/manifest.json`. Keep
 that manifest path with the filled result artifact as the final human gate
-evidence.
+evidence. The verifier also checks the referenced proof/readiness manifests and
+screenshots, so closeout cannot pass from stale notes with broken image paths.
 
 ## Current TODO
 

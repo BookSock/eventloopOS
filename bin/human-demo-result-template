@@ -100,6 +100,7 @@ const absoluteManifestPath = path.resolve(repoRoot, manifestPath);
 const manifest = readJson(absoluteManifestPath);
 const relativeManifestPath = path.relative(repoRoot, absoluteManifestPath);
 const screenshotPath = findScreenshotPath(path.dirname(absoluteManifestPath));
+const screenshotOk = imageArtifactOk(screenshotPath);
 const readyManifestPath = latestReadyManifestPath();
 const ready = readyManifestPath ? readJson(path.resolve(repoRoot, readyManifestPath)) : undefined;
 const readyScreenshotPath = ready?.screen_sharing_capture?.output ?? "";
@@ -122,6 +123,13 @@ if (outputPath) {
     console.error("Use --allow-stale-readiness only for debugging.");
     process.exit(1);
   }
+  if (!allowStaleReadiness && screenshotOk !== true) {
+    console.error("Latest human-demo proof screenshot is missing or invalid. Run `bin/lab-mac-human-demo-setup`, then `bin/human-demo-ready`, then retry.");
+    console.error(`Proof manifest: ${relativeManifestPath}`);
+    console.error(`Screenshot: ${screenshotPath || "(missing)"}`);
+    console.error("Use --allow-stale-readiness only for debugging.");
+    process.exit(1);
+  }
   const absoluteOutputPath = path.resolve(repoRoot, outputPath);
   fs.mkdirSync(path.dirname(absoluteOutputPath), { recursive: true });
   fs.writeFileSync(absoluteOutputPath, template, "utf8");
@@ -129,6 +137,7 @@ if (outputPath) {
 const result = {
   manifest_path: relativeManifestPath,
   screenshot_path: screenshotPath,
+  screenshot_ok: screenshotOk,
   readiness_manifest_path: readyManifestPath,
   readiness_screenshot_path: readyScreenshotPath,
   readiness_queue_latency_path: readiness.queue.path,
@@ -139,7 +148,7 @@ const result = {
   readiness_hotkey_latency_ok: readiness.hotkey.ok,
   readiness_ok: readiness.ok,
   readiness_failed_gates: readiness.failed_gates,
-  ready_to_write: readiness.ok === true || allowStaleReadiness,
+  ready_to_write: allowStaleReadiness || (readiness.ok === true && screenshotOk === true),
   suggested_output_path: suggestedOutputPath,
   output_path: outputPath,
   ok: manifest.ok === true,
@@ -213,6 +222,17 @@ function findScreenshotPath(runDir) {
     if (fs.existsSync(candidate)) return path.relative(repoRoot, candidate);
   }
   return "";
+}
+
+function imageArtifactOk(relativePath) {
+  if (!relativePath) return false;
+  try {
+    const absolutePath = path.resolve(repoRoot, relativePath);
+    const stat = fs.statSync(absolutePath);
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
 }
 
 function renderTemplate({ manifestPath, screenshotPath, readyManifestPath, readyScreenshotPath, manifest, ready }) {

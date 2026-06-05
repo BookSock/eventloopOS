@@ -29,7 +29,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 | Ambient autosave after move | Human demo `proofs.ambient_autosave.ok=true`; `ambient_workspace_saver` unit/integration tests; live activity emits save/skip events | Proven by automation |
 | Snapshot capture avoids unrelated lab/system windows | Human demo queue context includes only shared TextEdit and matching Chrome; ambient saver filtering tests cover blocklisted apps | Proven by automation |
 | Autosave observability | `/activity` shows `ambient_workspace_save_*`; `ambient_workspace_saver` tests cover commit/skip/fail paths | Proven |
-| Screenshot capture for demo inspection | `bin/local-screen-sharing-capture` uses `capture_mode=local_screen_sharing_window`; `bin/human-demo-ready` defaults to local Screen Sharing first and falls back to `bin/lab-mac-desktop-capture` with `capture_mode=lab_desktop`; latest readiness manifest proves fallback screenshot `1920x1080` with readable PNG dimensions and does not capture the controller Mac desktop | Proven |
+| Screenshot capture for demo inspection | `bin/local-screen-sharing-capture` uses `capture_mode=local_screen_sharing_window`; `bin/lab-mac-human-demo-setup` and `bin/human-demo-ready` fall back to `bin/lab-mac-desktop-capture` with `capture_mode=lab_desktop`; `bin/human-demo-ready` requires a valid latest proof screenshot plus a fresh readiness screenshot with readable image dimensions; `bin/human-demo-result-verify` rejects missing proof/readiness screenshots | Proven by guards; rerun setup for any older no-screenshot demo artifact |
 | Repeatable human demo setup | `bin/lab-mac-human-demo-setup`; latest manifest `ok=true`, queue count 2 | Proven |
 | Visible feedback during demo | Queue footer `feedback=...`; `QueueHarnessStatusTextTests`; `QueueViewModelTests` post-action lease-conflict coverage proves Done/Defer/Send show saved-action feedback instead of surfacing 409 noise; latest screenshot shows `feedback=ready` | Proven |
 | Stale readiness cannot be reused silently | `bin/human-demo-ready` requires latest proof freshness by default; `bin/human-demo-result-template --write` refuses any failed readiness check; `bin/human-demo-completion-audit --strict` requires the latest readiness manifest timestamp to be within the freshness window | Proven |
@@ -59,9 +59,10 @@ bin/human-demo-result-verify artifacts/human-demo-results/<result>.md --lab-stat
 ```
 
 The verifier writes `artifacts/human-demo-verifications/*/manifest.json`; use
-that manifest as the final machine-readable closeout evidence. Re-run the
-verifier after editing the result file; completion audit rejects stale
-verification hashes.
+that manifest as the final machine-readable closeout evidence. It checks the
+referenced proof/readiness manifests and screenshots before accepting the
+checklist. Re-run the verifier after editing the result file; completion audit
+rejects stale verification hashes.
 
 Closeout audit:
 
