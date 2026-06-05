@@ -14,7 +14,8 @@ if (args.includes("-h") || args.includes("--help")) {
 
 Checks GitHub Actions workflows for eventloopOS cost/noise guardrails:
 stale-run cancellation, docs/artifacts path ignores, Linux-only main CI,
-path-scoped macOS app CI, broad secret scanning, and opt-in AI review.
+path-scoped macOS app CI, broad secret scanning, opt-in AI review, and the
+Linux CI command's primitive/SDK proof coverage.
 `);
   process.exit(0);
 }
@@ -31,7 +32,7 @@ if (!result.ok) {
   process.exit(1);
 }
 
-console.log(`ci workflows audit passed: ${result.checked_count} workflows`);
+console.log(`ci workflows audit passed: ${result.checked_count} CI files`);
 
 export async function auditWorkflows(root) {
   const workflowsDir = path.join(root, ".github", "workflows");
@@ -40,6 +41,7 @@ export async function auditWorkflows(root) {
     macos: path.join(workflowsDir, "macos-app.yml"),
     secretScan: path.join(workflowsDir, "secret-scan.yml"),
     aiReview: path.join(workflowsDir, "ai-review-template.yml"),
+    ciLinux: path.join(root, "bin", "ci-linux"),
   };
   const errors = [];
   const texts = {};
@@ -83,6 +85,8 @@ export async function auditWorkflows(root) {
   requireIncludes(texts.aiReview, "contents: read", "ai-review-template.yml must keep contents permission read-only", errors);
   requireIncludes(texts.aiReview, "not a paid AI pass", "ai-review-template.yml must state it is not a paid AI pass", errors);
 
+  auditCiLinux(texts.ciLinux, errors);
+
   return { ok: errors.length === 0, checked_count: Object.keys(files).length, errors };
 }
 
@@ -90,6 +94,16 @@ function auditSharedWorkflowGuards(label, text, errors) {
   requireIncludes(text, "concurrency:", `${label} must cancel stale runs`, errors);
   requireIncludes(text, "cancel-in-progress: true", `${label} must cancel in-progress stale runs`, errors);
   requireIncludes(text, "contents: read", `${label} must keep repository contents read-only`, errors);
+}
+
+function auditCiLinux(text, errors) {
+  requireIncludes(text, "run pnpm test:contracts", "bin/ci-linux must run shared contract tests before package tests", errors);
+  requireIncludes(text, "run pnpm lint", "bin/ci-linux must run workspace lint", errors);
+  requireIncludes(text, "run pnpm primitives:self-test", "bin/ci-linux must run cataloged primitive self-tests", errors);
+  requireIncludes(text, "run pnpm --filter @eventloopos/shared typecheck", "bin/ci-linux must typecheck the shared SDK package", errors);
+  requireIncludes(text, "run pnpm --filter @eventloopos/shared pack:audit", "bin/ci-linux must audit the shared SDK package tarball", errors);
+  requireIncludes(text, "run pnpm --filter @eventloopos/orchestrator test", "bin/ci-linux must run orchestrator tests", errors);
+  requireIncludes(text, "run pnpm test:e2e:event-loop", "bin/ci-linux must run the Linux-safe event-loop E2E smoke", errors);
 }
 
 function requireIncludes(text, needle, error, errors) {
@@ -112,7 +126,9 @@ async function runSelfTest() {
   const tmp = mkdtempSync(path.join(os.tmpdir(), "eventloopos-ci-workflows-audit-"));
   try {
     const workflows = path.join(tmp, ".github", "workflows");
+    const bin = path.join(tmp, "bin");
     await fsMkdir(workflows);
+    await fsMkdir(bin);
     writeFixture(workflows, "ci.yml", `
 name: CI
 on:
@@ -199,6 +215,20 @@ jobs:
     steps:
       - run: echo "not a paid AI pass"
 `);
+    writeFixture(bin, "ci-linux", `
+#!/usr/bin/env bash
+set -euo pipefail
+run() {
+  "$@"
+}
+run pnpm test:contracts
+run pnpm lint
+run pnpm primitives:self-test
+run pnpm --filter @eventloopos/shared typecheck
+run pnpm --filter @eventloopos/shared pack:audit
+run pnpm --filter @eventloopos/orchestrator test
+run pnpm test:e2e:event-loop
+`);
 
     const pass = await auditWorkflows(tmp);
     assert.equal(pass.ok, true, pass.errors.join("\n"));
@@ -214,6 +244,14 @@ jobs:
     assert.equal(paidRunnerRisk.ok, false);
     assert.ok(paidRunnerRisk.errors.includes("ci.yml must run on ubuntu-latest, not macOS"));
     assert.ok(paidRunnerRisk.errors.includes("ci.yml must not run standard CI on macOS runners"));
+
+    writeFixture(bin, "ci-linux", (await readFile(path.join(bin, "ci-linux"), "utf8")).replace(
+      "run pnpm --filter @eventloopos/shared pack:audit\n",
+      ""
+    ));
+    const missingPackAudit = await auditWorkflows(tmp);
+    assert.equal(missingPackAudit.ok, false);
+    assert.ok(missingPackAudit.errors.includes("bin/ci-linux must audit the shared SDK package tarball"));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
