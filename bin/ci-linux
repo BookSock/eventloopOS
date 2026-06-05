@@ -10,6 +10,7 @@ run() {
 run pnpm test:contracts
 run pnpm lint
 run pnpm primitives:self-test
+run pnpm primitives:builder-gate
 
 run pnpm --filter @eventloopos/shared typecheck
 run pnpm --filter @eventloopos/shared pack:audit

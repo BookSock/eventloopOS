@@ -101,6 +101,7 @@ function auditCiLinux(text, errors) {
   requireIncludes(text, "run pnpm test:contracts", "bin/ci-linux must run shared contract tests before package tests", errors);
   requireIncludes(text, "run pnpm lint", "bin/ci-linux must run workspace lint", errors);
   requireIncludes(text, "run pnpm primitives:self-test", "bin/ci-linux must run cataloged primitive self-tests", errors);
+  requireIncludes(text, "run pnpm primitives:builder-gate", "bin/ci-linux must run the primitive builder handoff gate", errors);
   requireIncludes(text, "run pnpm --filter @eventloopos/shared typecheck", "bin/ci-linux must typecheck the shared SDK package", errors);
   requireIncludes(text, "run pnpm --filter @eventloopos/shared pack:audit", "bin/ci-linux must audit the shared SDK package tarball", errors);
   requireIncludes(text, "run pnpm --filter @eventloopos/orchestrator test", "bin/ci-linux must run orchestrator tests", errors);
@@ -228,6 +229,7 @@ run() {
 run pnpm test:contracts
 run pnpm lint
 run pnpm primitives:self-test
+run pnpm primitives:builder-gate
 run pnpm --filter @eventloopos/shared typecheck
 run pnpm --filter @eventloopos/shared pack:audit
 run pnpm --filter @eventloopos/orchestrator test
@@ -264,6 +266,14 @@ run pnpm test:e2e:event-loop
     const missingPackAudit = await auditWorkflows(tmp);
     assert.equal(missingPackAudit.ok, false);
     assert.ok(missingPackAudit.errors.includes("bin/ci-linux must audit the shared SDK package tarball"));
+
+    writeFixture(bin, "ci-linux", (await readFile(path.join(bin, "ci-linux"), "utf8")).replace(
+      "run pnpm primitives:builder-gate\n",
+      ""
+    ));
+    const missingBuilderGate = await auditWorkflows(tmp);
+    assert.equal(missingBuilderGate.ok, false);
+    assert.ok(missingBuilderGate.errors.includes("bin/ci-linux must run the primitive builder handoff gate"));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
