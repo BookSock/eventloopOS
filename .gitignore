@@ -46,6 +46,8 @@ artifacts/macos-permissions/*
 artifacts/product-readiness/*
 artifacts/product-readiness-artifact-audit/*
 artifacts/product-next/*
+artifacts/bug-fix-latency/*
+artifacts/ci-health/*
 artifacts/proof-repeat/*
 artifacts/primitives-self-tests/*
 artifacts/primitives-builder-gate/*

@@ -46,6 +46,7 @@ Cost/noise notes:
 - CI and secret-scan both cancel stale in-progress runs for the same branch/ref. If several commits are pushed quickly, only the newest run should finish and email.
 - Secret scan intentionally stays broad. Docs, notes, and fixtures are common places for pasted tokens, so docs-only pushes still get gitleaks coverage.
 - [`bin/ci-workflows-audit`](../bin/ci-workflows-audit) is part of `pnpm typecheck` and fails if these CI cost/noise controls drift.
+- [`bin/ci-health`](../bin/ci-health) is the one-command status check when GitHub emails look noisy: it reports latest completed run per workflow, open red workflows, old failures that were fixed by later green runs, repo public/private visibility, and the workflow guardrail audit result. Run `pnpm ci:health -- --json` for machine-readable output or `bin/ci-health --strict` to fail when any workflow is currently red.
 
 ### Repo hygiene
 

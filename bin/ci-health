@@ -1,0 +1,332 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/ci-health [--json] [--strict] [--manifest FILE]
+       bin/ci-health --runs-json FILE [--repo-public true|false]
+
+Summarizes current GitHub Actions health for eventloopOS:
+- latest completed run per workflow
+- open red workflows
+- old bug-signal runs already fixed by a later green run
+- repo public/private visibility for cost context
+- local workflow guardrail audit status
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  console.log("ci-health self-test passed");
+  process.exit(0);
+}
+
+const jsonOnly = args.includes("--json");
+const strict = args.includes("--strict");
+const repo = valueAfter("--repo") ?? "BookSock/eventloopOS";
+const branch = valueAfter("--branch") ?? "main";
+const limit = Number(valueAfter("--limit") ?? "100");
+const manifestPath = valueAfter("--manifest") ?? path.join(
+  "artifacts",
+  "ci-health",
+  utcStamp(),
+  "manifest.json"
+);
+const runs = readRuns({ repo, branch, limit });
+const repoPublic = readRepoPublic(repo);
+const workflowAudit = runWorkflowAudit();
+const manifest = analyzeCiHealth(runs, {
+  repo,
+  branch,
+  limit,
+  repoPublic,
+  workflowAuditOk: workflowAudit.ok,
+  workflowAuditDetail: workflowAudit.detail,
+});
+
+mkdirSync(path.dirname(path.resolve(repoRoot, manifestPath)), { recursive: true });
+writeFileSync(path.resolve(repoRoot, manifestPath), `${JSON.stringify(manifest, null, 2)}\n`);
+
+if (jsonOnly) {
+  console.log(JSON.stringify({ manifest: manifestPath, ...summaryOutput(manifest) }));
+} else {
+  console.log(`ci health manifest: ${manifestPath}`);
+  console.log(JSON.stringify(summaryOutput(manifest), null, 2));
+}
+
+if (strict && !manifest.ok) process.exit(1);
+
+export function analyzeCiHealth(runs, options = {}) {
+  if (!Array.isArray(runs)) throw new Error("runs must be an array");
+  const workflowRuns = groupByWorkflow(runs);
+  const latestCompleted = [];
+  const openRedWorkflows = [];
+  const fixedBugSignals = [];
+  let cancelledCount = 0;
+
+  for (const [workflowName, sortedRuns] of workflowRuns) {
+    const completed = sortedRuns.filter((run) => run.status === "completed");
+    for (const run of completed) {
+      if (run.conclusion === "cancelled") cancelledCount += 1;
+    }
+    const latest = completed.at(-1);
+    if (latest) {
+      const summary = runSummary(latest);
+      latestCompleted.push(summary);
+      if (isBugSignal(latest.conclusion)) openRedWorkflows.push(summary);
+    }
+
+    let open;
+    for (const run of completed) {
+      if (isBugSignal(run.conclusion)) {
+        open ??= {
+          workflow: workflowName,
+          started_at: run.createdAt,
+          first_failed_run: runSummary(run),
+          failed_runs: [],
+        };
+        open.failed_runs.push(runSummary(run));
+        continue;
+      }
+      if (run.conclusion === "success" && open) {
+        fixedBugSignals.push({
+          ...open,
+          fixed_at: run.createdAt,
+          fixed_by: runSummary(run),
+          failed_run_count: open.failed_runs.length,
+          duration_minutes: round((Date.parse(run.createdAt) - Date.parse(open.started_at)) / 60_000, 1),
+        });
+        open = undefined;
+      }
+    }
+  }
+
+  latestCompleted.sort((left, right) => String(left.workflow).localeCompare(String(right.workflow)));
+  openRedWorkflows.sort((left, right) => String(left.workflow).localeCompare(String(right.workflow)));
+  fixedBugSignals.sort((left, right) => Date.parse(right.fixed_at) - Date.parse(left.fixed_at));
+
+  const failedChecks = [];
+  if (openRedWorkflows.length > 0) failedChecks.push("open_red_workflow");
+  if (options.workflowAuditOk === false) failedChecks.push("workflow_guardrail_audit_failed");
+  if (options.repoPublic === false) failedChecks.push("repo_not_public");
+  const costNote = options.repoPublic === true
+    ? "public repo; standard GitHub-hosted runner minutes are not billed per GitHub docs"
+    : options.repoPublic === false
+      ? "repo is not public; verify GitHub Actions billing settings before using hosted runners"
+      : "repo visibility unknown; run live gh-backed mode to verify GitHub Actions billing context";
+
+  return {
+    schema_version: 1,
+    kind: "eventloopos.ci_health",
+    generated_at: new Date().toISOString(),
+    repo: options.repo ?? "BookSock/eventloopOS",
+    branch: options.branch ?? "main",
+    limit: Number(options.limit ?? runs.length),
+    repo_public: options.repoPublic,
+    standard_runner_cost_note: costNote,
+    workflow_guardrail_audit_ok: options.workflowAuditOk !== false,
+    workflow_guardrail_audit_detail: options.workflowAuditDetail ?? null,
+    ok: failedChecks.length === 0,
+    failed_checks: failedChecks,
+    run_count: runs.length,
+    workflow_count: workflowRuns.size,
+    cancelled_count: cancelledCount,
+    latest_completed: latestCompleted,
+    open_red_workflows: openRedWorkflows,
+    fixed_bug_signals: fixedBugSignals,
+  };
+}
+
+function readRuns({ repo, branch, limit }) {
+  const runsJsonPath = valueAfter("--runs-json");
+  if (runsJsonPath) return JSON.parse(readFileSync(runsJsonPath, "utf8"));
+  const result = spawnSync("gh", [
+    "run",
+    "list",
+    "--repo",
+    repo,
+    "--branch",
+    branch,
+    "--limit",
+    String(limit),
+    "--json",
+    "databaseId,headSha,conclusion,status,workflowName,event,createdAt,url",
+  ], { cwd: repoRoot, encoding: "utf8" });
+  if (result.status !== 0) {
+    throw new Error(`could not read GitHub Actions runs: ${formatSpawn(result)}`);
+  }
+  return JSON.parse(result.stdout);
+}
+
+function readRepoPublic(repo) {
+  const explicit = valueAfter("--repo-public");
+  if (explicit) return explicit === "true";
+  if (valueAfter("--runs-json")) return undefined;
+  const result = spawnSync("gh", [
+    "repo",
+    "view",
+    repo,
+    "--json",
+    "visibility,isPrivate",
+  ], { cwd: repoRoot, encoding: "utf8" });
+  if (result.status !== 0) return undefined;
+  const parsed = JSON.parse(result.stdout);
+  if (typeof parsed.isPrivate === "boolean") return !parsed.isPrivate;
+  return String(parsed.visibility ?? "").toUpperCase() === "PUBLIC";
+}
+
+function runWorkflowAudit() {
+  if (args.includes("--skip-workflow-audit")) return { ok: true, detail: "skipped" };
+  const result = spawnSync("node", ["bin/ci-workflows-audit"], { cwd: repoRoot, encoding: "utf8" });
+  return {
+    ok: result.status === 0,
+    detail: formatSpawn(result),
+  };
+}
+
+function groupByWorkflow(runs) {
+  const grouped = new Map();
+  for (const run of runs.filter(isRecord)) {
+    const workflowName = stringValue(run.workflowName) ?? "unknown";
+    if (!grouped.has(workflowName)) grouped.set(workflowName, []);
+    grouped.get(workflowName).push(run);
+  }
+  for (const workflowRuns of grouped.values()) {
+    workflowRuns.sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+  }
+  return grouped;
+}
+
+function summaryOutput(manifest) {
+  return {
+    ok: manifest.ok,
+    failed_checks: manifest.failed_checks,
+    repo_public: manifest.repo_public,
+    workflow_guardrail_audit_ok: manifest.workflow_guardrail_audit_ok,
+    run_count: manifest.run_count,
+    workflow_count: manifest.workflow_count,
+    cancelled_count: manifest.cancelled_count,
+    open_red_workflows: manifest.open_red_workflows.map((run) => ({
+      workflow: run.workflow,
+      conclusion: run.conclusion,
+      head_sha: shortSha(run.head_sha),
+      url: run.url,
+    })),
+    latest_completed: manifest.latest_completed.map((run) => ({
+      workflow: run.workflow,
+      conclusion: run.conclusion,
+      head_sha: shortSha(run.head_sha),
+      created_at: run.created_at,
+      url: run.url,
+    })),
+    fixed_bug_signal_count: manifest.fixed_bug_signals.length,
+    latest_fixed_bug_signal: manifest.fixed_bug_signals[0]
+      ? {
+          workflow: manifest.fixed_bug_signals[0].workflow,
+          failed_head_sha: shortSha(manifest.fixed_bug_signals[0].first_failed_run.head_sha),
+          fixed_head_sha: shortSha(manifest.fixed_bug_signals[0].fixed_by.head_sha),
+          duration_minutes: manifest.fixed_bug_signals[0].duration_minutes,
+          fixed_at: manifest.fixed_bug_signals[0].fixed_at,
+        }
+      : null,
+  };
+}
+
+function isBugSignal(conclusion) {
+  return ["failure", "timed_out", "startup_failure", "action_required"].includes(String(conclusion ?? ""));
+}
+
+function runSummary(run) {
+  return {
+    database_id: run.databaseId ?? null,
+    workflow: run.workflowName ?? null,
+    conclusion: run.conclusion ?? null,
+    status: run.status ?? null,
+    head_sha: run.headSha ?? null,
+    created_at: run.createdAt ?? null,
+    url: run.url ?? null,
+  };
+}
+
+function valueAfter(flag) {
+  const index = args.indexOf(flag);
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+function stringValue(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function shortSha(value) {
+  return typeof value === "string" ? value.slice(0, 7) : value;
+}
+
+function round(value, digits) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function formatSpawn(result) {
+  return `${result.stdout || result.stderr || "no output"}`.trim();
+}
+
+function utcStamp() {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function runSelfTest() {
+  const fixed = analyzeCiHealth([
+    run({ id: 1, workflow: "CI", conclusion: "success", at: "2026-06-05T17:00:00Z", sha: "ci-pass" }),
+    run({ id: 2, workflow: "macOS App", conclusion: "failure", at: "2026-06-05T17:38:59Z", sha: "mac-fail" }),
+    run({ id: 3, workflow: "macOS App", conclusion: "success", at: "2026-06-05T17:44:00Z", sha: "mac-pass" }),
+    run({ id: 4, workflow: "Secret Scan", conclusion: "success", at: "2026-06-05T17:45:00Z", sha: "sec-pass" }),
+  ], { repoPublic: true, workflowAuditOk: true });
+  assert.equal(fixed.ok, true);
+  assert.equal(fixed.open_red_workflows.length, 0);
+  assert.equal(fixed.fixed_bug_signals.length, 1);
+  assert.equal(fixed.fixed_bug_signals[0].workflow, "macOS App");
+
+  const openRed = analyzeCiHealth([
+    run({ id: 1, workflow: "CI", conclusion: "success", at: "2026-06-05T17:00:00Z", sha: "ci-pass" }),
+    run({ id: 2, workflow: "macOS App", conclusion: "failure", at: "2026-06-05T17:38:59Z", sha: "mac-fail" }),
+  ], { repoPublic: true, workflowAuditOk: true });
+  assert.equal(openRed.ok, false);
+  assert.deepEqual(openRed.failed_checks, ["open_red_workflow"]);
+
+  const guardrailFailure = analyzeCiHealth([
+    run({ id: 1, workflow: "CI", conclusion: "success", at: "2026-06-05T17:00:00Z", sha: "ci-pass" }),
+  ], { repoPublic: true, workflowAuditOk: false });
+  assert.equal(guardrailFailure.ok, false);
+  assert.deepEqual(guardrailFailure.failed_checks, ["workflow_guardrail_audit_failed"]);
+
+  const privateRepo = analyzeCiHealth([
+    run({ id: 1, workflow: "CI", conclusion: "success", at: "2026-06-05T17:00:00Z", sha: "ci-pass" }),
+  ], { repoPublic: false, workflowAuditOk: true });
+  assert.equal(privateRepo.ok, false);
+  assert.deepEqual(privateRepo.failed_checks, ["repo_not_public"]);
+  assert.match(privateRepo.standard_runner_cost_note, /not public/);
+}
+
+function run({ id, workflow, conclusion, at, sha }) {
+  return {
+    databaseId: id,
+    workflowName: workflow,
+    conclusion,
+    status: "completed",
+    headSha: sha,
+    event: "push",
+    createdAt: at,
+    url: `https://example.test/runs/${id}`,
+  };
+}
