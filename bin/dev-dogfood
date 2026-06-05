@@ -147,6 +147,7 @@ function startQueueApp(orchestrator) {
     EVENTLOOPOS_ORCHESTRATOR_URL: orchestratorUrl,
     EVENTLOOPOS_QUEUE_APP_RUN_SMOKE_MS: smokeMs === undefined ? undefined : String(smokeMs),
     EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW: process.env.EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW,
+    EVENTLOOPOS_QUEUE_HARNESS_STATUS_PATH: process.env.EVENTLOOPOS_QUEUE_HARNESS_STATUS_PATH,
   });
   child.once("exit", (code, signal) => {
     handleQueueAppExit(orchestrator, code, signal);

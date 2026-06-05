@@ -17,6 +17,7 @@ runs="${EVENTLOOPOS_HOTKEY_LATENCY_RUNS:-1}"
 budget_ms="${EVENTLOOPOS_HOTKEY_LATENCY_BUDGET_MS:-10000}"
 manifest="artifacts/macos-hotkey-latency-direct/$(date -u +%Y%m%dT%H%M%SZ)/manifest.json"
 expected_text="${EVENTLOOPOS_HOTKEY_LATENCY_EXPECT:-}"
+harness_status_path="${EVENTLOOPOS_QUEUE_HARNESS_STATUS_PATH:-/tmp/eventloopos-queue-harness-status.json}"
 
 while (($#)); do
   case "$1" in
@@ -26,6 +27,7 @@ while (($#)); do
     --budget-ms) budget_ms="${2:-}"; shift 2 ;;
     --manifest) manifest="${2:-}"; shift 2 ;;
     --expect) expected_text="${2:-}"; shift 2 ;;
+    --harness-status-path) harness_status_path="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -90,6 +92,20 @@ process.stdout.write((match ? match[1] : "").replace(/\s+/g, " ").trim());
 }
 
 read_status() {
+  if [[ -n "$harness_status_path" && -s "$harness_status_path" ]]; then
+    node -e '
+const fs = require("fs");
+const file = process.argv[1];
+try {
+  const payload = JSON.parse(fs.readFileSync(file, "utf8"));
+  if (payload && payload.kind === "eventloopos.queue_harness_status" && typeof payload.status === "string") {
+    process.stdout.write(payload.status);
+    process.exit(0);
+  }
+} catch {}
+process.exit(1);
+' "$harness_status_path" 2>/dev/null && return 0
+  fi
   osascript <<APPLESCRIPT
 tell application "System Events"
   if not (exists process "$process_name") then error "process not found: $process_name"
@@ -186,7 +202,7 @@ done
 
 finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 mkdir -p "$(dirname "$manifest")"
-STARTED_AT="$started_at" FINISHED_AT="$finished_at" PROCESS_NAME="$process_name" HOTKEY="$hotkey" RUNS="$runs" BUDGET_MS="$budget_ms" EXPECTED_TEXT="$expected_text" SAMPLES_TSV="$samples_tsv" MANIFEST="$manifest" node <<'NODE'
+STARTED_AT="$started_at" FINISHED_AT="$finished_at" PROCESS_NAME="$process_name" HOTKEY="$hotkey" RUNS="$runs" BUDGET_MS="$budget_ms" EXPECTED_TEXT="$expected_text" SAMPLES_TSV="$samples_tsv" MANIFEST="$manifest" HARNESS_STATUS_PATH="$harness_status_path" node <<'NODE'
 const fs = require("fs");
 const rows = fs.readFileSync(process.env.SAMPLES_TSV, "utf8").trim().split(/\n/).filter(Boolean);
 const samples = rows.map((row) => {
@@ -231,6 +247,7 @@ const manifest = {
   process_name: process.env.PROCESS_NAME,
   hotkey: process.env.HOTKEY,
   expected_text: process.env.EXPECTED_TEXT || undefined,
+  harness_status_path: process.env.HARNESS_STATUS_PATH || undefined,
   runs: Number(process.env.RUNS),
   budgets_ms: { hotkey_to_feedback: budget },
   failed_budgets: failedBudgets,

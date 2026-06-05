@@ -487,6 +487,9 @@ struct QueueWindowView: View {
         .onChange(of: viewModel.selectedPacketID) { _ in
             showPaperDismissed = false
         }
+        .onChange(of: harnessStatusText) { statusText in
+            QueueHarnessStatusFile.write(statusText, feedbackSequence: viewModel.feedbackSequence)
+        }
         .overlay(alignment: .topTrailing) {
             if viewModel.isManualMode {
                 Text("Manual Mode")
@@ -514,6 +517,7 @@ struct QueueWindowView: View {
                 .accessibilityLabel(harnessStatusText)
         }
         .task {
+            QueueHarnessStatusFile.write(harnessStatusText, feedbackSequence: viewModel.feedbackSequence)
             await viewModel.loadQueue()
             viewModel.startAutomaticQueueRefresh()
             viewModel.startAutomaticLeaseRenewal()
@@ -530,6 +534,57 @@ struct QueueWindowView: View {
             viewModel.stopAutomaticLeaseRenewal()
             viewModel.stopAutomaticContextRestoreRefresh()
         }
+    }
+}
+
+struct QueueHarnessStatusFileRecord: Codable, Equatable {
+    let kind: String
+    let status: String
+    let feedbackSequence: Int
+    let updatedAt: String
+}
+
+enum QueueHarnessStatusFile {
+    static func write(
+        _ status: String,
+        feedbackSequence: Int,
+        arguments: [String] = CommandLine.arguments,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        now: Date = Date()
+    ) {
+        guard let path = statusPath(arguments: arguments, environment: environment) else {
+            return
+        }
+        let record = QueueHarnessStatusFileRecord(
+            kind: "eventloopos.queue_harness_status",
+            status: status,
+            feedbackSequence: feedbackSequence,
+            updatedAt: ISO8601DateFormatter().string(from: now)
+        )
+        do {
+            let data = try JSONEncoder().encode(record)
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        } catch {
+            // Best-effort harness telemetry; visible UI remains source of truth.
+        }
+    }
+
+    static func statusPath(arguments: [String], environment: [String: String]) -> String? {
+        let explicit = value(after: "--harness-status-path", in: arguments)
+        let raw = explicit ?? environment["EVENTLOOPOS_QUEUE_HARNESS_STATUS_PATH"]
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func value(after flag: String, in arguments: [String]) -> String? {
+        guard let index = arguments.firstIndex(of: flag) else {
+            return nil
+        }
+        let valueIndex = arguments.index(after: index)
+        guard valueIndex < arguments.endIndex else {
+            return nil
+        }
+        return arguments[valueIndex]
     }
 }
 

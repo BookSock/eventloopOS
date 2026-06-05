@@ -17,6 +17,9 @@ const appArgs = ["--orchestrator-url", orchestratorUrl];
 if (process.env.EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW === "1") {
   appArgs.push("--harness-window");
 }
+if (process.env.EVENTLOOPOS_QUEUE_HARNESS_STATUS_PATH) {
+  appArgs.push("--harness-status-path", process.env.EVENTLOOPOS_QUEUE_HARNESS_STATUS_PATH);
+}
 
 let bundle;
 let child;
@@ -38,6 +41,7 @@ try {
     env: {
       EVENTLOOP_ORCHESTRATOR_URL: orchestratorUrl,
       EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW: process.env.EVENTLOOPOS_QUEUE_APP_HARNESS_WINDOW,
+      EVENTLOOPOS_QUEUE_HARNESS_STATUS_PATH: process.env.EVENTLOOPOS_QUEUE_HARNESS_STATUS_PATH,
     },
   });
   forwardOutput(child);

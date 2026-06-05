@@ -28,9 +28,10 @@ Before handing the keyboard to Jason, run a non-destructive readiness check:
 bin/human-demo-ready
 ```
 
-This does not restart or reseed the demo. It checks the current lab dogfood stack,
-verifies the latest human-demo proof artifact, captures only the local Screen
-Sharing window, and writes `artifacts/lab-runs/*-human-demo-ready/READY.md`.
+This does not restart or reseed the demo. It checks the current lab dogfood
+stack, verifies the latest human-demo proof artifact, captures only the local
+Screen Sharing window, runs queue/workspace latency probes on the lab Mac by
+default, and writes `artifacts/lab-runs/*-human-demo-ready/READY.md`.
 The Screen Sharing capture gate verifies the artifact exists and has readable
 PNG/JPEG dimensions, so readiness cannot pass from an empty or invalid
 screenshot file.
@@ -43,6 +44,10 @@ demo readiness proves the Queue path and workspace path are responsive without
 mutating the active paper. On macOS it includes a live hotkey-to-feedback p95
 latency gate in the readiness artifact by running the latency probe on the Mac
 Studio. Use `--skip-hotkey-latency` only while bootstrapping permission setup.
+Use `EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_TARGET=local` or
+`EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY_TARGET=local` only when the
+orchestrator is running on the controller Mac; the lab demo default keeps
+`127.0.0.1:4480` scoped to the Mac Studio.
 
 Latest known-good proof:
 

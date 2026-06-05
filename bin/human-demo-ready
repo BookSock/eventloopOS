@@ -37,9 +37,11 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_ALLOW_STALE_PROOF=1 skips demo proof freshness gate
   EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY=1 keeps queue latency on
   EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY=0 skips queue latency
+  EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_TARGET=local runs queue latency on this Mac instead of the lab Mac
   EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_RUNS default: 3
   EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY=1 keeps workspace latency on
   EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY=0 skips workspace latency
+  EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY_TARGET=local runs workspace latency on this Mac instead of the lab Mac
   EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY_RUNS default: 2
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=1 forces hotkey latency on
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=0 skips hotkey latency
@@ -262,7 +264,7 @@ function runHotkeyLatencyStep(manifestPath, envOverride) {
 }
 
 function runQueueLatencyStep(manifestPath, envOverride) {
-  return runStep("queue latency", "node", [
+  const args = [
     "bin/queue-latency-proof",
     "--url",
     envOverride.LAB_DOGFOOD_URL,
@@ -271,11 +273,20 @@ function runQueueLatencyStep(manifestPath, envOverride) {
     "--read-only",
     "--manifest",
     manifestPath,
+  ];
+  if (process.env.EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_TARGET === "local") {
+    return runStep("queue latency", "node", args, envOverride);
+  }
+  return runStep("queue latency", "bin/lab-mac-latency-proof", [
+    "queue",
+    "--manifest",
+    manifestPath,
+    ...args.slice(1, -2),
   ], envOverride);
 }
 
 function runWorkspaceLatencyStep(manifestPath, envOverride) {
-  return runStep("workspace latency", "node", [
+  const args = [
     "bin/workspace-latency-proof",
     "--url",
     envOverride.LAB_DOGFOOD_URL,
@@ -283,6 +294,15 @@ function runWorkspaceLatencyStep(manifestPath, envOverride) {
     process.env.EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY_RUNS ?? "2",
     "--manifest",
     manifestPath,
+  ];
+  if (process.env.EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY_TARGET === "local") {
+    return runStep("workspace latency", "node", args, envOverride);
+  }
+  return runStep("workspace latency", "bin/lab-mac-latency-proof", [
+    "workspace",
+    "--manifest",
+    manifestPath,
+    ...args.slice(1, -2),
   ], envOverride);
 }
 

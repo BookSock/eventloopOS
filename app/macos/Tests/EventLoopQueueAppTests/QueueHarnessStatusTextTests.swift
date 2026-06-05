@@ -70,6 +70,36 @@ final class QueueHarnessStatusTextTests: XCTestCase {
         XCTAssertTrue(text.contains("workspace=Returned without moving windows"))
     }
 
+    func testHarnessStatusFilePathUsesArgumentBeforeEnvironment() {
+        let path = QueueHarnessStatusFile.statusPath(
+            arguments: ["EventLoopQueueApp", "--harness-status-path", "/tmp/from-arg.json"],
+            environment: ["EVENTLOOPOS_QUEUE_HARNESS_STATUS_PATH": "/tmp/from-env.json"]
+        )
+
+        XCTAssertEqual(path, "/tmp/from-arg.json")
+    }
+
+    func testHarnessStatusFileWritesMachineReadableStatus() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("eventloopos-harness-status-\(UUID().uuidString).json")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        QueueHarnessStatusFile.write(
+            "eventloopOS harness status | feedback=Switching papers... | feedback_seq=42",
+            feedbackSequence: 42,
+            arguments: ["EventLoopQueueApp", "--harness-status-path", url.path],
+            environment: [:],
+            now: Date(timeIntervalSince1970: 1_800_000_000)
+        )
+
+        let data = try Data(contentsOf: url)
+        let record = try JSONDecoder().decode(QueueHarnessStatusFileRecord.self, from: data)
+        XCTAssertEqual(record.kind, "eventloopos.queue_harness_status")
+        XCTAssertEqual(record.feedbackSequence, 42)
+        XCTAssertEqual(record.status, "eventloopOS harness status | feedback=Switching papers... | feedback_seq=42")
+        XCTAssertFalse(record.updatedAt.isEmpty)
+    }
+
     private func makeSummary(
         workspaceRestoreState: WorkspaceRestoreState = .idle,
         manualWorkspaceCaptureState: ManualWorkspaceCaptureState = .idle

@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/lab-mac-latency-proof <queue|workspace> --manifest LOCAL_MANIFEST [proof args...]
+
+Run a latency proof on the remote Mac lab and sync its manifest back to
+LOCAL_MANIFEST. Use this when the orchestrator URL is localhost on the lab Mac;
+controller-side localhost would probe the wrong machine.
+
+Environment:
+  LAB_MAC_HOST           default: 100.71.111.25
+  LAB_MAC_USER           default: claw
+  LAB_MAC_KEY            default: ~/.ssh/eventloop_lab_mac
+  LAB_MAC_EVENTLOOP_PATH default: ~/dev/2026/eventloopOS
+EOF
+}
+
+proof="${1:-}"
+case "$proof" in
+  queue|workspace)
+    shift
+    ;;
+  -h|--help)
+    usage
+    exit 0
+    ;;
+  *)
+    echo "proof must be queue or workspace" >&2
+    usage >&2
+    exit 2
+    ;;
+esac
+
+local_manifest=""
+passthrough=()
+while (($#)); do
+  case "$1" in
+    --manifest)
+      local_manifest="${2:-}"
+      if [[ -z "$local_manifest" ]]; then
+        echo "--manifest requires a path" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      passthrough+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ -z "$local_manifest" ]]; then
+  echo "--manifest is required" >&2
+  usage >&2
+  exit 2
+fi
+
+case "$proof" in
+  queue) remote_bin="bin/queue-latency-proof" ;;
+  workspace) remote_bin="bin/workspace-latency-proof" ;;
+esac
+
+lab_host="${LAB_MAC_HOST:-100.71.111.25}"
+lab_user="${LAB_MAC_USER:-claw}"
+lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
+eventloop_path="${LAB_MAC_EVENTLOOP_PATH:-~/dev/2026/eventloopOS}"
+remote="${lab_user}@${lab_host}"
+case "$eventloop_path" in
+  "~"/*) remote_repo="/Users/$lab_user/${eventloop_path#"~/"}" ;;
+  "~") remote_repo="/Users/$lab_user" ;;
+  *) remote_repo="$eventloop_path" ;;
+esac
+
+remote_run="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-${proof}-latency"
+remote_manifest="$remote_run/manifest.json"
+ssh_opts=(-i "$lab_key" -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8)
+remote_args=("$remote_repo" "$remote_run" "$remote_bin" "$remote_manifest" "${passthrough[@]}")
+quoted_remote_args=()
+for arg in "${remote_args[@]}"; do
+  printf -v quoted "%q" "$arg"
+  quoted_remote_args+=("$quoted")
+done
+
+mkdir -p "$(dirname "$local_manifest")"
+
+set +e
+ssh "${ssh_opts[@]}" "$remote" "bash -s -- ${quoted_remote_args[*]}" <<'REMOTE'
+set -euo pipefail
+repo="$1"
+run="$2"
+proof_bin="$3"
+manifest="$4"
+shift 4
+
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+cd "$repo"
+mkdir -p "$run"
+node "$proof_bin" --manifest "$manifest" "$@" >"$run/stdout.txt" 2>"$run/stderr.txt"
+REMOTE
+code=$?
+set -e
+
+local_remote_dir="$(dirname "$local_manifest")/remote-${proof}-latency"
+rsync -az -e "ssh -i '$lab_key' -o BatchMode=yes -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=8" \
+  "$remote:$remote_repo/$remote_run/" "$local_remote_dir/" >/dev/null 2>&1 || true
+
+if [[ -f "$local_remote_dir/manifest.json" ]]; then
+  cp "$local_remote_dir/manifest.json" "$local_manifest"
+fi
+
+if [[ -f "$local_remote_dir/stdout.txt" ]]; then
+  cat "$local_remote_dir/stdout.txt"
+fi
+if [[ -f "$local_remote_dir/stderr.txt" ]]; then
+  cat "$local_remote_dir/stderr.txt" >&2
+fi
+
+exit "$code"
