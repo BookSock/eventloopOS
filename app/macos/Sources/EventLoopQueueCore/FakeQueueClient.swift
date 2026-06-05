@@ -40,6 +40,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var manualModeSetCalls: [(active: Bool, reason: String?)] = []
     private var manualModeGetCallCount: Int = 0
     private var readDelayNanoseconds: UInt64 = 0
+    private var masterActionDelayNanoseconds: UInt64 = 0
     private var readingQueueContexts: [ReadingQueueContext] = []
     private var fakeActivityEvents: [ActivityEvent] = []
     private var fakeActivityFetchCount: Int = 0
@@ -226,6 +227,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     public func setReadDelayNanoseconds(_ delay: UInt64) {
         lock.withLock { readDelayNanoseconds = delay }
+    }
+
+    public func setMasterActionDelayNanoseconds(_ delay: UInt64) {
+        lock.withLock { masterActionDelayNanoseconds = delay }
     }
 
     public func setNextLeaseError(_ error: Error?) {
@@ -426,7 +431,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func sendMasterCommand(text: String, taskHint: String?) async throws -> MasterCommandResult {
-        lock.withLock {
+        await sleepMasterActionDelayIfNeeded()
+        return lock.withLock {
             masterCommands.append((text: text, taskHint: taskHint))
             if let masterCommandResult {
                 return masterCommandResult
@@ -449,7 +455,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         model: String?,
         workspaceSnapshot: WorkspaceSnapshot?
     ) async throws -> TaskSessionStartResult {
-        lock.withLock {
+        await sleepMasterActionDelayIfNeeded()
+        return lock.withLock {
             masterTaskStarts.append((text: text, taskHint: taskHint, cwd: cwd, model: model, workspaceSnapshot: workspaceSnapshot))
             let taskId = normalizedTaskId(from: taskHint ?? text) ?? "task_master"
             let session = TaskSession(
@@ -662,7 +669,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         dryRun: Bool = false,
         idempotencyKey: String
     ) async throws -> MasterFanOutResult {
-        lock.withLock {
+        await sleepMasterActionDelayIfNeeded()
+        return lock.withLock {
             let allTaskIds = Set(taskSessions.compactMap { $0.taskId })
             var matchedTaskIds: Set<String> = []
             if !taskIds.isEmpty {
@@ -716,7 +724,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func bumpQueueItemPriority(packetId: String, delta: Int? = nil, score: Int? = nil, reason: String? = nil) async throws -> QueueActionResult {
-        try lock.withLock {
+        await sleepMasterActionDelayIfNeeded()
+        return try lock.withLock {
             guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
                 throw QueueClientError.packetNotFound(packetId)
             }
@@ -975,7 +984,8 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func promoteReadingQueueContexts(ids: [String]) async throws -> ReadingQueuePromoteResult {
-        lock.withLock {
+        await sleepMasterActionDelayIfNeeded()
+        return lock.withLock {
             let target: [ReadingQueueContext]
             let missing: [String]
             if ids.isEmpty {
@@ -1094,6 +1104,13 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
 
     private func sleepReadDelayIfNeeded() async {
         let delay = lock.withLock { readDelayNanoseconds }
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: delay)
+        }
+    }
+
+    private func sleepMasterActionDelayIfNeeded() async {
+        let delay = lock.withLock { masterActionDelayNanoseconds }
         if delay > 0 {
             try? await Task.sleep(nanoseconds: delay)
         }

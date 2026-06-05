@@ -560,6 +560,16 @@ public final class QueueViewModel: ObservableObject {
         paperActionInFlightStatus = nil
     }
 
+    private func beginMasterAction(_ status: String) -> Bool {
+        guard masterCommandState != .sending else {
+            advanceToast = .actionComplete("Master command still running.")
+            return false
+        }
+        masterCommandState = .sending
+        advanceToast = .actionComplete(status)
+        return true
+    }
+
     private func isQueueConflict(_ error: Error) -> Bool {
         if let queueError = error as? QueueClientError {
             return queueError.statusCode == 409
@@ -1155,8 +1165,7 @@ public final class QueueViewModel: ObservableObject {
             return
         }
 
-        masterCommandState = .sending
-        advanceToast = .actionComplete("Routing master command...")
+        guard beginMasterAction("Routing master command...") else { return }
         do {
             let result = try await client.sendMasterCommand(
                 text: trimmed,
@@ -1195,8 +1204,7 @@ public final class QueueViewModel: ObservableObject {
             return
         }
 
-        masterCommandState = .sending
-        advanceToast = .actionComplete("Starting task...")
+        guard beginMasterAction("Starting task...") else { return }
         var workspaceSnapshot = await captureSelectedTaskWorkspaceSnapshot()
         if workspaceSnapshot == nil {
             workspaceSnapshot = try? await workspaceClient.capture()
@@ -1225,7 +1233,7 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func previewFanOut(message: String, taskHintSubstring: String?, taskIdPattern: String?, idempotencyKey: String) async -> MasterFanOutResult? {
-        masterCommandState = .sending
+        guard beginMasterAction("Previewing fan-out...") else { return nil }
         do {
             let result = try await client.masterFanOut(
                 message: message,
@@ -1246,7 +1254,7 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func executeFanOut(message: String, taskHintSubstring: String?, taskIdPattern: String?, idempotencyKey: String) async -> MasterFanOutResult? {
-        masterCommandState = .sending
+        guard beginMasterAction("Broadcasting fan-out...") else { return nil }
         do {
             let result = try await client.masterFanOut(
                 message: message,
@@ -1269,7 +1277,7 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func bumpQueuePaperPriority(packetId: String, delta: Int, reason: String? = nil) async {
-        masterCommandState = .sending
+        guard beginMasterAction("Updating priority...") else { return }
         do {
             _ = try await client.bumpQueueItemPriority(
                 packetId: packetId,
@@ -1350,7 +1358,7 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func promoteReadingQueue(contextIds: [String] = []) async {
-        masterCommandState = .sending
+        guard beginMasterAction("Promoting reading papers...") else { return }
         do {
             let result = try await client.promoteReadingQueueContexts(ids: contextIds)
             masterCommandState = .idle

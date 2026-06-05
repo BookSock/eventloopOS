@@ -1223,6 +1223,35 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Master command queued: Review master note"))
     }
 
+    func testRapidMasterCommandDeduplicatesWhileSending() async {
+        let client = FakeQueueClient(packets: [])
+        client.setMasterActionDelayNanoseconds(200_000_000)
+        let viewModel = QueueViewModel(client: client)
+
+        let first = Task {
+            await viewModel.sendMasterCommand(text: "Route launch note", taskHint: "task_launch")
+        }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(viewModel.masterCommandState, .sending)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Routing master command..."))
+
+        await viewModel.sendMasterCommand(text: "Route launch note again", taskHint: "task_launch")
+
+        XCTAssertEqual(client.sentMasterCommands.count, 0)
+        XCTAssertEqual(viewModel.masterCommandState, .sending)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Master command still running."))
+
+        await first.value
+
+        XCTAssertEqual(client.sentMasterCommands.count, 1)
+        XCTAssertEqual(client.sentMasterCommands.first?.text, "Route launch note")
+        guard case let .routed(result) = viewModel.masterCommandState else {
+            return XCTFail("expected routed state")
+        }
+        XCTAssertEqual(result.targetTaskId, "task_launch")
+    }
+
     func testStartMasterTaskCreatesTaskSessionAndRefreshesSessions() async {
         let snapshot = WorkspaceSnapshot(
             windows: [
@@ -1774,6 +1803,49 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Fan-out delivered to 2 sessions."))
         XCTAssertEqual(client.sentMasterCommands.count, 2)
         XCTAssertTrue(client.sentMasterCommands.allSatisfy { $0.text.contains("Pause all blog work") })
+    }
+
+    func testRapidExecuteFanOutDeduplicatesWhileSending() async {
+        let client = FakeQueueClient(
+            packets: [],
+            taskSessions: [
+                TaskSession(id: "session_a", taskId: "task_blog_email", provider: "fake", status: "idle"),
+                TaskSession(id: "session_b", taskId: "task_blog_outreach", provider: "fake", status: "idle"),
+            ]
+        )
+        client.setMasterActionDelayNanoseconds(200_000_000)
+        let viewModel = QueueViewModel(client: client)
+
+        let first = Task {
+            await viewModel.executeFanOut(
+                message: "Pause all blog work",
+                taskHintSubstring: "blog",
+                taskIdPattern: nil,
+                idempotencyKey: "exec_blog_pause_v1"
+            )
+        }
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(viewModel.masterCommandState, .sending)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Broadcasting fan-out..."))
+
+        let duplicate = await viewModel.executeFanOut(
+            message: "Pause all blog work again",
+            taskHintSubstring: "blog",
+            taskIdPattern: nil,
+            idempotencyKey: "exec_blog_pause_v2"
+        )
+
+        XCTAssertNil(duplicate)
+        XCTAssertEqual(client.sentMasterCommands.count, 0)
+        XCTAssertEqual(viewModel.masterCommandState, .sending)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Master command still running."))
+
+        let result = await first.value
+
+        XCTAssertEqual(result?.deliveredCount, 2)
+        XCTAssertEqual(client.sentMasterCommands.count, 2)
+        XCTAssertTrue(client.sentMasterCommands.allSatisfy { $0.text == "Pause all blog work" })
     }
 
     func testVoiceCaptureUnavailableWhenNoServiceInjected() async {

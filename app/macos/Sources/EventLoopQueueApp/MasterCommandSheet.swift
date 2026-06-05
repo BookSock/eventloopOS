@@ -217,7 +217,7 @@ struct MasterCommandSheet: View {
                         broadcastPreview = await previewFanOut(text, trimmedSelector)
                     }
                 }
-                .disabled(broadcastSelector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(state == .sending || broadcastSelector.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityIdentifier("master-command-broadcast-preview-button")
             }
 
@@ -452,4 +452,3 @@ private struct MasterCommandStatusView: View {
         return "Routed"
     }
 }
-
