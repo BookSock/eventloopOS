@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
@@ -10,9 +11,10 @@ const args = process.argv.slice(2);
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: node bin/shared-sdk-pack-audit [--self-test]
 
-Runs a dry-run npm package audit for app/shared. The audit verifies that the
+Runs an npm package audit for app/shared. The audit verifies that the
 @eventloopos/shared SDK package exports only runtime package artifacts and that
-main/types/exports point at files included in the package tarball.
+main/types/exports point at files included in the package tarball. It also
+imports the packed artifact through Node package resolution.
 `);
   process.exit(0);
 }
@@ -24,11 +26,14 @@ if (args.includes("--self-test")) {
 }
 
 const packageJson = readJson(path.join(repoRoot, "app/shared/package.json"));
-const packJson = JSON.parse(execFileSync("pnpm", ["--dir", "app/shared", "pack", "--dry-run", "--json"], {
-  cwd: repoRoot,
-  encoding: "utf8",
-}));
-const result = auditSharedSdkPackage({ packageJson, packJson });
+const packed = packSharedSdkPackage();
+const result = auditSharedSdkPackage({ packageJson, packJson: packed.packJson });
+if (result.ok) {
+  result.import_smoke = runPackedImportSmoke(packed.filename);
+  result.ok = result.import_smoke.ok === true;
+  if (!result.import_smoke.ok) result.errors.push(...result.import_smoke.errors);
+}
+rmSync(packed.root, { recursive: true, force: true });
 if (!result.ok) {
   console.error(`shared SDK package audit failed:\n- ${result.errors.join("\n- ")}`);
   process.exit(1);
@@ -64,6 +69,92 @@ function auditSharedSdkPackage({ packageJson, packJson }) {
     files: Array.from(files).sort(),
     errors,
   };
+}
+
+function packSharedSdkPackage() {
+  const root = mkdtempSync(path.join(os.tmpdir(), "eventloopos-shared-sdk-pack-"));
+  const packJson = JSON.parse(execFileSync("pnpm", ["--dir", "app/shared", "pack", "--pack-destination", root, "--json"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  }));
+  return { root, packJson, filename: packJson.filename };
+}
+
+function runPackedImportSmoke(tarballPath) {
+  const root = mkdtempSync(path.join(os.tmpdir(), "eventloopos-shared-sdk-import-"));
+  try {
+    const extractDir = path.join(root, "extract");
+    const consumerDir = path.join(root, "consumer");
+    const packageDir = path.join(extractDir, "package");
+    const consumerModules = path.join(consumerDir, "node_modules");
+    mkdirSync(extractDir, { recursive: true });
+    mkdirSync(path.join(consumerModules, "@eventloopos"), { recursive: true });
+    execFileSync("tar", ["-xzf", tarballPath, "-C", extractDir], { cwd: repoRoot });
+    symlinkSync(packageDir, path.join(consumerModules, "@eventloopos", "shared"), "dir");
+    symlinkDependency(packageDir, "zod");
+    symlinkDependency(packageDir, "zod-to-json-schema");
+
+    const smokePath = path.join(consumerDir, "smoke.mjs");
+    writeFileSync(smokePath, `\
+import assert from "node:assert/strict";
+import { EventSchema } from "@eventloopos/shared";
+import { ContractJsonSchemas } from "@eventloopos/shared/json-schema";
+import { PrimitiveCatalogSchema, summarizePrimitiveCatalog } from "@eventloopos/shared/primitives";
+
+assert.equal(EventSchema.parse({
+  id: "evt_pack_smoke",
+  source: "manual",
+  source_id: "pack-smoke",
+  idempotency_key: "pack-smoke",
+  occurred_at: "2026-06-05T00:00:00Z",
+  received_at: "2026-06-05T00:00:01Z",
+  actor: { id: "agent", type: "agent" },
+  type: "pack.smoke",
+  title: "Pack smoke",
+  summary: "Import smoke",
+  raw_ref: { id: "raw_pack_smoke", uri: "artifact://raw/pack-smoke.json" },
+  links: [],
+  resources: []
+}).id, "evt_pack_smoke");
+assert.ok(ContractJsonSchemas.Event);
+const catalog = PrimitiveCatalogSchema.parse({
+  schema_version: 1,
+  schemas: {},
+  primitives: [{
+    id: "pack_smoke",
+    title: "Pack Smoke",
+    status: "stable_enough",
+    summary: "Packed import smoke",
+    code: ["dist/index.js"],
+    proofs: ["bin/shared-sdk-pack-audit"],
+    self_tests: ["pnpm --filter @eventloopos/shared pack:audit"]
+  }]
+});
+assert.equal(summarizePrimitiveCatalog(catalog).primitiveCount, 1);
+`, "utf8");
+    execFileSync(process.execPath, [smokePath], {
+      cwd: consumerDir,
+      encoding: "utf8",
+    });
+    return {
+      ok: true,
+      entrypoints: ["@eventloopos/shared", "@eventloopos/shared/json-schema", "@eventloopos/shared/primitives"],
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      errors: [error instanceof Error ? error.message : String(error)],
+    };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function symlinkDependency(packageDir, dependencyName) {
+  const source = path.join(repoRoot, "app/shared/node_modules", dependencyName);
+  const target = path.join(packageDir, "node_modules", dependencyName);
+  mkdirSync(path.dirname(target), { recursive: true });
+  symlinkSync(source, target, "dir");
 }
 
 function exportedPackageFiles(packageJson) {
