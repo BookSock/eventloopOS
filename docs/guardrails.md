@@ -53,6 +53,17 @@ Cost/noise notes:
 - `.gitignore` excludes `artifacts/`, `dist/`, local config — and `guard-file-size.mjs` catches accidental large-file commits anyway.
 - Status badges in [`README.md`](../README.md) for CI + secret-scan workflows.
 
+### Bug-To-Fix Latency
+
+- [`bin/bug-fix-latency-audit`](../bin/bug-fix-latency-audit) measures how long
+  GitHub Actions bug signals stay red before the next green run for the same
+  workflow on `main`.
+- It ignores intentionally cancelled stale runs from workflow concurrency,
+  records open incidents separately, and reports p50/p95/max fix latency hours.
+- `pnpm typecheck` runs the audit self-test with fixture data so the metric logic
+  cannot silently drift. Live measurement is explicit:
+  `bin/bug-fix-latency-audit --json --manifest artifacts/bug-fix-latency/latest.json`.
+
 ## Still aspirational
 
 These are mentioned in `ai-engineering-principles.md` but not yet wired:
@@ -62,7 +73,6 @@ These are mentioned in `ai-engineering-principles.md` but not yet wired:
 - **Custom AI-mistake checks.** The principles doc calls out things like "missing `await`", "duplicated components", "bypassed design system" as candidates for codified checks. None of those are codified yet — they live as review intuition.
 - **Real AI-review pass.** Today's `ai-review-template.yml` is a templated comment. A real model-driven review (Codex / Claude) would need an API key + opt-in flow + cost guardrails — explicitly deferred per principles doc ("Don't add a paid Codex API integration without the user opting in").
 - **Scheduled drift agents.** "Find drift between MCP, CLI, SDK, and docs" → fix. Pattern called out in the principles doc; no scheduled job yet.
-- **Bug-to-fix latency tracking.** Principles doc lists this as a better metric than "lines shipped". Not measured today.
 
 When you wire something on this list, move its bullet to **Wired today** and update `ai-engineering-principles.md` if the example changes.
 

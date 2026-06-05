@@ -147,7 +147,7 @@ For any production team trying to level up:
 7. Use narrow recurring agents for drift, dead code, doc mismatch, analytics gaps.
 8. Use different models for implementation vs review.
 9. Periodically let agents inspect logs, bug reports, and suspicious areas.
-10. Track regressions, complexity, dependencies, maintainability — not just code output.
+10. Track regressions, complexity, dependencies, maintainability — not just code output. In this repo, `bin/bug-fix-latency-audit` measures how long CI bug signals stay red before a same-workflow green run.
 
 ## eventloopOS-specific implications
 

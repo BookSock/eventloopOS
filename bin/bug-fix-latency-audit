@@ -1,0 +1,263 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/bug-fix-latency-audit [--runs-json FILE] [--json] [--strict] [--max-hours N]
+
+Measures CI bug-to-fix latency from GitHub Actions run history.
+Default live mode calls:
+  gh run list --repo BookSock/eventloopOS --branch main --limit 100 --json ...
+
+The metric treats a failed/timed-out workflow run as a bug signal and the next
+successful run for the same workflow as the fix point. Cancelled runs are ignored
+because workflow concurrency intentionally cancels stale pushes.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  console.log("bug-fix-latency-audit self-test passed");
+  process.exit(0);
+}
+
+const jsonOnly = args.includes("--json");
+const strict = args.includes("--strict");
+const maxHours = Number(valueAfter("--max-hours") ?? "24");
+const repo = valueAfter("--repo") ?? "BookSock/eventloopOS";
+const branch = valueAfter("--branch") ?? "main";
+const limit = valueAfter("--limit") ?? "100";
+const manifestPath = valueAfter("--manifest") ?? path.join(
+  "artifacts",
+  "bug-fix-latency",
+  utcStamp(),
+  "manifest.json"
+);
+const runs = readRuns();
+const manifest = analyzeRuns(runs, { maxHours, repo, branch, limit });
+
+mkdirSync(path.dirname(path.resolve(repoRoot, manifestPath)), { recursive: true });
+writeFileSync(path.resolve(repoRoot, manifestPath), `${JSON.stringify(manifest, null, 2)}\n`);
+
+if (jsonOnly) {
+  console.log(JSON.stringify({ manifest: manifestPath, ...summaryOutput(manifest) }));
+} else {
+  console.log(`bug-fix latency manifest: ${manifestPath}`);
+  console.log(JSON.stringify(summaryOutput(manifest), null, 2));
+}
+
+if (strict && !manifest.ok) process.exit(1);
+
+function readRuns() {
+  const runsJsonPath = valueAfter("--runs-json");
+  if (runsJsonPath) return JSON.parse(readFileSync(runsJsonPath, "utf8"));
+  const result = spawnSync("gh", [
+    "run",
+    "list",
+    "--repo",
+    repo,
+    "--branch",
+    branch,
+    "--limit",
+    String(limit),
+    "--json",
+    "databaseId,headSha,conclusion,status,workflowName,event,createdAt,url",
+  ], { cwd: repoRoot, encoding: "utf8" });
+  if (result.status !== 0) {
+    const detail = `${result.stderr || result.stdout || "gh run list failed"}`.trim();
+    throw new Error(`could not read GitHub Actions runs: ${detail}`);
+  }
+  return JSON.parse(result.stdout);
+}
+
+function analyzeRuns(runs, options = {}) {
+  if (!Array.isArray(runs)) throw new Error("runs must be an array");
+  const maxHoursValue = Number(options.maxHours ?? 24);
+  const workflows = groupByWorkflow(runs);
+  const incidents = [];
+  const openIncidents = [];
+  for (const [workflowName, workflowRuns] of workflows) {
+    let open;
+    for (const run of workflowRuns) {
+      if (run.status !== "completed") continue;
+      if (isBugSignal(run.conclusion)) {
+        if (!open) {
+          open = {
+            workflow: workflowName,
+            started_at: run.createdAt,
+            first_failed_run: runSummary(run),
+            failed_runs: [],
+          };
+        }
+        open.failed_runs.push(runSummary(run));
+        continue;
+      }
+      if (run.conclusion === "success" && open) {
+        const fixedAt = run.createdAt;
+        const durationMs = Math.max(0, Date.parse(fixedAt) - Date.parse(open.started_at));
+        incidents.push({
+          ...open,
+          fixed_at: fixedAt,
+          fixed_by: runSummary(run),
+          duration_ms: durationMs,
+          duration_hours: round(durationMs / 3_600_000, 3),
+          failed_run_count: open.failed_runs.length,
+        });
+        open = undefined;
+      }
+    }
+    if (open) {
+      openIncidents.push({
+        ...open,
+        failed_run_count: open.failed_runs.length,
+      });
+    }
+  }
+
+  const durations = incidents.map((incident) => incident.duration_ms).sort((a, b) => a - b);
+  const p50Ms = percentile(durations, 0.5);
+  const p95Ms = percentile(durations, 0.95);
+  const maxMs = durations.at(-1);
+  const failedChecks = [];
+  if (openIncidents.length > 0) failedChecks.push("open_bug_signal_incident");
+  if (typeof p95Ms === "number" && p95Ms > maxHoursValue * 3_600_000) failedChecks.push("p95_bug_fix_latency_over_budget");
+  const finishedAt = new Date().toISOString();
+  return {
+    schema_version: 1,
+    kind: "eventloopos.bug_fix_latency_audit",
+    generated_at: finishedAt,
+    source: options.runsJson ? "runs-json" : "github_actions",
+    repo: options.repo ?? "BookSock/eventloopOS",
+    branch: options.branch ?? "main",
+    max_hours: maxHoursValue,
+    ok: failedChecks.length === 0,
+    failed_checks: failedChecks,
+    run_count: runs.length,
+    workflow_count: workflows.size,
+    incident_count: incidents.length + openIncidents.length,
+    closed_incident_count: incidents.length,
+    open_incident_count: openIncidents.length,
+    summary: {
+      p50_hours: typeof p50Ms === "number" ? round(p50Ms / 3_600_000, 3) : null,
+      p95_hours: typeof p95Ms === "number" ? round(p95Ms / 3_600_000, 3) : null,
+      max_hours: typeof maxMs === "number" ? round(maxMs / 3_600_000, 3) : null,
+    },
+    incidents,
+    open_incidents: openIncidents,
+  };
+}
+
+function groupByWorkflow(runs) {
+  const grouped = new Map();
+  for (const run of runs.filter(isRecord)) {
+    const workflowName = stringValue(run.workflowName) ?? "unknown";
+    if (!grouped.has(workflowName)) grouped.set(workflowName, []);
+    grouped.get(workflowName).push(run);
+  }
+  for (const workflowRuns of grouped.values()) {
+    workflowRuns.sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt));
+  }
+  return grouped;
+}
+
+function isBugSignal(conclusion) {
+  return ["failure", "timed_out", "startup_failure", "action_required"].includes(String(conclusion ?? ""));
+}
+
+function runSummary(run) {
+  return {
+    database_id: run.databaseId ?? null,
+    workflow: run.workflowName ?? null,
+    conclusion: run.conclusion ?? null,
+    status: run.status ?? null,
+    head_sha: run.headSha ?? null,
+    created_at: run.createdAt ?? null,
+    url: run.url ?? null,
+  };
+}
+
+function percentile(sortedValues, quantile) {
+  if (sortedValues.length === 0) return undefined;
+  if (sortedValues.length === 1) return sortedValues[0];
+  const index = Math.ceil(sortedValues.length * quantile) - 1;
+  return sortedValues[Math.max(0, Math.min(sortedValues.length - 1, index))];
+}
+
+function summaryOutput(manifest) {
+  return {
+    ok: manifest.ok,
+    failed_checks: manifest.failed_checks,
+    run_count: manifest.run_count,
+    workflow_count: manifest.workflow_count,
+    closed_incident_count: manifest.closed_incident_count,
+    open_incident_count: manifest.open_incident_count,
+    summary: manifest.summary,
+  };
+}
+
+function valueAfter(flag) {
+  const index = args.indexOf(flag);
+  return index >= 0 ? args[index + 1] : undefined;
+}
+
+function stringValue(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function round(value, digits) {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function utcStamp() {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function runSelfTest() {
+  const fixture = [
+    run({ id: 8, workflow: "Secret Scan", conclusion: "failure", at: "2026-06-05T05:00:00Z" }),
+    run({ id: 7, workflow: "CI", conclusion: "success", at: "2026-06-05T04:00:00Z" }),
+    run({ id: 6, workflow: "CI", conclusion: "failure", at: "2026-06-05T02:00:00Z" }),
+    run({ id: 5, workflow: "CI", conclusion: "failure", at: "2026-06-05T01:00:00Z" }),
+    run({ id: 4, workflow: "CI", conclusion: "cancelled", at: "2026-06-05T00:30:00Z" }),
+    run({ id: 3, workflow: "CI", conclusion: "success", at: "2026-06-05T00:00:00Z" }),
+  ];
+  const open = analyzeRuns(fixture, { maxHours: 24, repo: "BookSock/eventloopOS", branch: "main", runsJson: true });
+  assert.equal(open.ok, false);
+  assert.equal(open.closed_incident_count, 1);
+  assert.equal(open.open_incident_count, 1);
+  assert.equal(open.incidents[0].duration_hours, 3);
+  assert.deepEqual(open.failed_checks, ["open_bug_signal_incident"]);
+
+  const closed = analyzeRuns([
+    run({ id: 9, workflow: "Secret Scan", conclusion: "success", at: "2026-06-05T06:00:00Z" }),
+    ...fixture,
+  ], { maxHours: 2, repo: "BookSock/eventloopOS", branch: "main", runsJson: true });
+  assert.equal(closed.closed_incident_count, 2);
+  assert.equal(closed.open_incident_count, 0);
+  assert.ok(closed.failed_checks.includes("p95_bug_fix_latency_over_budget"));
+}
+
+function run({ id, workflow, conclusion, at }) {
+  return {
+    databaseId: id,
+    workflowName: workflow,
+    conclusion,
+    status: "completed",
+    headSha: `sha${id}`,
+    event: "push",
+    createdAt: at,
+    url: `https://example.test/runs/${id}`,
+  };
+}
