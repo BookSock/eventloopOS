@@ -60,8 +60,10 @@ cataloged HTTP route so SDK drift is caught by `pnpm typecheck`.
 
 Runnable examples live in `examples/primitives/`: discover reusable primitive
 surfaces, restore a saved desk, inspect and rerank an attention queue, and wire
-external hotkeys to task-window/follows rules. Root `pnpm typecheck` runs their
-self-tests.
+external hotkeys to task-window/follows rules. The discovery example consumes
+the shared `@eventloopos/shared/primitives` SDK instead of duplicating catalog
+parsing, and builds `app/shared/dist` on demand for clean checkouts. Root
+`pnpm typecheck` runs their self-tests.
 
 Status labels:
 

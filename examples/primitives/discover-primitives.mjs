@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 
 const args = process.argv.slice(2);
 
 if (args.includes("--self-test")) {
-  runSelfTest();
+  const sdk = await loadPrimitiveSdk();
+  runSelfTest(sdk);
   console.log("discover-primitives example self-test passed");
   process.exit(0);
 }
@@ -19,9 +21,10 @@ if (args.includes("-h") || args.includes("--help") || args.length === 0) {
   node examples/primitives/discover-primitives.mjs list --catalog docs/primitives.catalog.json
 
 Small example app for discovering reusable eventloopOS primitive surfaces before
-building against them. It reads the machine-readable primitive catalog and
-filters by status, category, route count, self-test coverage, proof coverage,
-and latency-budget coverage.
+building against them. It consumes the shared primitive SDK exported at
+@eventloopos/shared/primitives, reads the machine-readable primitive catalog,
+and filters by status, category, route count, self-test coverage, proof
+coverage, and latency-budget coverage.
 `);
   process.exit(0);
 }
@@ -29,12 +32,26 @@ and latency-budget coverage.
 const options = parseArgs(args);
 if (options.command !== "list") die(`unknown command: ${options.command}`);
 
+const sdk = await loadPrimitiveSdk();
 const catalogPath = path.resolve(options.catalog ?? "docs/primitives.catalog.json");
-const catalog = JSON.parse(fs.readFileSync(catalogPath, "utf8"));
-const capabilities = selectCapabilities(summarizeCatalog(catalog), options);
+const catalog = sdk.parsePrimitiveCatalog(JSON.parse(fs.readFileSync(catalogPath, "utf8")));
+const catalogSummary = sdk.summarizePrimitiveCatalog(catalog);
+const capabilities = selectCapabilities(sdk, catalog, options);
 
 if (options.json) {
-  console.log(JSON.stringify({ ok: true, catalog: catalogPath, count: capabilities.length, primitives: capabilities }, null, 2));
+  console.log(JSON.stringify({
+    ok: true,
+    catalog: catalogPath,
+    catalog_summary: {
+      primitives: catalogSummary.primitiveCount,
+      routes: catalogSummary.routeCount,
+      schemas: catalogSummary.schemaCount,
+      latency_budgets: catalogSummary.latencyBudgetCount,
+      responsiveness_critical: catalogSummary.responsivenessCriticalCount,
+    },
+    count: capabilities.length,
+    primitives: capabilities,
+  }, null, 2));
 } else {
   printTable(capabilities);
 }
@@ -59,48 +76,34 @@ function parseArgs(argv) {
   return options;
 }
 
-function summarizeCatalog(catalog) {
-  const primitives = Array.isArray(catalog.primitives) ? catalog.primitives : [];
-  return primitives.map((primitive) => summarizePrimitive(primitive));
+function selectCapabilities(sdk, catalog, options) {
+  return sdk.selectPrimitiveCapabilities(catalog, {
+    ids: options.ids,
+    statuses: options.statuses,
+    categories: options.categories,
+    minRouteCount: options.minRouteCount,
+    requireCli: options.requireCli,
+    requireSelfTests: options.requireSelfTests,
+    requireProofs: options.requireProofs,
+    requireLatencyBudgets: options.requireLatencyBudgets,
+    requireResponsivenessCritical: options.requireResponsive,
+  }).map(toExampleCapability);
 }
 
-function summarizePrimitive(primitive) {
-  const http = Array.isArray(primitive.http) ? primitive.http : [];
-  const cli = arrayOfStrings(primitive.cli);
-  const selfTests = arrayOfStrings(primitive.self_tests);
-  const proofs = arrayOfStrings(primitive.proofs);
-  const latencyBudgets = Array.isArray(primitive.latency_budgets) ? primitive.latency_budgets : [];
+function toExampleCapability(primitive) {
   return {
-    id: String(primitive.id ?? ""),
-    title: String(primitive.title ?? primitive.id ?? ""),
-    status: String(primitive.status ?? "unknown"),
-    category: classifyPrimitive(primitive, http),
-    routes: http.length,
-    cli: cli.length,
-    self_tests: selfTests.length,
-    proofs: proofs.length,
-    latency_budgets: latencyBudgets.length,
-    responsiveness_critical: primitive.responsiveness_critical === true,
+    id: primitive.id,
+    title: primitive.title,
+    status: primitive.status,
+    category: primitive.category,
+    summary: primitive.summary,
+    routes: primitive.routeCount,
+    cli: primitive.cliCommandCount,
+    self_tests: primitive.selfTestCount,
+    proofs: primitive.proofRefCount,
+    latency_budgets: primitive.latencyBudgetCount,
+    responsiveness_critical: primitive.responsivenessCritical,
   };
-}
-
-function selectCapabilities(capabilities, options) {
-  const ids = options.ids ? new Set(options.ids) : undefined;
-  const statuses = options.statuses ? new Set(options.statuses) : undefined;
-  const categories = options.categories ? new Set(options.categories) : undefined;
-  const minRouteCount = options.minRouteCount ?? 0;
-  return capabilities.filter((primitive) => {
-    if (ids && !ids.has(primitive.id)) return false;
-    if (statuses && !statuses.has(primitive.status)) return false;
-    if (categories && !categories.has(primitive.category)) return false;
-    if (primitive.routes < minRouteCount) return false;
-    if (options.requireCli === true && primitive.cli === 0) return false;
-    if (options.requireSelfTests === true && primitive.self_tests === 0) return false;
-    if (options.requireProofs === true && primitive.proofs === 0) return false;
-    if (options.requireLatencyBudgets === true && primitive.latency_budgets === 0) return false;
-    if (options.requireResponsive === true && primitive.responsiveness_critical !== true) return false;
-    return true;
-  });
 }
 
 function printTable(capabilities) {
@@ -121,21 +124,6 @@ function printTable(capabilities) {
       primitive.latency_budgets,
     ].join("\t"));
   }
-}
-
-function classifyPrimitive(primitive, http) {
-  const id = String(primitive.id ?? "");
-  if (id.includes("workspace") || id.includes("window") || id === "manual_mode" || id === "mac_app_hotkeys") return "os_control";
-  if (id.includes("queue") || id.includes("routing") || id.includes("command") || id.includes("trigger")) return "attention_routing";
-  if (id.includes("agent") || id.includes("session") || id.includes("context")) return "agent_context";
-  if (http.some((route) => String(route.path ?? "").startsWith("/health") || String(route.path ?? "").startsWith("/metrics"))) {
-    return "observability";
-  }
-  return "runtime";
-}
-
-function arrayOfStrings(value) {
-  return Array.isArray(value) ? value.filter((entry) => typeof entry === "string" && entry.trim()) : [];
 }
 
 function parsePositiveInteger(value, flag) {
@@ -160,7 +148,36 @@ function die(message) {
   process.exit(2);
 }
 
-function runSelfTest() {
+async function loadPrimitiveSdk() {
+  const sdkUrl = new URL("../../app/shared/dist/primitives.js", import.meta.url);
+  try {
+    const sdk = await import(sdkUrl.href);
+    if (hasPrimitiveSdkExports(sdk)) return sdk;
+    throw new Error("app/shared/dist/primitives.js is missing required primitive SDK exports");
+  } catch (firstError) {
+    try {
+      execFileSync("pnpm", ["--filter", "@eventloopos/shared", "build"], {
+        cwd: new URL("../..", import.meta.url),
+        stdio: "ignore",
+      });
+      const sdk = await import(`${sdkUrl.href}?built=${Date.now()}`);
+      if (hasPrimitiveSdkExports(sdk)) return sdk;
+      throw new Error("rebuilt app/shared/dist/primitives.js is missing required primitive SDK exports");
+    } catch (secondError) {
+      const message = secondError instanceof Error ? secondError.message : String(secondError);
+      const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
+      die(`failed to load @eventloopos/shared/primitives SDK from app/shared/dist/primitives.js: ${firstMessage}; build failed: ${message}`);
+    }
+  }
+}
+
+function hasPrimitiveSdkExports(sdk) {
+  return typeof sdk.parsePrimitiveCatalog === "function"
+    && typeof sdk.summarizePrimitiveCatalog === "function"
+    && typeof sdk.selectPrimitiveCapabilities === "function";
+}
+
+function runSelfTest(sdk) {
   assert.deepEqual(parseArgs(["list", "--status", "dogfood", "--category", "os_control", "--min-routes", "2"]), {
     command: "list",
     statuses: ["dogfood"],
@@ -168,12 +185,21 @@ function runSelfTest() {
     minRouteCount: 2,
   });
   const fixture = {
+    schema_version: 1,
+    schemas: {},
     primitives: [
       {
         id: "workspace_control",
         title: "Workspace Control",
         status: "dogfood",
-        http: [{ method: "GET", path: "/workspace/status" }],
+        summary: "Capture, plan, and restore active window workspaces.",
+        http: [{
+          method: "GET",
+          path: "/workspace/status",
+          route_file: "app/orchestrator/src/server.ts",
+          response_schema: "WorkspaceStatusResponse",
+        }],
+        code: ["app/orchestrator/src/workspace/controller.ts"],
         cli: [],
         self_tests: ["pnpm test"],
         proofs: ["proof.ts"],
@@ -184,22 +210,25 @@ function runSelfTest() {
         id: "runtime_spine",
         title: "Runtime Spine",
         status: "stable_enough",
+        summary: "Shared runtime dependency record.",
         http: [],
+        code: ["app/orchestrator/src/runtime.ts"],
         cli: [],
         self_tests: ["pnpm test"],
         proofs: ["runtime.ts"],
       },
     ],
   };
-  assert.deepEqual(selectCapabilities(summarizeCatalog(fixture), {
+  const catalog = sdk.parsePrimitiveCatalog(fixture);
+  assert.deepEqual(selectCapabilities(sdk, catalog, {
     categories: ["os_control"],
     requireSelfTests: true,
     requireProofs: true,
   }).map((primitive) => primitive.id), ["workspace_control"]);
-  assert.deepEqual(selectCapabilities(summarizeCatalog(fixture), {
+  assert.deepEqual(selectCapabilities(sdk, catalog, {
     statuses: ["stable_enough"],
   }).map((primitive) => primitive.id), ["runtime_spine"]);
-  assert.deepEqual(selectCapabilities(summarizeCatalog(fixture), {
+  assert.deepEqual(selectCapabilities(sdk, catalog, {
     requireResponsive: true,
     requireLatencyBudgets: true,
   }).map((primitive) => primitive.id), ["workspace_control"]);

@@ -17,7 +17,7 @@ node examples/primitives/window-hotkey-router.mjs claim --task-id task_demo --wi
 
 Examples:
 
-- `discover-primitives.mjs`: inspect the primitive catalog before choosing which API surfaces to build on.
+- `discover-primitives.mjs`: inspect the primitive catalog through the shared `@eventloopos/shared/primitives` SDK before choosing which API surfaces to build on. If `app/shared/dist` is missing in a clean checkout, it builds the shared package on demand.
 - `restore-my-desk.mjs`: save, preview, and restore a workspace snapshot.
 - `agent-attention-queue.mjs`: list, boost, and defer attention papers.
 - `window-hotkey-router.mjs`: attach external hotkeys to task-window claims and follows-window rules.
