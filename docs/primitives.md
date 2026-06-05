@@ -908,7 +908,10 @@ Markdown report, and `--json` output include a compact primitive-readiness
 summary with primitive count, HTTP route count, CLI command count, self-test
 count, proof count, status/category counts, and strict gap counts so an agent
 can decide whether the host exposes a reusable primitive API surface without
-opening the full readiness report.
+opening the full readiness report. When the live orchestrator probe is offline,
+non-2xx, or timed out, the same outputs include structured diagnosis and
+suggested commands to start the orchestrator, verify the URL, or intentionally
+skip live checks for catalog/SDK-only validation.
 
 ## Near-Term Library Hardening
 

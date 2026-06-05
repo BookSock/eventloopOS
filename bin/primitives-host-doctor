@@ -86,6 +86,7 @@ async function runDoctor(options, deps = {}) {
   const failedChecks = allChecks.filter((check) => check.status === "failed");
   const warningChecks = allChecks.filter((check) => check.status === "warning");
   const primitiveReadiness = localChecks.find((check) => check.name === "strict_readiness")?.summary ?? null;
+  const fixes = suggestedFixes(allChecks, options);
   const finishedAt = new Date().toISOString();
   return {
     schema_version: 1,
@@ -101,6 +102,7 @@ async function runDoctor(options, deps = {}) {
     checks: allChecks,
     failed_checks: failedChecks.map((check) => check.name),
     warning_checks: warningChecks.map((check) => check.name),
+    fixes,
   };
 }
 
@@ -192,16 +194,80 @@ async function liveEndpointCheck(fetcher, baseUrl, endpointPath, { name = endpoi
       url: target,
       http_status: status,
       body_excerpt: body.trim().slice(0, 1_000),
+      ...(passed ? {} : {
+        diagnosis: {
+          reason: "http_status_not_2xx",
+          detail: `${endpointPath} returned HTTP ${status}`,
+        },
+      }),
     };
   } catch (error) {
+    const errorCode = error?.cause?.code ?? error?.code;
     return {
       name,
       status: requireLive ? "failed" : "warning",
       required: requireLive,
       url: target,
       error: error instanceof Error ? error.message : String(error),
+      ...(errorCode ? { error_code: String(errorCode) } : {}),
+      diagnosis: diagnoseLiveFetchError(error, endpointPath),
     };
   }
+}
+
+function diagnoseLiveFetchError(error, endpointPath) {
+  const errorCode = error?.cause?.code ?? error?.code;
+  const message = error instanceof Error ? error.message : String(error);
+  if (error?.name === "TimeoutError" || errorCode === "ETIMEDOUT" || /timed? out/i.test(message)) {
+    return {
+      reason: "timeout",
+      detail: `${endpointPath} did not respond before the 1500ms host-doctor timeout`,
+    };
+  }
+  if (errorCode === "ECONNREFUSED") {
+    return {
+      reason: "connection_refused",
+      detail: "No orchestrator is accepting connections at the configured URL.",
+    };
+  }
+  if (errorCode === "ENOTFOUND") {
+    return {
+      reason: "host_not_found",
+      detail: "Configured orchestrator host could not be resolved.",
+    };
+  }
+  return {
+    reason: "fetch_failed",
+    detail: message,
+  };
+}
+
+function suggestedFixes(checks, options) {
+  const liveProblem = checks.find((check) => check.name === "live_orchestrator" && ["failed", "warning"].includes(check.status));
+  if (!liveProblem) return [];
+  const fixes = [
+    {
+      check: "live_orchestrator",
+      reason: liveProblem.diagnosis?.reason ?? "unreachable",
+      detail: liveProblem.diagnosis?.detail ?? liveProblem.error ?? "live orchestrator probe failed",
+      command: "pnpm --filter @eventloopos/orchestrator start",
+    },
+    {
+      check: "live_orchestrator",
+      reason: "verify_url",
+      detail: `Re-run against the URL you expect to expose primitives.`,
+      command: `node bin/primitives-host-doctor --require-live --url ${shellQuote(options.url)}`,
+    },
+  ];
+  if (!options.requireLive) {
+    fixes.push({
+      check: "live_orchestrator",
+      reason: "optional_live_probe",
+      detail: "Use --skip-live when only catalog/SDK/docs readiness matters.",
+      command: "node bin/primitives-host-doctor --skip-live",
+    });
+  }
+  return fixes;
 }
 
 async function fetchWithTimeout(url) {
@@ -254,6 +320,19 @@ function renderMarkdown(manifest) {
   lines.push("");
   for (const check of manifest.checks) {
     lines.push(`- ${check.status}: ${check.name}`);
+    if (check.status === "failed" || check.status === "warning") {
+      if (check.error) lines.push(`  - Error: \`${check.error}\``);
+      if (check.diagnosis?.detail) lines.push(`  - Diagnosis: ${check.diagnosis.detail}`);
+    }
+  }
+  if (manifest.fixes.length > 0) {
+    lines.push("");
+    lines.push("## Suggested Fixes");
+    lines.push("");
+    for (const fix of manifest.fixes) {
+      lines.push(`- ${fix.detail}`);
+      lines.push(`  - \`${fix.command}\``);
+    }
   }
   return `${lines.join("\n")}\n`;
 }
@@ -264,6 +343,7 @@ function summaryOutput(manifest, manifestPath) {
     ok: manifest.ok,
     failed_checks: manifest.failed_checks,
     warning_checks: manifest.warning_checks,
+    fixes: manifest.fixes,
     check_count: manifest.checks.length,
     primitive_readiness: manifest.primitive_readiness,
     live_required: manifest.require_live,
@@ -291,6 +371,10 @@ function readArg(argv, name) {
 
 function utcStamp() {
   return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
 }
 
 async function runSelfTest() {
@@ -350,4 +434,39 @@ async function runSelfTest() {
   });
   assert.equal(warningManifest.ok, true);
   assert.deepEqual(warningManifest.warning_checks, ["live_orchestrator"]);
+  assert.equal(warningManifest.fixes.length, 3);
+  assert.equal(warningManifest.checks.at(-1).diagnosis.reason, "fetch_failed");
+  assert.match(renderMarkdown(warningManifest), /Suggested Fixes/);
+
+  const requiredOfflineManifest = await runDoctor({
+    url: "http://127.0.0.1:4377",
+    requireLive: true,
+    skipLive: false,
+  }, {
+    commandRunner,
+    fetcher: async () => {
+      const error = new Error("fetch failed");
+      error.cause = { code: "ECONNREFUSED" };
+      throw error;
+    },
+  });
+  assert.equal(requiredOfflineManifest.ok, false);
+  assert.deepEqual(requiredOfflineManifest.failed_checks, ["live_orchestrator"]);
+  assert.equal(requiredOfflineManifest.checks.at(-1).error_code, "ECONNREFUSED");
+  assert.equal(requiredOfflineManifest.checks.at(-1).diagnosis.reason, "connection_refused");
+  assert.equal(summaryOutput(requiredOfflineManifest, "manifest.json").fixes.length, 2);
+
+  const requiredHttpFailureManifest = await runDoctor({
+    url: "http://127.0.0.1:4377",
+    requireLive: true,
+    skipLive: false,
+  }, {
+    commandRunner,
+    fetcher: async () => ({
+      status: 503,
+      text: async () => "{\"ok\":false,\"error\":\"starting\"}",
+    }),
+  });
+  assert.equal(requiredHttpFailureManifest.ok, false);
+  assert.equal(requiredHttpFailureManifest.checks.at(-1).diagnosis.reason, "http_status_not_2xx");
 }
