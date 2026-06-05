@@ -48,7 +48,7 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=0 skips hotkey latency
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_TARGET=local runs latency on this Mac instead of the lab Mac
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD default: ctrl-option-r
-  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT optional expected feedback substring
+  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT optional expected feedback substring (default for ctrl-option-r: Showing paper:)
   EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=auto|local|lab default: auto
     auto captures local Screen Sharing window first, then falls back to lab Mac desktop only
 `);
@@ -624,13 +624,19 @@ function runHotkeyLatencyStep(manifestPath, envOverride) {
 }
 
 function hotkeyLatencyArgs() {
+  const chord = process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD ?? "ctrl-option-r";
   const args = [
     "--hotkey",
-    process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD ?? "ctrl-option-r",
+    chord,
   ];
-  const expected = process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT;
+  const expected = process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT
+    ?? (normalizeHotkeyText(chord) === "ctrl-option-r" ? "Showing paper:" : undefined);
   if (expected) args.push("--expect", expected);
   return args;
+}
+
+function normalizeHotkeyText(value) {
+  return String(value).trim().toLowerCase().replace(/\+/g, "-");
 }
 
 function runQueueLatencyStep(manifestPath, envOverride) {
@@ -1043,7 +1049,13 @@ function runSelfTest() {
     hotkey_feedback_latency: { skipped: true },
   });
   assert.ok(readyMarkdown.includes("Suggested result file: artifacts/human-demo-results/demo-human-demo-result.md"));
-  assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-r"]);
+  assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-r", "--expect", "Showing paper:"]);
+  process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD = "ctrl-option-h";
+  assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h"]);
+  process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT = "No paper selected.";
+  assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h", "--expect", "No paper selected."]);
+  delete process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD;
+  delete process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT;
   assert.ok(labDemoScreenshotStageScript().includes("task_demo_customer"));
   assert.ok(labDemoScreenshotStageScript().includes("latestDemoProofSnapshot"));
   assert.ok(labDemoScreenshotStageScript().includes("raiseDemoApps"));

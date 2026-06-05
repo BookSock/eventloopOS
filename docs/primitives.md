@@ -947,8 +947,9 @@ Proof scripts:
 - `bin/workspace-latency-proof`
 - `bin/queue-latency-proof`
 - `bin/macos-hotkey-feedback-latency`; human-demo readiness uses the
-  non-mutating restore-feedback path (`Ctrl-Option-R` with no selected paper)
-  so latency proof does not advance or mark demo queue items.
+  non-queue-mutating restore-feedback path (`Ctrl-Option-R` on the staged
+  Customer paper) and waits for final `Showing paper:` feedback, so latency
+  proof does not advance or mark demo queue items.
 - `bin/primitives-readiness-report`
 - `bin/task-workspace-memory-proof-smoke`
 - `bin/workspace-task-switch-proof-smoke`

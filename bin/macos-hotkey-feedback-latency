@@ -128,16 +128,29 @@ async function waitForHarnessFeedback({ processName, beforeFeedback, beforeFeedb
     lastStatus = await readHarnessStatus(processName);
     const feedback = feedbackValue(lastStatus);
     const feedbackSequence = feedbackSequenceValue(lastStatus);
+    const changed = feedbackChanged({
+      feedback,
+      feedbackSequence,
+      beforeFeedback,
+      beforeFeedbackSequence,
+    });
     if (expectedText) {
-      if (feedback.includes(expectedText) || lastStatus.includes(expectedText)) return lastStatus;
+      if (changed && (feedback.includes(expectedText) || lastStatus.includes(expectedText))) return lastStatus;
     } else if (feedback && feedback !== beforeFeedback) {
       return lastStatus;
-    } else if (feedbackSequence !== undefined && beforeFeedbackSequence !== undefined && feedbackSequence > beforeFeedbackSequence) {
+    } else if (changed) {
       return lastStatus;
     }
     await sleep(50);
   }
   throw new Error(`timed out waiting for feedback; last=${JSON.stringify(lastStatus)}`);
+}
+
+function feedbackChanged({ feedback, feedbackSequence, beforeFeedback, beforeFeedbackSequence }) {
+  if (feedback && feedback !== beforeFeedback) return true;
+  return feedbackSequence !== undefined
+    && beforeFeedbackSequence !== undefined
+    && feedbackSequence > beforeFeedbackSequence;
 }
 
 async function readHarnessStatus(processName) {
@@ -307,6 +320,22 @@ function runSelfTest() {
   const status = "eventloopOS harness status | feedback=Showing paper: qit_demo | feedback_seq=42 | state=loaded";
   if (feedbackValue(status) !== "Showing paper: qit_demo") throw new Error("feedback parse failed");
   if (feedbackSequenceValue(status) !== 42) throw new Error("feedback sequence parse failed");
+  if (feedbackChanged({
+    feedback: "Showing paper: qit_demo",
+    feedbackSequence: 42,
+    beforeFeedback: "Showing paper: qit_demo",
+    beforeFeedbackSequence: 42,
+  })) {
+    throw new Error("stale feedback should not count as changed");
+  }
+  if (!feedbackChanged({
+    feedback: "Showing paper: qit_demo",
+    feedbackSequence: 43,
+    beforeFeedback: "Showing paper: qit_demo",
+    beforeFeedbackSequence: 42,
+  })) {
+    throw new Error("new feedback sequence should count as changed");
+  }
   const summary = summarize([
     { timings_ms: { hotkey_to_feedback: 120 } },
     { timings_ms: { hotkey_to_feedback: 80 } },

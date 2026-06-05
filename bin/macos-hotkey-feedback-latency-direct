@@ -99,6 +99,20 @@ process.stdout.write(match ? match[1] : "");
 ' "$1"
 }
 
+feedback_changed() {
+  local before="$1"
+  local before_seq="$2"
+  local after="$3"
+  local after_seq="$4"
+  if [[ -n "$after" && "$after" != "$before" ]]; then
+    return 0
+  fi
+  if [[ -n "$before_seq" && -n "$after_seq" && "$after_seq" -gt "$before_seq" ]]; then
+    return 0
+  fi
+  return 1
+}
+
 read_status() {
   if [[ -n "$harness_status_path" && -s "$harness_status_path" ]]; then
     node -e '
@@ -189,14 +203,13 @@ for ((run = 1; run <= runs; run += 1)); do
           after_feedback="$(feedback_of "$after_status")"
           after_feedback_seq="$(feedback_seq_of "$after_status")"
           if [[ -n "$expected_text" ]]; then
-            if [[ "$after_feedback" == *"$expected_text"* || "$after_status" == *"$expected_text"* ]]; then
+            if feedback_changed "$before_feedback" "$before_feedback_seq" "$after_feedback" "$after_feedback_seq" && {
+              [[ "$after_feedback" == *"$expected_text"* || "$after_status" == *"$expected_text"* ]]
+            }; then
               latency=$((current_ms - start_ms))
               break
             fi
-          elif [[ -n "$before_feedback_seq" && -n "$after_feedback_seq" && "$after_feedback_seq" -gt "$before_feedback_seq" ]]; then
-            latency=$((current_ms - start_ms))
-            break
-          elif [[ -n "$after_feedback" && "$after_feedback" != "$before_feedback" ]]; then
+          elif feedback_changed "$before_feedback" "$before_feedback_seq" "$after_feedback" "$after_feedback_seq"; then
             latency=$((current_ms - start_ms))
             break
           fi
