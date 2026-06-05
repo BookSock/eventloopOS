@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -55,6 +56,7 @@ function buildAudit(root, options = {}) {
   const resultAudit = inspectHumanResult(root, resultPath);
   const verificationPath = options.verificationPath ?? latestVerificationPath(root, resultPath);
   const verification = verificationPath ? readJson(path.resolve(root, verificationPath)) : undefined;
+  const currentResultSha256 = resultPath ? fileSha256(path.resolve(root, resultPath)) : undefined;
   const checks = {
     readiness_manifest_present: Boolean(readinessPath),
     readiness_ok: readiness?.ok === true,
@@ -63,6 +65,11 @@ function buildAudit(root, options = {}) {
     verification_manifest_present: Boolean(verificationPath),
     verification_ok: verification?.ok === true || verification?.passed === true,
     verification_matches_result: verificationMatchesResult(root, verification, resultPath),
+    verification_matches_current_result_content: Boolean(
+      currentResultSha256
+      && verification?.result_sha256
+      && verification.result_sha256 === currentResultSha256,
+    ),
     lab_status_checked_and_ok: verification?.checks?.lab_status_ok === true && verification?.lab_status?.ok === true,
   };
   const failedChecks = Object.entries(checks)
@@ -83,6 +90,8 @@ function buildAudit(root, options = {}) {
     verification_manifest_path: verificationPath,
     verification_verified_at: verification?.verified_at ?? null,
     verification_lab_status_manifest_path: verification?.lab_status?.manifest_path ?? null,
+    verification_result_sha256: verification?.result_sha256 ?? null,
+    current_result_sha256: currentResultSha256 ?? null,
   };
 }
 
@@ -222,6 +231,7 @@ function completionStatus(failedChecks) {
     failedChecks.includes("verification_manifest_present")
     || failedChecks.includes("verification_ok")
     || failedChecks.includes("verification_matches_result")
+    || failedChecks.includes("verification_matches_current_result_content")
     || failedChecks.includes("lab_status_checked_and_ok")
   ) {
     return "pending_verification";
@@ -231,6 +241,11 @@ function completionStatus(failedChecks) {
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function fileSha256(filePath) {
+  if (!fs.existsSync(filePath)) return undefined;
+  return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
 }
 
 function valueAfter(flag) {
@@ -273,10 +288,12 @@ Ship/block decision:
 ship
 `, "utf8");
   const relativeResultPath = path.relative(root, resultPath);
+  const resultSha256 = fileSha256(resultPath);
   const verificationPath = path.join(root, "artifacts", "human-demo-verifications", "20260605T001100Z-human-demo-result-verify", "manifest.json");
   writeJson(verificationPath, {
     ok: true,
     result_path: relativeResultPath,
+    result_sha256: resultSha256,
     checks: { lab_status_ok: true },
     lab_status: { ok: true, manifest_path: "artifacts/lab-runs/status/manifest.json" },
   });
@@ -318,6 +335,7 @@ ship
   writeJson(verificationPath, {
     ok: true,
     result_path: "artifacts/human-demo-results/other-human-demo-result.md",
+    result_sha256: fileSha256(resultPath),
     checks: { lab_status_ok: true },
     lab_status: { ok: true },
   });
@@ -331,6 +349,7 @@ ship
   writeJson(verificationPath, {
     ok: true,
     result_path: relativeResultPath,
+    result_sha256: fileSha256(resultPath),
     checks: {},
     lab_status: undefined,
   });
@@ -340,6 +359,34 @@ ship
   });
   assert.equal(missingLab.ok, false);
   assert.ok(missingLab.failed_checks.includes("lab_status_checked_and_ok"));
+
+  writeJson(verificationPath, {
+    ok: true,
+    result_path: relativeResultPath,
+    result_sha256: fileSha256(resultPath),
+    checks: { lab_status_ok: true },
+    lab_status: { ok: true },
+  });
+  fs.appendFileSync(resultPath, "\nEdited after verification.\n", "utf8");
+  const staleVerification = buildAudit(root, {
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(staleVerification.ok, false);
+  assert.ok(staleVerification.failed_checks.includes("verification_matches_current_result_content"));
+
+  writeJson(verificationPath, {
+    ok: true,
+    result_path: relativeResultPath,
+    checks: { lab_status_ok: true },
+    lab_status: { ok: true },
+  });
+  const missingHash = buildAudit(root, {
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(missingHash.ok, false);
+  assert.ok(missingHash.failed_checks.includes("verification_matches_current_result_content"));
 
   fs.rmSync(root, { recursive: true, force: true });
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -58,6 +59,7 @@ const output = {
   artifact_dir: path.dirname(manifestPath),
   verification_manifest_path: manifestPath,
   result_path: path.relative(repoRoot, absoluteResultPath),
+  result_sha256: sha256(text),
   ok: failedChecks.length === 0,
   passed: failedChecks.length === 0,
   failed_checks: failedChecks,
@@ -243,6 +245,10 @@ function decisionAccepts(value) {
 
 function normalize(value) {
   return value.toLowerCase().replace(/[._]/g, "-").trim();
+}
+
+function sha256(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
 }
 
 function runLabStatus() {

@@ -33,6 +33,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 | Repeatable human demo setup | `bin/lab-mac-human-demo-setup`; latest manifest `ok=true`, queue count 2 | Proven |
 | Visible feedback during demo | Queue footer `feedback=...`; `QueueHarnessStatusTextTests`; `QueueViewModelTests` post-action lease-conflict coverage proves Done/Defer/Send show saved-action feedback instead of surfacing 409 noise; latest screenshot shows `feedback=ready` | Proven |
 | Stale readiness cannot be reused silently | `bin/human-demo-ready` requires latest proof freshness by default; `bin/human-demo-result-template --write` refuses any failed readiness check | Proven |
+| Stale result verification cannot be reused silently | `bin/human-demo-result-verify` records `result_sha256`; `bin/human-demo-completion-audit` compares it to the current result file and fails `verification_matches_current_result_content` after any edit | Proven |
 | Human keyboard/mouse UX | Jason must run `docs/human-demo-walkthrough.md`, fill `bin/human-demo-result-template --write` output, pass `bin/human-demo-result-verify --lab-status`, and pass `bin/human-demo-completion-audit --strict` | Pending |
 
 ## Human Gate
@@ -57,7 +58,9 @@ bin/human-demo-result-verify artifacts/human-demo-results/<result>.md --lab-stat
 ```
 
 The verifier writes `artifacts/human-demo-verifications/*/manifest.json`; use
-that manifest as the final machine-readable closeout evidence.
+that manifest as the final machine-readable closeout evidence. Re-run the
+verifier after editing the result file; completion audit rejects stale
+verification hashes.
 
 Closeout audit:
 
