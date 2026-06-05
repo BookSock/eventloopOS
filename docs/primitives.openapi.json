@@ -160,7 +160,7 @@
         ],
         "x-eventloopos-primitive": "agent_source_hooks",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/agent_runs.ts",
-        "x-eventloopos-status": "mixed"
+        "x-eventloopos-status": "dogfood"
       }
     },
     "/agent-runs/{id}": {
@@ -205,7 +205,7 @@
         ],
         "x-eventloopos-primitive": "agent_source_hooks",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/agent_runs.ts",
-        "x-eventloopos-status": "mixed"
+        "x-eventloopos-status": "dogfood"
       }
     },
     "/agents/claude/inspect/{id}": {
@@ -1157,7 +1157,7 @@
         ],
         "x-eventloopos-primitive": "agent_source_hooks",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
-        "x-eventloopos-status": "mixed"
+        "x-eventloopos-status": "dogfood"
       }
     },
     "/mcp-sources/poll-all-and-route": {
@@ -1202,7 +1202,7 @@
         ],
         "x-eventloopos-primitive": "agent_source_hooks",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
-        "x-eventloopos-status": "mixed"
+        "x-eventloopos-status": "dogfood"
       }
     },
     "/mcp-sources/{id}": {
@@ -1247,7 +1247,7 @@
         ],
         "x-eventloopos-primitive": "agent_source_hooks",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
-        "x-eventloopos-status": "mixed"
+        "x-eventloopos-status": "dogfood"
       }
     },
     "/mcp-sources/{id}/poll": {
@@ -1302,7 +1302,7 @@
         ],
         "x-eventloopos-primitive": "agent_source_hooks",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
-        "x-eventloopos-status": "mixed"
+        "x-eventloopos-status": "dogfood"
       }
     },
     "/mcp-sources/{id}/poll-and-route": {
@@ -1357,7 +1357,7 @@
         ],
         "x-eventloopos-primitive": "agent_source_hooks",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
-        "x-eventloopos-status": "mixed"
+        "x-eventloopos-status": "dogfood"
       }
     },
     "/mcp-sources/{id}/preview": {
@@ -1412,7 +1412,7 @@
         ],
         "x-eventloopos-primitive": "agent_source_hooks",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
-        "x-eventloopos-status": "mixed"
+        "x-eventloopos-status": "dogfood"
       }
     },
     "/mcp/poll": {
@@ -1457,7 +1457,7 @@
         ],
         "x-eventloopos-primitive": "agent_source_hooks",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/mcp_sources.ts",
-        "x-eventloopos-status": "mixed"
+        "x-eventloopos-status": "dogfood"
       }
     },
     "/metrics": {
@@ -3502,7 +3502,7 @@
         ],
         "x-eventloopos-primitive": "agent_source_hooks",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/events.ts",
-        "x-eventloopos-status": "mixed"
+        "x-eventloopos-status": "dogfood"
       }
     },
     "/workspace/capture": {

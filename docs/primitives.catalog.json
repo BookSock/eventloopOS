@@ -2656,7 +2656,7 @@
     {
       "id": "agent_source_hooks",
       "title": "Agent And Source Hooks",
-      "status": "mixed",
+      "status": "dogfood",
       "summary": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
       "http": [
         { "method": "POST", "path": "/mcp/poll", "route_file": "app/orchestrator/src/routes/mcp_sources.ts", "request_schema": "McpPollRequest", "response_schema": "McpPollResponse" },
@@ -2670,7 +2670,14 @@
         { "method": "GET", "path": "/agent-runs/:id", "route_file": "app/orchestrator/src/routes/agent_runs.ts", "response_schema": "AgentRunGetResponse" },
         { "method": "POST", "path": "/voice/commands", "route_file": "app/orchestrator/src/routes/events.ts", "request_schema": "VoiceCommandRequest", "response_schema": "VoiceCommandResponse" }
       ],
-      "code": ["app/orchestrator/src/routes/mcp_sources.ts", "app/orchestrator/src/routes/agent_runs.ts", "docs/codex-mcp-skill.md"],
+      "code": [
+        "app/orchestrator/src/routes/mcp_sources.ts",
+        "app/orchestrator/src/routes/agent_runs.ts",
+        "docs/codex-mcp-skill.md",
+        "docs/mcp-source-hooks.md",
+        "bin/mcp-source-templates-audit",
+        "config/mcp-sources.dogfood.example.json"
+      ],
       "proofs": [
         "app/orchestrator/src/mcp_sources/local_events_server.test.ts",
         "app/orchestrator/src/mcp_sources/script_events_server.test.ts",
@@ -2679,6 +2686,7 @@
         "app/orchestrator/src/agents/agent_run_cli.test.ts",
         "app/orchestrator/src/voice/send_voice_command.test.ts",
         "app/orchestrator/src/master/master_command_cli.test.ts",
+        "bin/mcp-source-templates-audit",
         "bin/agent-run-cli-smoke",
         "bin/postgres-mcp-dogfood-smoke"
       ],

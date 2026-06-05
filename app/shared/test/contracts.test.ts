@@ -262,7 +262,7 @@ describe("primitive catalog SDK boundary", () => {
     expect(summary.schemaCount).toBeGreaterThan(100);
     expect(summary.latencyBudgetCount).toBe(11);
     expect(summary.responsivenessCriticalCount).toBe(5);
-    expect(summary.statusCounts).toMatchObject({ dogfood: 12, mixed: 1, stable_enough: 5 });
+    expect(summary.statusCounts).toMatchObject({ dogfood: 13, stable_enough: 5 });
     expect(summary.categoryCounts).toMatchObject({
       agent_context: 4,
       attention_routing: 4,

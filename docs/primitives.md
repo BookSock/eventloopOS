@@ -36,7 +36,7 @@ Generate a builder-facing coverage/readiness summary with
 `bin/primitives-readiness-report docs/primitives.catalog.json` or use
 `--json` for machine-readable audit output.
 Current catalog summary: 18 primitives, 80 HTTP routes, 8 CLI commands, 21
-self-tests, 74 proof refs, 11 latency budgets.
+self-tests, 75 proof refs, 11 latency budgets.
 Strict readiness is expected to stay green: every cataloged primitive
 has a `self_tests` command, and the shared primitive operation-helper test
 proves typed helper coverage for every cataloged HTTP route.
@@ -741,10 +741,13 @@ Proof:
 - local integration script tests
 - `pnpm --filter @eventloopos/orchestrator run test:agent-source-hooks`
 - `docs/codex-mcp-skill.md`
+- `docs/mcp-source-hooks.md`
+- `bin/mcp-source-templates-audit`
 - `bin/agent-run-cli-smoke`
 
-Status: mixed. Local events and agent-run routes are stable enough internally;
-third-party source templates need setup docs and fixture cleanup.
+Status: dogfood. Local events, agent-run routes, third-party setup templates,
+and fixture cleanup are covered by tests and template audits. External Slack,
+GitHub, and Gmail sources still require their local CLIs/tokens before use.
 
 ## Agent Focus Binding
 
