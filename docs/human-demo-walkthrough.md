@@ -65,11 +65,14 @@ orchestrator is running on the controller Mac; the lab demo default keeps
 
 Latest known-good proof:
 
-- Manifest: `artifacts/lab-runs/20260603-132623-human-demo/manifest.json`
-- Screenshot: `artifacts/lab-runs/20260603-132623-human-demo/screen-sharing.png`
+- Manifest: `artifacts/lab-runs/20260605-152524-human-demo/manifest.json`
+- Screenshot: `artifacts/lab-runs/20260605-152524-human-demo/screen-sharing.png`
+- Readiness manifest: `artifacts/lab-runs/20260605T222714Z-human-demo-ready/manifest.json`
+- Readiness screenshot: `artifacts/lab-runs/20260605T222714Z-human-demo-ready/screen-sharing.png`
 - Queue proof: 2 current-run papers.
-- Ambient proof: customer paper context saved only the shared TextEdit window and customer Chrome after the move.
-- Visual feedback proof: Queue footer shows compact `feedback=...` status in the Screen Sharing capture.
+- Ambient proof: customer paper context saved the moved shared TextEdit, and the automated scratch window was remembered by the current paper before cleanup.
+- Background containment proof: Metrics Chrome was intentionally pushed into the Customer paper and moved back to the Metrics paper.
+- Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture.
 
 ## Starting State
 
@@ -101,6 +104,7 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 1. Click `Review Demo Customer Reply` in Queue.
 2. Press `Ctrl-Option-R`.
 3. Confirm Customer Chrome and the shared TextEdit come forward on `demo-customer`.
+   Queue should show green feedback starting with `Showing paper: Review Demo Customer Reply...`.
 4. Move the shared TextEdit window with `Ctrl-Option-Left`, or drag it manually toward the center/left.
    It starts on the right side, so `Ctrl-Option-Right` may look like nothing happened.
 5. Wait 2 to 3 seconds. Ambient autosave should remember the moved position without pressing Done/Defer/Advance.
@@ -108,9 +112,11 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 6. Click `Review Demo Metrics Review` in Queue.
 7. Press `Ctrl-Option-R`.
 8. Confirm the same TextEdit window moves to the metrics position and Metrics Chrome appears.
+   Queue should show green feedback for `Review Demo Metrics Review`.
 9. Click `Review Demo Customer Reply` again.
 10. Press `Ctrl-Option-R`.
 11. Confirm the same TextEdit window returns to the customer position.
+    Queue should again remind you what decision the Customer paper needs.
 12. Confirm the setup proof reports background window containment passed:
     Metrics Chrome was intentionally moved into the Customer paper and
     eventloopOS moved it back to the Metrics paper.
@@ -134,6 +140,7 @@ Report any of these as product issues:
 - same shared window does not move between paper-specific positions,
 - ambient autosave misses a moved window after waiting 2 to 3 seconds,
 - Queue briefing strip does not make the current decision obvious,
+- green `Showing paper: ...` feedback is missing, stale, or too hard to see after restore,
 - Queue is hard to find or blocks work,
 - Rectangle-style hotkeys feel surprising or conflict with another common app,
 - Manual Mode return restores the wrong workspace or loses a user-opened window unexpectedly.
