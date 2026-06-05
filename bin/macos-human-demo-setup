@@ -90,10 +90,9 @@ let snapshot = await waitForWindows();
 let windows = resolveDemoWindows(snapshot);
 
 const customerSnapshot = buildSnapshot(windows, "customer");
-await restore(customerSnapshot, "initial-customer-layout");
-await sleep(1_200);
-snapshot = await captureWithDemoFrames("initial customer restore", customerSnapshot);
-const customerProof = assertRestoredSnapshot(snapshot, customerSnapshot, "initial customer restore");
+const customerRestore = await restoreAndAssert(customerSnapshot, customerSnapshot, "initial customer restore", "initial-customer-layout");
+snapshot = customerRestore.snapshot;
+const customerProof = customerRestore.proof;
 windows = resolveDemoWindows(snapshot);
 
 await approveTask(paperCustomer, [windows.customerChrome.id]);
@@ -102,10 +101,9 @@ await saveTaskWorkspaceSnapshot(paperCustomer.taskId, customerSnapshot);
 await queuePaper(paperCustomer, "Customer asks whether eventloopOS is ready for hands-on Mac dogfood.");
 
 const metricsSnapshot = buildSnapshot(windows, "metrics");
-await restore(metricsSnapshot, "initial-metrics-layout");
-await sleep(1_200);
-snapshot = await captureWithDemoFrames("initial metrics restore", metricsSnapshot);
-const metricsProof = assertRestoredSnapshot(snapshot, metricsSnapshot, "initial metrics restore");
+const metricsRestore = await restoreAndAssert(metricsSnapshot, metricsSnapshot, "initial metrics restore", "initial-metrics-layout");
+snapshot = metricsRestore.snapshot;
+const metricsProof = metricsRestore.proof;
 windows = resolveDemoWindows(snapshot);
 
 await approveTask(paperMetrics, [windows.metricsChrome.id]);
@@ -125,18 +123,16 @@ const queueProof = assertDemoQueueItems(demoItems);
 await setCurrentTask(paperCustomer.taskId);
 const foreignWindowContainmentProof = await proveForeignWindowContainment(windows);
 const readySnapshotTarget = buildReadySnapshot(customerSnapshot, metricsSnapshot, windows);
-await restore(readySnapshotTarget, "ready-customer-layout");
-await sleep(1_200);
-const readySnapshot = await captureWithDemoFrames("ready customer restore", customerSnapshot);
-const readyCustomerProof = assertRestoredSnapshot(readySnapshot, customerSnapshot, "ready customer restore");
+const readyRestore = await restoreAndAssert(readySnapshotTarget, customerSnapshot, "ready customer restore", "ready-customer-layout");
+const readyCustomerProof = readyRestore.proof;
 const ambientAutosaveProof = await proveAmbientAutosave(paperCustomer, customerSnapshot);
 const newWindowAutosaveProof = await proveNewWindowAutosave(paperCustomer, customerSnapshot);
 await restore(readySnapshotTarget, "ready-customer-layout-after-ambient-proof");
 await sleep(1_200);
 await putTaskLayout(paperCustomer.taskId, customerSnapshot);
 await saveTaskWorkspaceSnapshot(paperCustomer.taskId, customerSnapshot);
-const finalReadySnapshot = await captureWithDemoFrames("final ready customer restore", customerSnapshot);
-const finalReadyCustomerProof = assertRestoredSnapshot(finalReadySnapshot, customerSnapshot, "final ready customer restore");
+const finalReadyRestore = await restoreAndAssert(readySnapshotTarget, customerSnapshot, "final ready customer restore", "final-ready-customer-layout");
+const finalReadyCustomerProof = finalReadyRestore.proof;
 const queueWindow = positionQueueWindow(paperCustomer.workspace);
 await sleep(600);
 const finalSnapshot = await captureWithDemoFrames("final demo snapshot", customerSnapshot, [queueWindow.window_id]);
@@ -839,7 +835,7 @@ function snapshotWindow(window, workspace, frame) {
 }
 
 async function restore(snapshot, label) {
-  const current = await capture();
+  const current = await capture({ capture_frames: false });
   const response = await fetch(`${orchestratorUrl}/workspace/restore`, {
     method: "POST",
     headers: {
@@ -857,6 +853,31 @@ async function restore(snapshot, label) {
     })}`);
   }
   return body;
+}
+
+async function restoreAndAssert(restoreSnapshot, expectedSnapshot, assertLabel, restoreLabel) {
+  let lastError;
+  let lastSnapshot;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const attemptLabel = attempt === 1 ? restoreLabel : `${restoreLabel}-retry-${attempt}`;
+    try {
+      await restore(restoreSnapshot, attemptLabel);
+      await sleep(900 + attempt * 350);
+      lastSnapshot = await captureWithDemoFrames(`${assertLabel} attempt ${attempt}`, expectedSnapshot);
+      const proof = assertRestoredSnapshot(lastSnapshot, expectedSnapshot, assertLabel);
+      return {
+        snapshot: lastSnapshot,
+        proof: {
+          ...proof,
+          restore_assert_attempts: attempt,
+        },
+      };
+    } catch (error) {
+      lastError = error;
+      await sleep(600);
+    }
+  }
+  throw new Error(`${assertLabel}: restore/assert failed after retries: ${lastError instanceof Error ? lastError.message : String(lastError)} ${JSON.stringify(lastSnapshot?.windows?.map(compactWindow) ?? [])}`);
 }
 
 async function approveTask(paper, windowIds) {

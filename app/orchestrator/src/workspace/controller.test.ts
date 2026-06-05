@@ -5,6 +5,7 @@ import {
   AerospaceWorkspaceController,
   parseRestoreExecuteRequest,
   parseRestorePlanRequest,
+  parseWorkspaceCaptureRequest,
   parseWorkspaceSnapshot,
   type WorkspaceController,
 } from "./controller.js";
@@ -93,6 +94,42 @@ describe("workspace controller", () => {
       ["focus", "--window-id", "9"],
     ]);
     assert.deepEqual(plan.skipped, []);
+  });
+
+  it("plans restore with uncached current windows without frame capture", async () => {
+    const calls: string[] = [];
+    const exec: ExecFunction = async (command, args) => {
+      calls.push(`${command}:${args[0]}`);
+      if (command === "osascript") throw new Error("frame capture should not run for restore planning");
+      if (args[0] === "list-workspaces") return { stdout: "manual\n" };
+      if (args[0] === "list-windows" && args.includes("--focused")) {
+        return { stdout: JSON.stringify([{ "window-id": 9, workspace: "manual" }]) };
+      }
+      return {
+        stdout: JSON.stringify([
+          { "window-id": 9, "app-name": "Ghostty", "window-title": "codex", workspace: "manual" },
+        ]),
+      };
+    };
+    const controller = new AerospaceWorkspaceController(exec);
+
+    const plan = await controller.planRestore({
+      backend: "aerospace",
+      activeWorkspace: "eventloop-blog",
+      focusedWindowId: 9,
+      windows: [{ id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog" }],
+    });
+
+    assert.deepEqual(plan.commands.map((command) => command.args), [
+      ["move-node-to-workspace", "--window-id", "9", "eventloop-blog"],
+      ["workspace", "eventloop-blog"],
+      ["focus", "--window-id", "9"],
+    ]);
+    assert.deepEqual(calls, [
+      "aerospace:list-windows",
+      "aerospace:list-workspaces",
+      "aerospace:list-windows",
+    ]);
   });
 
   it("verified restore retries until captured workspace and focus match", async () => {
@@ -186,6 +223,20 @@ describe("workspace controller", () => {
     assert.equal(request.snapshot.focusedWindowId, 9);
     assert.deepEqual(request.snapshot.frameCapture, { status: "captured", timeoutMs: 2_500, observed: 1, error: undefined });
     assert.equal(request.currentWindows?.[0].workspace, "manual");
+  });
+
+  it("parses capture requests with snake-case no-frame option", () => {
+    assert.deepEqual(parseWorkspaceCaptureRequest({
+      capture_frames: false,
+      frame_window_ids: [9, 10],
+      focus_frame_workspaces: true,
+      restore_frame_capture_focus: false,
+    }), {
+      captureFrames: false,
+      frameWindowIds: [9, 10],
+      focusFrameWorkspaces: true,
+      restoreFrameCaptureFocus: false,
+    });
   });
 
   it("requires explicit confirmation for restore execute requests", () => {

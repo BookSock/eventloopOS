@@ -62,6 +62,7 @@ export type WorkspaceSnapshot = {
 };
 
 export type WorkspaceCaptureOptions = {
+  captureFrames?: boolean;
   frameWindowIds?: readonly number[];
   focusFrameWorkspaces?: boolean;
   restoreFrameCaptureFocus?: boolean;
@@ -131,14 +132,9 @@ export class AerospaceWorkspaceAdapter {
       focusedWindowIdPromise,
     ]);
     const windows = parseAerospaceWindows(result.stdout);
-    const frameWindows = filterWindowsForFrameCapture(windows, options.frameWindowIds);
-    const frameCapture = options.focusFrameWorkspaces === true
-      ? await this.captureWindowFramesAcrossWorkspaces(frameWindows, {
-          activeWorkspace,
-          focusedWindowId,
-          restoreFocus: options.restoreFrameCaptureFocus !== false,
-        })
-      : await this.captureWindowFrames(frameWindows);
+    const frameCapture = options.captureFrames === false
+      ? skippedFrameCapture(this.frameCaptureTimeoutMs)
+      : await this.captureFrameOptions(windows, options, activeWorkspace, focusedWindowId);
 
     return {
       backend: this.backend,
@@ -147,6 +143,25 @@ export class AerospaceWorkspaceAdapter {
       focusedWindowId,
       frameCapture: frameCapture.status,
     };
+  }
+
+  private async captureFrameOptions(
+    windows: AerospaceWindow[],
+    options: WorkspaceCaptureOptions,
+    activeWorkspace: string | undefined,
+    focusedWindowId: number | undefined,
+  ): Promise<{
+    observations: MacOSWindowFrameObservation[];
+    status: WorkspaceFrameCaptureStatus;
+  }> {
+    const frameWindows = filterWindowsForFrameCapture(windows, options.frameWindowIds);
+    return options.focusFrameWorkspaces === true
+      ? await this.captureWindowFramesAcrossWorkspaces(frameWindows, {
+          activeWorkspace,
+          focusedWindowId,
+          restoreFocus: options.restoreFrameCaptureFocus !== false,
+        })
+      : await this.captureWindowFrames(frameWindows);
   }
 
   async executeRestorePlan(plan: RestorePlan): Promise<RestoreExecutionReceipt> {
@@ -284,6 +299,16 @@ function filterWindowsForFrameCapture(windows: AerospaceWindow[], frameWindowIds
   if (frameWindowIds === undefined) return windows;
   const ids = new Set(frameWindowIds);
   return windows.filter((window) => ids.has(window.id));
+}
+
+function skippedFrameCapture(timeoutMs: number): {
+  observations: MacOSWindowFrameObservation[];
+  status: WorkspaceFrameCaptureStatus;
+} {
+  return {
+    observations: [],
+    status: { status: "skipped", timeoutMs, observed: 0 },
+  };
 }
 
 function groupWindowsByWorkspace(windows: AerospaceWindow[]): Map<string | undefined, AerospaceWindow[]> {

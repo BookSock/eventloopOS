@@ -2,6 +2,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createServer } from "node:net";
+import path from "node:path";
 
 if (process.argv.includes("--self-test")) {
   runSelfTest();
@@ -193,7 +194,7 @@ function defaultMcpSourcesMode() {
 }
 
 function defaultMcpSourcesPath() {
-  return existsSync("config/mcp-sources.json") ? "config/mcp-sources.json" : undefined;
+  return existsSync("config/mcp-sources.json") ? path.resolve("config", "mcp-sources.json") : undefined;
 }
 
 async function maybeStartSharedCodexAppServer(taskSessionModes) {
@@ -365,12 +366,12 @@ function defaultPostgresContainer(selectedProfile) {
 }
 
 function defaultInMemoryStorePath(selectedProfile) {
-  return `.eventloopos/${selectedProfile}/gateway-store.json`;
+  return path.resolve(".eventloopos", selectedProfile, "gateway-store.json");
 }
 
 function defaultCodexTaskMapPath(selectedProfile) {
-  if (selectedProfile === "default") return "config/codex-task-map.json";
-  return `var/codex-task-map.${selectedProfile}.json`;
+  if (selectedProfile === "default") return path.resolve("config", "codex-task-map.json");
+  return path.resolve("var", `codex-task-map.${selectedProfile}.json`);
 }
 
 function parseHttpEndpoint(value) {
@@ -452,6 +453,17 @@ function runSelfTest() {
   }), "restart limit should be respected");
   assertSelf(parseOptionalNonnegativeInteger("0") === 0, "zero restart limit should parse");
   assertSelf(parseOptionalNonnegativeInteger("-1") === undefined, "negative restart limit should be ignored");
+  assertSelf(path.isAbsolute(defaultInMemoryStorePath("lab-human-demo")), "in-memory store path should be absolute");
+  assertSelf(
+    defaultInMemoryStorePath("lab-human-demo").endsWith(path.join(".eventloopos", "lab-human-demo", "gateway-store.json")),
+    "in-memory store path should preserve profile directory",
+  );
+  assertSelf(path.isAbsolute(defaultCodexTaskMapPath("default")), "default codex task map path should be absolute");
+  assertSelf(path.isAbsolute(defaultCodexTaskMapPath("experiment")), "profile codex task map path should be absolute");
+  assertSelf(
+    defaultMcpSourcesPath() === undefined || path.isAbsolute(defaultMcpSourcesPath()),
+    "mcp sources path should be absolute when present",
+  );
   console.log("dev-dogfood self-test passed");
 }
 

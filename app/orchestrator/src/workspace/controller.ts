@@ -52,7 +52,7 @@ export class AerospaceWorkspaceController implements WorkspaceController {
   }
 
   async planRestore(snapshot: WorkspaceSnapshot, currentWindows?: AerospaceWindow[]): Promise<RestorePlan> {
-    const windows = currentWindows ?? (await this.adapter.capture()).windows;
+    const windows = currentWindows ?? (await this.adapter.capture({ captureFrames: false })).windows;
     return restoreWorkspacePlan(snapshot, windows);
   }
 
@@ -129,6 +129,7 @@ export function parseWorkspaceCaptureRequest(input: unknown): WorkspaceCaptureOp
   }
 
   return {
+    captureFrames: readOptionalBoolean(input, "captureFrames", "capture_frames"),
     frameWindowIds: readOptionalIntegerArray(input, "frameWindowIds", "frame_window_ids"),
     focusFrameWorkspaces: readOptionalBoolean(input, "focusFrameWorkspaces", "focus_frame_workspaces"),
     restoreFrameCaptureFocus: readOptionalBoolean(input, "restoreFrameCaptureFocus", "restore_frame_capture_focus"),

@@ -9,7 +9,9 @@ const DEFAULT_BUDGETS_MS = {
   health: 500,
   queue: 800,
   workspace_capture: 5_000,
+  workspace_capture_no_frames: 800,
   workspace_restore_plan: 2_000,
+  workspace_restore_plan_uncached: 2_000,
   workspace_restore_execute: 5_000,
 };
 
@@ -75,12 +77,23 @@ async function measureWorkspaceLatency({ baseUrl, runs, executeRestore }) {
       if (!snapshot || !Array.isArray(snapshot.windows)) {
         throw new Error("workspace capture response missing snapshot.windows");
       }
+      const fastCapture = await timed(sample, "workspace_capture_no_frames", () => requestJson(baseUrl, "/workspace/capture", {
+        method: "POST",
+        body: { capture_frames: false },
+      }));
+      if (!fastCapture.snapshot || !Array.isArray(fastCapture.snapshot.windows)) {
+        throw new Error("workspace no-frame capture response missing snapshot.windows");
+      }
       await timed(sample, "workspace_restore_plan", () => requestJson(baseUrl, "/workspace/restore-plan", {
         method: "POST",
         body: {
           snapshot,
           current_windows: snapshot.windows,
         },
+      }));
+      await timed(sample, "workspace_restore_plan_uncached", () => requestJson(baseUrl, "/workspace/restore-plan", {
+        method: "POST",
+        body: { snapshot },
       }));
       if (executeRestore) {
         await timed(sample, "workspace_restore_execute", () => requestJson(baseUrl, "/workspace/restore", {

@@ -379,7 +379,7 @@ function runCommand(command, args, onSpawn = async () => {}) {
 async function captureWorkspace(options) {
   return requestJson(options.baseUrl, "/workspace/capture", {
     method: "POST",
-    body: {},
+    body: { capture_frames: false },
     timeoutMs: options.requestTimeoutMs,
   });
 }

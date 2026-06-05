@@ -248,6 +248,41 @@ describe("Aerospace workspace adapter", () => {
     assert.doesNotMatch(osascripts[0] ?? "", /com\.mitchellh\.ghostty/);
   });
 
+  it("skips frame capture when captureFrames is false", async () => {
+    const calls: string[] = [];
+    const adapter = new AerospaceWorkspaceAdapter(async (command, args) => {
+      calls.push(`${command}:${args[0]}`);
+      if (command === "osascript") throw new Error("osascript should not be called");
+      if (command === "aerospace" && args[0] === "list-windows" && args.includes("--focused")) {
+        return { stdout: JSON.stringify([{ "window-id": 21, workspace: "paper-a" }]) };
+      }
+      if (command === "aerospace" && args[0] === "list-workspaces") {
+        return { stdout: "paper-a\n" };
+      }
+      return {
+        stdout: JSON.stringify([
+          {
+            "window-id": 21,
+            "app-name": "TextEdit",
+            "app-bundle-id": "com.apple.TextEdit",
+            "window-title": "Shared Note",
+            workspace: "paper-a",
+          },
+        ]),
+      };
+    });
+
+    const snapshot = await adapter.capture({ captureFrames: false });
+
+    assert.equal(snapshot.windows[0]?.frame, undefined);
+    assert.deepEqual(snapshot.frameCapture, { status: "skipped", timeoutMs: 2_500, observed: 0 });
+    assert.deepEqual(calls, [
+      "aerospace:list-windows",
+      "aerospace:list-workspaces",
+      "aerospace:list-windows",
+    ]);
+  });
+
   it("captures requested frames by workspace and restores prior focus", async () => {
     const events: string[] = [];
     let currentWorkspace = "paper-a";

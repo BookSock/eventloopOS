@@ -330,7 +330,7 @@ const taskBody = await getJson(\`/tasks/\${customer.task_id}\`).catch(() => unde
 const taskWorkspace = taskBody?.task?.aerospace_workspace_id;
 if (taskWorkspace) snapshot.activeWorkspace = taskWorkspace;
 
-const current = await postJson("/workspace/capture", {});
+const current = await postJson("/workspace/capture", { capture_frames: false });
 const restore = await postJson("/workspace/restore", {
   confirm_execute: true,
   snapshot,
