@@ -1321,7 +1321,7 @@ final class QueueViewModelTests: XCTestCase {
         )
         XCTAssertEqual(
             viewModel.advanceToast,
-            .actionComplete("Master command failed: idempotency_conflict: duplicate idempotency key")
+            .actionComplete("Master command failed: Request already handled or still running. Wait a second, then try again.")
         )
     }
 

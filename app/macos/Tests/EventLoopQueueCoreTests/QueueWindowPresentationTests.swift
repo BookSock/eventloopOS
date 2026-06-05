@@ -82,7 +82,11 @@ final class QueueWindowPresentationTests: XCTestCase {
     func testUserFacingQueueStatusDetailStripsHTTPClientPrefix() {
         XCTAssertEqual(
             userFacingQueueStatusDetail("Queue request failed with HTTP 409: idempotency_conflict: duplicate idempotency key"),
-            "idempotency_conflict: duplicate idempotency key"
+            "Request already handled or still running. Wait a second, then try again."
+        )
+        XCTAssertEqual(
+            userFacingQueueStatusDetail("Queue request failed with HTTP 409: manual_mode_active: queue is paused while manual mode is active"),
+            "Manual Mode active. Press Ctrl-Option-M to return."
         )
         XCTAssertEqual(
             userFacingQueueStatusDetail("Workspace request failed with HTTP 422: schema_error: snapshot is required"),
@@ -101,7 +105,7 @@ final class QueueWindowPresentationTests: XCTestCase {
         )
         XCTAssertEqual(
             actionableQueueFailureMessage("Queue request failed with HTTP 409: idempotency_conflict: duplicate idempotency key"),
-            "idempotency_conflict: duplicate idempotency key"
+            "Request already handled or still running. Wait a second, then try again."
         )
     }
 

@@ -228,9 +228,26 @@ public func userFacingQueueStatusDetail(_ message: String) -> String {
         let status = rest[..<colonIndex]
         let messageStart = rest.index(after: colonIndex)
         let detail = rest[messageStart...].trimmingCharacters(in: .whitespacesAndNewlines)
+        if let known = knownUserFacingStatusDetail(status: String(status), detail: detail) {
+            return known
+        }
         return detail.isEmpty ? "HTTP \(status)" : detail
     }
     return normalized
+}
+
+private func knownUserFacingStatusDetail(status: String, detail: String) -> String? {
+    let lowered = detail.lowercased()
+    guard status.trimmingCharacters(in: .whitespacesAndNewlines) == "409" else {
+        return nil
+    }
+    if lowered.contains("manual_mode_active") {
+        return "Manual Mode active. Press Ctrl-Option-M to return."
+    }
+    if lowered.contains("idempotency_conflict") || lowered.contains("duplicate idempotency key") {
+        return "Request already handled or still running. Wait a second, then try again."
+    }
+    return nil
 }
 
 public func actionableQueueFailureMessage(_ message: String) -> String {
