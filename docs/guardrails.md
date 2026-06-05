@@ -45,6 +45,7 @@ Cost/noise notes:
 - macOS CI is path-scoped to `app/macos/**` and manual runs, so ordinary orchestrator/shared/docs commits do not launch a macOS runner.
 - CI and secret-scan both cancel stale in-progress runs for the same branch/ref. If several commits are pushed quickly, only the newest run should finish and email.
 - Secret scan intentionally stays broad. Docs, notes, and fixtures are common places for pasted tokens, so docs-only pushes still get gitleaks coverage.
+- [`bin/ci-workflows-audit`](../bin/ci-workflows-audit) is part of `pnpm typecheck` and fails if these CI cost/noise controls drift.
 
 ### Repo hygiene
 

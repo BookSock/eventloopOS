@@ -1,0 +1,218 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/ci-workflows-audit [--self-test]
+
+Checks GitHub Actions workflows for eventloopOS cost/noise guardrails:
+stale-run cancellation, docs/artifacts path ignores, Linux-only main CI,
+path-scoped macOS app CI, broad secret scanning, and opt-in AI review.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  await runSelfTest();
+  console.log("ci-workflows-audit self-test passed");
+  process.exit(0);
+}
+
+const result = await auditWorkflows(repoRoot);
+if (!result.ok) {
+  for (const error of result.errors) console.error(error);
+  process.exit(1);
+}
+
+console.log(`ci workflows audit passed: ${result.checked_count} workflows`);
+
+export async function auditWorkflows(root) {
+  const workflowsDir = path.join(root, ".github", "workflows");
+  const files = {
+    ci: path.join(workflowsDir, "ci.yml"),
+    macos: path.join(workflowsDir, "macos-app.yml"),
+    secretScan: path.join(workflowsDir, "secret-scan.yml"),
+    aiReview: path.join(workflowsDir, "ai-review-template.yml"),
+  };
+  const errors = [];
+  const texts = {};
+
+  for (const [key, filePath] of Object.entries(files)) {
+    try {
+      texts[key] = await readFile(filePath, "utf8");
+    } catch (error) {
+      errors.push(`${key} workflow missing/read failed: ${formatError(error)}`);
+    }
+  }
+  if (errors.length > 0) return { ok: false, checked_count: 0, errors };
+
+  auditSharedWorkflowGuards("ci.yml", texts.ci, errors);
+  requireIncludes(texts.ci, "runs-on: ubuntu-latest", "ci.yml must run on ubuntu-latest, not macOS", errors);
+  requireIncludes(texts.ci, "EVENTLOOPOS_SKIP_BROWSER_E2E=1 pnpm run ci", "ci.yml must skip browser/live mac work in Linux CI", errors);
+  requireIncludes(texts.ci, "paths-ignore:", "ci.yml must ignore docs/artifacts-only changes", errors);
+  requireIncludes(texts.ci, '"docs/**/*.md"', "ci.yml must ignore docs markdown-only changes", errors);
+  requireIncludes(texts.ci, '"artifacts/**"', "ci.yml must ignore artifact-only changes", errors);
+  requireIncludes(texts.ci, "timeout-minutes: 20", "ci.yml must keep bounded runtime", errors);
+
+  auditSharedWorkflowGuards("macos-app.yml", texts.macos, errors);
+  requireIncludes(texts.macos, "runs-on: macos-latest", "macos-app.yml must use GitHub macOS runner", errors);
+  requireIncludes(texts.macos, "paths:", "macos-app.yml must be path scoped", errors);
+  requireIncludes(texts.macos, '"app/macos/**"', "macos-app.yml must only auto-run for macOS app paths", errors);
+  requireIncludes(texts.macos, "swift test --package-path app/macos", "macos-app.yml must run Swift package tests", errors);
+  requireIncludes(texts.macos, "timeout-minutes: 20", "macos-app.yml must keep bounded runtime", errors);
+
+  auditSharedWorkflowGuards("secret-scan.yml", texts.secretScan, errors);
+  requireIncludes(texts.secretScan, "gitleaks/gitleaks-action@v2", "secret-scan.yml must use gitleaks action", errors);
+  requireIncludes(texts.secretScan, "GITLEAKS_CONFIG: .gitleaks.toml", "secret-scan.yml must use repo allow-list config", errors);
+  requireIncludes(texts.secretScan, "timeout-minutes: 10", "secret-scan.yml must keep bounded runtime", errors);
+  rejectIncludes(texts.secretScan, "paths-ignore:", "secret-scan.yml must stay broad; secrets can land in docs/fixtures", errors);
+
+  requireIncludes(texts.aiReview, "types: [labeled]", "ai-review-template.yml must only run on PR label events", errors);
+  requireIncludes(texts.aiReview, "github.event.label.name == 'needs-ai-review'", "ai-review-template.yml must be opt-in by label", errors);
+  requireIncludes(texts.aiReview, "pull-requests: write", "ai-review-template.yml must scope write permission to PR comments", errors);
+  requireIncludes(texts.aiReview, "contents: read", "ai-review-template.yml must keep contents permission read-only", errors);
+  requireIncludes(texts.aiReview, "not a paid AI pass", "ai-review-template.yml must state it is not a paid AI pass", errors);
+
+  return { ok: errors.length === 0, checked_count: Object.keys(files).length, errors };
+}
+
+function auditSharedWorkflowGuards(label, text, errors) {
+  requireIncludes(text, "concurrency:", `${label} must cancel stale runs`, errors);
+  requireIncludes(text, "cancel-in-progress: true", `${label} must cancel in-progress stale runs`, errors);
+  requireIncludes(text, "contents: read", `${label} must keep repository contents read-only`, errors);
+}
+
+function requireIncludes(text, needle, error, errors) {
+  if (!normalize(text).includes(normalize(needle))) errors.push(error);
+}
+
+function rejectIncludes(text, needle, error, errors) {
+  if (normalize(text).includes(normalize(needle))) errors.push(error);
+}
+
+function normalize(value) {
+  return String(value).replace(/\s+/g, " ").trim();
+}
+
+function formatError(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function runSelfTest() {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), "eventloopos-ci-workflows-audit-"));
+  try {
+    const workflows = path.join(tmp, ".github", "workflows");
+    await fsMkdir(workflows);
+    writeFixture(workflows, "ci.yml", `
+name: CI
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "README.md"
+      - "docs/**/*.md"
+      - "artifacts/**"
+  pull_request:
+    paths-ignore:
+      - "README.md"
+      - "docs/**/*.md"
+      - "artifacts/**"
+concurrency:
+  group: ci-\${{ github.workflow }}-\${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - run: EVENTLOOPOS_SKIP_BROWSER_E2E=1 pnpm run ci
+`);
+    writeFixture(workflows, "macos-app.yml", `
+name: macOS App
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/macos-app.yml"
+      - "app/macos/**"
+  pull_request:
+    paths:
+      - ".github/workflows/macos-app.yml"
+      - "app/macos/**"
+concurrency:
+  group: macos-app-\${{ github.workflow }}-\${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  swift-tests:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - run: swift test --package-path app/macos
+`);
+    writeFixture(workflows, "secret-scan.yml", `
+name: Secret Scan
+on:
+  push:
+    branches: [main]
+  pull_request:
+concurrency:
+  group: secret-scan-\${{ github.workflow }}-\${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+`);
+    writeFixture(workflows, "ai-review-template.yml", `
+name: AI Review Template
+on:
+  pull_request:
+    types: [labeled]
+jobs:
+  template-review:
+    if: github.event.label.name == 'needs-ai-review'
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - run: echo "not a paid AI pass"
+`);
+
+    const pass = await auditWorkflows(tmp);
+    assert.equal(pass.ok, true, pass.errors.join("\n"));
+
+    const badCi = path.join(workflows, "ci.yml");
+    writeFixture(workflows, "ci.yml", (await readFile(badCi, "utf8")).replace("cancel-in-progress: true", "cancel-in-progress: false"));
+    const fail = await auditWorkflows(tmp);
+    assert.equal(fail.ok, false);
+    assert.ok(fail.errors.includes("ci.yml must cancel in-progress stale runs"));
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
+async function fsMkdir(dir) {
+  const { mkdir } = await import("node:fs/promises");
+  await mkdir(dir, { recursive: true });
+}
+
+function writeFixture(dir, name, text) {
+  writeFileSync(path.join(dir, name), `${text.trim()}\n`);
+}
