@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
@@ -76,6 +76,7 @@ let screenshot;
 if (!skipScreenshot) {
   screenshot = runStep("screen sharing capture", "bin/local-screen-sharing-capture", [path.join(runDir, "screen-sharing.png")], env);
 }
+const screenshotImage = skipScreenshot ? undefined : imageArtifactSummary(path.join(runDir, "screen-sharing.png"));
 const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
 const queueLatencyManifestPath = path.join(runDir, "queue-latency.json");
 const workspaceLatencyManifestPath = path.join(runDir, "workspace-latency.json");
@@ -98,7 +99,7 @@ const checks = {
   latest_human_demo_proof_fresh: latestHumanDemoFreshness.ok === true,
   latest_human_demo_queue_has_two_papers: Number(templateJson?.queue_count ?? 0) >= 2,
   ambient_autosave_proof_ok: templateJson?.ambient_autosave_ok === true,
-  screen_sharing_capture_ok: skipScreenshot || screenshot?.status === 0,
+  screen_sharing_capture_ok: skipScreenshot || (screenshot?.status === 0 && screenshotImage?.ok === true),
   queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
   workspace_latency_ok: !workspaceLatencyEnabled || (workspaceLatency?.status === 0 && workspaceLatencyManifest?.ok === true),
   hotkey_feedback_latency_ok: !hotkeyLatencyEnabled || (hotkeyLatency?.status === 0 && hotkeyLatencyManifest?.ok === true),
@@ -142,6 +143,7 @@ const manifest = {
     ok: screenshot.status === 0,
     output: path.join(runDir, "screen-sharing.png"),
     exit_code: screenshot.status,
+    image: screenshotImage,
   } : {
     skipped: true,
   },
@@ -309,6 +311,94 @@ function readJsonIfPresent(relativePath) {
   }
 }
 
+function imageArtifactSummary(relativePath) {
+  const absolutePath = path.resolve(repoRoot, relativePath);
+  if (!existsSync(absolutePath)) {
+    return {
+      ok: false,
+      path: relativePath,
+      reason: "missing",
+    };
+  }
+  const bytes = statSync(absolutePath).size;
+  if (bytes <= 0) {
+    return {
+      ok: false,
+      path: relativePath,
+      bytes,
+      reason: "empty",
+    };
+  }
+  try {
+    const buffer = readFileSync(absolutePath);
+    const parsed = parseImageDimensions(buffer);
+    const ok = parsed.width > 0 && parsed.height > 0;
+    return {
+      ok,
+      path: relativePath,
+      bytes,
+      format: parsed.format,
+      width: parsed.width,
+      height: parsed.height,
+      dimensions: `${parsed.width}x${parsed.height}`,
+      reason: ok ? "ok" : "invalid_dimensions",
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      path: relativePath,
+      bytes,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function parseImageDimensions(buffer) {
+  if (buffer.length >= 24
+    && buffer[0] === 0x89
+    && buffer[1] === 0x50
+    && buffer[2] === 0x4e
+    && buffer[3] === 0x47
+    && buffer[4] === 0x0d
+    && buffer[5] === 0x0a
+    && buffer[6] === 0x1a
+    && buffer[7] === 0x0a) {
+    return {
+      format: "png",
+      width: buffer.readUInt32BE(16),
+      height: buffer.readUInt32BE(20),
+    };
+  }
+  if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8) {
+    for (let offset = 2; offset + 8 < buffer.length;) {
+      if (buffer[offset] !== 0xff) {
+        offset += 1;
+        continue;
+      }
+      const marker = buffer[offset + 1];
+      if (marker === 0xd9 || marker === 0xda) break;
+      const segmentLength = buffer.readUInt16BE(offset + 2);
+      if (segmentLength < 2) throw new Error("invalid_jpeg_segment");
+      if (isJpegStartOfFrame(marker)) {
+        return {
+          format: "jpeg",
+          width: buffer.readUInt16BE(offset + 7),
+          height: buffer.readUInt16BE(offset + 5),
+        };
+      }
+      offset += 2 + segmentLength;
+    }
+  }
+  throw new Error("unsupported_image_format");
+}
+
+function isJpegStartOfFrame(marker) {
+  return (marker >= 0xc0 && marker <= 0xc3)
+    || (marker >= 0xc5 && marker <= 0xc7)
+    || (marker >= 0xc9 && marker <= 0xcb)
+    || (marker >= 0xcd && marker <= 0xcf);
+}
+
 function renderReadyMarkdown(manifest) {
   const latest = manifest.latest_human_demo;
   const screenshot = manifest.screen_sharing_capture;
@@ -324,7 +414,7 @@ function renderReadyMarkdown(manifest) {
 - Latest proof: ${latest?.manifest_path ?? ""}
 - Latest proof screenshot: ${latest?.screenshot_path ?? ""}
 - Latest proof freshness: ${freshness ? `${freshness.ok ? "ok" : "stale"} age=${freshness.age_hours ?? ""}h max=${freshness.max_age_hours}h${freshness.allowed_stale ? " allowed" : ""}` : ""}
-- Fresh Screen Sharing capture: ${screenshot?.output ?? "skipped"}
+- Fresh Screen Sharing capture: ${screenshot?.output ?? "skipped"}${screenshot?.image?.dimensions ? ` (${screenshot.image.dimensions}, ${screenshot.image.bytes} bytes)` : ""}
 - Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
 - Workspace latency: ${workspaceLatency?.manifest_path ?? "skipped"}${manifest.workspace_latency_required ? " (required)" : ""}
 - Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}${manifest.hotkey_latency_required ? " (required)" : ""}
@@ -381,6 +471,22 @@ function runSelfTest() {
   });
   assert.equal(demoProofFreshness("2026-06-03T10:00:00.000Z", "2026-06-04T20:00:00.000Z", 24, false).ok, false);
   assert.equal(demoProofFreshness("bad", "2026-06-04T20:00:00.000Z", 24, true).ok, true);
+  const png = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+    0x00, 0x00, 0x07, 0x80,
+    0x00, 0x00, 0x04, 0x38,
+  ]);
+  assert.deepEqual(parseImageDimensions(png), { format: "png", width: 1920, height: 1080 });
+  const jpeg = Buffer.from([
+    0xff, 0xd8,
+    0xff, 0xe0, 0x00, 0x04, 0x00, 0x00,
+    0xff, 0xc0, 0x00, 0x0b, 0x08,
+    0x02, 0xd0,
+    0x05, 0x00,
+    0x03, 0x01, 0x11, 0x00,
+  ]);
+  assert.deepEqual(parseImageDimensions(jpeg), { format: "jpeg", width: 1280, height: 720 });
   const markdown = renderReadyMarkdown({
     ok: true,
     profile: "lab-human-demo",
@@ -391,7 +497,10 @@ function runSelfTest() {
       screenshot_path: "artifacts/lab-runs/demo/screen-sharing.png",
       freshness: { ok: true, age_hours: 1.25, max_age_hours: 24, allowed_stale: false },
     },
-    screen_sharing_capture: { output: "artifacts/lab-runs/ready/screen-sharing.png" },
+    screen_sharing_capture: {
+      output: "artifacts/lab-runs/ready/screen-sharing.png",
+      image: { dimensions: "1280x720", bytes: 2048 },
+    },
     queue_latency: { manifest_path: "artifacts/lab-runs/ready/queue-latency.json" },
     queue_latency_required: true,
     workspace_latency: { manifest_path: "artifacts/lab-runs/ready/workspace-latency.json" },
@@ -401,6 +510,7 @@ function runSelfTest() {
   assert.match(markdown, /Ready: yes/);
   assert.match(markdown, /artifacts\/lab-runs\/demo\/manifest\.json/);
   assert.match(markdown, /Latest proof freshness: ok age=1.25h max=24h/);
+  assert.match(markdown, /Fresh Screen Sharing capture: artifacts\/lab-runs\/ready\/screen-sharing\.png \(1280x720, 2048 bytes\)/);
   assert.match(markdown, /Hotkey feedback latency: skipped/);
   assert.match(markdown, /Queue latency: artifacts\/lab-runs\/ready\/queue-latency\.json/);
   assert.match(markdown, /Workspace latency: artifacts\/lab-runs\/ready\/workspace-latency\.json/);

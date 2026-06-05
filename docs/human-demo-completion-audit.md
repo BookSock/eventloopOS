@@ -27,7 +27,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 | Ambient autosave after move | Human demo `proofs.ambient_autosave.ok=true`; `ambient_workspace_saver` unit/integration tests; live activity emits save/skip events | Proven by automation |
 | Snapshot capture avoids unrelated lab/system windows | Human demo queue context includes only shared TextEdit and matching Chrome; ambient saver filtering tests cover blocklisted apps | Proven by automation |
 | Autosave observability | `/activity` shows `ambient_workspace_save_*`; `ambient_workspace_saver` tests cover commit/skip/fail paths | Proven |
-| Local Screen Sharing window-only capture | `bin/local-screen-sharing-capture`; capture manifests use `capture_mode=local_screen_sharing_window`; screenshots show only Screen Sharing window | Proven |
+| Local Screen Sharing window-only capture | `bin/local-screen-sharing-capture`; capture manifests use `capture_mode=local_screen_sharing_window`; `bin/human-demo-ready` requires a readable PNG/JPEG screenshot artifact with dimensions before passing; screenshots show only Screen Sharing window | Proven |
 | Repeatable human demo setup | `bin/lab-mac-human-demo-setup`; latest manifest `ok=true`, queue count 2 | Proven |
 | Visible feedback during demo | Queue footer `feedback=...`; `QueueHarnessStatusTextTests`; `QueueViewModelTests` post-action lease-conflict coverage proves Done/Defer/Send show saved-action feedback instead of surfacing 409 noise; latest screenshot shows `feedback=ready` | Proven |
 | Stale readiness cannot be reused silently | `bin/human-demo-ready` requires latest proof freshness by default; `bin/human-demo-result-template --write` refuses any failed readiness check | Proven |

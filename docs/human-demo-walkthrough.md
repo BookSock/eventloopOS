@@ -31,6 +31,9 @@ bin/human-demo-ready
 This does not restart or reseed the demo. It checks the current lab dogfood stack,
 verifies the latest human-demo proof artifact, captures only the local Screen
 Sharing window, and writes `artifacts/lab-runs/*-human-demo-ready/READY.md`.
+The Screen Sharing capture gate verifies the artifact exists and has readable
+PNG/JPEG dimensions, so readiness cannot pass from an empty or invalid
+screenshot file.
 Run `bin/human-demo-ready` after the queue app has Accessibility permission. By
 default the latest proof must be no older than 24 hours; use
 `EVENTLOOPOS_HUMAN_DEMO_PROOF_MAX_AGE_HOURS` or
