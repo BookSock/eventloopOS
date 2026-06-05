@@ -68,16 +68,19 @@ const request = buildPrimitiveRequest({
 
 const client = createPrimitiveHttpClient({
   catalog,
-  baseUrl: "http://127.0.0.1:4377"
+  baseUrl: "http://127.0.0.1:4377",
+  timeoutMs: 5_000
 });
 const lineage = await client.request("GET", "/queue/:id/lineage", {
   pathParams: { id: "qit_feedback_001" },
-  query: { limit: 25 }
+  query: { limit: 25 },
+  timeoutMs: 1_500
 });
 
 const ops = createPrimitiveOperationsClient({
   catalog,
-  baseUrl: "http://127.0.0.1:4377"
+  baseUrl: "http://127.0.0.1:4377",
+  timeoutMs: 5_000
 });
 await ops.queue.done("qit_feedback_001", { actor_id: "human" });
 await ops.taskWindowClaims.create({

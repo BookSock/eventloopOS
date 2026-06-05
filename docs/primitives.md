@@ -56,13 +56,14 @@ entry, and that cataloged HTTP routes cannot silently drift back to freeform
 envelopes.
 The shared primitive HTTP client validates request and response bodies and
 throws typed errors for request-build failures, non-2xx responses, invalid JSON,
-and response-schema mismatches so builders can recover from malformed inputs,
-conflicts, dependency failures, and server drift without string-matching generic
-exceptions. Request-build errors expose a stable `kind` and affected parameter
-for unknown routes, missing path/query params, invalid query values, and invalid
-request bodies. HTTP errors expose `status`, server `code`, server detail text,
-route metadata, and exported guard helpers for branching on recoverable cases
-like manual-mode pauses or stale task-session bindings.
+response-schema mismatches, and timed-out calls so builders can recover from
+malformed inputs, conflicts, dependency failures, server drift, and stalled
+local orchestrators without string-matching generic exceptions. Request-build
+errors expose a stable `kind` and affected parameter for unknown routes, missing
+path/query params, invalid query values, and invalid request bodies. HTTP errors
+expose `status`, server `code`, server detail text, route metadata, and exported
+guard helpers for branching on recoverable cases like manual-mode pauses or
+stale task-session bindings. Timeout errors expose the route and `timeoutMs`.
 It also exposes `createPrimitiveOperationsClient`, a small typed convenience
 layer for common master-command, manual-mode, task-workspace, queue,
 workspace, task-session, Codex/Claude agent, task-window-claim,

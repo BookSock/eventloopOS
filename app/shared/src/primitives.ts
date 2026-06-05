@@ -453,13 +453,20 @@ export type PrimitiveOperationsClient = {
   };
 };
 
-export type PrimitiveHttpClientRequestOptions = Omit<PrimitiveRequestBuildInput, "catalog" | "method" | "path" | "baseUrl">;
+export type PrimitiveHttpClientRequestRuntimeOptions = {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+};
+export type PrimitiveHttpClientRequestOptions =
+  & Omit<PrimitiveRequestBuildInput, "catalog" | "method" | "path" | "baseUrl">
+  & PrimitiveHttpClientRequestRuntimeOptions;
 
 export type PrimitiveHttpClientOptions = {
   catalog: PrimitiveCatalog;
   baseUrl: string;
   fetch?: typeof fetch;
   headers?: Record<string, string>;
+  timeoutMs?: number;
 };
 
 export type PrimitiveErrorDetails = {
@@ -562,6 +569,16 @@ export class PrimitiveResponseValidationError extends PrimitiveError {
   }
 }
 
+export class PrimitiveTimeoutError extends PrimitiveError {
+  readonly timeoutMs: number;
+
+  constructor(message: string, details: PrimitiveErrorDetails & { timeoutMs: number }) {
+    super(message, details);
+    this.name = "PrimitiveTimeoutError";
+    this.timeoutMs = details.timeoutMs;
+  }
+}
+
 export type PrimitiveHttpErrorMatch = {
   status?: number;
   code?: string;
@@ -579,6 +596,7 @@ export type PrimitiveErrorSummary = {
   status?: number;
   code?: string;
   detail?: string;
+  timeoutMs?: number;
 };
 
 export function isPrimitiveHttpError(error: unknown, match: PrimitiveHttpErrorMatch = {}): error is PrimitiveHttpError {
@@ -612,6 +630,9 @@ export function primitiveErrorSummary(error: unknown): PrimitiveErrorSummary {
     if (error instanceof PrimitiveRequestBuildError) {
       summary.kind = error.kind;
       summary.parameter = error.parameter;
+    }
+    if (error instanceof PrimitiveTimeoutError) {
+      summary.timeoutMs = error.timeoutMs;
     }
     return summary;
   }
@@ -757,11 +778,37 @@ export function createPrimitiveHttpClient(options: PrimitiveHttpClientOptions): 
           ...(input.headers ?? {})
         }
       });
-      const response = await fetchImpl(request.url, {
-        method: request.method,
-        headers: request.headers,
-        body: request.body
+      const abortSignal = primitiveAbortSignal({
+        signal: input.signal,
+        timeoutMs: input.timeoutMs ?? options.timeoutMs,
+        request
       });
+      let response: Response;
+      try {
+        response = await fetchImpl(request.url, {
+          method: request.method,
+          headers: request.headers,
+          body: request.body,
+          signal: abortSignal.signal
+        });
+      } catch (error) {
+        if (abortSignal.timedOut()) {
+          if (error instanceof PrimitiveTimeoutError) throw error;
+          throw new PrimitiveTimeoutError(
+            `Primitive route timed out after ${abortSignal.timeoutMs}ms: ${request.method} ${request.path}`,
+            {
+              route: request.route,
+              method: request.method,
+              path: request.path,
+              timeoutMs: abortSignal.timeoutMs ?? 0,
+              cause: error
+            }
+          );
+        }
+        throw error;
+      } finally {
+        abortSignal.cleanup();
+      }
       const text = await response.text();
       const payload = parsePrimitiveResponsePayload(request, text);
       if (!response.ok) {
@@ -794,6 +841,69 @@ export function createPrimitiveHttpClient(options: PrimitiveHttpClientOptions): 
       }
     }
   };
+}
+
+function primitiveAbortSignal(input: {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  request: PrimitiveRequest;
+}): {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  timedOut(): boolean;
+  cleanup(): void;
+} {
+  const timeoutMs = normalizePrimitiveTimeoutMs(input.timeoutMs);
+  if (timeoutMs === undefined && input.signal === undefined) {
+    return {
+      timedOut: () => false,
+      cleanup: () => {}
+    };
+  }
+
+  const controller = new AbortController();
+  let timedOut = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+
+  if (input.signal) {
+    onAbort = () => controller.abort(input.signal?.reason);
+    if (input.signal.aborted) {
+      onAbort();
+    } else {
+      input.signal.addEventListener("abort", onAbort, { once: true });
+    }
+  }
+
+  if (timeoutMs !== undefined) {
+    timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort(
+        new PrimitiveTimeoutError(`Primitive route timed out after ${timeoutMs}ms: ${input.request.method} ${input.request.path}`, {
+          route: input.request.route,
+          method: input.request.method,
+          path: input.request.path,
+          timeoutMs
+        })
+      );
+    }, timeoutMs);
+  }
+
+  return {
+    signal: controller.signal,
+    timeoutMs,
+    timedOut: () => timedOut,
+    cleanup: () => {
+      if (timeout) clearTimeout(timeout);
+      if (input.signal && onAbort) input.signal.removeEventListener("abort", onAbort);
+    }
+  };
+}
+
+function normalizePrimitiveTimeoutMs(timeoutMs: number | undefined): number | undefined {
+  if (timeoutMs === undefined) return undefined;
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) return undefined;
+  return Math.trunc(timeoutMs);
 }
 
 export function createPrimitiveOperationsClient(options: PrimitiveHttpClientOptions): PrimitiveOperationsClient {

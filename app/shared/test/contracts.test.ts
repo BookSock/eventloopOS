@@ -32,6 +32,7 @@ import {
   PrimitiveRequestBuildError,
   PrimitiveResponseParseError,
   PrimitiveResponseValidationError,
+  PrimitiveTimeoutError,
   primitiveRoutes,
   routeHasRequestBody,
   selectPrimitiveLatencyBudgets,
@@ -769,6 +770,46 @@ describe("primitive catalog SDK boundary", () => {
       expect(primitiveError.route?.path).toBe("/onboarding/approvals/batch");
       expect(primitiveError.payload).toEqual({ ok: true });
       expect(primitiveError.cause).toBeTruthy();
+    }
+  });
+
+  it("times out stalled primitive HTTP calls with a typed error", async () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    let observedSignal: AbortSignal | undefined;
+    const fakeFetch: typeof fetch = async (_url, init) => {
+      observedSignal = init?.signal ?? undefined;
+      if (!observedSignal) throw new Error("expected abort signal");
+      return await new Promise<Response>((_resolve, reject) => {
+        if (observedSignal?.aborted) {
+          reject(observedSignal.reason);
+          return;
+        }
+        observedSignal?.addEventListener("abort", () => reject(observedSignal?.reason), { once: true });
+      });
+    };
+    const client = createPrimitiveHttpClient({
+      catalog,
+      baseUrl: "http://127.0.0.1:4480",
+      fetch: fakeFetch,
+      timeoutMs: 5
+    });
+
+    try {
+      await client.request("GET", "/health");
+      throw new Error("expected primitive timeout error");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PrimitiveTimeoutError);
+      const primitiveError = error as PrimitiveTimeoutError;
+      expect(primitiveError.timeoutMs).toBe(5);
+      expect(primitiveError.method).toBe("GET");
+      expect(primitiveError.path).toBe("/health");
+      expect(observedSignal?.aborted).toBe(true);
+      expect(primitiveErrorSummary(error)).toMatchObject({
+        name: "PrimitiveTimeoutError",
+        method: "GET",
+        path: "/health",
+        timeoutMs: 5
+      });
     }
   });
 
