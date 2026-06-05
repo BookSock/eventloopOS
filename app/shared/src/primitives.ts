@@ -254,6 +254,24 @@ export type PrimitiveCapabilityFilter = {
   requireResponsivenessCritical?: boolean;
 };
 
+export type PrimitiveSelfTestCatalog = {
+  primitives?: Array<{
+    id?: unknown;
+    self_tests?: unknown;
+  }>;
+};
+
+export type PrimitiveSelfTestCommand = {
+  command: string;
+  primitiveIds: string[];
+};
+
+export type PrimitiveSelfTestSelection = {
+  selectedPrimitiveIds: string[];
+  missingPrimitiveIds: string[];
+  commands: PrimitiveSelfTestCommand[];
+};
+
 export type PrimitiveRequestBuildInput = {
   catalog: PrimitiveCatalog;
   method: PrimitiveHttpMethod | Lowercase<PrimitiveHttpMethod>;
@@ -1080,6 +1098,44 @@ export function selectPrimitiveCapabilities(
   });
 }
 
+export function selectPrimitiveSelfTestCommands(
+  catalog: PrimitiveSelfTestCatalog,
+  primitiveIds: string[] = []
+): PrimitiveSelfTestSelection {
+  const primitives = Array.isArray(catalog.primitives) ? catalog.primitives : [];
+  const catalogIds = new Set(primitives.map((primitive) => readPrimitiveString(primitive.id)).filter(isNonEmptyString));
+  const requested = Array.from(new Set(primitiveIds.filter(isNonEmptyString)));
+  const missingPrimitiveIds = requested.filter((id) => !catalogIds.has(id));
+  const selectedPrimitiveIds = requested.length > 0
+    ? requested.filter((id) => catalogIds.has(id))
+    : Array.from(catalogIds).sort();
+  const selectedSet = new Set(selectedPrimitiveIds);
+  const grouped = new Map<string, Set<string>>();
+
+  for (const primitive of primitives) {
+    const primitiveId = readPrimitiveString(primitive.id);
+    if (!primitiveId || !selectedSet.has(primitiveId)) continue;
+    const selfTests = Array.isArray(primitive.self_tests) ? primitive.self_tests : [];
+    for (const rawCommand of selfTests) {
+      const command = readPrimitiveString(rawCommand);
+      if (!command) continue;
+      if (!grouped.has(command)) grouped.set(command, new Set());
+      grouped.get(command)?.add(primitiveId);
+    }
+  }
+
+  return {
+    selectedPrimitiveIds,
+    missingPrimitiveIds,
+    commands: Array.from(grouped.entries())
+      .map(([command, primitiveIdSet]) => ({
+        command,
+        primitiveIds: Array.from(primitiveIdSet).sort()
+      }))
+      .sort((left, right) => left.command.localeCompare(right.command))
+  };
+}
+
 function summarizePrimitiveCapability(primitive: PrimitiveDefinition): PrimitiveCapabilitySummary {
   const http = primitive.http ?? [];
   const cli = primitive.cli ?? [];
@@ -1119,6 +1175,14 @@ function classifyPrimitiveCapability(primitive: PrimitiveDefinition, routes: Pri
     return "observability";
   }
   return "runtime";
+}
+
+function readPrimitiveString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isNonEmptyString(value: string | undefined): value is string {
+  return value !== undefined;
 }
 
 function countBy<T>(items: T[], keyFn: (item: T) => string): Record<string, number> {

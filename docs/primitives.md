@@ -20,6 +20,9 @@ flag, and request/response schema coverage.
 minimum route count, CLI availability, self-test coverage, and proof coverage
 plus latency-budget and responsiveness-critical coverage so builder tools can
 choose reusable surfaces without parsing prose docs.
+`selectPrimitiveSelfTestCommands` returns the runnable self-test commands for
+all primitives or a requested primitive subset, including selected ids, missing
+ids, and the primitive ids covered by each de-duplicated command.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.

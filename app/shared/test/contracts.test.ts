@@ -33,6 +33,7 @@ import {
   PrimitiveResponseValidationError,
   primitiveRoutes,
   routeHasRequestBody,
+  selectPrimitiveSelfTestCommands,
   selectPrimitiveCapabilities,
   summarizePrimitiveCatalog,
   validatePrimitiveResponse
@@ -338,6 +339,31 @@ describe("primitive catalog SDK boundary", () => {
       "master_command_router",
       "mac_app_hotkeys"
     ]);
+  });
+
+  it("selects primitive self-test commands with stable primitive coverage", () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const selection = selectPrimitiveSelfTestCommands(catalog);
+
+    expect(selection.missingPrimitiveIds).toEqual([]);
+    expect(selection.selectedPrimitiveIds).toHaveLength(18);
+    expect(selection.commands.length).toBe(9);
+    expect(selection.commands).toContainEqual({
+      command: "pnpm --filter @eventloopos/orchestrator run test:runtime-spine",
+      primitiveIds: ["runtime_spine"]
+    });
+    expect(selection.commands).toContainEqual(expect.objectContaining({
+      command: "pnpm --filter @eventloopos/shared run test:primitive-ops",
+      primitiveIds: expect.arrayContaining(["workspace_control"])
+    }));
+
+    const filtered = selectPrimitiveSelfTestCommands(catalog, ["workspace_control", "missing", "workspace_control"]);
+    expect(filtered.selectedPrimitiveIds).toEqual(["workspace_control"]);
+    expect(filtered.missingPrimitiveIds).toEqual(["missing"]);
+    expect(filtered.commands).toEqual([{
+      command: "pnpm --filter @eventloopos/shared run test:primitive-ops",
+      primitiveIds: ["workspace_control"]
+    }]);
   });
 
   it("rejects primitive routes that drift back to freeform mutating bodies", () => {
