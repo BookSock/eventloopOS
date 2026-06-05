@@ -789,24 +789,28 @@ export function primitiveOperationId(primitiveId: string, method: string, routeP
   return [primitiveId, method.toLowerCase(), routeName].filter(Boolean).join("_");
 }
 
-export function getPrimitiveOperation(catalog: PrimitiveCatalog, operation: string): PrimitiveOperationRoute | undefined {
-  for (const primitive of catalog.primitives) {
+export function listPrimitiveOperations(
+  catalog: PrimitiveCatalog,
+  filter: PrimitiveCapabilityFilter = {}
+): PrimitiveOperationRoute[] {
+  const selectedIds = new Set(selectPrimitiveCapabilities(catalog, filter).map((primitive) => primitive.id));
+  return catalog.primitives.flatMap((primitive) => {
+    if (!selectedIds.has(primitive.id)) return [];
     const category = classifyPrimitiveCapability(primitive, primitive.http ?? []);
-    for (const route of primitive.http ?? []) {
-      const routeOperation = primitiveOperationId(primitive.id, route.method, route.path);
-      if (routeOperation !== operation) continue;
-      return {
-        operation: routeOperation,
-        primitiveId: primitive.id,
-        primitiveTitle: primitive.title,
-        primitiveStatus: primitive.status,
-        primitiveCategory: category,
-        primitiveSummary: primitive.summary,
-        route
-      };
-    }
-  }
-  return undefined;
+    return (primitive.http ?? []).map((route) => ({
+      operation: primitiveOperationId(primitive.id, route.method, route.path),
+      primitiveId: primitive.id,
+      primitiveTitle: primitive.title,
+      primitiveStatus: primitive.status,
+      primitiveCategory: category,
+      primitiveSummary: primitive.summary,
+      route
+    }));
+  });
+}
+
+export function getPrimitiveOperation(catalog: PrimitiveCatalog, operation: string): PrimitiveOperationRoute | undefined {
+  return listPrimitiveOperations(catalog).find((candidate) => candidate.operation === operation);
 }
 
 export function buildPrimitiveRequest(input: PrimitiveRequestBuildInput): PrimitiveRequest {

@@ -31,6 +31,7 @@ import {
   createPrimitiveOperationsClient,
   getPrimitiveOperation,
   getPrimitiveRoute,
+  listPrimitiveOperations,
   PrimitiveHttpError,
   isPrimitiveHttpError,
   isPrimitiveRequestBuildError,
@@ -49,12 +50,14 @@ import {
 
 const catalog = parsePrimitiveCatalog(catalogJson);
 const route = getPrimitiveRoute(catalog, "POST", "/onboarding/approvals/batch");
+const operations = listPrimitiveOperations(catalog, { categories: ["os_control"] });
 const operation = getPrimitiveOperation(catalog, "queue_paper_routing_get_queue_by_id_lineage");
 const summary = summarizePrimitiveCatalog(catalog);
 
 console.log(summary.statusCounts);
 console.log(summary.categoryCounts);
 console.log(summary.primitives.find((primitive) => primitive.id === "workspace_control"));
+console.log(operations.map((operation) => operation.operation));
 console.log(selectPrimitiveCapabilities(catalog, {
   categories: ["os_control"],
   statuses: ["stable_enough", "dogfood"],
@@ -158,10 +161,11 @@ responsiveness checks for selected API surfaces.
 primitive ids, de-duplicated self-test commands, and latency proof hooks in one
 object for builders that need a single verification plan before using a
 primitive subset.
-`getPrimitiveOperation` and `buildPrimitiveOperationRequest` resolve the stable
-operation ids from `docs/primitives.index.json` back into catalog routes and
-validated requests, so generated/LLM-authored builders can call primitives
-without hard-coding method/path pairs.
+`listPrimitiveOperations`, `getPrimitiveOperation`, and
+`buildPrimitiveOperationRequest` expose the stable operation ids from
+`docs/primitives.index.json` back into catalog routes and validated requests,
+so generated/LLM-authored builders can discover and call primitives without
+hard-coding method/path pairs.
 `createPrimitiveOperationHttpClient` executes those operation ids through the
 same validating HTTP client, preserving timeout, request-build, HTTP-status,
 response-parse, and response-schema errors.

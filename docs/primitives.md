@@ -79,11 +79,12 @@ path/query params, invalid query values, and invalid request bodies. HTTP errors
 expose `status`, server `code`, server detail text, route metadata, and exported
 guard helpers for branching on recoverable cases like manual-mode pauses or
 stale task-session bindings. Timeout errors expose the route and `timeoutMs`.
-The shared SDK also resolves stable operation ids from
+The shared SDK also lists and resolves stable operation ids from
 `docs/primitives.index.json` back to catalog routes and validated requests with
-`getPrimitiveOperation` and `buildPrimitiveOperationRequest`, so generated
-tools can target `queue_paper_routing_get_queue_by_id_lineage`-style operations
-without hard-coding method/path pairs.
+`listPrimitiveOperations`, `getPrimitiveOperation`, and
+`buildPrimitiveOperationRequest`, so generated tools can discover and target
+`queue_paper_routing_get_queue_by_id_lineage`-style operations without
+hard-coding method/path pairs.
 `createPrimitiveOperationHttpClient` executes the same operation ids over HTTP
 with request/response validation and typed timeout/status/schema errors.
 The SDK now exports guard helpers for every recoverable primitive error class:
