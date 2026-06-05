@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { createPrimitiveExampleOperations } from "./lib/primitive-sdk-loader.mjs";
 
 const args = process.argv.slice(2);
 
@@ -16,20 +17,27 @@ if (args.includes("-h") || args.includes("--help") || args.length === 0) {
   node examples/primitives/restore-my-desk.mjs capture --output desk.json [--url http://127.0.0.1:4377]
   node examples/primitives/restore-my-desk.mjs plan --input desk.json [--url http://127.0.0.1:4377]
   node examples/primitives/restore-my-desk.mjs restore --input desk.json --execute [--url http://127.0.0.1:4377]
+  node examples/primitives/restore-my-desk.mjs capture --output desk.json --timeout-ms 5000
 
 Small example app for the workspace_control primitive. It stores a workspace
 snapshot in a plain JSON file, previews the restore plan, and only executes when
---execute is present.
+--execute is present. Live calls use @eventloopos/shared/primitives for catalog
+validation, typed operation helpers, idempotency headers, and request timeouts.
 `);
   process.exit(0);
 }
 
 const options = parseArgs(args);
 const baseUrl = options.url ?? process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377";
+const { ops } = await createPrimitiveExampleOperations({
+  baseUrl,
+  catalogPath: options.catalog,
+  timeoutMs: options.timeoutMs,
+});
 
 if (options.command === "capture") {
   if (!options.output) die("capture requires --output");
-  const body = await requestJson(baseUrl, "/workspace/capture", { method: "POST", body: {} });
+  const body = await ops.workspace.capture();
   if (!body.snapshot) die("capture response did not include snapshot");
   await fs.mkdir(path.dirname(path.resolve(options.output)), { recursive: true });
   await fs.writeFile(options.output, `${JSON.stringify(body.snapshot, null, 2)}\n`, "utf8");
@@ -37,18 +45,14 @@ if (options.command === "capture") {
 } else if (options.command === "plan") {
   if (!options.input) die("plan requires --input");
   const snapshot = JSON.parse(await fs.readFile(options.input, "utf8"));
-  const body = await requestJson(baseUrl, "/workspace/restore-plan", { method: "POST", body: { snapshot } });
+  const body = await ops.workspace.restorePlan({ snapshot });
   console.log(JSON.stringify(body, null, 2));
 } else if (options.command === "restore") {
   if (!options.input) die("restore requires --input");
   if (!options.execute) die("restore requires --execute");
   const snapshot = JSON.parse(await fs.readFile(options.input, "utf8"));
   const idempotencyKey = options.idempotencyKey ?? `restore-my-desk-${Date.now()}`;
-  const body = await requestJson(baseUrl, "/workspace/restore", {
-    method: "POST",
-    headers: { "idempotency-key": idempotencyKey },
-    body: { snapshot, confirm_execute: true },
-  });
+  const body = await ops.workspace.restore({ snapshot, confirm_execute: true }, idempotencyKey);
   console.log(JSON.stringify(body, null, 2));
 } else {
   die(`unknown command: ${options.command}`);
@@ -65,21 +69,12 @@ function parseArgs(argv) {
     if (arg === "--input") options.input = readValue(argv, ++index, arg);
     else if (arg === "--output") options.output = readValue(argv, ++index, arg);
     else if (arg === "--url") options.url = readValue(argv, ++index, arg);
+    else if (arg === "--catalog") options.catalog = readValue(argv, ++index, arg);
+    else if (arg === "--timeout-ms") options.timeoutMs = parsePositiveInteger(readValue(argv, ++index, arg), arg);
     else if (arg === "--idempotency-key") options.idempotencyKey = readValue(argv, ++index, arg);
     else die(`unknown option: ${arg}`);
   }
   return options;
-}
-
-async function requestJson(baseUrl, routePath, { method, body, headers = {} }) {
-  const response = await fetch(new URL(routePath, baseUrl), {
-    method,
-    headers: { "content-type": "application/json", ...headers },
-    body: JSON.stringify(body),
-  });
-  const payload = await response.json();
-  if (!response.ok) throw new Error(`${method} ${routePath} failed: HTTP ${response.status} ${JSON.stringify(payload)}`);
-  return payload;
 }
 
 function readValue(argv, index, flag) {
@@ -91,6 +86,12 @@ function readValue(argv, index, flag) {
 function die(message) {
   console.error(message);
   process.exit(2);
+}
+
+function parsePositiveInteger(value, flag) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) die(`${flag} must be a positive integer`);
+  return parsed;
 }
 
 async function runSelfTest() {

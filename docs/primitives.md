@@ -81,6 +81,10 @@ parsing, can also print self-test commands for a primitive subset, and builds
 budgets for responsiveness-critical primitives or a combined proof plan for a
 builder-selected primitive subset with
 `node examples/primitives/discover-primitives.mjs proof-plan --id workspace_control --json`.
+The live queue, workspace, and window-hotkey examples now use the same shared
+operation client instead of hand-rolled fetch calls, so example apps exercise
+catalog validation, typed response parsing, idempotency headers, and request
+timeouts.
 Root `pnpm typecheck` runs their self-tests.
 
 Status labels:

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { loadPrimitiveSdk } from "./lib/primitive-sdk-loader.mjs";
 
 const args = process.argv.slice(2);
 
@@ -324,38 +324,6 @@ function readValue(argv, index, flag) {
 function die(message) {
   console.error(message);
   process.exit(2);
-}
-
-async function loadPrimitiveSdk() {
-  const sdkUrl = new URL("../../app/shared/dist/primitives.js", import.meta.url);
-  try {
-    const sdk = await import(sdkUrl.href);
-    if (hasPrimitiveSdkExports(sdk)) return sdk;
-    throw new Error("app/shared/dist/primitives.js is missing required primitive SDK exports");
-  } catch (firstError) {
-    try {
-      execFileSync("pnpm", ["--filter", "@eventloopos/shared", "build"], {
-        cwd: new URL("../..", import.meta.url),
-        stdio: "ignore",
-      });
-      const sdk = await import(`${sdkUrl.href}?built=${Date.now()}`);
-      if (hasPrimitiveSdkExports(sdk)) return sdk;
-      throw new Error("rebuilt app/shared/dist/primitives.js is missing required primitive SDK exports");
-    } catch (secondError) {
-      const message = secondError instanceof Error ? secondError.message : String(secondError);
-      const firstMessage = firstError instanceof Error ? firstError.message : String(firstError);
-      die(`failed to load @eventloopos/shared/primitives SDK from app/shared/dist/primitives.js: ${firstMessage}; build failed: ${message}`);
-    }
-  }
-}
-
-function hasPrimitiveSdkExports(sdk) {
-  return typeof sdk.parsePrimitiveCatalog === "function"
-    && typeof sdk.summarizePrimitiveCatalog === "function"
-    && typeof sdk.selectPrimitiveCapabilities === "function"
-    && typeof sdk.selectPrimitiveSelfTestCommands === "function"
-    && typeof sdk.selectPrimitiveLatencyBudgets === "function"
-    && typeof sdk.buildPrimitiveProofPlan === "function";
 }
 
 function runSelfTest(sdk) {
