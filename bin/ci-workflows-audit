@@ -54,7 +54,9 @@ export async function auditWorkflows(root) {
   if (errors.length > 0) return { ok: false, checked_count: 0, errors };
 
   auditSharedWorkflowGuards("ci.yml", texts.ci, errors);
+  requireIncludes(texts.ci, "workflow_dispatch:", "ci.yml must support manual dispatch for explicit verification", errors);
   requireIncludes(texts.ci, "runs-on: ubuntu-latest", "ci.yml must run on ubuntu-latest, not macOS", errors);
+  rejectIncludes(texts.ci, "runs-on: macos-latest", "ci.yml must not run standard CI on macOS runners", errors);
   requireIncludes(texts.ci, "EVENTLOOPOS_SKIP_BROWSER_E2E=1 pnpm run ci", "ci.yml must skip browser/live mac work in Linux CI", errors);
   requireIncludes(texts.ci, "paths-ignore:", "ci.yml must ignore docs/artifacts-only changes", errors);
   requireIncludes(texts.ci, '"docs/**/*.md"', "ci.yml must ignore docs markdown-only changes", errors);
@@ -62,6 +64,7 @@ export async function auditWorkflows(root) {
   requireIncludes(texts.ci, "timeout-minutes: 20", "ci.yml must keep bounded runtime", errors);
 
   auditSharedWorkflowGuards("macos-app.yml", texts.macos, errors);
+  requireIncludes(texts.macos, "workflow_dispatch:", "macos-app.yml must support manual dispatch for explicit verification", errors);
   requireIncludes(texts.macos, "runs-on: macos-latest", "macos-app.yml must use GitHub macOS runner", errors);
   requireIncludes(texts.macos, "paths:", "macos-app.yml must be path scoped", errors);
   requireIncludes(texts.macos, '"app/macos/**"', "macos-app.yml must only auto-run for macOS app paths", errors);
@@ -124,6 +127,7 @@ on:
       - "README.md"
       - "docs/**/*.md"
       - "artifacts/**"
+  workflow_dispatch:
 concurrency:
   group: ci-\${{ github.workflow }}-\${{ github.ref }}
   cancel-in-progress: true
@@ -148,6 +152,7 @@ on:
     paths:
       - ".github/workflows/macos-app.yml"
       - "app/macos/**"
+  workflow_dispatch:
 concurrency:
   group: macos-app-\${{ github.workflow }}-\${{ github.ref }}
   cancel-in-progress: true
@@ -203,6 +208,12 @@ jobs:
     const fail = await auditWorkflows(tmp);
     assert.equal(fail.ok, false);
     assert.ok(fail.errors.includes("ci.yml must cancel in-progress stale runs"));
+
+    writeFixture(workflows, "ci.yml", (await readFile(badCi, "utf8")).replace("runs-on: ubuntu-latest", "runs-on: macos-latest"));
+    const paidRunnerRisk = await auditWorkflows(tmp);
+    assert.equal(paidRunnerRisk.ok, false);
+    assert.ok(paidRunnerRisk.errors.includes("ci.yml must run on ubuntu-latest, not macOS"));
+    assert.ok(paidRunnerRisk.errors.includes("ci.yml must not run standard CI on macOS runners"));
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
