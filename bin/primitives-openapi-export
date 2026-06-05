@@ -66,10 +66,7 @@ function openapiFromCatalog(catalog) {
     const primitiveId = readString(primitive.id);
     const title = readString(primitive.title);
     if (!primitiveId || !title) continue;
-    tagsByName.set(primitiveId, {
-      name: primitiveId,
-      description: `${title}: ${readString(primitive.summary) ?? ""}`.trim(),
-    });
+    tagsByName.set(primitiveId, tagForPrimitive(primitive, primitiveId, title));
 
     if (!Array.isArray(primitive.http)) continue;
     for (const route of primitive.http) {
@@ -169,6 +166,8 @@ function operationForRoute(input) {
     "x-eventloopos-status": status,
     "x-eventloopos-route-file": input.routeFile,
   };
+  const budgets = latencyBudgetsForRoute(input.primitive, input.method, input.routePath);
+  if (budgets.length > 0) operation["x-eventloopos-latency-budgets"] = budgets;
   const requestSchema = schemaRef(input.route.request_schema);
   if (["post", "put", "patch"].includes(input.method) && input.route.no_request_body !== true) {
     operation.requestBody = {
@@ -184,6 +183,58 @@ function operationForRoute(input) {
   if (queryParameters.length > 0) operation.parameters.push(...queryParameters);
   if (operation.parameters.length === 0) delete operation.parameters;
   return operation;
+}
+
+function tagForPrimitive(primitive, primitiveId, title) {
+  const budgets = latencyBudgetsForPrimitive(primitive);
+  return compactRecord({
+    name: primitiveId,
+    description: `${title}: ${readString(primitive.summary) ?? ""}`.trim(),
+    "x-eventloopos-status": readString(primitive.status),
+    "x-eventloopos-responsiveness-critical": primitive.responsiveness_critical === true ? true : undefined,
+    "x-eventloopos-code": stringList(primitive.code),
+    "x-eventloopos-proofs": stringList(primitive.proofs),
+    "x-eventloopos-self-tests": stringList(primitive.self_tests),
+    "x-eventloopos-cli": stringList(primitive.cli),
+    "x-eventloopos-latency-budgets": budgets.length > 0 ? budgets : undefined,
+  });
+}
+
+function latencyBudgetsForRoute(primitive, method, routePath) {
+  const route = `${method.toUpperCase()} ${routePath}`;
+  return latencyBudgetsForPrimitive(primitive).filter((budget) => budget.route === route);
+}
+
+function latencyBudgetsForPrimitive(primitive) {
+  if (!Array.isArray(primitive.latency_budgets)) return [];
+  return primitive.latency_budgets
+    .filter(isRecord)
+    .map((budget) => compactRecord({
+      name: readString(budget.name),
+      p95_ms: typeof budget.p95_ms === "number" ? budget.p95_ms : undefined,
+      scope: readString(budget.scope),
+      route: readString(budget.route),
+      hotkey: readString(budget.hotkey),
+      proof: readString(budget.proof),
+    }))
+    .filter((budget) => budget.name && typeof budget.p95_ms === "number")
+    .sort((a, b) => String(a.route ?? a.hotkey ?? a.name).localeCompare(String(b.route ?? b.hotkey ?? b.name)));
+}
+
+function stringList(value) {
+  if (!Array.isArray(value)) return undefined;
+  const values = value.map(readString).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  return values.length > 0 ? values : undefined;
+}
+
+function compactRecord(value) {
+  const output = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (item === undefined) continue;
+    if (Array.isArray(item) && item.length === 0) continue;
+    output[key] = item;
+  }
+  return output;
 }
 
 function pathParameters(routePath) {
@@ -281,6 +332,7 @@ function runSelfTest() {
       title: "Task Control",
       status: "dogfood",
       summary: "Task primitive.",
+      responsiveness_critical: true,
       http: [
         { method: "GET", path: "/tasks/:id/layout", route_file: "routes/tasks.ts" },
         {
@@ -301,7 +353,13 @@ function runSelfTest() {
         },
       ],
       code: ["routes/tasks.ts"],
+      cli: ["eventloopos tasks create"],
       proofs: ["routes/tasks.test.ts"],
+      self_tests: ["pnpm --filter @eventloopos/orchestrator test"],
+      latency_budgets: [
+        { name: "task_create", p95_ms: 250, route: "POST /tasks", scope: "local_orchestrator", proof: "bin/task-latency-proof" },
+        { name: "task_focus", p95_ms: 100, hotkey: "Ctrl-Option-J", scope: "macos_app", proof: "bin/hotkey-proof" },
+      ],
     }],
     schemas: {
       CreateTaskRequest: {
@@ -342,6 +400,16 @@ function runSelfTest() {
   }
   if (postTasks.parameters?.[0]?.name !== "dry_run") {
     throw new Error("self-test did not wire query parameter");
+  }
+  const taskTag = checked.tags.find((tag) => tag.name === "task_control");
+  if (!taskTag?.["x-eventloopos-responsiveness-critical"]) {
+    throw new Error("self-test did not wire responsiveness metadata");
+  }
+  if (taskTag["x-eventloopos-cli"]?.[0] !== "eventloopos tasks create") {
+    throw new Error("self-test did not wire primitive CLI metadata");
+  }
+  if (postTasks["x-eventloopos-latency-budgets"]?.[0]?.name !== "task_create") {
+    throw new Error("self-test did not wire route latency budget metadata");
   }
   const retryTask = checked.paths["/tasks/{id}/retry"]?.post;
   if (!retryTask || retryTask.requestBody) {

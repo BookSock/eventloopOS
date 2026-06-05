@@ -11,75 +11,458 @@
   "tags": [
     {
       "name": "agent_focus_binding",
-      "description": "Agent Focus Binding: Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows."
+      "description": "Agent Focus Binding: Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/agents/claude/session_inspector.ts",
+        "app/orchestrator/src/agents/codex/auto_bind.ts",
+        "app/orchestrator/src/agents/codex/foreground_resolver.ts",
+        "app/orchestrator/src/agents/codex/session_inspector.ts",
+        "app/orchestrator/src/routes/agents.ts"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/src/agents/claude/session_inspector.test.ts",
+        "app/orchestrator/src/agents/codex/auto_bind.test.ts",
+        "app/orchestrator/src/agents/codex/foreground_resolver.test.ts",
+        "app/orchestrator/src/agents/codex/session_inspector.test.ts",
+        "app/orchestrator/test/auto_bind_integration.test.ts",
+        "app/orchestrator/test/resolve_foreground_route.test.ts"
+      ],
+      "x-eventloopos-self-tests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ]
     },
     {
       "name": "agent_source_hooks",
-      "description": "Agent And Source Hooks: Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions."
+      "description": "Agent And Source Hooks: Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/routes/agent_runs.ts",
+        "app/orchestrator/src/routes/mcp_sources.ts",
+        "bin/mcp-source-templates-audit",
+        "config/mcp-sources.dogfood.example.json",
+        "docs/codex-mcp-skill.md",
+        "docs/mcp-source-hooks.md"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/src/agents/agent_run_cli.test.ts",
+        "app/orchestrator/src/integrations/mcp_poll/mcp_poll.test.ts",
+        "app/orchestrator/src/master/master_command_cli.test.ts",
+        "app/orchestrator/src/mcp_sources/local_events_server.test.ts",
+        "app/orchestrator/src/mcp_sources/script_events_server.test.ts",
+        "app/orchestrator/src/mcp_sources/source_cli.test.ts",
+        "app/orchestrator/src/voice/send_voice_command.test.ts",
+        "bin/agent-run-cli-smoke",
+        "bin/mcp-source-templates-audit",
+        "bin/postgres-mcp-dogfood-smoke"
+      ],
+      "x-eventloopos-self-tests": [
+        "pnpm --filter @eventloopos/orchestrator run test:agent-source-hooks"
+      ]
     },
     {
       "name": "ambient_autosave",
-      "description": "Ambient Autosave: Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, task-window claim filtering, tagged-window inference, process-tree claim inference, process-root claim expansion, and foreign claimed-window cleanup."
+      "description": "Ambient Autosave: Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, task-window claim filtering, tagged-window inference, process-tree claim inference, process-root claim expansion, and foreign claimed-window cleanup.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/agents/ambient_workspace_saver.ts"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/src/agents/ambient_workspace_saver.test.ts"
+      ],
+      "x-eventloopos-self-tests": [
+        "pnpm --filter @eventloopos/orchestrator run test:ambient-autosave"
+      ]
     },
     {
       "name": "context_capture_restore",
-      "description": "Context Capture And Restore: Store context resources and manage local restore requests for browser tabs, files, and deeplinks."
+      "description": "Context Capture And Restore: Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/routes/context_restore.ts",
+        "app/orchestrator/src/store/context_restore_store.ts"
+      ],
+      "x-eventloopos-proofs": [
+        "docs/planning/17-deeplink-strategies.md"
+      ],
+      "x-eventloopos-self-tests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ]
     },
     {
       "name": "follows_windows",
-      "description": "Follows Windows: Detect windows seen across several workspaces and move them with focused task workspace unless excluded; redirect claimed foreign-task windows back home."
+      "description": "Follows Windows: Detect windows seen across several workspaces and move them with focused task workspace unless excluded; redirect claimed foreign-task windows back home.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/agents/follows_window_orchestrator.ts",
+        "app/orchestrator/src/routes/follows_windows.ts",
+        "bin/follows-window-rules",
+        "examples/primitives/window-hotkey-router.mjs"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/src/agents/follows_window_orchestrator.test.ts",
+        "app/orchestrator/test/follows_window_orchestrator_integration.test.ts",
+        "bin/follows-window-rules",
+        "examples/primitives/window-hotkey-router.mjs"
+      ],
+      "x-eventloopos-self-tests": [
+        "bin/follows-window-rules --self-test",
+        "pnpm --filter @eventloopos/orchestrator run test:follows-window-orchestrator"
+      ],
+      "x-eventloopos-cli": [
+        "bin/follows-window-rules"
+      ]
     },
     {
       "name": "mac_app_hotkeys",
-      "description": "Mac App And Hotkey Surface: Swift macOS queue UI, hotkeys, manual mode, restore, voice capture, and master command shell."
+      "description": "Mac App And Hotkey Surface: Swift macOS queue UI, hotkeys, manual mode, restore, voice capture, and master command shell.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-responsiveness-critical": true,
+      "x-eventloopos-code": [
+        "app/macos/Sources/EventLoopQueueApp",
+        "app/macos/Sources/EventLoopQueueCore"
+      ],
+      "x-eventloopos-proofs": [
+        "bin/lab-mac-human-demo-setup",
+        "bin/macos-hotkey-feedback-latency",
+        "docs/human-demo-walkthrough.md"
+      ],
+      "x-eventloopos-self-tests": [
+        "bin/macos-hotkey-feedback-latency --self-test"
+      ],
+      "x-eventloopos-latency-budgets": [
+        {
+          "name": "hotkey_to_feedback",
+          "p95_ms": 10000,
+          "scope": "macos_queue_app",
+          "hotkey": "Ctrl-Option-J",
+          "proof": "bin/macos-hotkey-feedback-latency"
+        }
+      ]
     },
     {
       "name": "manual_mode",
-      "description": "Manual Mode: Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk."
+      "description": "Manual Mode: Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
+      "x-eventloopos-status": "stable_enough",
+      "x-eventloopos-responsiveness-critical": true,
+      "x-eventloopos-code": [
+        "app/orchestrator/src/agents/ambient_workspace_saver.ts",
+        "app/orchestrator/src/routes/modes.ts"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/test/manual_mode_pause_integration.test.ts",
+        "app/orchestrator/test/manual_mode_round_trip.test.ts",
+        "bin/manual-mode-latency-proof"
+      ],
+      "x-eventloopos-self-tests": [
+        "bin/manual-mode-latency-proof --self-test",
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "x-eventloopos-latency-budgets": [
+        {
+          "name": "manual_mode_get",
+          "p95_ms": 500,
+          "scope": "local_orchestrator",
+          "route": "GET /modes/manual",
+          "proof": "bin/manual-mode-latency-proof"
+        },
+        {
+          "name": "manual_mode_set",
+          "p95_ms": 800,
+          "scope": "local_orchestrator_toggle_sample",
+          "route": "POST /modes/manual",
+          "proof": "bin/manual-mode-latency-proof"
+        },
+        {
+          "name": "manual_mode_restore",
+          "p95_ms": 800,
+          "scope": "local_orchestrator_restore_original_state",
+          "route": "POST /modes/manual",
+          "proof": "bin/manual-mode-latency-proof"
+        }
+      ]
     },
     {
       "name": "master_command_router",
-      "description": "Master Command Router: Route one universal command to tasks, idle sessions, fan-out targets, or queue prioritization."
+      "description": "Master Command Router: Route one universal command to tasks, idle sessions, fan-out targets, or queue prioritization.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-responsiveness-critical": true,
+      "x-eventloopos-code": [
+        "app/orchestrator/src/master/master_command_cli.ts",
+        "app/orchestrator/src/routes/master.ts",
+        "examples/primitives/agent-attention-queue.mjs"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/src/master/master_command_cli.test.ts",
+        "app/orchestrator/test/master_fan_out_idle_filter.test.ts",
+        "app/orchestrator/test/master_fan_out.test.ts",
+        "bin/master-priority-proof-smoke",
+        "examples/primitives/agent-attention-queue.mjs"
+      ],
+      "x-eventloopos-self-tests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "x-eventloopos-cli": [
+        "pnpm master:send"
+      ],
+      "x-eventloopos-latency-budgets": [
+        {
+          "name": "master_fan_out_dry_run",
+          "p95_ms": 1200,
+          "scope": "local_orchestrator",
+          "route": "POST /master/fan-out",
+          "proof": "bin/queue-latency-proof"
+        }
+      ]
     },
     {
       "name": "observability_proofs",
-      "description": "Observability And Proof Harnesses: Health, metrics, activity, proof runners, latency checks, and machine-readable manifests."
+      "description": "Observability And Proof Harnesses: Health, metrics, activity, proof runners, latency checks, and machine-readable manifests.",
+      "x-eventloopos-status": "stable_enough",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/routes/observability.ts"
+      ],
+      "x-eventloopos-proofs": [
+        "bin/macos-hotkey-feedback-latency",
+        "bin/primitives-readiness-report",
+        "bin/product-readiness-proof",
+        "bin/proof-agent",
+        "bin/proof-repeat",
+        "bin/queue-latency-proof",
+        "bin/workspace-latency-proof"
+      ],
+      "x-eventloopos-self-tests": [
+        "bin/primitives-readiness-report --self-test"
+      ]
     },
     {
       "name": "paper_triggers",
-      "description": "Paper Triggers: Let tasks declare event-matching rules that can create routed papers from future agent/source events."
+      "description": "Paper Triggers: Let tasks declare event-matching rules that can create routed papers from future agent/source events.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/routes/events.ts",
+        "app/orchestrator/src/routes/triggers.ts",
+        "app/orchestrator/src/triggers/evaluator.ts"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/src/triggers/evaluator.test.ts",
+        "app/orchestrator/test/db_migrations.test.ts",
+        "app/orchestrator/test/triggers_route.test.ts"
+      ],
+      "x-eventloopos-self-tests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ]
     },
     {
       "name": "queue_paper_routing",
-      "description": "Queue And Paper Routing: Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency."
+      "description": "Queue And Paper Routing: Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+      "x-eventloopos-status": "stable_enough",
+      "x-eventloopos-responsiveness-critical": true,
+      "x-eventloopos-code": [
+        "app/orchestrator/src/routes/events.ts",
+        "app/orchestrator/src/routes/queue.ts",
+        "examples/primitives/agent-attention-queue.mjs"
+      ],
+      "x-eventloopos-proofs": [
+        "bin/event-loop-proof-smoke",
+        "bin/master-priority-proof-smoke",
+        "examples/primitives/agent-attention-queue.mjs"
+      ],
+      "x-eventloopos-self-tests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "x-eventloopos-latency-budgets": [
+        {
+          "name": "queue_list",
+          "p95_ms": 800,
+          "scope": "local_orchestrator",
+          "route": "GET /queue",
+          "proof": "bin/queue-latency-proof"
+        },
+        {
+          "name": "queue_next",
+          "p95_ms": 800,
+          "scope": "local_orchestrator",
+          "route": "GET /queue/next",
+          "proof": "bin/queue-latency-proof"
+        },
+        {
+          "name": "queue_lease_next",
+          "p95_ms": 1000,
+          "scope": "local_orchestrator",
+          "route": "POST /queue/lease-next",
+          "proof": "bin/queue-latency-proof"
+        }
+      ]
     },
     {
       "name": "reading_queue",
-      "description": "Reading Queue: Promote idle unbound browser contexts into task_reading_queue papers manually or by age threshold."
+      "description": "Reading Queue: Promote idle unbound browser contexts into task_reading_queue papers manually or by age threshold.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/routes/reading_queue.ts"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/test/manual_mode_pause_integration.test.ts",
+        "app/orchestrator/test/reading_queue_auto_promote_integration.test.ts",
+        "app/orchestrator/test/reading_queue.test.ts"
+      ],
+      "x-eventloopos-self-tests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ]
     },
     {
       "name": "runtime_spine",
-      "description": "Runtime Spine: Flat dependency record for routes, timers, stores, workspace, sessions, observability, and source polling."
+      "description": "Runtime Spine: Flat dependency record for routes, timers, stores, workspace, sessions, observability, and source polling.",
+      "x-eventloopos-status": "stable_enough",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/runtime.ts"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/test/gateway_store_conformance.test.ts"
+      ],
+      "x-eventloopos-self-tests": [
+        "pnpm --filter @eventloopos/orchestrator run test:runtime-spine"
+      ]
     },
     {
       "name": "task_intake_onboarding",
-      "description": "Task Intake Onboarding: Scan existing browser/window context into proposed tasks, then approve or reject onboarding workbenches."
+      "description": "Task Intake Onboarding: Scan existing browser/window context into proposed tasks, then approve or reject onboarding workbenches.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/onboarding/onboarding_scan_cli.ts",
+        "app/orchestrator/src/onboarding/task_grouping.ts",
+        "app/orchestrator/src/routes/onboarding.ts"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/src/onboarding/onboarding_scan_cli.test.ts",
+        "app/orchestrator/src/onboarding/task_grouping.test.ts",
+        "app/orchestrator/test/onboarding_happy_path_e2e.test.ts",
+        "bin/onboarding-live-proof-smoke"
+      ],
+      "x-eventloopos-self-tests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "x-eventloopos-cli": [
+        "bin/onboarding-live-proof-smoke"
+      ]
     },
     {
       "name": "task_session_control",
-      "description": "Task Session Control: Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions."
+      "description": "Task Session Control: Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/routes/task_sessions.ts",
+        "app/orchestrator/src/task_sessions/pid_fields.ts",
+        "app/orchestrator/src/task_sessions/types.ts"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/src/task_sessions/claude_cli_task_session_controller.test.ts",
+        "app/orchestrator/src/task_sessions/codex_app_server_thread_client.test.ts",
+        "app/orchestrator/src/task_sessions/codex_native_thread_controller.test.ts",
+        "app/orchestrator/src/task_sessions/development_task_session_controller.test.ts",
+        "app/orchestrator/src/task_sessions/task_session_cli.test.ts",
+        "bin/task-runtime-smoke"
+      ],
+      "x-eventloopos-self-tests": [
+        "pnpm --filter @eventloopos/orchestrator run test:task-sessions"
+      ],
+      "x-eventloopos-cli": [
+        "pnpm task:bind",
+        "pnpm task:messages",
+        "pnpm task:replace",
+        "pnpm task:sessions"
+      ]
     },
     {
       "name": "task_window_claims",
-      "description": "Task Window Claims: Declare or infer that windows belong to tasks by window identity or process root so foreign windows, including guarded app/title-filtered reused windows, do not pollute active paper snapshots and can be redirected home."
+      "description": "Task Window Claims: Declare or infer that windows belong to tasks by window identity or process root so foreign windows, including guarded app/title-filtered reused windows, do not pollute active paper snapshots and can be redirected home.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/agents/ambient_workspace_saver.ts",
+        "app/orchestrator/src/agents/follows_window_orchestrator.ts",
+        "app/orchestrator/src/routes/events.ts",
+        "app/orchestrator/src/routes/task_window_claims.ts",
+        "examples/primitives/window-hotkey-router.mjs"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/src/agents/ambient_workspace_saver.test.ts",
+        "app/orchestrator/src/agents/follows_window_orchestrator.test.ts",
+        "app/orchestrator/src/routes/events_task_window_claims.test.ts",
+        "app/orchestrator/src/routes/task_window_claims.test.ts",
+        "app/orchestrator/test/follows_window_orchestrator_integration.test.ts",
+        "app/orchestrator/test/gateway_store_conformance.test.ts",
+        "examples/primitives/window-hotkey-router.mjs"
+      ],
+      "x-eventloopos-self-tests": [
+        "bin/task-window-spawn --self-test"
+      ],
+      "x-eventloopos-cli": [
+        "bin/task-window-spawn"
+      ]
     },
     {
       "name": "task_workspace_memory",
-      "description": "Task Workspace Memory: Persist task-specific workspace snapshots so later papers inherit task desk state."
+      "description": "Task Workspace Memory: Persist task-specific workspace snapshots so later papers inherit task desk state.",
+      "x-eventloopos-status": "stable_enough",
+      "x-eventloopos-code": [
+        "app/orchestrator/src/agents/ambient_workspace_saver.ts",
+        "app/orchestrator/src/routes/tasks.ts"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/test/ambient_workspace_saver_integration.test.ts",
+        "bin/lab-mac-human-demo-setup",
+        "bin/task-workspace-memory-proof-smoke"
+      ],
+      "x-eventloopos-self-tests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ]
     },
     {
       "name": "workspace_control",
-      "description": "Workspace Control: Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves."
+      "description": "Workspace Control: Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+      "x-eventloopos-status": "dogfood",
+      "x-eventloopos-responsiveness-critical": true,
+      "x-eventloopos-code": [
+        "app/orchestrator/src/workspace/aerospace.ts",
+        "app/orchestrator/src/workspace/controller.ts",
+        "docs/workspace-backend-adapter.md",
+        "examples/primitives/restore-my-desk.mjs"
+      ],
+      "x-eventloopos-proofs": [
+        "app/orchestrator/src/workspace/aerospace.test.ts",
+        "app/orchestrator/src/workspace/controller.test.ts",
+        "bin/lab-mac-geometry-proof",
+        "bin/task-workspace-memory-proof-smoke",
+        "examples/primitives/restore-my-desk.mjs"
+      ],
+      "x-eventloopos-self-tests": [
+        "bin/lab-mac-geometry-proof --self-test",
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "x-eventloopos-latency-budgets": [
+        {
+          "name": "workspace_capture",
+          "p95_ms": 5000,
+          "scope": "local_orchestrator",
+          "route": "POST /workspace/capture",
+          "proof": "bin/workspace-latency-proof"
+        },
+        {
+          "name": "workspace_restore_execute",
+          "p95_ms": 5000,
+          "scope": "local_orchestrator_execute_enabled",
+          "route": "POST /workspace/restore",
+          "proof": "bin/workspace-latency-proof"
+        },
+        {
+          "name": "workspace_restore_plan",
+          "p95_ms": 2000,
+          "scope": "local_orchestrator",
+          "route": "POST /workspace/restore-plan",
+          "proof": "bin/workspace-latency-proof"
+        }
+      ]
     }
   ],
   "paths": {
@@ -1120,6 +1503,15 @@
         "tags": [
           "master_command_router"
         ],
+        "x-eventloopos-latency-budgets": [
+          {
+            "name": "master_fan_out_dry_run",
+            "p95_ms": 1200,
+            "proof": "bin/queue-latency-proof",
+            "route": "POST /master/fan-out",
+            "scope": "local_orchestrator"
+          }
+        ],
         "x-eventloopos-primitive": "master_command_router",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/master.ts",
         "x-eventloopos-status": "dogfood"
@@ -1525,6 +1917,15 @@
         "tags": [
           "manual_mode"
         ],
+        "x-eventloopos-latency-budgets": [
+          {
+            "name": "manual_mode_get",
+            "p95_ms": 500,
+            "proof": "bin/manual-mode-latency-proof",
+            "route": "GET /modes/manual",
+            "scope": "local_orchestrator"
+          }
+        ],
         "x-eventloopos-primitive": "manual_mode",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/modes.ts",
         "x-eventloopos-status": "stable_enough"
@@ -1567,6 +1968,22 @@
         "summary": "Manual Mode POST /modes/manual",
         "tags": [
           "manual_mode"
+        ],
+        "x-eventloopos-latency-budgets": [
+          {
+            "name": "manual_mode_set",
+            "p95_ms": 800,
+            "proof": "bin/manual-mode-latency-proof",
+            "route": "POST /modes/manual",
+            "scope": "local_orchestrator_toggle_sample"
+          },
+          {
+            "name": "manual_mode_restore",
+            "p95_ms": 800,
+            "proof": "bin/manual-mode-latency-proof",
+            "route": "POST /modes/manual",
+            "scope": "local_orchestrator_restore_original_state"
+          }
         ],
         "x-eventloopos-primitive": "manual_mode",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/modes.ts",
@@ -1790,6 +2207,15 @@
         "tags": [
           "queue_paper_routing"
         ],
+        "x-eventloopos-latency-budgets": [
+          {
+            "name": "queue_list",
+            "p95_ms": 800,
+            "proof": "bin/queue-latency-proof",
+            "route": "GET /queue",
+            "scope": "local_orchestrator"
+          }
+        ],
         "x-eventloopos-primitive": "queue_paper_routing",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
         "x-eventloopos-status": "stable_enough"
@@ -1835,6 +2261,15 @@
         "tags": [
           "queue_paper_routing"
         ],
+        "x-eventloopos-latency-budgets": [
+          {
+            "name": "queue_lease_next",
+            "p95_ms": 1000,
+            "proof": "bin/queue-latency-proof",
+            "route": "POST /queue/lease-next",
+            "scope": "local_orchestrator"
+          }
+        ],
         "x-eventloopos-primitive": "queue_paper_routing",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
         "x-eventloopos-status": "stable_enough"
@@ -1869,6 +2304,15 @@
         "summary": "Queue And Paper Routing GET /queue/next",
         "tags": [
           "queue_paper_routing"
+        ],
+        "x-eventloopos-latency-budgets": [
+          {
+            "name": "queue_next",
+            "p95_ms": 800,
+            "proof": "bin/queue-latency-proof",
+            "route": "GET /queue/next",
+            "scope": "local_orchestrator"
+          }
         ],
         "x-eventloopos-primitive": "queue_paper_routing",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/queue.ts",
@@ -3546,6 +3990,15 @@
         "tags": [
           "workspace_control"
         ],
+        "x-eventloopos-latency-budgets": [
+          {
+            "name": "workspace_capture",
+            "p95_ms": 5000,
+            "proof": "bin/workspace-latency-proof",
+            "route": "POST /workspace/capture",
+            "scope": "local_orchestrator"
+          }
+        ],
         "x-eventloopos-primitive": "workspace_control",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/workspace.ts",
         "x-eventloopos-status": "dogfood"
@@ -3591,6 +4044,15 @@
         "tags": [
           "workspace_control"
         ],
+        "x-eventloopos-latency-budgets": [
+          {
+            "name": "workspace_restore_execute",
+            "p95_ms": 5000,
+            "proof": "bin/workspace-latency-proof",
+            "route": "POST /workspace/restore",
+            "scope": "local_orchestrator_execute_enabled"
+          }
+        ],
         "x-eventloopos-primitive": "workspace_control",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/workspace.ts",
         "x-eventloopos-status": "dogfood"
@@ -3635,6 +4097,15 @@
         "summary": "Workspace Control POST /workspace/restore-plan",
         "tags": [
           "workspace_control"
+        ],
+        "x-eventloopos-latency-budgets": [
+          {
+            "name": "workspace_restore_plan",
+            "p95_ms": 2000,
+            "proof": "bin/workspace-latency-proof",
+            "route": "POST /workspace/restore-plan",
+            "scope": "local_orchestrator"
+          }
         ],
         "x-eventloopos-primitive": "workspace_control",
         "x-eventloopos-route-file": "app/orchestrator/src/routes/workspace.ts",

@@ -26,6 +26,9 @@ ids, and the primitive ids covered by each de-duplicated command.
 `selectPrimitiveLatencyBudgets` returns cataloged p95 budgets and proof hooks by
 the same builder-facing filters, so responsiveness guarantees are machine
 discoverable instead of prose-only.
+The generated OpenAPI also carries `x-eventloopos-*` extensions on primitive
+tags and route operations for status, source files, CLI entrypoints, proofs,
+self-tests, responsiveness-critical flags, and matching latency budgets.
 `bin/primitives-latency-audit --strict` checks whether those speed-critical
 budget hooks have recent green proof manifests under `artifacts/`, so stale
 latency evidence cannot be mistaken for current product responsiveness.
