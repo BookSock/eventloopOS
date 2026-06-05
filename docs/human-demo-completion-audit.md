@@ -32,7 +32,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 | Screenshot capture for demo inspection | `bin/local-screen-sharing-capture` uses `capture_mode=local_screen_sharing_window`; `bin/human-demo-ready` defaults to local Screen Sharing first and falls back to `bin/lab-mac-desktop-capture` with `capture_mode=lab_desktop`; latest readiness manifest proves fallback screenshot `1920x1080` with readable PNG dimensions and does not capture the controller Mac desktop | Proven |
 | Repeatable human demo setup | `bin/lab-mac-human-demo-setup`; latest manifest `ok=true`, queue count 2 | Proven |
 | Visible feedback during demo | Queue footer `feedback=...`; `QueueHarnessStatusTextTests`; `QueueViewModelTests` post-action lease-conflict coverage proves Done/Defer/Send show saved-action feedback instead of surfacing 409 noise; latest screenshot shows `feedback=ready` | Proven |
-| Stale readiness cannot be reused silently | `bin/human-demo-ready` requires latest proof freshness by default; `bin/human-demo-result-template --write` refuses any failed readiness check | Proven |
+| Stale readiness cannot be reused silently | `bin/human-demo-ready` requires latest proof freshness by default; `bin/human-demo-result-template --write` refuses any failed readiness check; `bin/human-demo-completion-audit --strict` requires the latest readiness manifest timestamp to be within the freshness window | Proven |
 | Stale result verification cannot be reused silently | `bin/human-demo-result-verify` records `result_sha256`; `bin/human-demo-completion-audit` compares it to the current result file and fails `verification_matches_current_result_content` after any edit | Proven |
 | Human keyboard/mouse UX | Jason must run `docs/human-demo-walkthrough.md`, fill `bin/human-demo-result-template --write` output, pass `bin/human-demo-result-verify --lab-status`, and pass `bin/human-demo-completion-audit --strict` | Pending |
 
@@ -69,6 +69,10 @@ bin/human-demo-completion-audit --strict
 ```
 
 This must stay red until the filled result and lab-status verification exist.
+By default it also rejects readiness manifests older than 24 hours. Use
+`--readiness-max-age-hours` or
+`EVENTLOOPOS_HUMAN_DEMO_COMPLETION_READINESS_MAX_AGE_HOURS` only when you
+intentionally need a different closeout window.
 
 ## Current Blockers
 

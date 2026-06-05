@@ -15,13 +15,17 @@ const jsonOnly = args.includes("--json");
 const strict = args.includes("--strict");
 const resultArg = valueAfter("--result");
 const verificationArg = valueAfter("--verification");
+const readinessMaxAgeHours = positiveNumberOption(
+  "--readiness-max-age-hours",
+  process.env.EVENTLOOPOS_HUMAN_DEMO_COMPLETION_READINESS_MAX_AGE_HOURS ?? "24",
+);
 
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: bin/human-demo-completion-audit [--json] [--strict] [--result path] [--verification path]
 
 Audit whether the macOS human demo completion gate can close. This is a
-closeout guard: latest readiness must be green, Jason's filled result must
-exist, verification must pass, verification must match that result, and
+closeout guard: latest readiness must be green and fresh, Jason's filled result
+must exist, verification must pass, verification must match that result, and
 verification must include a green Mac Studio lab status check.
 `);
   process.exit(0);
@@ -52,6 +56,8 @@ process.exit(strict && audit.ok !== true ? 1 : 0);
 function buildAudit(root, options = {}) {
   const readinessPath = latestReadinessManifestPath(root);
   const readiness = readinessPath ? readJson(path.resolve(root, readinessPath)) : undefined;
+  const readinessAt = manifestTimestamp(readiness);
+  const readinessFreshness = manifestFreshness(readinessAt, readinessMaxAgeHours);
   const resultPath = options.resultPath ?? latestResultPath(root);
   const resultAudit = inspectHumanResult(root, resultPath);
   const verificationPath = options.verificationPath ?? latestVerificationPath(root, resultPath);
@@ -60,6 +66,7 @@ function buildAudit(root, options = {}) {
   const checks = {
     readiness_manifest_present: Boolean(readinessPath),
     readiness_ok: readiness?.ok === true,
+    readiness_fresh: readinessFreshness.ok === true,
     human_result_recorded: Boolean(resultPath && fs.existsSync(path.resolve(root, resultPath))),
     human_result_filled: resultAudit.filled === true,
     verification_manifest_present: Boolean(verificationPath),
@@ -84,7 +91,9 @@ function buildAudit(root, options = {}) {
     failed_checks: failedChecks,
     checks,
     readiness_manifest_path: readinessPath,
-    readiness_generated_at: readiness?.generated_at ?? readiness?.checked_at ?? null,
+    readiness_observed_at: readinessAt ?? null,
+    readiness_generated_at: readinessAt ?? null,
+    readiness_freshness: readinessFreshness,
     result_path: resultPath,
     result_audit: resultAudit,
     verification_manifest_path: verificationPath,
@@ -239,6 +248,43 @@ function completionStatus(failedChecks) {
   return "pending_readiness";
 }
 
+function manifestTimestamp(manifest) {
+  if (!manifest || typeof manifest !== "object") return undefined;
+  for (const key of ["finished_at", "generated_at", "checked_at", "verified_at", "started_at"]) {
+    const value = manifest[key];
+    if (typeof value === "string" && !Number.isNaN(Date.parse(value))) return value;
+  }
+  return undefined;
+}
+
+function manifestFreshness(timestamp, maxAgeHours, now = new Date()) {
+  if (!timestamp) {
+    return {
+      ok: false,
+      reason: "missing_timestamp",
+      max_age_hours: maxAgeHours,
+    };
+  }
+  const observedMs = Date.parse(timestamp);
+  if (Number.isNaN(observedMs)) {
+    return {
+      ok: false,
+      reason: "invalid_timestamp",
+      observed_at: timestamp,
+      max_age_hours: maxAgeHours,
+    };
+  }
+  const ageMs = Math.max(0, now.getTime() - observedMs);
+  const ageHours = Number((ageMs / 3_600_000).toFixed(2));
+  return {
+    ok: ageHours <= maxAgeHours,
+    reason: ageHours <= maxAgeHours ? "fresh" : "stale",
+    observed_at: timestamp,
+    age_hours: ageHours,
+    max_age_hours: maxAgeHours,
+  };
+}
+
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf8"));
 }
@@ -259,6 +305,17 @@ function valueAfter(flag) {
   return value;
 }
 
+function positiveNumberOption(flag, defaultValue) {
+  const index = args.indexOf(flag);
+  const raw = index === -1 ? defaultValue : args[index + 1];
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.error(`Invalid ${flag}: ${String(raw)}`);
+    process.exit(2);
+  }
+  return parsed;
+}
+
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
@@ -267,12 +324,14 @@ function writeJson(filePath, value) {
 function runSelfTest() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-human-demo-completion-audit-"));
   const readinessPath = path.join(root, "artifacts", "lab-runs", "20260605T000000Z-human-demo-ready", "manifest.json");
-  writeJson(readinessPath, { ok: true, generated_at: "2026-06-05T00:00:00.000Z" });
+  writeJson(readinessPath, { ok: true, finished_at: new Date().toISOString() });
 
   const pending = buildAudit(root);
   assert.equal(pending.ok, false);
   assert.ok(pending.failed_checks.includes("human_result_recorded"));
   assert.ok(pending.failed_checks.includes("verification_manifest_present"));
+  assert.equal(pending.checks.readiness_fresh, true);
+  assert.ok(pending.readiness_observed_at);
 
   const resultPath = path.join(root, "artifacts", "human-demo-results", "20260605T001000Z-human-demo-result.md");
   fs.mkdirSync(path.dirname(resultPath), { recursive: true });
@@ -301,6 +360,21 @@ ship
   const complete = buildAudit(root);
   assert.equal(complete.ok, true);
   assert.equal(complete.status, "complete");
+
+  writeJson(readinessPath, { ok: true, finished_at: "2000-01-01T00:00:00.000Z" });
+  const staleReadiness = buildAudit(root, {
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(staleReadiness.ok, false);
+  assert.ok(staleReadiness.failed_checks.includes("readiness_fresh"));
+  assert.equal(staleReadiness.readiness_freshness.reason, "stale");
+  writeJson(readinessPath, { ok: true, started_at: new Date().toISOString() });
+  const startedAtReadiness = buildAudit(root, {
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(startedAtReadiness.checks.readiness_fresh, true);
 
   fs.writeFileSync(resultPath, `Pass/fail:
 - Starting state on demo-customer with Queue visible:
