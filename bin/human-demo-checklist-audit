@@ -1,0 +1,140 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+import { humanDemoPassFailLabels } from "./lib/human-demo-checklist.mjs";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+process.chdir(repoRoot);
+
+const args = process.argv.slice(2);
+const jsonOnly = args.includes("--json");
+const docPath = valueAfter("--doc") ?? "docs/human-demo-walkthrough.md";
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/human-demo-checklist-audit [--json] [--doc docs/human-demo-walkthrough.md]
+
+Verifies that human demo docs use the same pass/fail checklist contract as
+the generated result template and verifier.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  console.log("human-demo-checklist-audit self-test passed");
+  process.exit(0);
+}
+
+const audit = auditChecklistDoc(path.resolve(repoRoot, docPath));
+if (jsonOnly) {
+  console.log(JSON.stringify(audit, null, 2));
+} else {
+  console.log(`human demo checklist docs: ${audit.ok ? "ok" : "drifted"}`);
+  if (audit.failed_checks.length > 0) console.log(`failed checks: ${audit.failed_checks.join(", ")}`);
+  console.log(JSON.stringify(audit, null, 2));
+}
+
+process.exit(audit.ok ? 0 : 1);
+
+function auditChecklistDoc(absoluteDocPath) {
+  const text = fs.existsSync(absoluteDocPath) ? fs.readFileSync(absoluteDocPath, "utf8") : "";
+  const actualLabels = extractPassFailLabels(text);
+  const missingLabels = humanDemoPassFailLabels.filter((label) => !actualLabels.includes(label));
+  const extraLabels = actualLabels.filter((label) => !humanDemoPassFailLabels.includes(label));
+  const orderMatches = actualLabels.length === humanDemoPassFailLabels.length
+    && actualLabels.every((label, index) => label === humanDemoPassFailLabels[index]);
+  const checks = {
+    doc_exists: fs.existsSync(absoluteDocPath),
+    pass_fail_section_present: actualLabels.length > 0,
+    all_expected_labels_present: missingLabels.length === 0,
+    no_extra_labels_present: extraLabels.length === 0,
+    label_order_matches_template: orderMatches,
+  };
+  const failedChecks = Object.entries(checks)
+    .filter(([, ok]) => ok !== true)
+    .map(([key]) => key);
+  return {
+    schema_version: 1,
+    kind: "eventloopos.human_demo_checklist_audit",
+    checked_at: new Date().toISOString(),
+    doc_path: path.relative(repoRoot, absoluteDocPath),
+    ok: failedChecks.length === 0,
+    failed_checks: failedChecks,
+    checks,
+    expected_labels: humanDemoPassFailLabels,
+    actual_labels: actualLabels,
+    missing_labels: missingLabels,
+    extra_labels: extraLabels,
+  };
+}
+
+function extractPassFailLabels(text) {
+  const block = sectionText(text, "Pass/fail:", "Friction:");
+  const labels = [];
+  for (const line of block.split(/\r?\n/)) {
+    const match = line.match(/^\s*-\s*(.+?):\s*(.*)$/);
+    if (match) labels.push(match[1].trim());
+  }
+  return labels;
+}
+
+function sectionText(text, startMarker, endMarker) {
+  const start = text.indexOf(startMarker);
+  if (start === -1) return "";
+  const afterStart = start + startMarker.length;
+  const end = text.indexOf(endMarker, afterStart);
+  return text.slice(afterStart, end === -1 ? undefined : end);
+}
+
+function valueAfter(flag) {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) {
+    console.error(`Missing value for ${flag}`);
+    process.exit(2);
+  }
+  return value;
+}
+
+function runSelfTest() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-human-demo-checklist-audit-"));
+  const goodDoc = path.join(root, "good.md");
+  fs.writeFileSync(goodDoc, `Pass/fail:
+${humanDemoPassFailLabels.map((label) => `- ${label}:`).join("\n")}
+
+Friction:
+- none
+`, "utf8");
+  const good = auditChecklistDoc(goodDoc);
+  assert.equal(good.ok, true);
+
+  const missingDoc = path.join(root, "missing.md");
+  fs.writeFileSync(missingDoc, `Pass/fail:
+- ${humanDemoPassFailLabels[0]}:
+
+Friction:
+- none
+`, "utf8");
+  const missing = auditChecklistDoc(missingDoc);
+  assert.equal(missing.ok, false);
+  assert.ok(missing.failed_checks.includes("all_expected_labels_present"));
+  assert.ok(missing.failed_checks.includes("label_order_matches_template"));
+
+  const extraDoc = path.join(root, "extra.md");
+  fs.writeFileSync(extraDoc, `Pass/fail:
+${humanDemoPassFailLabels.map((label) => `- ${label}:`).join("\n")}
+- Surprise checklist item:
+
+Friction:
+- none
+`, "utf8");
+  const extra = auditChecklistDoc(extraDoc);
+  assert.equal(extra.ok, false);
+  assert.ok(extra.failed_checks.includes("no_extra_labels_present"));
+
+  fs.rmSync(root, { recursive: true, force: true });
+}
