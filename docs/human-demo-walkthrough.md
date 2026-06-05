@@ -20,7 +20,7 @@ The setup script:
 - queues exactly two papers,
 - proves the shared TextEdit window restores to different positions per paper,
 - proves ambient autosave updates future queue context after the shared window moves,
-- captures a local Screen Sharing window-only screenshot.
+- captures a local Screen Sharing window-only screenshot, or falls back to a lab Mac desktop capture when Screen Sharing is unavailable.
 
 Before handing the keyboard to Jason, run a non-destructive readiness check:
 
@@ -29,12 +29,18 @@ bin/human-demo-ready
 ```
 
 This does not restart or reseed the demo. It checks the current lab dogfood
-stack, verifies the latest human-demo proof artifact, captures only the local
-Screen Sharing window, runs queue/workspace latency probes on the lab Mac by
+stack, verifies the latest human-demo proof artifact, captures the local Screen
+Sharing window first, falls back to a lab Mac desktop capture if that local
+window is unavailable, runs queue/workspace latency probes on the lab Mac by
 default, and writes `artifacts/lab-runs/*-human-demo-ready/READY.md`.
-The Screen Sharing capture gate verifies the artifact exists and has readable
-PNG/JPEG dimensions, so readiness cannot pass from an empty or invalid
-screenshot file.
+The screenshot capture gate verifies the chosen artifact exists and has
+readable PNG/JPEG dimensions, so readiness cannot pass from an empty or invalid
+screenshot file. The default `auto` mode never captures the controller Mac
+desktop: the first attempt is a Screen Sharing window capture, and the fallback
+captures the remote lab Mac desktop over SSH. Use
+`EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=local` to require only the local
+Screen Sharing window, or `EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=lab` to use
+only the lab Mac desktop capture.
 Run `bin/human-demo-ready` after the queue app has Accessibility permission. By
 default the latest proof must be no older than 24 hours; use
 `EVENTLOOPOS_HUMAN_DEMO_PROOF_MAX_AGE_HOURS` or

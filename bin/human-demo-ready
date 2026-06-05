@@ -20,6 +20,7 @@ const skipHotkeyLatency = args.includes("--skip-hotkey-latency") || process.env.
 const hotkeyLatencyRequested = args.includes("--hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "1";
 const hotkeyLatencyEnabled = !skipHotkeyLatency && (hotkeyLatencyRequested || process.platform === "darwin");
 const jsonOnly = args.includes("--json");
+const screenshotTarget = normalizeScreenshotTarget(process.env.EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET ?? "auto");
 
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-queue-latency] [--skip-workspace-latency] [--skip-hotkey-latency] [--hotkey-latency] [--demo-proof-max-age-hours n] [--allow-stale-demo-proof] [--json]
@@ -46,6 +47,8 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=1 forces hotkey latency on
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=0 skips hotkey latency
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_TARGET=local runs latency on this Mac instead of the lab Mac
+  EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=auto|local|lab default: auto
+    auto captures local Screen Sharing window first, then falls back to lab Mac desktop only
 `);
   process.exit(0);
 }
@@ -76,9 +79,8 @@ const latestHumanDemoFreshness = demoProofFreshness(templateJson?.generated_at, 
 
 let screenshot;
 if (!skipScreenshot) {
-  screenshot = runStep("screen sharing capture", "bin/local-screen-sharing-capture", [path.join(runDir, "screen-sharing.png")], env);
+  screenshot = runScreenshotStep(path.join(runDir, "screen-sharing.png"), env);
 }
-const screenshotImage = skipScreenshot ? undefined : imageArtifactSummary(path.join(runDir, "screen-sharing.png"));
 const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
 const queueLatencyManifestPath = path.join(runDir, "queue-latency.json");
 const workspaceLatencyManifestPath = path.join(runDir, "workspace-latency.json");
@@ -101,7 +103,7 @@ const checks = {
   latest_human_demo_proof_fresh: latestHumanDemoFreshness.ok === true,
   latest_human_demo_queue_has_two_papers: Number(templateJson?.queue_count ?? 0) >= 2,
   ambient_autosave_proof_ok: templateJson?.ambient_autosave_ok === true,
-  screen_sharing_capture_ok: skipScreenshot || (screenshot?.status === 0 && screenshotImage?.ok === true),
+  screen_sharing_capture_ok: skipScreenshot || screenshot?.ok === true,
   queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
   workspace_latency_ok: !workspaceLatencyEnabled || (workspaceLatency?.status === 0 && workspaceLatencyManifest?.ok === true),
   hotkey_feedback_latency_ok: !hotkeyLatencyEnabled || (hotkeyLatency?.status === 0 && hotkeyLatencyManifest?.ok === true),
@@ -122,6 +124,7 @@ const manifest = {
   queue_latency_required: queueLatencyEnabled,
   workspace_latency_required: workspaceLatencyEnabled,
   hotkey_latency_required: hotkeyLatencyEnabled,
+  screenshot_target: screenshotTarget,
   demo_proof_max_age_hours: demoProofMaxAgeHours,
   allow_stale_demo_proof: allowStaleDemoProof,
   checks,
@@ -141,12 +144,7 @@ const manifest = {
     generated_at: templateJson.generated_at,
     freshness: latestHumanDemoFreshness,
   } : undefined,
-  screen_sharing_capture: screenshot ? {
-    ok: screenshot.status === 0,
-    output: path.join(runDir, "screen-sharing.png"),
-    exit_code: screenshot.status,
-    image: screenshotImage,
-  } : {
+  screen_sharing_capture: screenshot ? screenshot : {
     skipped: true,
   },
   queue_latency: queueLatency ? {
@@ -306,6 +304,152 @@ function runWorkspaceLatencyStep(manifestPath, envOverride) {
   ], envOverride);
 }
 
+function runScreenshotStep(localOutputPath, envOverride) {
+  if (screenshotTarget === "local") {
+    return runLocalScreenSharingCapture(localOutputPath, envOverride);
+  }
+  if (screenshotTarget === "lab") {
+    return runLabDesktopCapture(envOverride, "requested");
+  }
+
+  const local = runLocalScreenSharingCapture(localOutputPath, envOverride);
+  if (local.ok) return local;
+
+  const lab = runLabDesktopCapture(envOverride, "local_screen_sharing_unavailable");
+  return {
+    ...lab,
+    fallback_reason: lab.ok
+      ? "local_screen_sharing_unavailable"
+      : "local_screen_sharing_and_lab_capture_failed",
+    local_attempt: local,
+  };
+}
+
+function runLocalScreenSharingCapture(localOutputPath, envOverride) {
+  const step = runStep("local screen sharing capture", "bin/local-screen-sharing-capture", [localOutputPath], envOverride);
+  const image = imageArtifactSummary(localOutputPath);
+  return {
+    ok: step.status === 0 && image.ok === true,
+    capture_mode: "local_screen_sharing_window",
+    target: "local",
+    output: localOutputPath,
+    exit_code: step.status,
+    image,
+    stdout_path: step.stdout_path,
+    stderr_path: step.stderr_path,
+  };
+}
+
+function runLabDesktopCapture(envOverride, fallbackReason) {
+  const label = "human-demo-ready";
+  const step = runStep("lab desktop capture", "bin/lab-mac-desktop-capture", [runDir, label], envOverride);
+  const remoteCapturePath = lastNonEmptyLine(step.stdout);
+  const localCaptureDir = remoteCapturePath && !remoteCapturePath.startsWith("/")
+    ? remoteCapturePath
+    : path.join(runDir, "captures", label);
+  const sync = remoteCapturePath
+    ? syncLabCapture(remoteCapturePath, localCaptureDir, envOverride)
+    : { ok: false, reason: "missing_remote_capture_path" };
+  const output = path.join(localCaptureDir, "screen.png");
+  const image = imageArtifactSummary(output);
+  const summary = readJsonIfPresent(path.join(localCaptureDir, "capture-summary.json"));
+  return {
+    ok: step.status === 0 && sync.ok === true && image.ok === true,
+    capture_mode: "lab_desktop",
+    target: "lab",
+    fallback_reason: fallbackReason,
+    output,
+    exit_code: step.status,
+    remote_capture_path: remoteCapturePath,
+    image,
+    lab_capture_summary: summary ? {
+      screen: summary.screen,
+      queue_app: summary.queue_app,
+      gui_fallback: summary.gui_fallback,
+    } : undefined,
+    stdout_path: step.stdout_path,
+    stderr_path: step.stderr_path,
+    sync,
+  };
+}
+
+function syncLabCapture(remoteCapturePath, localCaptureDir, envOverride) {
+  mkdirSync(path.resolve(repoRoot, localCaptureDir), { recursive: true });
+  const labHost = envOverride.LAB_MAC_HOST ?? "100.71.111.25";
+  const labUser = envOverride.LAB_MAC_USER ?? "claw";
+  const labKey = envOverride.LAB_MAC_KEY ?? path.join(osHome(), ".ssh", "eventloop_lab_mac");
+  const remoteRepo = remoteRepoFromEnv(envOverride);
+  const remote = `${labUser}@${labHost}`;
+  const sshCommand = [
+    "ssh",
+    "-i",
+    labKey,
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=20",
+    "-o",
+    "ServerAliveInterval=15",
+    "-o",
+    "ServerAliveCountMax=8",
+  ].join(" ");
+  const result = spawnSync("rsync", [
+    "-az",
+    "-e",
+    sshCommand,
+    `${remote}:${remoteRepo}/${remoteCapturePath.replace(/\/$/, "")}/`,
+    `${path.resolve(repoRoot, localCaptureDir)}/`,
+  ], {
+    cwd: repoRoot,
+    env: envOverride,
+    encoding: "utf8",
+    shell: false,
+  });
+  const stdoutPath = path.join(runDir, "steps", "lab-desktop-capture-sync.stdout");
+  const stderrPath = path.join(runDir, "steps", "lab-desktop-capture-sync.stderr");
+  writeFileSync(path.join(repoRoot, stdoutPath), result.stdout ?? "", "utf8");
+  writeFileSync(path.join(repoRoot, stderrPath), result.stderr ?? "", "utf8");
+  steps.push({
+    name: "lab desktop capture sync",
+    command: ["rsync", "-az", "-e", sshCommand, `${remote}:${remoteRepo}/${remoteCapturePath}/`, `${localCaptureDir}/`],
+    status: result.status ?? 1,
+    signal: result.signal,
+    stdout_path: stdoutPath,
+    stderr_path: stderrPath,
+  });
+  return {
+    ok: result.status === 0,
+    exit_code: result.status ?? 1,
+    local_capture_dir: localCaptureDir,
+    stdout_path: stdoutPath,
+    stderr_path: stderrPath,
+  };
+}
+
+function normalizeScreenshotTarget(raw) {
+  const value = String(raw ?? "").trim().toLowerCase();
+  if (["auto", "local", "lab"].includes(value)) return value;
+  console.error(`Invalid EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET: ${String(raw)}`);
+  process.exit(2);
+}
+
+function remoteRepoFromEnv(envOverride) {
+  const labUser = envOverride.LAB_MAC_USER ?? "claw";
+  const eventloopPath = envOverride.LAB_MAC_EVENTLOOP_PATH ?? "~/dev/2026/eventloopOS";
+  if (eventloopPath === "~") return `/Users/${labUser}`;
+  if (eventloopPath.startsWith("~/")) return `/Users/${labUser}/${eventloopPath.slice(2)}`;
+  return eventloopPath;
+}
+
+function osHome() {
+  return process.env.HOME ?? "/tmp";
+}
+
+function lastNonEmptyLine(value) {
+  const lines = String(value ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.at(-1) ?? "";
+}
+
 function extractJsonObject(value) {
   if (!value.trim()) return undefined;
   const starts = [];
@@ -434,7 +578,7 @@ function renderReadyMarkdown(manifest) {
 - Latest proof: ${latest?.manifest_path ?? ""}
 - Latest proof screenshot: ${latest?.screenshot_path ?? ""}
 - Latest proof freshness: ${freshness ? `${freshness.ok ? "ok" : "stale"} age=${freshness.age_hours ?? ""}h max=${freshness.max_age_hours}h${freshness.allowed_stale ? " allowed" : ""}` : ""}
-- Fresh Screen Sharing capture: ${screenshot?.output ?? "skipped"}${screenshot?.image?.dimensions ? ` (${screenshot.image.dimensions}, ${screenshot.image.bytes} bytes)` : ""}
+- Fresh screenshot capture: ${screenshot?.output ?? "skipped"}${screenshot?.capture_mode ? ` mode=${screenshot.capture_mode}` : ""}${screenshot?.image?.dimensions ? ` (${screenshot.image.dimensions}, ${screenshot.image.bytes} bytes)` : ""}
 - Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
 - Workspace latency: ${workspaceLatency?.manifest_path ?? "skipped"}${manifest.workspace_latency_required ? " (required)" : ""}
 - Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}${manifest.hotkey_latency_required ? " (required)" : ""}
@@ -491,6 +635,10 @@ function runSelfTest() {
   });
   assert.equal(demoProofFreshness("2026-06-03T10:00:00.000Z", "2026-06-04T20:00:00.000Z", 24, false).ok, false);
   assert.equal(demoProofFreshness("bad", "2026-06-04T20:00:00.000Z", 24, true).ok, true);
+  assert.equal(remoteRepoFromEnv({ LAB_MAC_USER: "claw" }), "/Users/claw/dev/2026/eventloopOS");
+  assert.equal(remoteRepoFromEnv({ LAB_MAC_USER: "demo", LAB_MAC_EVENTLOOP_PATH: "~/src/eventloopOS" }), "/Users/demo/src/eventloopOS");
+  assert.equal(remoteRepoFromEnv({ LAB_MAC_EVENTLOOP_PATH: "/tmp/repo" }), "/tmp/repo");
+  assert.equal(lastNonEmptyLine("one\n\ntwo\n"), "two");
   const png = Buffer.from([
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
     0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
@@ -519,6 +667,7 @@ function runSelfTest() {
     },
     screen_sharing_capture: {
       output: "artifacts/lab-runs/ready/screen-sharing.png",
+      capture_mode: "local_screen_sharing_window",
       image: { dimensions: "1280x720", bytes: 2048 },
     },
     queue_latency: { manifest_path: "artifacts/lab-runs/ready/queue-latency.json" },
@@ -530,7 +679,7 @@ function runSelfTest() {
   assert.match(markdown, /Ready: yes/);
   assert.match(markdown, /artifacts\/lab-runs\/demo\/manifest\.json/);
   assert.match(markdown, /Latest proof freshness: ok age=1.25h max=24h/);
-  assert.match(markdown, /Fresh Screen Sharing capture: artifacts\/lab-runs\/ready\/screen-sharing\.png \(1280x720, 2048 bytes\)/);
+  assert.match(markdown, /Fresh screenshot capture: artifacts\/lab-runs\/ready\/screen-sharing\.png mode=local_screen_sharing_window \(1280x720, 2048 bytes\)/);
   assert.match(markdown, /Hotkey feedback latency: skipped/);
   assert.match(markdown, /Queue latency: artifacts\/lab-runs\/ready\/queue-latency\.json/);
   assert.match(markdown, /Workspace latency: artifacts\/lab-runs\/ready\/workspace-latency\.json/);
