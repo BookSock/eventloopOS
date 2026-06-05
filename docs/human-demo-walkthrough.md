@@ -20,6 +20,9 @@ The setup script:
 - queues exactly two papers,
 - proves the shared TextEdit window restores to different positions per paper,
 - proves ambient autosave updates future queue context after the shared window moves,
+- proves a newly opened scratch TextEdit window on the current paper is saved
+  into future queue context without pressing Done/Defer/Advance, then closes it
+  before the hands-on walkthrough,
 - proves a background/foreign paper window is moved back to its owning paper,
 - captures a local Screen Sharing window-only screenshot, or falls back to a lab Mac desktop capture when Screen Sharing is unavailable.
 
@@ -172,6 +175,7 @@ Pass/fail:
 - Starting state on demo-customer with Queue visible:
 - Ctrl-Option-R restores Customer paper:
 - Moving shared TextEdit is remembered after 2-3 seconds:
+- Automated new scratch window is remembered by current paper:
 - Metrics paper brings same TextEdit to metrics position:
 - Customer paper brings same TextEdit back to customer position:
 - Background window containment proof passed:

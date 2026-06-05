@@ -2,6 +2,7 @@ export const humanDemoPassFailLabels = Object.freeze([
   "Starting state on demo-customer with Queue visible",
   "Ctrl-Option-R restores Customer paper",
   "Moving shared TextEdit is remembered after 2-3 seconds",
+  "Automated new scratch window is remembered by current paper",
   "Metrics paper brings same TextEdit to metrics position",
   "Customer paper brings same TextEdit back to customer position",
   "Background window containment proof passed",

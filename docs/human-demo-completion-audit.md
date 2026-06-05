@@ -6,9 +6,9 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 
 ## Current Evidence
 
-- Latest automated human demo: `artifacts/lab-runs/20260605-084637-human-demo/manifest.json`
-- Latest readiness screenshot: `artifacts/lab-runs/20260605T155221Z-human-demo-ready/captures/human-demo-ready/screen.png`
-- Latest readiness manifest: `artifacts/lab-runs/20260605T155221Z-human-demo-ready/manifest.json`
+- Latest automated human demo: `artifacts/lab-runs/20260605-132340-human-demo/manifest.json`
+- Latest readiness screenshot: `artifacts/lab-runs/20260605T202622Z-human-demo-ready/screen-sharing.png`
+- Latest readiness manifest: `artifacts/lab-runs/20260605T202622Z-human-demo-ready/manifest.json`
 - Current result template/artifact writer: `bin/human-demo-result-template --write`
 - Current result verifier: `bin/human-demo-result-verify --lab-status`
 - Current closeout auditor: `bin/human-demo-completion-audit --strict` (JSON output includes `next_actions` with the exact result-template, verification, and closeout commands while pending)
@@ -27,6 +27,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 | One window in multiple papers with different positions | Human demo manifest proves shared TextEdit window id appears in both demo paper snapshots with different frames and restores both ways | Proven by automation |
 | Later saves do not destroy older paper snapshots | Human demo ambient probe updates customer context, then final customer restore is re-proven; task workspace memory tests cover separate task layouts | Proven by automation |
 | Ambient autosave after move | Human demo `proofs.ambient_autosave.ok=true`; `ambient_workspace_saver` unit/integration tests; live activity emits save/skip events | Proven by automation |
+| Ambient autosave after opening a new window | Human demo `proofs.new_window_autosave.ok=true` opens a scratch TextEdit on the current paper, waits for ambient save, verifies future queue context includes the scratch window/frame, then closes it before the hands-on walkthrough; readiness requires this proof | Proven by automation |
 | Snapshot capture avoids unrelated lab/system windows | Human demo queue context includes only shared TextEdit and matching Chrome; ambient saver filtering tests cover blocklisted apps | Proven by automation |
 | Autosave observability | `/activity` shows `ambient_workspace_save_*`; `ambient_workspace_saver` tests cover commit/skip/fail paths | Proven |
 | Current paper briefing remains visible | Queue detail begins with `queue-paper-briefing-strip`, backed by `QueuePaperBriefingPresentation` tests, Swift render smoke screenshots, `bin/human-demo-ready` screenshot staging, and `bin/human-demo-completion-audit --strict` requiring `checks.queue_briefing_strip_visible=true` | Proven |
