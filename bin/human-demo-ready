@@ -463,6 +463,10 @@ function queueBriefingStripStatus(expected) {
     "  tell process \\"eventloopOS Queue\\"",
     "    if (count of windows) is 0 then return \\"missing:window\\"",
     "    set allLines to {}",
+    "    set stripName to \\"\\"",
+    "    set briefingTitle to \\"\\"",
+    "    set briefingDecision to \\"\\"",
+    "    set briefingContext to \\"\\"",
     "    set flattenedElements to entire contents of window 1",
     "    set elementCount to count of flattenedElements",
     "    if elementCount is greater than 240 then set elementCount to 240",
@@ -481,8 +485,15 @@ function queueBriefingStripStatus(expected) {
     "        set valueText to value of candidateElement as string",
     "      end try",
     "      set end of allLines to identifierText & \\" \\" & nameText & \\" \\" & valueText",
-    "      if identifierText is \\"queue-paper-briefing-strip\\" then return \\"present:identifier:\\" & nameText",
+    "      set readableText to nameText",
+    "      if readableText is \\"\\" then set readableText to valueText",
+    "      if identifierText is \\"queue-paper-briefing-strip\\" then set stripName to readableText",
+    "      if identifierText is \\"queue-paper-briefing-title\\" then set briefingTitle to readableText",
+    "      if identifierText is \\"queue-paper-briefing-decision\\" then set briefingDecision to readableText",
+    "      if identifierText is \\"queue-paper-briefing-context\\" then set briefingContext to readableText",
     "    end repeat",
+    "    if briefingTitle is not \\"\\" and briefingDecision is not \\"\\" and briefingContext is not \\"\\" then return \\"present:parts:\\" & briefingTitle & \\" | \\" & briefingDecision & \\" | \\" & briefingContext",
+    "    if stripName is not \\"\\" then return \\"present:identifier:\\" & stripName",
     "  end tell",
     "end tell",
     "set AppleScript's text item delimiters to linefeed",
@@ -490,11 +501,11 @@ function queueBriefingStripStatus(expected) {
   ].join("\\n");
   try {
     const output = execFileSync("osascript", [], { input: script, encoding: "utf8" }).trim();
+    if (output.startsWith("present:parts:")) {
+      return briefingLineStatus(output.slice("present:parts:".length), expected);
+    }
     if (output.startsWith("present:identifier:")) {
-      return {
-        present: true,
-        line: output,
-      };
+      return briefingLineStatus(output.slice("present:identifier:".length), expected);
     }
     const line = matchingBriefingLine(output, expected);
     return {
@@ -510,22 +521,48 @@ function queueBriefingStripStatus(expected) {
   }
 }
 
-function matchingBriefingLine(output, expected) {
+function briefingLineStatus(line, expected) {
+  const normalized = String(line ?? "").replace(/\s+/g, " ").trim();
+  const comparable = briefingComparableText(normalized);
+  const missing = expectedBriefingParts(expected).filter((part) => !comparable.includes(briefingComparableText(part)));
+  return {
+    present: missing.length === 0,
+    line: normalized,
+    error: missing.length > 0 ? "briefing missing expected parts: " + missing.join(", ") : undefined,
+  };
+}
+
+function briefingComparableText(value) {
+  // Lab AX reads have returned lowercase "s" as spaces for SwiftUI Text.
+  return String(value ?? "")
+    .toLowerCase()
+    .replace(/[\\s]+/g, "")
+    .replace(/s/g, "");
+}
+
+function expectedBriefingParts(expected) {
   const title = String(expected?.title ?? "").trim();
   const decision = String(expected?.decision ?? "").trim();
   const taskId = String(expected?.taskId ?? "").trim();
   const priority = String(expected?.priority ?? "").trim();
-  const expectedParts = [
+  return [
     title,
     decision,
     taskId,
-    priority ? \`P\${priority}\` : "",
+    priority ? "P" + priority : "",
   ].filter(Boolean);
+}
+
+function matchingBriefingLine(output, expected) {
+  const expectedParts = expectedBriefingParts(expected).map(briefingComparableText);
   if (expectedParts.length < 3) return undefined;
   return output
     .split(/\\r?\\n/)
     .map((line) => line.replace(/\\s+/g, " ").trim())
-    .find((line) => expectedParts.every((part) => line.includes(part)));
+    .find((line) => {
+      const comparable = briefingComparableText(line);
+      return expectedParts.every((part) => comparable.includes(part));
+    });
 }
 
 function delay(ms) {
@@ -1009,7 +1046,13 @@ function runSelfTest() {
   assert.ok(labDemoScreenshotStageScript().includes("queueBriefingStripStatus"));
   assert.ok(labDemoScreenshotStageScript().includes("matchingBriefingLine"));
   assert.ok(labDemoScreenshotStageScript().includes("queue-paper-briefing-strip"));
+  assert.ok(labDemoScreenshotStageScript().includes("queue-paper-briefing-title"));
+  assert.ok(labDemoScreenshotStageScript().includes("queue-paper-briefing-decision"));
+  assert.ok(labDemoScreenshotStageScript().includes("queue-paper-briefing-context"));
   assert.ok(labDemoScreenshotStageScript().includes("/workspace/restore"));
+  assert.ok(labDemoScreenshotStageScript().includes("present:parts:"));
+  assert.ok(labDemoScreenshotStageScript().includes("briefing missing expected parts"));
+  assert.ok(labDemoScreenshotStageScript().includes("priority ? \"P\" + priority : \"\""));
   assert.equal(remoteRepoFromEnv({ LAB_MAC_USER: "claw" }), "/Users/claw/dev/2026/eventloopOS");
   assert.equal(remoteRepoFromEnv({ LAB_MAC_USER: "demo", LAB_MAC_EVENTLOOP_PATH: "~/src/eventloopOS" }), "/Users/demo/src/eventloopOS");
   assert.equal(remoteRepoFromEnv({ LAB_MAC_EVENTLOOP_PATH: "/tmp/repo" }), "/tmp/repo");

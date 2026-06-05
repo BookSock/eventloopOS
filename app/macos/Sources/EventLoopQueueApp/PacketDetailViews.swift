@@ -270,16 +270,19 @@ private struct PaperBriefingStrip: View {
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
                     .truncationMode(.tail)
+                    .accessibilityIdentifier("queue-paper-briefing-title")
                 Text(presentation.decision)
                     .font(.caption2)
                     .foregroundStyle(.primary)
                     .lineLimit(2)
                     .truncationMode(.tail)
+                    .accessibilityIdentifier("queue-paper-briefing-decision")
                 Text(presentation.context)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .accessibilityIdentifier("queue-paper-briefing-context")
             }
             Spacer(minLength: 0)
         }
@@ -288,7 +291,7 @@ private struct PaperBriefingStrip: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("queue-paper-briefing-strip")
         .accessibilityLabel("\(presentation.title). \(presentation.decision). \(presentation.context)")
     }

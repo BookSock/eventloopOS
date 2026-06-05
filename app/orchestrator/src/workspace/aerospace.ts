@@ -625,6 +625,7 @@ function restoreWindowFrameAppleScript(window: AerospaceWindow): string {
   const appMatcher = window.appBundleId
     ? `bundle identifier of candidateProcess as text is ${appleScriptString(window.appBundleId)}`
     : `name of candidateProcess as text is ${appleScriptString(window.app)}`;
+  const titleMatcher = appleScriptOrCondition("windowName", windowFrameTitleCandidates(window));
 
   return `
 -- eventloopOS generated frame restore
@@ -634,7 +635,8 @@ tell application "System Events"
       if ${appMatcher} then
         repeat with candidateWindow in windows of candidateProcess
           try
-            if name of candidateWindow as text is ${appleScriptString(window.title)} then
+            set windowName to name of candidateWindow as text
+            if ${titleMatcher} then
               set position of candidateWindow to {${frame.x}, ${frame.y}}
               set size of candidateWindow to {${frame.width}, ${frame.height}}
               return "ok"

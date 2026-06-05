@@ -90,7 +90,7 @@ let windows = resolveDemoWindows(snapshot);
 const customerSnapshot = buildSnapshot(windows, "customer");
 await restore(customerSnapshot, "initial-customer-layout");
 await sleep(1_200);
-snapshot = await captureWithDemoFrames("initial customer restore");
+snapshot = await captureWithDemoFrames("initial customer restore", customerSnapshot);
 const customerProof = assertRestoredSnapshot(snapshot, customerSnapshot, "initial customer restore");
 windows = resolveDemoWindows(snapshot);
 
@@ -102,7 +102,7 @@ await queuePaper(paperCustomer, "Customer asks whether eventloopOS is ready for 
 const metricsSnapshot = buildSnapshot(windows, "metrics");
 await restore(metricsSnapshot, "initial-metrics-layout");
 await sleep(1_200);
-snapshot = await captureWithDemoFrames("initial metrics restore");
+snapshot = await captureWithDemoFrames("initial metrics restore", metricsSnapshot);
 const metricsProof = assertRestoredSnapshot(snapshot, metricsSnapshot, "initial metrics restore");
 windows = resolveDemoWindows(snapshot);
 
@@ -125,18 +125,18 @@ const foreignWindowContainmentProof = await proveForeignWindowContainment(window
 const readySnapshotTarget = buildReadySnapshot(customerSnapshot, metricsSnapshot, windows);
 await restore(readySnapshotTarget, "ready-customer-layout");
 await sleep(1_200);
-const readySnapshot = await captureWithDemoFrames("ready customer restore");
+const readySnapshot = await captureWithDemoFrames("ready customer restore", customerSnapshot);
 const readyCustomerProof = assertRestoredSnapshot(readySnapshot, customerSnapshot, "ready customer restore");
 const ambientAutosaveProof = await proveAmbientAutosave(paperCustomer, customerSnapshot);
 await restore(readySnapshotTarget, "ready-customer-layout-after-ambient-proof");
 await sleep(1_200);
 await putTaskLayout(paperCustomer.taskId, customerSnapshot);
 await saveTaskWorkspaceSnapshot(paperCustomer.taskId, customerSnapshot);
-const finalReadySnapshot = await captureWithDemoFrames("final ready customer restore");
+const finalReadySnapshot = await captureWithDemoFrames("final ready customer restore", customerSnapshot);
 const finalReadyCustomerProof = assertRestoredSnapshot(finalReadySnapshot, customerSnapshot, "final ready customer restore");
 const queueWindow = positionQueueWindow();
 await sleep(600);
-const finalSnapshot = await captureWithDemoFrames("final demo snapshot");
+const finalSnapshot = await captureWithDemoFrames("final demo snapshot", customerSnapshot);
 const finalWindows = resolveDemoWindows(finalSnapshot);
 
 const manifest = {
@@ -393,13 +393,17 @@ async function capture() {
   return (await response.json()).snapshot;
 }
 
-async function captureWithDemoFrames(label) {
+async function captureWithDemoFrames(label, expectedSnapshot) {
   let lastSnapshot;
   let lastError;
   for (let attempt = 1; attempt <= 12; attempt += 1) {
     lastSnapshot = await capture();
     try {
-      assertDemoFramesPresent(resolveDemoWindows(lastSnapshot));
+      if (expectedSnapshot) {
+        assertExpectedSnapshotFramesPresent(lastSnapshot, expectedSnapshot);
+      } else {
+        assertDemoFramesPresent(resolveDemoWindows(lastSnapshot));
+      }
       return lastSnapshot;
     } catch (error) {
       lastError = error;
@@ -423,6 +427,17 @@ function assertDemoFramesPresent(windows) {
   for (const [label, window] of Object.entries(windows)) {
     if (!window.frame || typeof window.frame.x !== "number") {
       throw new Error(`${label} frame missing`);
+    }
+  }
+}
+
+function assertExpectedSnapshotFramesPresent(actualSnapshot, expectedSnapshot) {
+  const actualById = new Map(actualSnapshot.windows.map((window) => [window.id, window]));
+  for (const expected of expectedSnapshot.windows) {
+    const actual = actualById.get(expected.id);
+    if (!actual) throw new Error(`window ${expected.id} missing`);
+    if (!actual.frame || typeof actual.frame.x !== "number") {
+      throw new Error(`window ${expected.id} frame missing`);
     }
   }
 }

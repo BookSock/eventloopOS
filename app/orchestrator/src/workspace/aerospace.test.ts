@@ -10,6 +10,7 @@ import {
   moveToWorkspacePlan,
   parseWindowFrameObservations,
   parseAerospaceWindows,
+  restoreWindowFramePlan,
   restoreWorkspacePlan,
   type ExecFunction,
   type WorkspaceSnapshot,
@@ -131,6 +132,23 @@ describe("Aerospace workspace adapter", () => {
     );
 
     assert.deepEqual(windows[0]?.frame, { x: 40, y: 60, width: 980, height: 720 });
+  });
+
+  it("restores Chrome frames when System Events strips the app suffix from the window title", () => {
+    const plan = restoreWindowFramePlan({
+      id: 568,
+      app: "Google Chrome",
+      appBundleId: "com.google.Chrome",
+      title: "eventloopOS Human Demo Metrics Review - Google Chrome",
+      workspace: "demo-metrics",
+      frame: { x: 760, y: 70, width: 980, height: 690 },
+    });
+
+    assert.equal(plan?.command, "osascript");
+    const script = plan?.args[1] ?? "";
+    assert.match(script, /windowName is "eventloopOS Human Demo Metrics Review"/);
+    assert.match(script, /windowName is "eventloopOS Human Demo Metrics Review - Google Chrome"/);
+    assert.match(script, /set position of candidateWindow to \{760, 70\}/);
   });
 
   it("does not attach stripped-title observations across different Chrome windows", () => {
