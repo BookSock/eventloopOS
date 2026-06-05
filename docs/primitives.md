@@ -35,8 +35,8 @@ Validate both with
 Generate a builder-facing coverage/readiness summary with
 `bin/primitives-readiness-report docs/primitives.catalog.json` or use
 `--json` for machine-readable audit output.
-Current catalog summary: 18 primitives, 80 HTTP routes, 8 CLI commands, 18
-self-tests, 73 proof refs, 8 latency budgets.
+Current catalog summary: 18 primitives, 80 HTTP routes, 8 CLI commands, 19
+self-tests, 74 proof refs, 11 latency budgets.
 Strict readiness is expected to stay green: every cataloged primitive
 has a `self_tests` command, and the shared primitive operation-helper test
 proves typed helper coverage for every cataloged HTTP route.
@@ -695,11 +695,15 @@ Guarantees:
 - follows-window orchestrator skips during manual mode
 - queue lease-next returns a 409 manual-mode response while paused
 - manual workspace can be restored on app termination
+- `manual_mode_get`, `manual_mode_set`, and `manual_mode_restore` p95 budgets
+  are checked by `bin/manual-mode-latency-proof`, which restores the original
+  manual-mode state after live write samples
 
 Proof:
 
 - `app/orchestrator/test/manual_mode_pause_integration.test.ts`
 - `app/orchestrator/test/manual_mode_round_trip.test.ts`
+- `bin/manual-mode-latency-proof`
 - Mac app `QueueViewModelTests` and `QueueAppDelegateTests`
 
 Status: stable enough for dogfood.

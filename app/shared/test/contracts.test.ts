@@ -260,8 +260,8 @@ describe("primitive catalog SDK boundary", () => {
     expect(summary.responseSchemaCount).toBe(summary.routeCount);
     expect(summary.requestSchemaCount + summary.noRequestBodyCount).toBeGreaterThan(40);
     expect(summary.schemaCount).toBeGreaterThan(100);
-    expect(summary.latencyBudgetCount).toBe(8);
-    expect(summary.responsivenessCriticalCount).toBe(4);
+    expect(summary.latencyBudgetCount).toBe(11);
+    expect(summary.responsivenessCriticalCount).toBe(5);
     expect(summary.statusCounts).toMatchObject({ dogfood: 12, mixed: 1, stable_enough: 5 });
     expect(summary.categoryCounts).toMatchObject({
       agent_context: 4,
@@ -340,6 +340,7 @@ describe("primitive catalog SDK boundary", () => {
       "workspace_control",
       "queue_paper_routing",
       "master_command_router",
+      "manual_mode",
       "mac_app_hotkeys"
     ]);
   });
@@ -350,7 +351,7 @@ describe("primitive catalog SDK boundary", () => {
 
     expect(selection.missingPrimitiveIds).toEqual([]);
     expect(selection.selectedPrimitiveIds).toHaveLength(18);
-    expect(selection.commands.length).toBe(9);
+    expect(selection.commands.length).toBe(10);
     expect(selection.commands).toContainEqual({
       command: "pnpm --filter @eventloopos/orchestrator run test:runtime-spine",
       primitiveIds: ["runtime_spine"]
@@ -373,7 +374,7 @@ describe("primitive catalog SDK boundary", () => {
     const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
     const allBudgets = selectPrimitiveLatencyBudgets(catalog);
 
-    expect(allBudgets).toHaveLength(8);
+    expect(allBudgets).toHaveLength(11);
     expect(allBudgets).toContainEqual(expect.objectContaining({
       primitiveId: "workspace_control",
       primitiveCategory: "os_control",
@@ -388,6 +389,9 @@ describe("primitive catalog SDK boundary", () => {
       "workspace_control",
       "workspace_control",
       "workspace_control",
+      "manual_mode",
+      "manual_mode",
+      "manual_mode",
       "mac_app_hotkeys"
     ]);
 
@@ -403,6 +407,9 @@ describe("primitive catalog SDK boundary", () => {
       "queue_next",
       "queue_lease_next",
       "master_fan_out_dry_run",
+      "manual_mode_get",
+      "manual_mode_set",
+      "manual_mode_restore",
       "hotkey_to_feedback"
     ]);
   });
@@ -439,10 +446,11 @@ describe("primitive catalog SDK boundary", () => {
       "workspace_control",
       "queue_paper_routing",
       "master_command_router",
+      "manual_mode",
       "mac_app_hotkeys"
     ]);
     expect(criticalPlan.selfTestCommands.length).toBeGreaterThanOrEqual(2);
-    expect(criticalPlan.latencyBudgets).toHaveLength(8);
+    expect(criticalPlan.latencyBudgets).toHaveLength(11);
   });
 
   it("rejects primitive routes that drift back to freeform mutating bodies", () => {

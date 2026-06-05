@@ -1,0 +1,290 @@
+#!/usr/bin/env node
+import http from "node:http";
+import fs from "node:fs";
+import path from "node:path";
+import { performance } from "node:perf_hooks";
+
+const args = process.argv.slice(2);
+const DEFAULT_BUDGETS_MS = {
+  manual_mode_get: 500,
+  manual_mode_set: 800,
+  manual_mode_restore: 800,
+};
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/manual-mode-latency-proof [--url URL] [--runs N] [--read-only] [--manifest PATH]
+
+Measures manual-mode responsiveness. Live write mode toggles manual mode once
+per sample and restores the original state before the next sample/exit.
+Use --read-only when a demo run must not change manual mode.
+
+Environment:
+  EVENTLOOPOS_ORCHESTRATOR_URL          default: http://127.0.0.1:4377
+  EVENTLOOPOS_MANUAL_MODE_LATENCY_RUNS default: 10
+  EVENTLOOPOS_MANUAL_MODE_LATENCY_READ_ONLY=1 skips POST /modes/manual
+`);
+  process.exit(0);
+}
+
+if (args.includes("--budgets-json")) {
+  console.log(JSON.stringify({
+    kind: "eventloopos.manual_mode_latency_budgets",
+    budgets_ms: DEFAULT_BUDGETS_MS,
+  }, null, 2));
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  await runSelfTest();
+  process.exit(0);
+}
+
+const url = readArg("--url") ?? process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4377";
+const runs = positiveInteger(readArg("--runs") ?? process.env.EVENTLOOPOS_MANUAL_MODE_LATENCY_RUNS, 10);
+const readOnly = args.includes("--read-only") || process.env.EVENTLOOPOS_MANUAL_MODE_LATENCY_READ_ONLY === "1";
+const runId = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+const manifestPath = readArg("--manifest") ?? path.join("artifacts", "manual-mode-latency", runId, "manifest.json");
+
+const manifest = await measureManualModeLatency({ baseUrl: url, runs, readOnly });
+writeJson(manifestPath, manifest);
+console.log(`manual mode latency manifest: ${manifestPath}`);
+console.log(JSON.stringify({
+  ok: manifest.ok,
+  runs: manifest.runs,
+  read_only: manifest.read_only,
+  failed_budgets: manifest.failed_budgets,
+  summary: manifest.summary,
+}, null, 2));
+process.exit(manifest.ok ? 0 : 1);
+
+async function measureManualModeLatency({ baseUrl, runs, readOnly = false }) {
+  const startedAt = new Date().toISOString();
+  const samples = [];
+  const initial = await requestJson(baseUrl, "/modes/manual");
+  const originalActive = Boolean(initial.manual_mode?.active);
+
+  try {
+    for (let index = 0; index < runs; index += 1) {
+      const sample = { run: index + 1, ok: true, timings_ms: {}, errors: [] };
+      try {
+        const current = await timed(sample, "manual_mode_get", () => requestJson(baseUrl, "/modes/manual"));
+        const currentActive = Boolean(current.manual_mode?.active);
+        if (!readOnly) {
+          await timed(sample, "manual_mode_set", () => requestJson(baseUrl, "/modes/manual", {
+            method: "POST",
+            body: {
+              active: !currentActive,
+              reason: "manual_mode_latency_proof",
+            },
+          }));
+          await timed(sample, "manual_mode_restore", () => requestJson(baseUrl, "/modes/manual", {
+            method: "POST",
+            body: {
+              active: currentActive,
+              reason: "manual_mode_latency_proof_restore",
+            },
+          }));
+        }
+      } catch (error) {
+        sample.ok = false;
+        sample.errors.push(error instanceof Error ? error.message : String(error));
+      }
+      samples.push(sample);
+    }
+  } finally {
+    if (!readOnly) {
+      await restoreManualMode(baseUrl, originalActive).catch((error) => {
+        samples.push({
+          run: "final_restore",
+          ok: false,
+          timings_ms: {},
+          errors: [`final restore failed: ${error instanceof Error ? error.message : String(error)}`],
+        });
+      });
+    }
+  }
+
+  const summary = summarize(samples);
+  const failedBudgets = [];
+  for (const [name, budget] of Object.entries(DEFAULT_BUDGETS_MS)) {
+    if (readOnly && name !== "manual_mode_get") continue;
+    const p95 = summary[name]?.p95_ms;
+    if (typeof p95 === "number" && p95 > budget) {
+      failedBudgets.push({ name, p95_ms: p95, budget_ms: budget });
+    }
+  }
+  const final = await requestJson(baseUrl, "/modes/manual").catch(() => undefined);
+  const restored = readOnly || Boolean(final?.manual_mode?.active) === originalActive;
+  const finishedAt = new Date().toISOString();
+  return {
+    ok: restored && samples.every((sample) => sample.ok) && failedBudgets.length === 0,
+    kind: "eventloopos.manual_mode_latency_proof",
+    started_at: startedAt,
+    finished_at: finishedAt,
+    orchestrator_url: baseUrl,
+    runs,
+    read_only: readOnly,
+    original_active: originalActive,
+    final_active: final?.manual_mode?.active,
+    restored,
+    budgets_ms: DEFAULT_BUDGETS_MS,
+    failed_budgets: failedBudgets,
+    summary,
+    samples,
+  };
+}
+
+async function restoreManualMode(baseUrl, active) {
+  return await requestJson(baseUrl, "/modes/manual", {
+    method: "POST",
+    body: {
+      active,
+      reason: "manual_mode_latency_proof_final_restore",
+    },
+  });
+}
+
+async function timed(sample, name, fn) {
+  const start = performance.now();
+  try {
+    const value = await fn();
+    sample.timings_ms[name] = roundMs(performance.now() - start);
+    return value;
+  } catch (error) {
+    sample.timings_ms[name] = roundMs(performance.now() - start);
+    throw error;
+  }
+}
+
+async function requestJson(baseUrl, route, options = {}) {
+  const headers = { ...(options.headers ?? {}) };
+  let body;
+  if (options.body !== undefined) {
+    headers["content-type"] = "application/json";
+    body = JSON.stringify(options.body);
+  }
+  const response = await fetch(new URL(route, baseUrl), {
+    method: options.method ?? "GET",
+    headers,
+    body,
+  });
+  const text = await response.text();
+  let parsed;
+  try {
+    parsed = text ? JSON.parse(text) : {};
+  } catch {
+    parsed = { raw: text };
+  }
+  if (!response.ok) throw new Error(`${route} HTTP ${response.status}: ${JSON.stringify(parsed)}`);
+  return parsed;
+}
+
+function summarize(samples) {
+  const names = new Set(samples.flatMap((sample) => Object.keys(sample.timings_ms)));
+  const result = {};
+  for (const name of names) {
+    const values = samples
+      .map((sample) => sample.timings_ms[name])
+      .filter((value) => typeof value === "number" && Number.isFinite(value))
+      .sort((left, right) => left - right);
+    if (values.length === 0) continue;
+    result[name] = {
+      count: values.length,
+      min_ms: roundMs(values[0]),
+      median_ms: percentile(values, 0.5),
+      p95_ms: percentile(values, 0.95),
+      max_ms: roundMs(values[values.length - 1]),
+    };
+  }
+  return result;
+}
+
+function percentile(values, p) {
+  if (values.length === 0) return undefined;
+  const index = Math.min(values.length - 1, Math.ceil(values.length * p) - 1);
+  return roundMs(values[index]);
+}
+
+function roundMs(value) {
+  return Math.round(value * 10) / 10;
+}
+
+function readArg(name) {
+  const index = args.indexOf(name);
+  if (index < 0) return undefined;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) throw new Error(`${name} requires a value`);
+  return value;
+}
+
+function positiveInteger(value, fallback) {
+  if (value === undefined || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) throw new Error(`expected positive integer, got ${value}`);
+  return parsed;
+}
+
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function runSelfTest() {
+  let active = false;
+  const calls = [];
+  const server = http.createServer(async (request, response) => {
+    const send = (status, body) => {
+      response.writeHead(status, { "content-type": "application/json" });
+      response.end(JSON.stringify(body));
+    };
+    if (request.method === "GET" && request.url === "/modes/manual") {
+      send(200, { manual_mode: { active, updated_at: "2026-06-05T00:00:00.000Z" }, request_id: "req_get" });
+      return;
+    }
+    if (request.method === "POST" && request.url === "/modes/manual") {
+      const body = await readRequestBody(request);
+      active = Boolean(body.active);
+      calls.push({ active, reason: body.reason });
+      send(200, { ok: true, manual_mode: { active, updated_at: "2026-06-05T00:00:00.000Z" }, transitioned: true, request_id: "req_set" });
+      return;
+    }
+    send(404, { ok: false, error: "not_found" });
+  });
+
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    const baseUrl = `http://127.0.0.1:${port}`;
+    const manifest = await measureManualModeLatency({ baseUrl, runs: 2 });
+    if (!manifest.ok) throw new Error(`self-test manifest not ok: ${JSON.stringify(manifest)}`);
+    if (!manifest.restored || manifest.final_active !== false) throw new Error("self-test did not restore original manual mode");
+    if (!manifest.summary.manual_mode_set || !manifest.summary.manual_mode_restore) throw new Error("self-test missing write timings");
+    if (calls.length !== 5) throw new Error(`expected 5 set calls including final restore, got ${calls.length}`);
+
+    calls.length = 0;
+    const readOnlyManifest = await measureManualModeLatency({ baseUrl, runs: 1, readOnly: true });
+    if (!readOnlyManifest.ok) throw new Error(`read-only self-test not ok: ${JSON.stringify(readOnlyManifest)}`);
+    if (readOnlyManifest.summary.manual_mode_set) throw new Error("read-only mode must not set manual mode");
+    if (calls.length !== 0) throw new Error("read-only mode made POST calls");
+    console.log("manual-mode-latency-proof self-test passed");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+function readRequestBody(request) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    request.on("data", (chunk) => chunks.push(chunk));
+    request.on("error", reject);
+    request.on("end", () => {
+      try {
+        const text = Buffer.concat(chunks).toString("utf8");
+        resolve(text ? JSON.parse(text) : {});
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}

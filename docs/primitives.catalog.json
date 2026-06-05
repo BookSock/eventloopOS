@@ -2620,6 +2620,7 @@
       "title": "Manual Mode",
       "status": "stable_enough",
       "summary": "Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
+      "responsiveness_critical": true,
       "http": [
         {
           "method": "GET",
@@ -2636,12 +2637,18 @@
         }
       ],
       "hotkeys": ["Ctrl-Option-M", "Ctrl-Option-Shift-M"],
+      "latency_budgets": [
+        { "name": "manual_mode_get", "p95_ms": 500, "proof": "bin/manual-mode-latency-proof", "route": "GET /modes/manual", "scope": "local_orchestrator" },
+        { "name": "manual_mode_set", "p95_ms": 800, "proof": "bin/manual-mode-latency-proof", "route": "POST /modes/manual", "scope": "local_orchestrator_toggle_sample" },
+        { "name": "manual_mode_restore", "p95_ms": 800, "proof": "bin/manual-mode-latency-proof", "route": "POST /modes/manual", "scope": "local_orchestrator_restore_original_state" }
+      ],
       "code": ["app/orchestrator/src/routes/modes.ts", "app/orchestrator/src/agents/ambient_workspace_saver.ts"],
       "proofs": [
         "app/orchestrator/test/manual_mode_pause_integration.test.ts",
-        "app/orchestrator/test/manual_mode_round_trip.test.ts"
+        "app/orchestrator/test/manual_mode_round_trip.test.ts",
+        "bin/manual-mode-latency-proof"
       ],
-      "self_tests": ["pnpm --filter @eventloopos/shared run test:primitive-ops"]
+      "self_tests": ["pnpm --filter @eventloopos/shared run test:primitive-ops", "bin/manual-mode-latency-proof --self-test"]
     },
     {
       "id": "agent_source_hooks",
