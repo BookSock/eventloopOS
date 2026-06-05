@@ -406,6 +406,77 @@ describe("ambient_workspace_saver", () => {
     assert.deepEqual(writes[0]?.snapshot.windows.map((window) => window.id), [1, 3]);
   });
 
+  it("strips inactive follows-window frames before saving a task snapshot", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 1,
+      windows: [
+        {
+          id: 1,
+          app: "TextEdit",
+          title: "Reply",
+          workspace: "paper-a",
+          frame: { x: 40, y: 60, width: 620, height: 420 },
+        },
+        {
+          id: 3,
+          app: "Slack",
+          title: "Team",
+          workspace: "paper-b",
+          frame: { x: 1919, y: 956, width: 900, height: 640 },
+        },
+      ],
+    };
+
+    const filtered = filterSnapshotForTaskSave(snapshot, new Set(["3"]));
+
+    assert.deepEqual(filtered.windows.find((window) => window.id === 1)?.frame, { x: 40, y: 60, width: 620, height: 420 });
+    assert.equal(filtered.windows.find((window) => window.id === 3)?.frame, undefined);
+  });
+
+  it("does not churn ambient saves when only an inactive follows-window frame changes", async () => {
+    const firstSnapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 1,
+      windows: [
+        { id: 1, app: "TextEdit", title: "Reply", workspace: "paper-a", frame: { x: 40, y: 60, width: 620, height: 420 } },
+        { id: 3, app: "Slack", title: "Team", workspace: "paper-b", frame: { x: 1919, y: 956, width: 900, height: 640 } },
+      ],
+    };
+    const workspace = makeFakeWorkspace(firstSnapshot);
+    const writes: Array<{ taskId: string; snapshot: WorkspaceSnapshot }> = [];
+    let nowMs = Date.parse("2026-05-10T15:00:00.000Z");
+    const saver = createAmbientWorkspaceSaver({
+      workspace,
+      getCurrentTaskState: async () => ({ currentTaskId: "task_paper_a" }),
+      updateTaskLayout: async (taskId, snapshot) => {
+        writes.push({ taskId, snapshot });
+      },
+      isManualModeActive: () => false,
+      getFollowsWindowIds: () => ["3"],
+      debounceMs: 3_000,
+      now: () => new Date(nowMs),
+    });
+
+    assert.equal((await saver.tick()).decision, "debounced");
+    nowMs += 5_000;
+    assert.equal((await saver.tick()).decision, "committed");
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0]?.snapshot.windows.find((window) => window.id === 3)?.frame, undefined);
+
+    workspace.setSnapshot({
+      ...firstSnapshot,
+      windows: firstSnapshot.windows.map((window) =>
+        window.id === 3 ? { ...window, frame: { x: 0, y: 0, width: 1_000, height: 700 } } : window,
+      ),
+    });
+    nowMs += 5_000;
+    assert.equal((await saver.tick()).decision, "skipped_unchanged");
+    assert.equal(writes.length, 1);
+  });
+
   it("does not save windows explicitly tagged for a different task into the current paper", async () => {
     const snapshot: WorkspaceSnapshot = {
       backend: "aerospace",

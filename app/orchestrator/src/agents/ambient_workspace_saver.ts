@@ -458,11 +458,13 @@ export function filterSnapshotForTaskSave(
   taskWindowClaims: readonly TaskWindowClaim[] = [],
 ): WorkspaceSnapshot {
   if (!snapshot.activeWorkspace) return snapshot;
-  const windows = snapshot.windows.filter(
-    (window) =>
-      isTaskSnapshotEligibleWindow(window, currentTaskId, taskWindowClaims)
-      && (window.workspace === snapshot.activeWorkspace || followsWindowIds.has(String(window.id))),
-  );
+  const windows = snapshot.windows
+    .filter(
+      (window) =>
+        isTaskSnapshotEligibleWindow(window, currentTaskId, taskWindowClaims)
+        && (window.workspace === snapshot.activeWorkspace || followsWindowIds.has(String(window.id))),
+    )
+    .map((window) => sanitizeSavedWindowFrame(snapshot, window));
   const focusedWindowId =
     snapshot.focusedWindowId !== undefined && windows.some((window) => window.id === snapshot.focusedWindowId)
       ? snapshot.focusedWindowId
@@ -502,7 +504,7 @@ async function filterSnapshotForTaskSaveWithProcessAncestry(
   for (const window of snapshot.windows) {
     if (window.workspace !== snapshot.activeWorkspace && !followsWindowIds.has(String(window.id))) continue;
     if (!await isTaskSnapshotEligibleWindowWithProcessAncestry(window, currentTaskId, taskWindowClaims, windowAncestors)) continue;
-    windows.push(window);
+    windows.push(sanitizeSavedWindowFrame(snapshot, window));
   }
 
   const focusedWindowId =
@@ -515,6 +517,12 @@ async function filterSnapshotForTaskSaveWithProcessAncestry(
     windows,
     focusedWindowId,
   };
+}
+
+function sanitizeSavedWindowFrame(snapshot: WorkspaceSnapshot, window: AerospaceWindow): AerospaceWindow {
+  if (!snapshot.activeWorkspace || window.workspace === snapshot.activeWorkspace || window.frame === undefined) return window;
+  const { frame: _untrustedOffActiveSpaceFrame, ...withoutFrame } = window;
+  return withoutFrame;
 }
 
 function isTaskSnapshotEligibleWindow(
