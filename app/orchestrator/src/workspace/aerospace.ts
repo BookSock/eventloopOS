@@ -4,6 +4,7 @@ export type ExecResult = {
 };
 
 export type ExecFunction = (command: string, args: string[], options?: { timeoutMs?: number; cwd?: string }) => Promise<ExecResult>;
+export type SleepFunction = (ms: number) => Promise<void>;
 
 export type AerospaceCommand =
   | {
@@ -87,12 +88,16 @@ export class AerospaceWorkspaceAdapter {
   readonly backend = "aerospace" as const;
 
   private readonly frameCaptureTimeoutMs: number;
+  private readonly workspaceFocusSettleMs: number;
+  private readonly sleep: SleepFunction;
 
   constructor(
     private readonly exec: ExecFunction,
-    options: { frameCaptureTimeoutMs?: number } = {},
+    options: { frameCaptureTimeoutMs?: number; workspaceFocusSettleMs?: number; sleep?: SleepFunction } = {},
   ) {
     this.frameCaptureTimeoutMs = options.frameCaptureTimeoutMs ?? readFrameCaptureTimeoutMs();
+    this.workspaceFocusSettleMs = options.workspaceFocusSettleMs ?? readWorkspaceFocusSettleMs();
+    this.sleep = options.sleep ?? sleep;
   }
 
   async capabilityStatus(): Promise<WorkspaceCapabilityStatus> {
@@ -133,10 +138,15 @@ export class AerospaceWorkspaceAdapter {
 
   async executeRestorePlan(plan: RestorePlan): Promise<RestoreExecutionReceipt> {
     const commands: RestoreExecutionReceipt["commands"] = [];
-    for (const command of plan.commands) {
+    for (let index = 0; index < plan.commands.length; index += 1) {
+      const command = plan.commands[index];
+      if (!command) continue;
       assertSafeAerospaceCommand(command);
       const result = await this.exec(command.command, command.args);
       commands.push({ ...command, ...result });
+      if (this.workspaceFocusSettleMs > 0 && shouldSettleAfterWorkspaceFocus(command, plan.commands.slice(index + 1))) {
+        await this.sleep(this.workspaceFocusSettleMs);
+      }
     }
 
     return {
@@ -662,6 +672,24 @@ function readFrameCaptureTimeoutMs(): number {
   const parsed = Number(raw);
   if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 15_000) return 2_500;
   return parsed;
+}
+
+function readWorkspaceFocusSettleMs(): number {
+  const raw = process.env.EVENTLOOPOS_WORKSPACE_FOCUS_SETTLE_MS;
+  if (!raw) return 350;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 5_000) return 350;
+  return parsed;
+}
+
+function shouldSettleAfterWorkspaceFocus(command: AerospaceCommand, remaining: AerospaceCommand[]): boolean {
+  return command.command === "aerospace" &&
+    command.args[0] === "workspace" &&
+    remaining.some((candidate) => candidate.command === "osascript");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function hasWindowIdentityForFrameRestore(window: AerospaceWindow): boolean {

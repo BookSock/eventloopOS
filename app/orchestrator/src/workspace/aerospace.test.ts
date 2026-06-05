@@ -448,6 +448,52 @@ describe("Aerospace workspace adapter", () => {
     assert.equal(receipt.commands[0]?.stdout, "ok");
   });
 
+  it("waits for workspace focus to settle before restoring window frames", async () => {
+    const events: string[] = [];
+    const adapter = new AerospaceWorkspaceAdapter(
+      async (command, args) => {
+        events.push(`${command}:${args[0]}`);
+        return { stdout: "ok", stderr: "" };
+      },
+      {
+        workspaceFocusSettleMs: 123,
+        sleep: async (ms) => {
+          events.push(`sleep:${ms}`);
+        },
+      },
+    );
+    const plan = restoreWorkspacePlan(
+      {
+        backend: "aerospace",
+        activeWorkspace: "dev",
+        focusedWindowId: 11,
+        windows: [
+          {
+            id: 11,
+            app: "TextEdit",
+            appBundleId: "com.apple.TextEdit",
+            title: "Shared Note",
+            workspace: "dev",
+            layout: "floating",
+            frame: { x: 20, y: 30, width: 640, height: 480 },
+          },
+        ],
+      },
+      [{ id: 11, app: "TextEdit", appBundleId: "com.apple.TextEdit", title: "Shared Note", workspace: "manual", layout: "floating" }],
+    );
+
+    const receipt = await adapter.executeRestorePlan(plan);
+
+    assert.deepEqual(events, [
+      "aerospace:move-node-to-workspace",
+      "aerospace:workspace",
+      "sleep:123",
+      "osascript:-e",
+      "aerospace:focus",
+    ]);
+    assert.equal(receipt.commands.length, 4);
+  });
+
   it("blocks unsafe restore execution commands", async () => {
     const adapter = new AerospaceWorkspaceAdapter(async () => {
       throw new Error("exec should not be called");
