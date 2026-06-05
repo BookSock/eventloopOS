@@ -335,7 +335,8 @@ Useful standalone uses:
 - if LaunchServices or Chrome reuses an already-open window, the same wrapper
   can add `--claim-existing-matching --app chrome --title checkout` to claim
   and rehome only existing windows that pass an explicit app/title filter before
-  running the command
+  or during the post-launch polling window, including reused windows whose title
+  changes after the command starts
 - a bound Codex/Claude task session exposes `pid`/`agent_pid`/`terminal_pid`,
   and the follows-window orchestrator redirects descendant app windows before
   they can linger on the human's current paper; ambient autosave also converts

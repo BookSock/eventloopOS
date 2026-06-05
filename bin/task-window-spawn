@@ -47,7 +47,9 @@ Options:
   --title CONTAINS      Optional title substring filter for new windows
   --claim-existing-matching
                          Also claim/move already-open windows matching --app/--title.
-                         Requires --app or --title.
+                         Requires --app or --title. Matching continues while
+                         polling, so reused LaunchServices/Chrome windows whose
+                         title changes after launch are claimed too.
 `);
 }
 
@@ -128,12 +130,14 @@ async function runTaskWindowSpawn(options) {
   const errors = [];
   const taskWorkspace = await readTaskWorkspace(options, options.taskId).catch(() => undefined);
   const focusWorkspace = before.snapshot?.activeWorkspace;
+  const claimedWindowIds = new Set();
   const preexisting = await claimExistingMatchingWindows({
     options,
     beforeWindows: before.snapshot?.windows ?? [],
     taskWorkspace,
     focusWorkspace,
     errors,
+    claimedWindowIds,
   });
   let commandDoneAt;
   const commandPromise = runCommand(options.command, options.args, async (child) => {
@@ -166,6 +170,7 @@ async function runTaskWindowSpawn(options) {
     focusWorkspace,
     commandDoneAt: () => commandDoneAt,
     errors,
+    claimedWindowIds,
   });
   const command = await commandPromise;
   const waitResult = await waitResultPromise;
@@ -173,6 +178,9 @@ async function runTaskWindowSpawn(options) {
   const newWindows = waitResult.newWindows;
   const claimed = waitResult.claimed;
   const moved = waitResult.moved;
+  const lateMatchingExisting = waitResult.lateMatchingExisting;
+  const lateClaimed = waitResult.lateClaimed;
+  const lateMoved = waitResult.lateMoved;
 
   return {
     ok: errors.length === 0 && (command.exit_code === 0 || command.exit_code === null),
@@ -197,46 +205,76 @@ async function runTaskWindowSpawn(options) {
     claimed,
     moved_count: moved.length,
     moved,
+    late_matching_existing_count: lateMatchingExisting.length,
+    late_matching_existing_claimed_count: lateClaimed.length,
+    late_matching_existing_claimed: lateClaimed,
+    late_matching_existing_moved_count: lateMoved.length,
+    late_matching_existing_moved: lateMoved,
     errors,
   };
 }
 
-async function watchNewWindows({ options, beforeWindows, taskWorkspace, focusWorkspace, commandDoneAt, errors }) {
+async function watchNewWindows({ options, beforeWindows, taskWorkspace, focusWorkspace, commandDoneAt, errors, claimedWindowIds }) {
   const startedAt = Date.now();
   let captureAttempts = 0;
   let after;
   let newWindows = [];
+  let lateMatchingExisting = [];
   let firstNewWindowMs;
   const seenWindowIds = new Set(beforeWindows.map((window) => String(window.id)));
   const claimed = [];
   const moved = [];
+  const lateClaimed = [];
+  const lateMoved = [];
 
   do {
     captureAttempts += 1;
     after = await captureWorkspace(options);
-    const currentNewWindows = findNewWindowsFromSeen(seenWindowIds, after.snapshot?.windows ?? [])
+    const windows = after.snapshot?.windows ?? [];
+    const currentNewWindows = findNewWindowsFromSeen(seenWindowIds, windows)
       .filter((window) => windowMatchesFilters(window, options));
     if (currentNewWindows.length > 0 && firstNewWindowMs === undefined) {
       firstNewWindowMs = Math.max(0, Date.now() - startedAt);
     }
     for (const window of currentNewWindows) {
       newWindows.push(window);
-      await claimAndMaybeMoveWindow({ options, window, source: options.source, taskWorkspace, focusWorkspace, errors, claimed, moved });
+      await claimAndMaybeMoveWindow({ options, window, source: options.source, taskWorkspace, focusWorkspace, errors, claimed, moved, claimedWindowIds });
+    }
+    if (options.claimExistingMatching === true) {
+      const matchingExistingWindows = windows
+        .filter((window) => window?.id !== undefined)
+        .filter((window) => !currentNewWindows.some((candidate) => String(candidate.id) === String(window.id)))
+        .filter((window) => !claimedWindowIds.has(String(window.id)))
+        .filter((window) => windowMatchesFilters(window, options));
+      for (const window of matchingExistingWindows) {
+        lateMatchingExisting.push(window);
+        await claimAndMaybeMoveWindow({
+          options,
+          window,
+          source: `${options.source}:late_existing_matching`,
+          taskWorkspace,
+          focusWorkspace,
+          errors,
+          claimed: lateClaimed,
+          moved: lateMoved,
+          claimedWindowIds,
+        });
+      }
     }
     const doneAt = commandDoneAt();
     if (doneAt !== undefined) {
       const settledAt = doneAt + options.settleMs;
       const timeoutAt = settledAt + options.waitMs;
       const now = Date.now();
-      if (now >= settledAt && (newWindows.length > 0 || now >= timeoutAt)) break;
-      const nextDeadline = newWindows.length > 0 ? settledAt : timeoutAt;
+      if (now >= settledAt && (newWindows.length > 0 || lateMatchingExisting.length > 0 || now >= timeoutAt)) break;
+      const nextDeadline = newWindows.length > 0 || lateMatchingExisting.length > 0 ? settledAt : timeoutAt;
       await sleep(Math.min(options.pollMs, Math.max(1, nextDeadline - now)));
     } else {
       await sleep(options.pollMs);
     }
   } while (true);
 
-  return { after, newWindows, claimed, moved, captureAttempts, firstNewWindowMs };
+  return { after, newWindows, claimed, moved, lateMatchingExisting, lateClaimed, lateMoved, captureAttempts, firstNewWindowMs };
 }
 
 function validateOptions(options) {
@@ -245,7 +283,7 @@ function validateOptions(options) {
   }
 }
 
-async function claimExistingMatchingWindows({ options, beforeWindows, taskWorkspace, focusWorkspace, errors }) {
+async function claimExistingMatchingWindows({ options, beforeWindows, taskWorkspace, focusWorkspace, errors, claimedWindowIds }) {
   const matching = [];
   const claimed = [];
   const moved = [];
@@ -264,12 +302,13 @@ async function claimExistingMatchingWindows({ options, beforeWindows, taskWorksp
       errors,
       claimed,
       moved,
+      claimedWindowIds,
     });
   }
   return { matching, claimed, moved };
 }
 
-async function claimAndMaybeMoveWindow({ options, window, source, taskWorkspace, focusWorkspace, errors, claimed, moved }) {
+async function claimAndMaybeMoveWindow({ options, window, source, taskWorkspace, focusWorkspace, errors, claimed, moved, claimedWindowIds }) {
   try {
     const claim = await claimWindow(options, {
       task_id: options.taskId,
@@ -286,6 +325,7 @@ async function claimAndMaybeMoveWindow({ options, window, source, taskWorkspace,
       title: readWindowTitle(window),
       claim_id: claim.claim?.claim_id,
     });
+    claimedWindowIds?.add(String(window.id));
   } catch (error) {
     errors.push({
       window_id: String(window.id),
@@ -650,6 +690,91 @@ async function runSelfTest() {
       existingServer.closeAllConnections?.();
       await new Promise((resolve, reject) => {
         existingServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+
+    const lateExistingClaims = [];
+    const lateExistingAerospaceCommands = [];
+    let lateCaptureCount = 0;
+    const lateExistingServer = http.createServer(async (request, response) => {
+      const send = (status, body) => {
+        response.writeHead(status, { "content-type": "application/json" });
+        response.end(JSON.stringify(body));
+      };
+      if (request.method === "POST" && request.url === "/workspace/capture") {
+        lateCaptureCount += 1;
+        send(200, {
+          snapshot: {
+            backend: "aerospace",
+            activeWorkspace: "main",
+            windows: [
+              {
+                id: 88,
+                app: "Google Chrome",
+                appBundleId: "com.google.Chrome",
+                title: lateCaptureCount < 3 ? "New Tab" : "Checkout reused report",
+                workspace: "main",
+              },
+            ],
+          },
+        });
+        return;
+      }
+      if (request.method === "GET" && request.url === "/tasks/task_checkout") {
+        send(200, { ok: true, task: { task_id: "task_checkout", aerospace_workspace_id: "task-checkout" } });
+        return;
+      }
+      if (request.method === "POST" && request.url === "/task-window-claims") {
+        const body = await readRequestJson(request);
+        lateExistingClaims.push(body);
+        send(200, { ok: true, claim: { claim_id: `twc_late_${body.window_id ?? body.process_root_pid}`, ...body } });
+        return;
+      }
+      send(404, { ok: false });
+    });
+    await new Promise((resolve) => lateExistingServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const lateAddress = lateExistingServer.address();
+      const lateResult = await runTaskWindowSpawn({
+        baseUrl: `http://127.0.0.1:${lateAddress.port}`,
+        taskId: "task_checkout",
+        settleMs: 0,
+        waitMs: 1_000,
+        pollMs: 1,
+        requestTimeoutMs: 5_000,
+        ttlMs: 123_000,
+        source: "self-test-late-existing",
+        appContains: "chrome",
+        titleContains: "checkout",
+        claimExistingMatching: true,
+        runAerospace: async (commandArgs) => {
+          lateExistingAerospaceCommands.push(commandArgs);
+        },
+        command: process.execPath,
+        args: ["-e", ""],
+      });
+      if (!lateResult.ok) throw new Error(`late existing self-test result not ok: ${JSON.stringify(lateResult)}`);
+      if (lateResult.preexisting_claimed_count !== 0) throw new Error(`expected no preexisting claim, got ${lateResult.preexisting_claimed_count}`);
+      if (lateResult.new_window_count !== 0) throw new Error(`expected reused window, got new count ${lateResult.new_window_count}`);
+      if (lateResult.late_matching_existing_claimed_count !== 1) {
+        throw new Error(`expected one late existing claim, got ${lateResult.late_matching_existing_claimed_count}`);
+      }
+      const lateWindowClaim = lateExistingClaims.find((claim) => claim.window_id === "88");
+      if (!lateWindowClaim) throw new Error(`late existing window claim missing: ${JSON.stringify(lateExistingClaims)}`);
+      if (lateWindowClaim.source !== "self-test-late-existing:late_existing_matching") {
+        throw new Error(`late existing source mismatch: ${JSON.stringify(lateWindowClaim)}`);
+      }
+      const lateCommandJson = JSON.stringify(lateExistingAerospaceCommands);
+      if (lateCommandJson !== JSON.stringify([
+        ["move-node-to-workspace", "--window-id", "88", "task-checkout"],
+        ["workspace", "main"],
+      ])) {
+        throw new Error(`expected late existing move then focus restore, got ${lateCommandJson}`);
+      }
+    } finally {
+      lateExistingServer.closeAllConnections?.();
+      await new Promise((resolve, reject) => {
+        lateExistingServer.close((error) => (error ? reject(error) : resolve()));
       });
     }
 
