@@ -71,6 +71,8 @@ function auditPrimitiveExamples(examplesDir) {
       if (file === "primitive-workbench-walkthrough.mjs") {
         requireIncludes(text, "listPrimitiveOperations", "primitive-workbench-walkthrough must use shared operation-list helper", errors);
         requireIncludes(text, "buildPrimitiveProofPlan", "primitive-workbench-walkthrough must use shared proof-plan helper", errors);
+        requireIncludes(text, "side_effect", "primitive-workbench-walkthrough must surface route side-effect labels", errors);
+        requireIncludes(text, "read_only", "primitive-workbench-walkthrough must surface route read-only labels", errors);
         rejectIncludes(text, "buildPrimitiveApiIndex", "primitive-workbench-walkthrough must not rebuild workbench routes from the compact API index", errors);
         requireIncludes(text, "examples/primitives/fixtures/workbench-catalog.json", "primitive-workbench-walkthrough must have fixture-backed self-test", errors);
       }
@@ -93,6 +95,12 @@ function auditPrimitiveExamples(examplesDir) {
     requireIncludes(text, "--timeout-ms", `${file} must expose timeout option`, errors);
     rejectIncludes(text, "fetch(", `${file} must not hand-roll fetch calls`, errors);
     rejectIncludes(text, "requestJson(", `${file} must not hand-roll requestJson calls`, errors);
+  }
+
+  const readme = readText(path.join(examplesDir, "README.md"), errors);
+  if (readme !== undefined) {
+    requireIncludes(readme, "--side-effect none --read-only", "examples README must show safe read-only operation discovery", errors);
+    requireIncludes(readme, "side-effect/read-only", "examples README must explain side-effect/read-only labels", errors);
   }
 
   return { ok: errors.length === 0, example_count: allExamples.length, errors };
@@ -135,10 +143,16 @@ import { loadPrimitiveSdk } from "./lib/primitive-sdk-loader.mjs";
 if (process.argv.includes("--self-test")) {}
 `);
   fs.mkdirSync(path.join(examplesDir, "fixtures"), { recursive: true });
+  fs.writeFileSync(path.join(examplesDir, "README.md"), `
+node examples/primitives/operation-id-client.mjs list --side-effect none --read-only
+Primitive examples show side-effect/read-only metadata.
+`);
   fs.writeFileSync(path.join(examplesDir, "primitive-workbench-walkthrough.mjs"), `
 import { loadPrimitiveSdk } from "./lib/primitive-sdk-loader.mjs";
 const operationListHelper = "listPrimitiveOperations";
 const proofPlanHelper = "buildPrimitiveProofPlan";
+const sideEffect = "side_effect";
+const readOnly = "read_only";
 const fixture = "examples/primitives/fixtures/workbench-catalog.json";
 if (process.argv.includes("--self-test")) {}
 `);

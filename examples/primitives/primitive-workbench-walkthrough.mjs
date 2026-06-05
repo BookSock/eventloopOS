@@ -20,8 +20,8 @@ if (args.includes("-h") || args.includes("--help")) {
   node examples/primitives/primitive-workbench-walkthrough.mjs --catalog docs/primitives.catalog.json --id queue_paper_routing
 
 Builds a starter workbench from the primitive catalog: selected primitives,
-stable route operation ids, schemas, self-test commands, and latency proof
-hooks. No live orchestrator is required.
+stable route operation ids, side-effect/read-only labels, schemas, self-test
+commands, and latency proof hooks. No live orchestrator is required.
 `);
   process.exit(0);
 }
@@ -66,6 +66,8 @@ function buildWalkthrough(sdk, catalog, catalogPath, options) {
         operation: route.operation,
         method: route.route.method,
         path: route.route.path,
+        side_effect: route.sideEffect,
+        read_only: route.readOnly,
         request_schema: schemaReferenceName(route.route.request_schema),
         response_schema: schemaReferenceName(route.route.response_schema) ?? "FreeformJsonObject",
         query_parameters: queryParameterNames(route.route),
@@ -175,7 +177,7 @@ function printWalkthrough(walkthrough) {
   for (const primitive of walkthrough.primitives) {
     console.log(`primitive ${primitive.id} [${primitive.status}/${primitive.category}]`);
     for (const route of primitive.routes) {
-      console.log(`- ${route.operation}: ${route.method} ${route.path} -> ${route.response_schema}`);
+      console.log(`- ${route.operation}: ${route.method} ${route.path} [${route.side_effect}] -> ${route.response_schema}`);
     }
   }
 }
@@ -219,6 +221,10 @@ function runSelfTest(sdk) {
   assert.deepEqual(walkthrough.primitives[0].routes.map((route) => route.operation), [
     "workspace_control_get_workspace_status",
     "workspace_control_post_workspace_capture",
+  ]);
+  assert.deepEqual(walkthrough.primitives[0].routes.map((route) => [route.operation, route.side_effect, route.read_only]), [
+    ["workspace_control_get_workspace_status", "none", true],
+    ["workspace_control_post_workspace_capture", "none", true],
   ]);
   assert.deepEqual(walkthrough.primitives[0].latency_budgets, [{
     name: "workspace_capture",
