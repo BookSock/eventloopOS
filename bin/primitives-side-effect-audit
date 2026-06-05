@@ -1,0 +1,200 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/primitives-side-effect-audit [--self-test] [openapi.json] [index.json]
+
+Checks that docs/primitives.openapi.json and docs/primitives.index.json agree on
+each operation's side-effect and read-only metadata.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  process.exit(0);
+}
+
+const positional = args.filter((arg) => arg !== "--self-test");
+const openapiPath = positional[0] ?? "docs/primitives.openapi.json";
+const indexPath = positional[1] ?? "docs/primitives.index.json";
+const result = auditSideEffects(openapiPath, indexPath);
+if (!result.ok) {
+  for (const error of result.errors) console.error(error);
+  process.exit(1);
+}
+console.log(`primitives side-effect audit passed: ${openapiPath} <-> ${indexPath} (${result.operation_count} operations)`);
+
+function auditSideEffects(openapiPath, indexPath) {
+  const errors = [];
+  let openapi;
+  let index;
+  try {
+    openapi = readJson(openapiPath);
+  } catch (error) {
+    return { ok: false, operation_count: 0, errors: [`OpenAPI read failed: ${errorMessage(error)}`] };
+  }
+  try {
+    index = readJson(indexPath);
+  } catch (error) {
+    return { ok: false, operation_count: 0, errors: [`index read failed: ${errorMessage(error)}`] };
+  }
+  const openapiOperations = openapiSideEffectRows(openapi, errors);
+  const indexOperations = indexSideEffectRows(index, errors);
+  const allOperationIds = new Set([...openapiOperations.keys(), ...indexOperations.keys()]);
+  for (const operationId of Array.from(allOperationIds).sort()) {
+    const openapiRow = openapiOperations.get(operationId);
+    const indexRow = indexOperations.get(operationId);
+    if (!openapiRow) {
+      errors.push(`operation missing from OpenAPI: ${operationId}`);
+      continue;
+    }
+    if (!indexRow) {
+      errors.push(`operation missing from compact index: ${operationId}`);
+      continue;
+    }
+    if (openapiRow.sideEffect !== indexRow.sideEffect) {
+      errors.push(`side-effect mismatch for ${operationId}: OpenAPI=${openapiRow.sideEffect} index=${indexRow.sideEffect}`);
+    }
+    if (openapiRow.readOnly !== indexRow.readOnly) {
+      errors.push(`read-only mismatch for ${operationId}: OpenAPI=${openapiRow.readOnly} index=${indexRow.readOnly}`);
+    }
+  }
+  return {
+    ok: errors.length === 0,
+    operation_count: allOperationIds.size,
+    errors,
+  };
+}
+
+function openapiSideEffectRows(openapi, errors) {
+  const rows = new Map();
+  const paths = isRecord(openapi?.paths) ? openapi.paths : {};
+  for (const [routePath, methods] of Object.entries(paths)) {
+    if (!isRecord(methods)) continue;
+    for (const [method, operation] of Object.entries(methods)) {
+      if (!["get", "post", "put", "patch", "delete"].includes(method)) continue;
+      if (!isRecord(operation)) continue;
+      const operationId = readString(operation.operationId);
+      if (!operationId) {
+        errors.push(`OpenAPI ${method.toUpperCase()} ${routePath} missing operationId`);
+        continue;
+      }
+      const sideEffect = readString(operation["x-eventloopos-side-effect"]);
+      const readOnly = operation["x-eventloopos-read-only"];
+      validateSideEffectRow(`OpenAPI ${operationId}`, sideEffect, readOnly, errors);
+      rows.set(operationId, { sideEffect, readOnly });
+    }
+  }
+  return rows;
+}
+
+function indexSideEffectRows(index, errors) {
+  const rows = new Map();
+  const primitives = Array.isArray(index?.primitives) ? index.primitives : [];
+  for (const primitive of primitives) {
+    const routes = Array.isArray(primitive?.routes) ? primitive.routes : [];
+    for (const route of routes) {
+      const operationId = readString(route.operation);
+      if (!operationId) {
+        errors.push(`compact index route missing operation under primitive ${readString(primitive?.id) ?? "(unknown)"}`);
+        continue;
+      }
+      const sideEffect = readString(route.sideEffect);
+      const readOnly = route.readOnly;
+      validateSideEffectRow(`compact index ${operationId}`, sideEffect, readOnly, errors);
+      rows.set(operationId, { sideEffect, readOnly });
+    }
+  }
+  return rows;
+}
+
+function validateSideEffectRow(label, sideEffect, readOnly, errors) {
+  const allowed = new Set(["none", "internal_state", "os_control", "external_agent_or_source"]);
+  if (!allowed.has(sideEffect)) errors.push(`${label} has invalid side-effect: ${sideEffect ?? "(missing)"}`);
+  if (typeof readOnly !== "boolean") errors.push(`${label} has invalid read-only flag: ${String(readOnly)}`);
+  if (sideEffect === "none" && readOnly !== true) errors.push(`${label} side-effect none must be read-only`);
+  if (sideEffect && sideEffect !== "none" && readOnly !== false) errors.push(`${label} mutating side-effect must not be read-only`);
+}
+
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function readString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function runSelfTest() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-primitives-side-effect-"));
+  const openapiPath = path.join(root, "openapi.json");
+  const indexPath = path.join(root, "index.json");
+  const openapi = {
+    paths: {
+      "/health": {
+        get: {
+          operationId: "observability_get_health",
+          "x-eventloopos-side-effect": "none",
+          "x-eventloopos-read-only": true,
+        },
+      },
+      "/workspace/restore": {
+        post: {
+          operationId: "workspace_control_post_workspace_restore",
+          "x-eventloopos-side-effect": "os_control",
+          "x-eventloopos-read-only": false,
+        },
+      },
+    },
+  };
+  const index = {
+    primitives: [{
+      id: "observability",
+      routes: [{
+        operation: "observability_get_health",
+        sideEffect: "none",
+        readOnly: true,
+      }],
+    }, {
+      id: "workspace_control",
+      routes: [{
+        operation: "workspace_control_post_workspace_restore",
+        sideEffect: "os_control",
+        readOnly: false,
+      }],
+    }],
+  };
+  fs.writeFileSync(openapiPath, `${JSON.stringify(openapi, null, 2)}\n`);
+  fs.writeFileSync(indexPath, `${JSON.stringify(index, null, 2)}\n`);
+  assert.equal(auditSideEffects(openapiPath, indexPath).ok, true);
+
+  const mismatch = structuredClone(index);
+  mismatch.primitives[1].routes[0].sideEffect = "internal_state";
+  fs.writeFileSync(indexPath, `${JSON.stringify(mismatch, null, 2)}\n`);
+  const mismatchResult = auditSideEffects(openapiPath, indexPath);
+  assert.equal(mismatchResult.ok, false);
+  assert.ok(mismatchResult.errors.some((error) => error.includes("side-effect mismatch")));
+
+  const invalid = structuredClone(openapi);
+  invalid.paths["/health"].get["x-eventloopos-read-only"] = false;
+  fs.writeFileSync(openapiPath, `${JSON.stringify(invalid, null, 2)}\n`);
+  fs.writeFileSync(indexPath, `${JSON.stringify(index, null, 2)}\n`);
+  const invalidResult = auditSideEffects(openapiPath, indexPath);
+  assert.equal(invalidResult.ok, false);
+  assert.ok(invalidResult.errors.some((error) => error.includes("side-effect none must be read-only")));
+  fs.rmSync(root, { recursive: true, force: true });
+  console.log("primitives-side-effect-audit self-test passed");
+}

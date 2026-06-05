@@ -52,8 +52,9 @@ Generate a builder-facing coverage/readiness summary with
 `--json` for machine-readable audit output.
 Run `bin/primitives-builder-gate` when handing the primitive surface to another
 tool or agent: it checks catalog structure, strict readiness, docs, examples,
-OpenAPI freshness, compact-index freshness, shared SDK pack/import shape, and
-the cataloged self-test list in one command. Add `--require-latency` on a
+OpenAPI freshness, compact-index freshness, side-effect/read-only consistency
+between OpenAPI and compact index, shared SDK pack/import shape, and the
+cataloged self-test list in one command. Add `--require-latency` on a
 machine with current latency artifacts, `--latency-max-age-hours 24` when the
 handoff must prove same-day responsiveness, and `--run-self-tests` when the
 handoff should execute every cataloged primitive self-test instead of only

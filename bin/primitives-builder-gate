@@ -12,8 +12,8 @@ if (args.includes("-h") || args.includes("--help")) {
 
 Runs one builder-facing gate for the reusable primitive surface: catalog
 structure, strict readiness, docs, examples, generated OpenAPI, generated
-compact index, shared SDK package audit, optional live latency evidence, and
-optional full catalog self-tests.
+compact index, OpenAPI/index side-effect consistency, shared SDK package audit,
+optional live latency evidence, and optional full catalog self-tests.
 
 Defaults avoid mutable/live evidence so CI can run cheaply. Use
 --require-latency on a machine with current artifacts, --latency-max-age-hours
@@ -168,6 +168,12 @@ function buildCommands(options) {
       required: true,
     },
     {
+      name: "side_effect_consistency",
+      cmd: "node",
+      args: ["bin/primitives-side-effect-audit", options.openapiPath, options.indexPath],
+      required: true,
+    },
+    {
       name: "shared_sdk_pack_audit",
       cmd: "pnpm",
       args: ["--filter", "@eventloopos/shared", "pack:audit"],
@@ -252,12 +258,13 @@ function runSelfTest() {
     () => ({ status: 0, signal: null, stdout: "ok\n", stderr: "" }),
   );
   assert.equal(good.ok, true);
-  assert.equal(good.command_count, 9);
+  assert.equal(good.command_count, 10);
   assert.ok(good.commands.some((command) => command.name === "latency_evidence"));
   assert.ok(good.commands.some((command) => command.command.includes("--max-age-hours 24")));
   assert.equal(good.latency_max_age_hours, 24);
   assert.ok(good.commands.some((command) => command.name === "catalog_self_tests"));
   assert.ok(good.commands.some((command) => command.name === "shared_sdk_pack_audit"));
+  assert.ok(good.commands.some((command) => command.name === "side_effect_consistency"));
   assert.match(renderManifest(good), /primitives builder gate: ok/);
   const pnpmForwarded = parseArgs(["--", "--json", "--require-latency", "--latency-max-age-hours", "24"]);
   assert.equal(pnpmForwarded.json, true);
@@ -285,7 +292,7 @@ function runSelfTest() {
   );
   assert.equal(failed.ok, false);
   assert.deepEqual(failed.required_failures, ["openapi_fresh"]);
-  assert.equal(failed.command_count, 8);
+  assert.equal(failed.command_count, 9);
   assert.ok(failed.commands.some((command) => command.name === "catalog_self_tests_list"));
   assert.match(renderManifest(failed), /stale openapi/);
   console.log("primitives-builder-gate self-test passed");

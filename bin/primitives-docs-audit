@@ -54,6 +54,7 @@ function auditPrimitiveDocs(catalogPath, docsPath, repoRoot) {
   requireIncludes(docs, "--side-effect none --read-only", "missing side-effect/read-only example wording", errors);
   requireIncludes(docs, "discover-primitives.mjs proof-plan", "missing discovery proof-plan command wording", errors);
   requireIncludes(docs, "bin/primitives-builder-gate", "missing primitive builder gate wording", errors);
+  requireIncludes(docs, "side-effect/read-only consistency", "missing primitive side-effect consistency gate wording", errors);
   requireIncludes(docs, "primitives:builder-gate:release", "missing primitive builder release gate wording", errors);
   requireIncludes(docs, "pnpm --silent primitives:builder-gate:release -- --json", "missing primitive builder release JSON handoff wording", errors);
   requireIncludes(docs, "--manifest artifacts/primitives-builder-gate/release.json", "missing primitive builder manifest handoff wording", errors);
@@ -163,6 +164,7 @@ Example safe listing: node examples/primitives/operation-id-client.mjs list --si
 Example: node examples/primitives/discover-primitives.mjs proof-plan --id workspace_control --json.
 Root typecheck writes the full catalog self-test manifest.
 Run bin/primitives-builder-gate before handing primitive APIs to another tool.
+Builder gate includes side-effect/read-only consistency across generated artifacts.
 Release handoff uses pnpm primitives:builder-gate:release with --latency-max-age-hours 24.
 Machine-readable release handoff uses pnpm --silent primitives:builder-gate:release -- --json or --manifest artifacts/primitives-builder-gate/release.json.
 It includes shared SDK pack/import shape.
