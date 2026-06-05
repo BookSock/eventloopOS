@@ -40,6 +40,7 @@ function auditPrimitiveExamples(examplesDir) {
   const discoveryExamples = [
     "discover-primitives.mjs",
     "primitive-workbench-walkthrough.mjs",
+    "operation-id-client.mjs",
   ];
   const allExamples = [
     ...discoveryExamples,
@@ -50,7 +51,9 @@ function auditPrimitiveExamples(examplesDir) {
   if (loader !== undefined) {
     requireIncludes(loader, "export async function loadPrimitiveSdk", "loader must export loadPrimitiveSdk", errors);
     requireIncludes(loader, "export async function createPrimitiveExampleOperations", "loader must export createPrimitiveExampleOperations", errors);
+    requireIncludes(loader, "export async function createPrimitiveExampleOperationClient", "loader must export createPrimitiveExampleOperationClient", errors);
     requireIncludes(loader, "createPrimitiveOperationsClient", "loader must create shared primitive operations client", errors);
+    requireIncludes(loader, "createPrimitiveOperationHttpClient", "loader must create shared primitive operation-id HTTP client", errors);
     requireIncludes(loader, "pnpm\", [\"--filter\", \"@eventloopos/shared\", \"build\"]", "loader must build shared SDK on demand", errors);
   }
 
@@ -59,11 +62,19 @@ function auditPrimitiveExamples(examplesDir) {
     if (text === undefined) continue;
     requireIncludes(text, "--self-test", `${file} must expose a self-test`, errors);
     if (discoveryExamples.includes(file)) {
-      requireIncludes(text, "loadPrimitiveSdk", "discover-primitives must use shared loader", errors);
+      if (file !== "operation-id-client.mjs") {
+        requireIncludes(text, "loadPrimitiveSdk", `${file} must use shared SDK loader`, errors);
+      }
       rejectIncludes(text, "execFileSync", "discover-primitives must not duplicate shared SDK build loader", errors);
       if (file === "primitive-workbench-walkthrough.mjs") {
         requireIncludes(text, "buildPrimitiveApiIndex", "primitive-workbench-walkthrough must use compact primitive API index", errors);
         requireIncludes(text, "examples/primitives/fixtures/workbench-catalog.json", "primitive-workbench-walkthrough must have fixture-backed self-test", errors);
+      }
+      if (file === "operation-id-client.mjs") {
+        requireIncludes(text, "createPrimitiveExampleOperationClient", "operation-id-client must use shared operation-id client loader", errors);
+        requireIncludes(text, "requestOperation", "operation-id-client must call primitives by operation id", errors);
+        requireIncludes(text, "--timeout-ms", "operation-id-client must expose timeout option", errors);
+        requireIncludes(text, "examples/primitives/fixtures/workbench-catalog.json", "operation-id-client must have fixture-backed self-test", errors);
       }
       continue;
     }
@@ -102,8 +113,10 @@ function runSelfTest() {
   fs.writeFileSync(path.join(libDir, "primitive-sdk-loader.mjs"), `
 export async function loadPrimitiveSdk() {}
 export async function createPrimitiveExampleOperations() {}
+export async function createPrimitiveExampleOperationClient() {}
 const command = ["pnpm", ["--filter", "@eventloopos/shared", "build"]];
 const helper = "createPrimitiveOperationsClient";
+const operationHelper = "createPrimitiveOperationHttpClient";
 `);
   fs.writeFileSync(path.join(examplesDir, "discover-primitives.mjs"), `
 import { loadPrimitiveSdk } from "./lib/primitive-sdk-loader.mjs";
@@ -113,6 +126,13 @@ if (process.argv.includes("--self-test")) {}
   fs.writeFileSync(path.join(examplesDir, "primitive-workbench-walkthrough.mjs"), `
 import { loadPrimitiveSdk } from "./lib/primitive-sdk-loader.mjs";
 const helper = "buildPrimitiveApiIndex";
+const fixture = "examples/primitives/fixtures/workbench-catalog.json";
+if (process.argv.includes("--self-test")) {}
+`);
+  fs.writeFileSync(path.join(examplesDir, "operation-id-client.mjs"), `
+import { loadPrimitiveSdk, createPrimitiveExampleOperationClient } from "./lib/primitive-sdk-loader.mjs";
+const call = "requestOperation";
+const usage = "--timeout-ms";
 const fixture = "examples/primitives/fixtures/workbench-catalog.json";
 if (process.argv.includes("--self-test")) {}
 `);

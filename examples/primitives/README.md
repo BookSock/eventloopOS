@@ -15,6 +15,7 @@ node examples/primitives/discover-primitives.mjs self-tests --id workspace_contr
 node examples/primitives/discover-primitives.mjs latency-budgets --require-responsive
 node examples/primitives/discover-primitives.mjs proof-plan --id workspace_control --json
 node examples/primitives/primitive-workbench-walkthrough.mjs --id workspace_control
+node examples/primitives/operation-id-client.mjs workspace_control_get_workspace_status --json
 node examples/primitives/agent-attention-queue.mjs list
 node examples/primitives/window-hotkey-router.mjs claim --task-id task_demo --window-id 123
 ```
@@ -23,6 +24,7 @@ Examples:
 
 - `discover-primitives.mjs`: inspect the primitive catalog, self-test command coverage, latency budgets, and combined proof plans through the shared `@eventloopos/shared/primitives` SDK before choosing which API surfaces to build on. If `app/shared/dist` is missing in a clean checkout, it builds the shared package on demand.
 - `primitive-workbench-walkthrough.mjs`: turn selected primitive ids/categories into a starter workbench with prerequisites, proof commands, route operations, schemas, and latency budgets, backed by `examples/primitives/fixtures/workbench-catalog.json`.
+- `operation-id-client.mjs`: call any cataloged HTTP primitive by stable operation id, with path/query/body options and shared SDK request/response validation.
 - `restore-my-desk.mjs`: save, preview, and restore a workspace snapshot.
 - `agent-attention-queue.mjs`: list, boost, and defer attention papers.
 - `window-hotkey-router.mjs`: attach external hotkeys to task-window claims and follows-window rules.

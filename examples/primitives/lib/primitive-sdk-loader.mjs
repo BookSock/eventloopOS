@@ -47,6 +47,26 @@ export async function createPrimitiveExampleOperations({
   return { sdk, catalog, ops };
 }
 
+export async function createPrimitiveExampleOperationClient({
+  baseUrl = "http://127.0.0.1:4377",
+  catalogPath = "docs/primitives.catalog.json",
+  timeoutMs = 5_000,
+  fetch,
+} = {}) {
+  const sdk = await loadPrimitiveSdk([
+    "parsePrimitiveCatalog",
+    "createPrimitiveOperationHttpClient",
+  ]);
+  const catalog = readPrimitiveCatalog(sdk, catalogPath);
+  const client = sdk.createPrimitiveOperationHttpClient({
+    catalog,
+    baseUrl,
+    timeoutMs,
+    ...(fetch ? { fetch } : {}),
+  });
+  return { sdk, catalog, client };
+}
+
 export function readPrimitiveCatalog(sdk, catalogPath = "docs/primitives.catalog.json") {
   const resolved = path.resolve(repoRootPath, catalogPath);
   return sdk.parsePrimitiveCatalog(JSON.parse(fs.readFileSync(resolved, "utf8")));
@@ -61,6 +81,7 @@ function defaultPrimitiveSdkExports() {
     "selectPrimitiveLatencyBudgets",
     "buildPrimitiveProofPlan",
     "buildPrimitiveApiIndex",
+    "createPrimitiveOperationHttpClient",
     "createPrimitiveOperationsClient",
   ];
 }

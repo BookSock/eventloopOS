@@ -111,10 +111,12 @@ builder-selected primitive subset with
 turns the compact API index into a fixture-backed starter workbench: prerequisites,
 proof commands, route operation ids, schemas, and latency budgets for selected
 primitive ids or categories without needing a live orchestrator.
-The live queue, workspace, and window-hotkey examples now use the same shared
-operation client instead of hand-rolled fetch calls, so example apps exercise
-catalog validation, typed response parsing, idempotency headers, and request
-timeouts.
+`node examples/primitives/operation-id-client.mjs workspace_control_get_workspace_status --json`
+calls a cataloged route by stable operation id through the shared operation-id
+HTTP client. The live queue, workspace, and window-hotkey examples now use the
+same shared operation client instead of hand-rolled fetch calls, so example apps
+exercise catalog validation, typed response parsing, idempotency headers, and
+request timeouts.
 Root `pnpm typecheck` runs their self-tests and
 `bin/primitives-examples-audit` prevents example drift back to custom HTTP
 clients.
