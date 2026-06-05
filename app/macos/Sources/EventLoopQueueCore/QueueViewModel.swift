@@ -145,6 +145,8 @@ public final class QueueViewModel: ObservableObject {
     }
     @Published public private(set) var feedbackSequence: Int = 0
     @Published public private(set) var currentTask: TaskRecord?
+    @Published public private(set) var paperActionInFlight = false
+    @Published public private(set) var paperActionInFlightStatus: String?
 
     private static let terminalSendConfirmedDefaultsKey = "eventLoopOS.terminalSendConfirmed.v1"
     private static let terminalSendRememberedRefsKey = "eventLoopOS.terminalSendRememberedRefs.v1"
@@ -163,8 +165,6 @@ public final class QueueViewModel: ObservableObject {
     private var activityRefreshTask: Task<Void, Never>?
     private var autoBindLoopTask: Task<Void, Never>?
     private var autoRestoredContextPacketIds = Set<String>()
-    private var paperActionInFlight = false
-    private var paperActionInFlightStatus: String?
     private var workspaceRestoreInFlight = false
     private var lastWorkspaceRestore: RecentWorkspaceRestore?
     private let workspaceRestoreRepeatWindow: TimeInterval = 2.0
@@ -2051,6 +2051,9 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func moveToNext() async {
+        guard beginPaperAction("Skipping paper...") else { return }
+        defer { finishPaperAction() }
+
         do {
             try await saveSelectedTaskWorkspaceSnapshotIfNeeded()
             if let nextPacket = try await client.next(after: selectedPacketID) {
@@ -2058,9 +2061,20 @@ public final class QueueViewModel: ObservableObject {
                 await loadTaskSessionsForSelectedPacketIfNeeded()
                 await prepareSelectedWorkspaceRestore()
                 await requestSelectedBrowserContextRestoresIfNeeded()
+                advanceToast = .switchedToPaper(packetId: nextPacket.id)
+            } else {
+                advanceToast = .actionComplete("No other paper ready.")
             }
         } catch {
+            if isQueueConflict(error) {
+                packets = (try? await client.fetchQueue()) ?? packets
+                selectedPacketID = packets.first?.id ?? selectedPacketID
+                state = .loaded
+                advanceToast = .actionComplete("Queue paused. Try again.")
+                return
+            }
             state = .failed(error.localizedDescription)
+            advanceToast = .actionComplete("Skip failed: \(Self.shortStatusMessage(error.localizedDescription))")
         }
     }
 

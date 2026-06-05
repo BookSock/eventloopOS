@@ -147,6 +147,44 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Done. Next paper ready."))
     }
 
+    func testRapidMoveToNextDeduplicatesWhileInFlight() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: SeededQueue.blogFeedbackWorkspace,
+            captureDelayNanoseconds: 100_000_000
+        )
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+
+        await viewModel.pullNextPaper()
+        let captureCountBeforeSkip = workspaceClient.workspaceCaptureCount
+
+        let firstSkip = Task { @MainActor in
+            await viewModel.moveToNext()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        XCTAssertEqual(viewModel.paperActionInFlight, true)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Skipping paper..."))
+        let firstFeedbackSequence = viewModel.feedbackSequence
+
+        let secondSkip = Task { @MainActor in
+            await viewModel.moveToNext()
+        }
+        await secondSkip.value
+
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Skipping paper... Still running."))
+        XCTAssertGreaterThan(viewModel.feedbackSequence, firstFeedbackSequence)
+        XCTAssertEqual(client.leasedPacketIds, ["packet-blog-feedback"])
+
+        await firstSkip.value
+
+        XCTAssertEqual(client.completedPacketIds, [])
+        XCTAssertEqual(client.leasedPacketIds, ["packet-blog-feedback", "packet-ci-failed"])
+        XCTAssertEqual(workspaceClient.workspaceCaptureCount, captureCountBeforeSkip + 1)
+        XCTAssertEqual(viewModel.paperActionInFlight, false)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+    }
+
     func testPullNextPaperLeasesTopPacketAndPlansWorkspace() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let plan = WorkspaceRestorePlan(
@@ -843,6 +881,20 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.moveToNext()
 
         XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("No other paper ready."))
+    }
+
+    func testMoveToNextTreatsLeaseConflictAsNonFatal() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+        client.setNextLeaseError(QueueClientError.httpStatus(409))
+
+        await viewModel.moveToNext()
+
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Queue paused. Try again."))
     }
 
     func testExecuteRecommendedActionCompletesSelectedPacketAndAdvances() async {

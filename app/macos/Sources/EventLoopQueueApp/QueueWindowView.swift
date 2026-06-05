@@ -130,6 +130,7 @@ struct QueueWindowView: View {
                         Label("Pull Next Paper", systemImage: "doc.text.magnifyingglass")
                     }
                     .accessibilityIdentifier("queue-pull-next-paper-button")
+                    .disabled(viewModel.paperActionInFlight)
 
                     Button {
                         workspaceRestoreCandidate = viewModel.selectedWorkspaceSnapshot
@@ -278,7 +279,8 @@ struct QueueWindowView: View {
                 taskBindingState: viewModel.taskBindingState,
                 queueLineageState: viewModel.queueLineageState,
                 canExecuteRecommendedAction: viewModel.canExecuteSelectedRecommendedAction,
-                recommendedActionBlockReason: viewModel.selectedRecommendedActionBlockReason
+                recommendedActionBlockReason: viewModel.selectedRecommendedActionBlockReason,
+                paperActionInFlight: viewModel.paperActionInFlight
             ) {
                 Task {
                     await viewModel.doneAndNext()

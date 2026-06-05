@@ -94,6 +94,7 @@ struct EventLoopQueueApp: App {
                     }
                 }
                 .keyboardShortcut("j", modifiers: [.control, .option])
+                .disabled(viewModel.paperActionInFlight)
                 .accessibilityIdentifier("queue-command-pull-next-paper")
 
                 Button(viewModel.selectedPacket?.recommendedAction ?? "Run Recommended Action") {
@@ -102,7 +103,7 @@ struct EventLoopQueueApp: App {
                     }
                 }
                 .keyboardShortcut(.return, modifiers: [.control, .option])
-                .disabled(!viewModel.canExecuteSelectedRecommendedAction)
+                .disabled(!viewModel.canExecuteSelectedRecommendedAction || viewModel.paperActionInFlight)
                 .accessibilityIdentifier("queue-command-execute-recommended-action")
 
                 Button("Done / Next") {
@@ -111,7 +112,7 @@ struct EventLoopQueueApp: App {
                     }
                 }
                 .keyboardShortcut("e", modifiers: [.control, .option])
-                .disabled(viewModel.selectedPacket == nil)
+                .disabled(viewModel.selectedPacket == nil || viewModel.paperActionInFlight)
                 .accessibilityIdentifier("queue-command-done-next")
 
                 Button("Defer 1 Hour") {
@@ -120,7 +121,7 @@ struct EventLoopQueueApp: App {
                     }
                 }
                 .keyboardShortcut("h", modifiers: [.control, .option])
-                .disabled(viewModel.selectedPacket == nil)
+                .disabled(viewModel.selectedPacket == nil || viewModel.paperActionInFlight)
                 .accessibilityIdentifier("queue-command-defer-one-hour")
 
                 Button("Ignore Item", role: .destructive) {
@@ -128,7 +129,7 @@ struct EventLoopQueueApp: App {
                         await viewModel.ignoreSelectedPacket()
                     }
                 }
-                .disabled(viewModel.selectedPacket == nil)
+                .disabled(viewModel.selectedPacket == nil || viewModel.paperActionInFlight)
                 .accessibilityIdentifier("queue-command-ignore")
 
                 Button("Restore Queue Workspace") {
@@ -146,7 +147,7 @@ struct EventLoopQueueApp: App {
                     }
                 }
                 .keyboardShortcut(.return, modifiers: [.command, .option])
-                .disabled(viewModel.selectedPacket == nil)
+                .disabled(viewModel.selectedPacket == nil || viewModel.paperActionInFlight)
                 .accessibilityIdentifier("queue-command-skip-next")
 
                 if viewModel.isManualMode {
@@ -415,6 +416,7 @@ private struct QueueMenuView: View {
                 }
             }
             .keyboardShortcut("j", modifiers: [.control, .option])
+            .disabled(viewModel.paperActionInFlight)
             .accessibilityIdentifier("queue-menu-pull-next-paper")
 
             Button(viewModel.selectedPacket?.recommendedAction ?? "Run Recommended Action") {
@@ -423,7 +425,7 @@ private struct QueueMenuView: View {
                 }
             }
             .keyboardShortcut(.return, modifiers: [.control, .option])
-            .disabled(!viewModel.canExecuteSelectedRecommendedAction)
+            .disabled(!viewModel.canExecuteSelectedRecommendedAction || viewModel.paperActionInFlight)
             .accessibilityIdentifier("queue-menu-execute-recommended-action")
 
             Button("Done / Next") {
@@ -432,7 +434,7 @@ private struct QueueMenuView: View {
                 }
             }
             .keyboardShortcut("e", modifiers: [.control, .option])
-            .disabled(viewModel.selectedPacket == nil)
+            .disabled(viewModel.selectedPacket == nil || viewModel.paperActionInFlight)
             .accessibilityIdentifier("queue-menu-done-next")
 
             Button("Defer 1 Hour") {
@@ -441,7 +443,7 @@ private struct QueueMenuView: View {
                 }
             }
             .keyboardShortcut("h", modifiers: [.control, .option])
-            .disabled(viewModel.selectedPacket == nil)
+            .disabled(viewModel.selectedPacket == nil || viewModel.paperActionInFlight)
             .accessibilityIdentifier("queue-menu-defer-one-hour")
 
             Button("Ignore Item", role: .destructive) {
@@ -449,7 +451,7 @@ private struct QueueMenuView: View {
                     await viewModel.ignoreSelectedPacket()
                 }
             }
-            .disabled(viewModel.selectedPacket == nil)
+            .disabled(viewModel.selectedPacket == nil || viewModel.paperActionInFlight)
             .accessibilityIdentifier("queue-menu-ignore")
 
             Button("Restore Queue Workspace") {
@@ -467,7 +469,7 @@ private struct QueueMenuView: View {
                 }
             }
             .keyboardShortcut(.return, modifiers: [.command, .option])
-            .disabled(viewModel.selectedPacket == nil)
+            .disabled(viewModel.selectedPacket == nil || viewModel.paperActionInFlight)
             .accessibilityIdentifier("queue-menu-skip-next")
 
             if viewModel.isManualMode {

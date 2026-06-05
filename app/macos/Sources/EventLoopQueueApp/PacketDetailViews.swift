@@ -11,6 +11,7 @@ struct PacketDetail: View {
     let queueLineageState: QueueLineageState
     let canExecuteRecommendedAction: Bool
     let recommendedActionBlockReason: String?
+    let paperActionInFlight: Bool
     let doneAndNext: () -> Void
     let executeRecommendedAction: () -> Void
     let deferForOneHour: () -> Void
@@ -193,7 +194,7 @@ struct PacketDetail: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        .disabled(!canExecuteRecommendedAction)
+                        .disabled(!canExecuteRecommendedAction || paperActionInFlight)
                         .help(actionConsequence(for: packet, selectedTaskSessions: selectedTaskSessions) ?? "Send recommended follow-up to bound agent.")
                         .accessibilityIdentifier("queue-execute-recommended-action-button")
                     }
@@ -203,6 +204,7 @@ struct PacketDetail: View {
                         Label("Defer 1h", systemImage: "clock")
                     }
                     .controlSize(.large)
+                    .disabled(paperActionInFlight)
                     .help("Hide this paper for one hour, then it returns to the queue.")
                     .accessibilityIdentifier("queue-defer-one-hour-button")
 
@@ -212,6 +214,7 @@ struct PacketDetail: View {
                         Label("Ignore", systemImage: "trash")
                     }
                     .controlSize(.large)
+                    .disabled(paperActionInFlight)
                     .help("Drop this paper from the queue. It will not return.")
                     .accessibilityIdentifier("queue-ignore-button")
 
@@ -221,6 +224,7 @@ struct PacketDetail: View {
                         Label("Skip / Next", systemImage: "arrow.right.circle")
                     }
                     .controlSize(.large)
+                    .disabled(paperActionInFlight)
                     .help("Leave this paper in the queue and pull the next paper.")
                     .accessibilityIdentifier("queue-skip-next-button")
 
@@ -231,6 +235,7 @@ struct PacketDetail: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                    .disabled(paperActionInFlight)
                     .help("Save this workspace for the task, mark this paper done, then pull the next paper.")
                     .accessibilityIdentifier("queue-done-next-button")
                 }
