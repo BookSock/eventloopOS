@@ -162,7 +162,10 @@ Proof:
 - route tests under `app/orchestrator/src/routes/*.test.ts`
 - store conformance tests in `app/orchestrator/test/gateway_store_conformance.ts`
 
-Status: stable enough as internal architecture; not yet packaged as public SDK.
+Status: stable enough as internal architecture. The runtime spine remains an
+internal dependency-injection surface; reusable builder APIs are packaged in
+`@eventloopos/shared/primitives` through the catalog, operation-id, and typed
+HTTP-client helpers above.
 
 ## Workspace Control
 

@@ -157,6 +157,9 @@ command covers.
 `selectPrimitiveLatencyBudgets` returns the cataloged p95 budget rows and proof
 hooks by the same builder-facing primitive filters, so tools can surface or run
 responsiveness checks for selected API surfaces.
+Empty filter arrays are treated the same as omitted filters, so generated tools
+can pass optional `ids`, `statuses`, or `categories` arrays without special-case
+branching when the user has not selected a value.
 `buildPrimitiveProofPlan` combines the selected capability rows, missing
 primitive ids, de-duplicated self-test commands, and latency proof hooks in one
 object for builders that need a single verification plan before using a
