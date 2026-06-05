@@ -50,6 +50,7 @@ function auditPrimitiveDocs(catalogPath, docsPath, repoRoot) {
   requireIncludes(docs, "Responsiveness-critical primitives must also carry explicit p95 latency budgets", "missing responsiveness latency-budget invariant wording", errors);
   requireIncludes(docs, "buildPrimitiveProofPlan", "missing primitive proof-plan SDK helper wording", errors);
   requireIncludes(docs, "discover-primitives.mjs proof-plan", "missing discovery proof-plan command wording", errors);
+  requireIncludes(docs, "master_fan_out_dry_run", "missing master command latency budget wording", errors);
 
   const totals = {
     primitives: catalog.primitives.length,
@@ -144,6 +145,7 @@ Strict readiness is expected to stay green: every cataloged primitive has a \`se
 Responsiveness-critical primitives must also carry explicit p95 latency budgets linked to runnable proof commands.
 \`buildPrimitiveProofPlan\` combines those selectors into one verification plan.
 Example: node examples/primitives/discover-primitives.mjs proof-plan --id workspace_control --json.
+Master command latency budget: master_fan_out_dry_run.
 Current catalog summary: 2 primitives, 1 HTTP routes, 1 CLI commands, 2 self-tests, 3 proof refs, 1 latency budgets.
 
 ## Runtime Spine
@@ -152,6 +154,10 @@ Current catalog summary: 2 primitives, 1 HTTP routes, 1 CLI commands, 2 self-tes
 `);
   const good = auditPrimitiveDocs(catalogPath, docsPath, root);
   assert.equal(good.ok, true);
+  fs.writeFileSync(docsPath, fs.readFileSync(docsPath, "utf8").replace("master_fan_out_dry_run", "master_route_latency_removed"));
+  const staleMasterLatency = auditPrimitiveDocs(catalogPath, docsPath, root);
+  assert.equal(staleMasterLatency.ok, false);
+  assert.ok(staleMasterLatency.errors.includes("missing master command latency budget wording"));
   fs.writeFileSync(docsPath, "# eventloopOS Primitives\n\n## Runtime Spine\n");
   const bad = auditPrimitiveDocs(catalogPath, docsPath, root);
   assert.equal(bad.ok, false);

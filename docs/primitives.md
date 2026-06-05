@@ -564,9 +564,11 @@ Proof:
 - `app/orchestrator/test/master_fan_out_idle_filter.test.ts`
 - `app/orchestrator/src/master/master_command_cli.test.ts`
 - `bin/master-priority-proof-smoke`
+- `bin/queue-latency-proof` budget `master_fan_out_dry_run`
 - Swift `QueueViewModelTests` cover queue-level master-command feedback
 
-Status: dogfood; routing latency still needs broader live-host proof coverage.
+Status: dogfood; local orchestrator routing latency is budgeted and covered by
+`master_fan_out_dry_run`; broader live-host proof remains part of demo gates.
 
 ## Task Session Control
 
