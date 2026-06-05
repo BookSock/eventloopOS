@@ -1,0 +1,217 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+
+const repoRoot = path.resolve(import.meta.dirname, "..");
+process.chdir(repoRoot);
+
+const args = process.argv.slice(2);
+const jsonOnly = args.includes("--json");
+const strict = args.includes("--strict");
+const resultArg = valueAfter("--result");
+const verificationArg = valueAfter("--verification");
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/human-demo-completion-audit [--json] [--strict] [--result path] [--verification path]
+
+Audit whether the macOS human demo completion gate can close. This is a
+closeout guard: latest readiness must be green, Jason's filled result must
+exist, verification must pass, verification must match that result, and
+verification must include a green Mac Studio lab status check.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  console.log("human-demo-completion-audit self-test passed");
+  process.exit(0);
+}
+
+const audit = buildAudit(repoRoot, { resultPath: resultArg, verificationPath: verificationArg });
+
+if (jsonOnly) {
+  console.log(JSON.stringify(audit, null, 2));
+} else {
+  console.log(`human demo completion: ${audit.ok ? "complete" : "pending"}`);
+  console.log(`status: ${audit.status}`);
+  console.log(`readiness: ${audit.readiness_manifest_path ?? "(missing)"}`);
+  console.log(`result: ${audit.result_path ?? "(missing)"}`);
+  console.log(`verification: ${audit.verification_manifest_path ?? "(missing)"}`);
+  if (audit.failed_checks.length > 0) console.log(`failed checks: ${audit.failed_checks.join(", ")}`);
+  console.log(JSON.stringify(audit, null, 2));
+}
+
+process.exit(strict && audit.ok !== true ? 1 : 0);
+
+function buildAudit(root, options = {}) {
+  const readinessPath = latestReadinessManifestPath(root);
+  const readiness = readinessPath ? readJson(path.resolve(root, readinessPath)) : undefined;
+  const resultPath = options.resultPath ?? latestResultPath(root);
+  const verificationPath = options.verificationPath ?? latestVerificationPath(root, resultPath);
+  const verification = verificationPath ? readJson(path.resolve(root, verificationPath)) : undefined;
+  const checks = {
+    readiness_manifest_present: Boolean(readinessPath),
+    readiness_ok: readiness?.ok === true,
+    human_result_recorded: Boolean(resultPath && fs.existsSync(path.resolve(root, resultPath))),
+    verification_manifest_present: Boolean(verificationPath),
+    verification_ok: verification?.ok === true || verification?.passed === true,
+    verification_matches_result: verificationMatchesResult(root, verification, resultPath),
+    lab_status_checked_and_ok: verification?.checks?.lab_status_ok === true && verification?.lab_status?.ok === true,
+  };
+  const failedChecks = Object.entries(checks)
+    .filter(([, ok]) => ok !== true)
+    .map(([key]) => key);
+  return {
+    schema_version: 1,
+    kind: "eventloopos.human_demo_completion_audit",
+    generated_at: new Date().toISOString(),
+    ok: failedChecks.length === 0,
+    status: failedChecks.length === 0 ? "complete" : "pending_human_gate",
+    failed_checks: failedChecks,
+    checks,
+    readiness_manifest_path: readinessPath,
+    readiness_generated_at: readiness?.generated_at ?? readiness?.checked_at ?? null,
+    result_path: resultPath,
+    verification_manifest_path: verificationPath,
+    verification_verified_at: verification?.verified_at ?? null,
+    verification_lab_status_manifest_path: verification?.lab_status?.manifest_path ?? null,
+  };
+}
+
+function latestReadinessManifestPath(root) {
+  const labRuns = path.join(root, "artifacts", "lab-runs");
+  if (!fs.existsSync(labRuns)) return undefined;
+  const candidates = fs.readdirSync(labRuns, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith("-human-demo-ready"))
+    .map((entry) => path.join(labRuns, entry.name, "manifest.json"))
+    .filter((candidate) => fs.existsSync(candidate))
+    .sort();
+  const latest = candidates.at(-1);
+  return latest ? path.relative(root, latest) : undefined;
+}
+
+function latestResultPath(root) {
+  const dir = path.join(root, "artifacts", "human-demo-results");
+  if (!fs.existsSync(dir)) return undefined;
+  const candidates = fs.readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith("-human-demo-result.md"))
+    .map((entry) => path.join(dir, entry.name))
+    .sort();
+  const latest = candidates.at(-1);
+  return latest ? path.relative(root, latest) : undefined;
+}
+
+function latestVerificationPath(root, resultPath) {
+  const dir = path.join(root, "artifacts", "human-demo-verifications");
+  if (!fs.existsSync(dir)) return undefined;
+  const candidates = fs.readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(dir, entry.name, "manifest.json"))
+    .filter((candidate) => fs.existsSync(candidate))
+    .sort();
+  if (candidates.length === 0) return undefined;
+  if (resultPath) {
+    const matching = candidates.filter((candidate) => {
+      try {
+        const manifest = readJson(candidate);
+        return verificationMatchesResult(root, manifest, resultPath);
+      } catch {
+        return false;
+      }
+    });
+    const latestMatching = matching.at(-1);
+    if (latestMatching) return path.relative(root, latestMatching);
+  }
+  return path.relative(root, candidates.at(-1));
+}
+
+function verificationMatchesResult(root, verification, resultPath) {
+  if (!verification || !resultPath || !verification.result_path) return false;
+  const expected = path.resolve(root, resultPath);
+  const actual = path.resolve(root, verification.result_path);
+  return actual === expected;
+}
+
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function valueAfter(flag) {
+  const index = args.indexOf(flag);
+  if (index === -1) return undefined;
+  const value = args[index + 1];
+  if (!value || value.startsWith("--")) {
+    console.error(`Missing value for ${flag}`);
+    process.exit(2);
+  }
+  return value;
+}
+
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+}
+
+function runSelfTest() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-human-demo-completion-audit-"));
+  const readinessPath = path.join(root, "artifacts", "lab-runs", "20260605T000000Z-human-demo-ready", "manifest.json");
+  writeJson(readinessPath, { ok: true, generated_at: "2026-06-05T00:00:00.000Z" });
+
+  const pending = buildAudit(root);
+  assert.equal(pending.ok, false);
+  assert.ok(pending.failed_checks.includes("human_result_recorded"));
+  assert.ok(pending.failed_checks.includes("verification_manifest_present"));
+
+  const resultPath = path.join(root, "artifacts", "human-demo-results", "20260605T001000Z-human-demo-result.md");
+  fs.mkdirSync(path.dirname(resultPath), { recursive: true });
+  fs.writeFileSync(resultPath, "filled human result\n", "utf8");
+  const relativeResultPath = path.relative(root, resultPath);
+  const verificationPath = path.join(root, "artifacts", "human-demo-verifications", "20260605T001100Z-human-demo-result-verify", "manifest.json");
+  writeJson(verificationPath, {
+    ok: true,
+    result_path: relativeResultPath,
+    checks: { lab_status_ok: true },
+    lab_status: { ok: true, manifest_path: "artifacts/lab-runs/status/manifest.json" },
+  });
+
+  const complete = buildAudit(root);
+  assert.equal(complete.ok, true);
+  assert.equal(complete.status, "complete");
+
+  const mismatched = buildAudit(root, {
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(mismatched.ok, true);
+  writeJson(verificationPath, {
+    ok: true,
+    result_path: "artifacts/human-demo-results/other-human-demo-result.md",
+    checks: { lab_status_ok: true },
+    lab_status: { ok: true },
+  });
+  const mismatch = buildAudit(root, {
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(mismatch.ok, false);
+  assert.ok(mismatch.failed_checks.includes("verification_matches_result"));
+
+  writeJson(verificationPath, {
+    ok: true,
+    result_path: relativeResultPath,
+    checks: {},
+    lab_status: undefined,
+  });
+  const missingLab = buildAudit(root, {
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(missingLab.ok, false);
+  assert.ok(missingLab.failed_checks.includes("lab_status_checked_and_ok"));
+
+  fs.rmSync(root, { recursive: true, force: true });
+}
