@@ -24,6 +24,11 @@ Commit-msg also runs `gitleaks protect --staged` as a belt-and-suspenders pass.
 
 Run hooks manually with `pnpm hooks:run`.
 
+If commits print `Can't find lefthook in PATH`, the local install is stale or
+was created with scripts disabled. Repair with `pnpm hooks:repair`; it refreshes
+the frozen install with scripts enabled, reinstalls Lefthook's git hooks, and
+runs the pre-commit hook once so the failure is visible immediately.
+
 ### CI
 
 GitHub Actions in `.github/workflows/`:

@@ -141,8 +141,9 @@
     "ci:linux": "bin/ci-linux",
     "ci:full": "pnpm test:contracts && pnpm test:proof-agent && pnpm proof:agent",
     "prepare": "lefthook install || true",
-    "hooks:install": "lefthook install",
-    "hooks:run": "lefthook run pre-commit"
+    "hooks:install": "pnpm exec lefthook install",
+    "hooks:repair": "pnpm install --frozen-lockfile --ignore-scripts=false && pnpm exec lefthook install && pnpm exec lefthook run pre-commit",
+    "hooks:run": "pnpm exec lefthook run pre-commit"
   },
   "devDependencies": {
     "@types/node": "^24.10.2",
