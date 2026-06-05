@@ -4,6 +4,10 @@ on:
   pull_request:
     types: [labeled]
 
+concurrency:
+  group: ai-review-template-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   template-review:
     if: github.event.label.name == 'needs-ai-review'
@@ -37,7 +41,9 @@ jobs:
             const files = "${{ steps.diff.outputs.files }}";
             const adds = "${{ steps.diff.outputs.adds }}";
             const dels = "${{ steps.diff.outputs.dels }}";
+            const marker = "<!-- eventloopos-ai-review-template -->";
             const body = [
+              marker,
               "## AI-review checklist",
               "",
               `Diff: **${files}** files changed, **+${adds} / -${dels}** lines.`,
@@ -56,9 +62,29 @@ jobs:
               "",
               "If this comment was unnecessary, remove the `needs-ai-review` label.",
             ].join("\n");
-            await github.rest.issues.createComment({
+
+            const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body,
+              per_page: 100,
             });
+
+            const previous = comments.find((comment) =>
+              comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: previous.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
