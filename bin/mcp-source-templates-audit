@@ -10,10 +10,12 @@ const repoRoot = path.resolve(import.meta.dirname, "..");
 const args = process.argv.slice(2);
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/mcp-source-templates-audit [--self-test] [root]
+  console.log(`Usage: bin/mcp-source-templates-audit [--self-test] [--include-local] [root]
 
 Audits config/mcp-sources*.example.json files so source-hook templates stay
 read-only, bounded, deduped, and usable without leaking local/private config.
+With --include-local, also audits config/mcp-sources.json when that ignored
+local dogfood config exists.
 `);
   process.exit(0);
 }
@@ -24,16 +26,20 @@ if (args.includes("--self-test")) {
   process.exit(0);
 }
 
+const options = {
+  includeLocal: args.includes("--include-local"),
+};
 const root = path.resolve(args.find((arg) => !arg.startsWith("-")) ?? repoRoot);
-const result = await auditMcpSourceTemplates(root);
+const result = await auditMcpSourceTemplates(root, options);
 if (!result.ok) {
   for (const error of result.errors) console.error(error);
   process.exit(1);
 }
 
-console.log(`mcp source templates audit passed: ${result.checked_count} files, ${result.source_count} sources`);
+const localSummary = options.includeLocal ? `, local ${result.local_checked ? "checked" : "skipped"}` : "";
+console.log(`mcp source templates audit passed: ${result.checked_count} files, ${result.source_count} sources${localSummary}`);
 
-export async function auditMcpSourceTemplates(root) {
+export async function auditMcpSourceTemplates(root, options = {}) {
   const errors = [];
   const configDir = path.join(root, "config");
   let names;
@@ -50,6 +56,12 @@ export async function auditMcpSourceTemplates(root) {
     return { ok: false, checked_count: 0, source_count: 0, errors };
   }
 
+  let localChecked = false;
+  if (options.includeLocal === true && existsSync(path.join(configDir, "mcp-sources.json"))) {
+    names = [...names, "mcp-sources.json"];
+    localChecked = true;
+  }
+
   let sourceCount = 0;
   for (const name of names) {
     const filePath = path.join(configDir, name);
@@ -63,7 +75,7 @@ export async function auditMcpSourceTemplates(root) {
     sourceCount += auditTemplateFile(root, name, parsed, errors);
   }
 
-  return { ok: errors.length === 0, checked_count: names.length, source_count: sourceCount, errors };
+  return { ok: errors.length === 0, checked_count: names.length, source_count: sourceCount, local_checked: localChecked, errors };
 }
 
 function auditTemplateFile(root, fileName, parsed, errors) {
@@ -275,6 +287,76 @@ async function runSelfTest() {
 
     const pass = await auditMcpSourceTemplates(tmp);
     assert.equal(pass.ok, true, pass.errors.join("\n"));
+    assert.equal(pass.local_checked, false);
+
+    writeFileSync(
+      path.join(configDir, "mcp-sources.json"),
+      `${JSON.stringify(
+        {
+          sources: [
+            {
+              id: "local_source",
+              server: {
+                name: "eventloopos-script-events",
+                command: "node",
+                args: ["dist/src/mcp_sources/script_events_server.js"],
+                envAllowlist: ["PATH", "HOME"],
+                stderrLogPath: "var/log/mcp/local_source.stderr.log"
+              },
+              poll: {
+                tool: "poll_script",
+                args: { script_args: ["../../scripts/poll-demo.mjs"] },
+                timeoutMs: 5000
+              },
+              cursor: { strategy: "hash", dedupeWindow: 1000 },
+              eventMapper: "generic_item_to_event",
+              riskPolicy: {
+                readOnly: true,
+                allowWriteTools: false,
+                maxRiskLevel: "low",
+                untrustedTextFields: ["title", "summary", "text"]
+              }
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`
+    );
+    const localPass = await auditMcpSourceTemplates(tmp, { includeLocal: true });
+    assert.equal(localPass.ok, true, localPass.errors.join("\n"));
+    assert.equal(localPass.local_checked, true);
+
+    writeFileSync(
+      path.join(configDir, "mcp-sources.json"),
+      `${JSON.stringify(
+        {
+          sources: [
+            {
+              id: "local_source",
+              server: {
+                name: "bad",
+                command: "node",
+                args: [],
+                envAllowlist: ["TOKEN=secret"],
+                stderrLogPath: "/tmp/local.log"
+              },
+              poll: { tool: "poll_script", args: {}, timeoutMs: 5000 },
+              cursor: { strategy: "hash", dedupeWindow: 1000 },
+              eventMapper: "generic_item_to_event",
+              riskPolicy: { readOnly: false, allowWriteTools: false, maxRiskLevel: "low", untrustedTextFields: ["text"] }
+            }
+          ]
+        },
+        null,
+        2
+      )}\n`
+    );
+    const localFail = await auditMcpSourceTemplates(tmp, { includeLocal: true });
+    assert.equal(localFail.ok, false);
+    assert.ok(localFail.errors.some((error) => error.includes("mcp-sources.json")));
+    assert.ok(localFail.errors.some((error) => error.includes("riskPolicy.readOnly must be true")));
+    rmSync(path.join(configDir, "mcp-sources.json"), { force: true });
 
     writeFileSync(
       path.join(configDir, "mcp-sources.bad.example.json"),

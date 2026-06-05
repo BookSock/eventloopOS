@@ -67,7 +67,7 @@ async function runDoctor(options, deps = {}) {
   ));
   checks.push(commandCheck(commandRunner, "builder_docs_current", "node", ["bin/primitives-docs-audit", "docs/primitives.catalog.json", "docs/primitives.md"]));
   checks.push(commandCheck(commandRunner, "openapi_current", "node", ["bin/primitives-openapi-export", "--check", "docs/primitives.catalog.json", "docs/primitives.openapi.json"]));
-  checks.push(commandCheck(commandRunner, "mcp_source_templates", "node", ["bin/mcp-source-templates-audit"]));
+  checks.push(commandCheck(commandRunner, "mcp_source_templates", "node", ["bin/mcp-source-templates-audit", "--include-local"]));
   checks.push(commandCheck(commandRunner, "primitive_self_tests", "node", ["bin/primitives-self-test-runner", "--catalog", "docs/primitives.catalog.json"]));
   checks.push(commandCheck(commandRunner, "discover_primitives_example", "node", ["examples/primitives/discover-primitives.mjs", "--self-test"]));
   checks.push(commandCheck(commandRunner, "restore_my_desk_example", "node", ["examples/primitives/restore-my-desk.mjs", "--self-test"]));

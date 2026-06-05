@@ -25,6 +25,9 @@ node bin/mcp-source-templates-audit
 ```
 
 Root `pnpm typecheck` runs the same audit, plus the audit self-test.
+`pnpm primitives:doctor` runs `node bin/mcp-source-templates-audit --include-local`,
+so a present local `config/mcp-sources.json` is also checked before calling a
+host ready for builders or dogfood.
 
 ## Configure
 
