@@ -70,11 +70,13 @@ function auditPrimitiveExamples(examplesDir) {
       if (file === "primitive-workbench-walkthrough.mjs") {
         requireIncludes(text, "listPrimitiveOperations", "primitive-workbench-walkthrough must use shared operation-list helper", errors);
         requireIncludes(text, "buildPrimitiveProofPlan", "primitive-workbench-walkthrough must use shared proof-plan helper", errors);
+        rejectIncludes(text, "buildPrimitiveApiIndex", "primitive-workbench-walkthrough must not rebuild workbench routes from the compact API index", errors);
         requireIncludes(text, "examples/primitives/fixtures/workbench-catalog.json", "primitive-workbench-walkthrough must have fixture-backed self-test", errors);
       }
       if (file === "operation-id-client.mjs") {
         requireIncludes(text, "createPrimitiveExampleOperationClient", "operation-id-client must use shared operation-id client loader", errors);
         requireIncludes(text, "listPrimitiveOperations", "operation-id-client must expose catalog-backed operation discovery through shared SDK helper", errors);
+        rejectIncludes(text, "buildPrimitiveApiIndex", "operation-id-client must not rebuild operation discovery from the compact API index", errors);
         requireIncludes(text, "describeOperation", "operation-id-client must describe operation ids before live calls", errors);
         requireIncludes(text, "listOperations", "operation-id-client must list operation ids before live calls", errors);
         requireIncludes(text, "requestOperation", "operation-id-client must call primitives by operation id", errors);
@@ -155,6 +157,16 @@ const usage = "--timeout-ms";
   }
   const good = auditPrimitiveExamples(examplesDir);
   assert.equal(good.ok, true, good.errors.join("; "));
+  const workbenchPath = path.join(examplesDir, "primitive-workbench-walkthrough.mjs");
+  const originalWorkbench = fs.readFileSync(workbenchPath, "utf8");
+  fs.appendFileSync(workbenchPath, "\nconst staleIndexHelper = \"buildPrimitiveApiIndex\";\n");
+  const staleIndex = auditPrimitiveExamples(examplesDir);
+  assert.equal(staleIndex.ok, false);
+  assert.ok(
+    staleIndex.errors.some((error) => error.includes("must not rebuild workbench routes from the compact API index")),
+    staleIndex.errors.join("; ")
+  );
+  fs.writeFileSync(workbenchPath, originalWorkbench);
   fs.appendFileSync(path.join(examplesDir, "agent-attention-queue.mjs"), "\nawait fetch('http://127.0.0.1');\n");
   const bad = auditPrimitiveExamples(examplesDir);
   assert.equal(bad.ok, false);
