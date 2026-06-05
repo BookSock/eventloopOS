@@ -138,6 +138,7 @@ const manifest = {
   latest_human_demo: templateJson ? {
     manifest_path: templateJson.manifest_path,
     screenshot_path: templateJson.screenshot_path,
+    suggested_result_path: templateJson.suggested_output_path,
     ok: templateJson.ok === true,
     queue_count: templateJson.queue_count,
     ambient_autosave_ok: templateJson.ambient_autosave_ok === true,
@@ -577,6 +578,7 @@ function renderReadyMarkdown(manifest) {
 - URL: ${manifest.url}
 - Latest proof: ${latest?.manifest_path ?? ""}
 - Latest proof screenshot: ${latest?.screenshot_path ?? ""}
+- Suggested result file: ${latest?.suggested_result_path ?? ""}
 - Latest proof freshness: ${freshness ? `${freshness.ok ? "ok" : "stale"} age=${freshness.age_hours ?? ""}h max=${freshness.max_age_hours}h${freshness.allowed_stale ? " allowed" : ""}` : ""}
 - Fresh screenshot capture: ${screenshot?.output ?? "skipped"}${screenshot?.capture_mode ? ` mode=${screenshot.capture_mode}` : ""}${screenshot?.image?.dimensions ? ` (${screenshot.image.dimensions}, ${screenshot.image.bytes} bytes)` : ""}
 - Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
@@ -635,6 +637,26 @@ function runSelfTest() {
   });
   assert.equal(demoProofFreshness("2026-06-03T10:00:00.000Z", "2026-06-04T20:00:00.000Z", 24, false).ok, false);
   assert.equal(demoProofFreshness("bad", "2026-06-04T20:00:00.000Z", 24, true).ok, true);
+  const readyMarkdown = renderReadyMarkdown({
+    ok: true,
+    profile: "lab-human-demo",
+    url: "http://127.0.0.1:4480",
+    failed_checks: [],
+    queue_latency_required: true,
+    workspace_latency_required: true,
+    hotkey_latency_required: false,
+    latest_human_demo: {
+      manifest_path: "artifacts/lab-runs/demo/manifest.json",
+      screenshot_path: "artifacts/lab-runs/demo/screen-sharing.png",
+      suggested_result_path: "artifacts/human-demo-results/demo-human-demo-result.md",
+      freshness: { ok: true, age_hours: 1, max_age_hours: 24 },
+    },
+    screen_sharing_capture: { output: "artifacts/lab-runs/ready/screen-sharing.png" },
+    queue_latency: { manifest_path: "artifacts/lab-runs/ready/queue-latency.json" },
+    workspace_latency: { manifest_path: "artifacts/lab-runs/ready/workspace-latency.json" },
+    hotkey_feedback_latency: { skipped: true },
+  });
+  assert.ok(readyMarkdown.includes("Suggested result file: artifacts/human-demo-results/demo-human-demo-result.md"));
   assert.equal(remoteRepoFromEnv({ LAB_MAC_USER: "claw" }), "/Users/claw/dev/2026/eventloopOS");
   assert.equal(remoteRepoFromEnv({ LAB_MAC_USER: "demo", LAB_MAC_EVENTLOOP_PATH: "~/src/eventloopOS" }), "/Users/demo/src/eventloopOS");
   assert.equal(remoteRepoFromEnv({ LAB_MAC_EVENTLOOP_PATH: "/tmp/repo" }), "/tmp/repo");

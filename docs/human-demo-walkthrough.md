@@ -50,6 +50,8 @@ demo readiness proves the Queue path and workspace path are responsive without
 mutating the active paper. On macOS it includes a live hotkey-to-feedback p95
 latency gate in the readiness artifact by running the latency probe on the Mac
 Studio. Use `--skip-hotkey-latency` only while bootstrapping permission setup.
+`READY.md` also names the suggested human result file so the final checklist
+does not accidentally reuse an older blank artifact.
 Use `EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_TARGET=local` or
 `EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY_TARGET=local` only when the
 orchestrator is running on the controller Mac; the lab demo default keeps

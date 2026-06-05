@@ -60,6 +60,7 @@ if (args.includes("--self-test")) {
   assertIncludes(rendered, "Readiness workspace latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/workspace-latency.json ok=true required=true");
   assertIncludes(rendered, "Readiness hotkey latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/hotkey-latency.json ok=true required=true");
   assertIncludes(rendered, "Automated proof: ok=true, queue_count=2, ambient_autosave=true");
+  assertEqual(defaultOutputPath(manifest), "artifacts/human-demo-results/20260603T202742Z-human-demo-result.md");
   const staleReadiness = readinessSummary({});
   assertEqual(staleReadiness.ok, false);
   assertEqual(staleReadiness.failed_gates.join(","), "readiness_ok,queue_latency_ok,workspace_latency_ok");
@@ -102,7 +103,8 @@ const screenshotPath = findScreenshotPath(path.dirname(absoluteManifestPath));
 const readyManifestPath = latestReadyManifestPath();
 const ready = readyManifestPath ? readJson(path.resolve(repoRoot, readyManifestPath)) : undefined;
 const readyScreenshotPath = ready?.screen_sharing_capture?.output ?? "";
-const outputPath = outputArg ?? (write ? defaultOutputPath(manifest) : "");
+const suggestedOutputPath = outputArg ?? defaultOutputPath(manifest);
+const outputPath = write || outputArg ? suggestedOutputPath : "";
 const template = renderTemplate({
   manifestPath: relativeManifestPath,
   screenshotPath,
@@ -138,6 +140,7 @@ const result = {
   readiness_ok: readiness.ok,
   readiness_failed_gates: readiness.failed_gates,
   ready_to_write: readiness.ok === true || allowStaleReadiness,
+  suggested_output_path: suggestedOutputPath,
   output_path: outputPath,
   ok: manifest.ok === true,
   queue_count: manifest.proofs?.demo_queue?.count ?? null,
