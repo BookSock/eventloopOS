@@ -1,0 +1,107 @@
+#!/usr/bin/env node
+import { execFileSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+
+const args = process.argv.slice(2);
+const check = args.includes("--check");
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/primitives-api-index-export [--check] [--self-test] [catalog.json] [index.json]
+
+Exports a compact builder-facing primitive API index from docs/primitives.catalog.json.
+The index is easier for non-OpenAPI clients to consume than the full catalog:
+primitive summaries, routes, operation ids, schemas, commands, proofs, and
+latency budgets are grouped by primitive.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  await runSelfTest();
+  process.exit(0);
+}
+
+const positional = args.filter((arg) => arg !== "--check");
+const catalogPath = positional[0] ?? "docs/primitives.catalog.json";
+const outputPath = positional[1] ?? "docs/primitives.index.json";
+const sdk = await loadPrimitiveSdk(process.cwd());
+const catalog = sdk.parsePrimitiveCatalog(readJson(catalogPath));
+const rendered = `${JSON.stringify(sdk.buildPrimitiveApiIndex(catalog), null, 2)}\n`;
+
+if (check) {
+  let existing;
+  try {
+    existing = fs.readFileSync(outputPath, "utf8");
+  } catch {
+    console.error(`Primitive API index missing: ${outputPath}`);
+    process.exit(1);
+  }
+  if (existing !== rendered) {
+    console.error(`Primitive API index is stale: ${outputPath}`);
+    console.error(`Run: bin/primitives-api-index-export ${catalogPath} ${outputPath}`);
+    process.exit(1);
+  }
+  console.log(`primitives API index check passed: ${outputPath}`);
+  process.exit(0);
+}
+
+fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+fs.writeFileSync(outputPath, rendered);
+console.log(`wrote ${outputPath}`);
+
+async function loadPrimitiveSdk(repoRoot) {
+  const distPath = path.join(repoRoot, "app/shared/dist/primitives.js");
+  try {
+    return await import(pathToFileURL(distPath).href);
+  } catch (firstError) {
+    execFileSync("pnpm", ["--filter", "@eventloopos/shared", "build"], {
+      cwd: repoRoot,
+      stdio: "inherit",
+    });
+    try {
+      return await import(`${pathToFileURL(distPath).href}?built=${Date.now()}`);
+    } catch (secondError) {
+      throw new Error(`failed to load primitive SDK: ${errorMessage(firstError)}; after build: ${errorMessage(secondError)}`);
+    }
+  }
+}
+
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function runSelfTest() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-primitives-api-index-"));
+  fs.mkdirSync(path.join(root, "app/shared/dist"), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, "app/shared/dist/primitives.js"),
+    [
+      "export function parsePrimitiveCatalog(value) { return value; }",
+      "export function buildPrimitiveApiIndex(catalog) {",
+      "  return { schemaVersion: 1, primitiveCount: catalog.primitives.length, routeCount: 1, generatedFrom: 'docs/primitives.catalog.json', statusLabels: [], schemaNames: [], primitives: [{ id: catalog.primitives[0].id, routes: [{ operation: 'example_post_ping' }] }] };",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  const catalogPath = path.join(root, "catalog.json");
+  const outputPath = path.join(root, "index.json");
+  fs.writeFileSync(catalogPath, JSON.stringify({ primitives: [{ id: "example" }] }));
+  const previousCwd = process.cwd();
+  process.chdir(root);
+  try {
+    const sdk = await loadPrimitiveSdk(root);
+    const rendered = `${JSON.stringify(sdk.buildPrimitiveApiIndex(sdk.parsePrimitiveCatalog(readJson(catalogPath))), null, 2)}\n`;
+    fs.writeFileSync(outputPath, rendered);
+    if (!rendered.includes("example_post_ping")) throw new Error("self-test index did not include route operation");
+  } finally {
+    process.chdir(previousCwd);
+  }
+  console.log("primitives-api-index-export self-test passed");
+}

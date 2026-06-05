@@ -67,6 +67,7 @@ async function runDoctor(options, deps = {}) {
   ));
   checks.push(commandCheck(commandRunner, "builder_docs_current", "node", ["bin/primitives-docs-audit", "docs/primitives.catalog.json", "docs/primitives.md"]));
   checks.push(commandCheck(commandRunner, "openapi_current", "node", ["bin/primitives-openapi-export", "--check", "docs/primitives.catalog.json", "docs/primitives.openapi.json"]));
+  checks.push(commandCheck(commandRunner, "api_index_current", "node", ["bin/primitives-api-index-export", "--check", "docs/primitives.catalog.json", "docs/primitives.index.json"]));
   checks.push(commandCheck(commandRunner, "shared_sdk_pack_audit", "node", ["bin/shared-sdk-pack-audit"]));
   checks.push(commandCheck(commandRunner, "mcp_source_templates", "node", ["bin/mcp-source-templates-audit", "--include-local"]));
   checks.push(commandCheck(commandRunner, "primitive_self_tests", "node", ["bin/primitives-self-test-runner", "--catalog", "docs/primitives.catalog.json"]));
@@ -506,6 +507,7 @@ async function runSelfTest() {
   assert.equal(manifest.failed_checks.length, 0);
   assert.ok(manifest.checks.some((check) => check.name === "strict_readiness"));
   assert.ok(manifest.checks.some((check) => check.name === "builder_docs_current"));
+  assert.ok(manifest.checks.some((check) => check.name === "api_index_current"));
   assert.ok(manifest.checks.some((check) => check.name === "shared_sdk_pack_audit"));
   assert.ok(manifest.checks.some((check) => check.name === "mcp_source_templates"));
   assert.ok(manifest.checks.some((check) => check.name === "primitive_self_tests"));

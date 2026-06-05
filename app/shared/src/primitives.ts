@@ -294,6 +294,38 @@ export type PrimitiveProofPlan = {
   latencyBudgets: PrimitiveLatencyBudgetSummary[];
 };
 
+export type PrimitiveApiIndexRoute = {
+  method: PrimitiveHttpMethod;
+  path: string;
+  operation: string;
+  requestSchema?: string;
+  responseSchema: string;
+  requestBody: boolean;
+  queryParameters: string[];
+  routeFile: string;
+  latencyBudgets: PrimitiveLatencyBudgetSummary[];
+};
+
+export type PrimitiveApiIndexEntry = PrimitiveCapabilitySummary & {
+  code: string[];
+  proofs: string[];
+  cli: string[];
+  selfTests: string[];
+  routes: PrimitiveApiIndexRoute[];
+  latencyBudgets: PrimitiveLatencyBudgetSummary[];
+};
+
+export type PrimitiveApiIndex = {
+  schemaVersion: 1;
+  primitiveCount: number;
+  routeCount: number;
+  generatedFrom: string;
+  license?: string;
+  statusLabels: string[];
+  schemaNames: string[];
+  primitives: PrimitiveApiIndexEntry[];
+};
+
 export type PrimitiveRequestBuildInput = {
   catalog: PrimitiveCatalog;
   method: PrimitiveHttpMethod | Lowercase<PrimitiveHttpMethod>;
@@ -1370,6 +1402,46 @@ export function buildPrimitiveProofPlan(catalog: PrimitiveCatalog, filter: Primi
   };
 }
 
+export function buildPrimitiveApiIndex(catalog: PrimitiveCatalog): PrimitiveApiIndex {
+  const summary = summarizePrimitiveCatalog(catalog);
+  const capabilityById = new Map(summary.primitives.map((primitive) => [primitive.id, primitive]));
+  return {
+    schemaVersion: 1,
+    primitiveCount: summary.primitiveCount,
+    routeCount: summary.routeCount,
+    generatedFrom: "docs/primitives.catalog.json",
+    license: catalog.license,
+    statusLabels: [...(catalog.status_labels ?? [])].sort((left, right) => left.localeCompare(right)),
+    schemaNames: Object.keys(catalog.schemas).sort((left, right) => left.localeCompare(right)),
+    primitives: catalog.primitives.map((primitive) => {
+      const capability = capabilityById.get(primitive.id) ?? summarizePrimitiveCapability(primitive);
+      const latencyBudgets = selectPrimitiveLatencyBudgets(catalog, { ids: [primitive.id] });
+      return {
+        ...capability,
+        code: sortedStrings(primitive.code),
+        proofs: sortedStrings(primitive.proofs),
+        cli: sortedStrings(primitive.cli ?? []),
+        selfTests: sortedStrings(primitive.self_tests ?? []),
+        latencyBudgets,
+        routes: (primitive.http ?? []).map((route) => {
+          const routeName = `${route.method} ${route.path}`;
+          return {
+            method: route.method,
+            path: route.path,
+            operation: primitiveOperationId(primitive.id, route.method, route.path),
+            requestSchema: schemaReferenceName(route.request_schema),
+            responseSchema: schemaReferenceName(route.response_schema) ?? "FreeformJsonObject",
+            requestBody: routeHasRequestBody(route),
+            queryParameters: (route.query_parameters ?? route.parameters ?? []).map((parameter) => parameter.name).sort(),
+            routeFile: route.route_file,
+            latencyBudgets: latencyBudgets.filter((budget) => budget.route === routeName)
+          };
+        })
+      };
+    })
+  };
+}
+
 function summarizePrimitiveCapability(primitive: PrimitiveDefinition): PrimitiveCapabilitySummary {
   const http = primitive.http ?? [];
   const cli = primitive.cli ?? [];
@@ -1392,6 +1464,25 @@ function summarizePrimitiveCapability(primitive: PrimitiveDefinition): Primitive
     requestSchemaRouteCount: http.filter((route) => route.request_schema).length,
     noRequestBodyRouteCount: http.filter((route) => route.no_request_body === true).length
   };
+}
+
+function primitiveOperationId(primitiveId: string, method: string, routePath: string): string {
+  const routeName = routePath
+    .replace(/^\/+/, "")
+    .replace(/:([A-Za-z0-9_]+)/g, "by_$1")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return [primitiveId, method.toLowerCase(), routeName].filter(Boolean).join("_");
+}
+
+function schemaReferenceName(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const refPrefix = "#/components/schemas/";
+  return value.startsWith(refPrefix) ? value.slice(refPrefix.length) : value;
+}
+
+function sortedStrings(values: string[]): string[] {
+  return [...values].sort((left, right) => left.localeCompare(right));
 }
 
 function classifyPrimitiveCapability(primitive: PrimitiveDefinition, routes: PrimitiveHttpRoute[]): string {

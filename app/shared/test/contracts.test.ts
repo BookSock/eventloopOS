@@ -21,6 +21,7 @@ import {
 } from "../src/index.js";
 import {
   bindPrimitiveOperationsClient,
+  buildPrimitiveApiIndex,
   buildPrimitiveProofPlan,
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
@@ -467,6 +468,51 @@ describe("primitive catalog SDK boundary", () => {
     ]);
     expect(criticalPlan.selfTestCommands.length).toBeGreaterThanOrEqual(2);
     expect(criticalPlan.latencyBudgets).toHaveLength(11);
+  });
+
+  it("builds a compact primitive API index for non-OpenAPI builders", () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const index = buildPrimitiveApiIndex(catalog);
+
+    expect(index.schemaVersion).toBe(1);
+    expect(index.primitiveCount).toBe(18);
+    expect(index.routeCount).toBeGreaterThan(70);
+    expect(index.statusLabels).toEqual(["dogfood", "experimental", "mixed", "stable_enough"]);
+    expect(index.schemaNames).toContain("WorkspaceCaptureResponse");
+
+    const workspace = index.primitives.find((primitive) => primitive.id === "workspace_control");
+    expect(workspace).toMatchObject({
+      title: "Workspace Control",
+      category: "os_control",
+      responsivenessCritical: true,
+      routeCount: 4,
+      latencyBudgetCount: 3
+    });
+    expect(workspace?.code).toContain("app/orchestrator/src/workspace/aerospace.ts");
+    expect(workspace?.selfTests).toContain("pnpm --filter @eventloopos/shared run test:primitive-ops");
+    expect(workspace?.latencyBudgets.map((budget) => budget.name)).toEqual([
+      "workspace_capture",
+      "workspace_restore_plan",
+      "workspace_restore_execute"
+    ]);
+    expect(workspace?.routes).toContainEqual(expect.objectContaining({
+      method: "POST",
+      path: "/workspace/capture",
+      operation: "workspace_control_post_workspace_capture",
+      responseSchema: "WorkspaceCaptureResponse",
+      requestBody: true,
+      routeFile: "app/orchestrator/src/routes/workspace.ts",
+      latencyBudgets: [expect.objectContaining({ name: "workspace_capture" })]
+    }));
+
+    const lineage = index.primitives
+      .find((primitive) => primitive.id === "queue_paper_routing")
+      ?.routes.find((route) => route.path === "/queue/:id/lineage");
+    expect(lineage).toMatchObject({
+      operation: "queue_paper_routing_get_queue_by_id_lineage",
+      queryParameters: ["limit"],
+      responseSchema: "QueueLineageResponse"
+    });
   });
 
   it("rejects primitive routes that drift back to freeform mutating bodies", () => {

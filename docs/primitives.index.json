@@ -1,0 +1,1921 @@
+{
+  "schemaVersion": 1,
+  "primitiveCount": 18,
+  "routeCount": 80,
+  "generatedFrom": "docs/primitives.catalog.json",
+  "license": "AGPL-3.0-only",
+  "statusLabels": [
+    "dogfood",
+    "experimental",
+    "mixed",
+    "stable_enough"
+  ],
+  "schemaNames": [
+    "ActivityActor",
+    "ActivityEvent",
+    "ActivityResponse",
+    "ActivityStatus",
+    "AerospaceCommand",
+    "AgentRunGetResponse",
+    "AgentRunUpsertRequest",
+    "AgentRunUpsertResponse",
+    "ClaudeSessionInspectionResponse",
+    "CodexAutoBindBound",
+    "CodexAutoBindResponse",
+    "CodexAutoBindSkipped",
+    "CodexForegroundResolveResponse",
+    "CodexSessionInspectionResponse",
+    "ContextEntry",
+    "ContextResource",
+    "ContextRestoreClaimRequest",
+    "ContextRestoreFinishRequest",
+    "ContextRestorePlan",
+    "ContextRestorePlanRequest",
+    "ContextRestorePlanResponse",
+    "ContextRestoreRequest",
+    "ContextRestoreRequestMaybeResponse",
+    "ContextRestoreRequestResponse",
+    "ContextsListResponse",
+    "CreateTaskRequest",
+    "CreateTaskResponse",
+    "CurrentTaskResponse",
+    "CurrentTaskSetRequest",
+    "EventGetResponse",
+    "EventIngestRequest",
+    "EventIngestResponse",
+    "EvidenceRef",
+    "FollowsWindowExclusionCreateRequest",
+    "FollowsWindowExclusionRecord",
+    "FollowsWindowExclusionResponse",
+    "FollowsWindowExclusionsListResponse",
+    "FollowsWindowRecord",
+    "FollowsWindowsListResponse",
+    "HealthResponse",
+    "ManualModeGetResponse",
+    "ManualModeSetRequest",
+    "ManualModeSetResponse",
+    "ManualModeState",
+    "MasterFanOutDelivered",
+    "MasterFanOutMatch",
+    "MasterFanOutRequest",
+    "MasterFanOutResponse",
+    "MasterFanOutSelector",
+    "MasterFanOutSkipped",
+    "McpPollAllAndRouteRequest",
+    "McpPollAllAndRouteResponse",
+    "McpPollAndRouteResponse",
+    "McpPollAndRouteResult",
+    "McpPollItem",
+    "McpPollRequest",
+    "McpPollResponse",
+    "McpPollSourceRequest",
+    "McpPreviewItem",
+    "McpPreviewResponse",
+    "McpSourceGetResponse",
+    "McpSourcesListResponse",
+    "McpSourceSummary",
+    "MetricsResponse",
+    "MetricsSnapshot",
+    "OnboardingApprovalBatchEntry",
+    "OnboardingApprovalBatchRequest",
+    "OnboardingApprovalBatchResponse",
+    "OnboardingApprovalRequest",
+    "OnboardingApprovalResponse",
+    "OnboardingBrowserContext",
+    "OnboardingBrowserContextBinding",
+    "OnboardingRejectionRecord",
+    "OnboardingRejectionRequest",
+    "OnboardingRejectionResponse",
+    "OnboardingScanResponse",
+    "OnboardingScanSummary",
+    "OnboardingTaskProposal",
+    "OnboardingWindow",
+    "PaperTriggerCreateRequest",
+    "PaperTriggerGetResponse",
+    "PaperTriggerListResponse",
+    "PaperTriggerMutationResponse",
+    "PaperTriggerPatchRequest",
+    "PaperTriggerRecord",
+    "QueueActionDecision",
+    "QueueActionResponse",
+    "QueueDeferRequest",
+    "QueueDoneRequest",
+    "QueueIgnoreRequest",
+    "QueueItemWithPacket",
+    "QueueLeaseRenewRequest",
+    "QueueLeaseRenewResponse",
+    "QueueLeaseRequest",
+    "QueueLineage",
+    "QueueLineageResponse",
+    "QueueListResponse",
+    "QueueNextResponse",
+    "QueuePriorityRequest",
+    "QueuePriorityResponse",
+    "QueueRecommendedActionRequest",
+    "QueueRecommendedActionResponse",
+    "ReadingQueueAutoPromoteRequest",
+    "ReadingQueueAutoPromoteResponse",
+    "ReadingQueueContextSummary",
+    "ReadingQueueListResponse",
+    "ReadingQueuePromoteRequest",
+    "ReadingQueuePromoteResponse",
+    "ReadingQueuePromotionResult",
+    "RestoreSkip",
+    "ReviewPacketGetResponse",
+    "RouteDecision",
+    "RouteEventResult",
+    "TaskAnchor",
+    "TaskAnchorKind",
+    "TaskGetResponse",
+    "TaskLayoutRecord",
+    "TaskLayoutResponse",
+    "TaskLayoutUpdateResponse",
+    "TaskListResponse",
+    "TaskMessageApi",
+    "TaskMessagesListResponse",
+    "TaskMessagesReconcileAttemptedRequest",
+    "TaskMessagesReconcileAttemptedResponse",
+    "TaskRecord",
+    "TaskRuntimeSession",
+    "TaskSessionBinding",
+    "TaskSessionBindingRequest",
+    "TaskSessionBindingResponse",
+    "TaskSessionFollowupRequest",
+    "TaskSessionFollowupResponse",
+    "TaskSessionGetResponse",
+    "TaskSessionReplacementRequest",
+    "TaskSessionReplacementResponse",
+    "TaskSessionsListResponse",
+    "TaskSessionStartRequest",
+    "TaskSessionStartResponse",
+    "TaskSessionStartResult",
+    "TaskWindowClaimCreateRequest",
+    "TaskWindowClaimRecord",
+    "TaskWindowClaimResponse",
+    "TaskWindowClaimsListResponse",
+    "TaskWorkspaceSnapshotRecord",
+    "TaskWorkspaceSnapshotSaveRequest",
+    "TaskWorkspaceSnapshotSaveResponse",
+    "VoiceCommandRequest",
+    "VoiceCommandResponse",
+    "WindowFrame",
+    "WorkspaceCapabilityStatus",
+    "WorkspaceCaptureResponse",
+    "WorkspaceCommand",
+    "WorkspaceFrameCaptureStatus",
+    "WorkspaceRestoreCommandReceipt",
+    "WorkspaceRestorePlan",
+    "WorkspaceRestorePlanRequest",
+    "WorkspaceRestorePlanResponse",
+    "WorkspaceRestoreReceipt",
+    "WorkspaceRestoreRequest",
+    "WorkspaceRestoreResponse",
+    "WorkspaceSnapshot",
+    "WorkspaceStatusResponse",
+    "WorkspaceWindow"
+  ],
+  "primitives": [
+    {
+      "id": "runtime_spine",
+      "title": "Runtime Spine",
+      "status": "stable_enough",
+      "category": "runtime",
+      "summary": "Flat dependency record for routes, timers, stores, workspace, sessions, observability, and source polling.",
+      "routeCount": 0,
+      "cliCommandCount": 0,
+      "selfTestCount": 1,
+      "proofRefCount": 1,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 0,
+      "requestSchemaRouteCount": 0,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/runtime.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/test/gateway_store_conformance.test.ts"
+      ],
+      "cli": [],
+      "selfTests": [
+        "pnpm --filter @eventloopos/orchestrator run test:runtime-spine"
+      ],
+      "latencyBudgets": [],
+      "routes": []
+    },
+    {
+      "id": "workspace_control",
+      "title": "Workspace Control",
+      "status": "dogfood",
+      "category": "os_control",
+      "summary": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+      "routeCount": 4,
+      "cliCommandCount": 0,
+      "selfTestCount": 2,
+      "proofRefCount": 5,
+      "latencyBudgetCount": 3,
+      "responsivenessCritical": true,
+      "responseSchemaRouteCount": 4,
+      "requestSchemaRouteCount": 3,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/workspace/aerospace.ts",
+        "app/orchestrator/src/workspace/controller.ts",
+        "docs/workspace-backend-adapter.md",
+        "examples/primitives/restore-my-desk.mjs"
+      ],
+      "proofs": [
+        "app/orchestrator/src/workspace/aerospace.test.ts",
+        "app/orchestrator/src/workspace/controller.test.ts",
+        "bin/lab-mac-geometry-proof",
+        "bin/task-workspace-memory-proof-smoke",
+        "examples/primitives/restore-my-desk.mjs"
+      ],
+      "cli": [],
+      "selfTests": [
+        "bin/lab-mac-geometry-proof --self-test",
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "latencyBudgets": [
+        {
+          "primitiveId": "workspace_control",
+          "primitiveTitle": "Workspace Control",
+          "primitiveStatus": "dogfood",
+          "primitiveCategory": "os_control",
+          "primitiveSummary": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+          "name": "workspace_capture",
+          "p95Ms": 5000,
+          "proof": "bin/workspace-latency-proof",
+          "scope": "local_orchestrator",
+          "route": "POST /workspace/capture"
+        },
+        {
+          "primitiveId": "workspace_control",
+          "primitiveTitle": "Workspace Control",
+          "primitiveStatus": "dogfood",
+          "primitiveCategory": "os_control",
+          "primitiveSummary": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+          "name": "workspace_restore_plan",
+          "p95Ms": 2000,
+          "proof": "bin/workspace-latency-proof",
+          "scope": "local_orchestrator",
+          "route": "POST /workspace/restore-plan"
+        },
+        {
+          "primitiveId": "workspace_control",
+          "primitiveTitle": "Workspace Control",
+          "primitiveStatus": "dogfood",
+          "primitiveCategory": "os_control",
+          "primitiveSummary": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+          "name": "workspace_restore_execute",
+          "p95Ms": 5000,
+          "proof": "bin/workspace-latency-proof",
+          "scope": "local_orchestrator_execute_enabled",
+          "route": "POST /workspace/restore"
+        }
+      ],
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/workspace/status",
+          "operation": "workspace_control_get_workspace_status",
+          "responseSchema": "WorkspaceStatusResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/workspace.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/workspace/capture",
+          "operation": "workspace_control_post_workspace_capture",
+          "responseSchema": "WorkspaceCaptureResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/workspace.ts",
+          "latencyBudgets": [
+            {
+              "primitiveId": "workspace_control",
+              "primitiveTitle": "Workspace Control",
+              "primitiveStatus": "dogfood",
+              "primitiveCategory": "os_control",
+              "primitiveSummary": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+              "name": "workspace_capture",
+              "p95Ms": 5000,
+              "proof": "bin/workspace-latency-proof",
+              "scope": "local_orchestrator",
+              "route": "POST /workspace/capture"
+            }
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/workspace/restore-plan",
+          "operation": "workspace_control_post_workspace_restore_plan",
+          "requestSchema": "WorkspaceRestorePlanRequest",
+          "responseSchema": "WorkspaceRestorePlanResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/workspace.ts",
+          "latencyBudgets": [
+            {
+              "primitiveId": "workspace_control",
+              "primitiveTitle": "Workspace Control",
+              "primitiveStatus": "dogfood",
+              "primitiveCategory": "os_control",
+              "primitiveSummary": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+              "name": "workspace_restore_plan",
+              "p95Ms": 2000,
+              "proof": "bin/workspace-latency-proof",
+              "scope": "local_orchestrator",
+              "route": "POST /workspace/restore-plan"
+            }
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/workspace/restore",
+          "operation": "workspace_control_post_workspace_restore",
+          "requestSchema": "WorkspaceRestoreRequest",
+          "responseSchema": "WorkspaceRestoreResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/workspace.ts",
+          "latencyBudgets": [
+            {
+              "primitiveId": "workspace_control",
+              "primitiveTitle": "Workspace Control",
+              "primitiveStatus": "dogfood",
+              "primitiveCategory": "os_control",
+              "primitiveSummary": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+              "name": "workspace_restore_execute",
+              "p95Ms": 5000,
+              "proof": "bin/workspace-latency-proof",
+              "scope": "local_orchestrator_execute_enabled",
+              "route": "POST /workspace/restore"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "task_workspace_memory",
+      "title": "Task Workspace Memory",
+      "status": "stable_enough",
+      "category": "os_control",
+      "summary": "Persist task-specific workspace snapshots so later papers inherit task desk state.",
+      "routeCount": 8,
+      "cliCommandCount": 0,
+      "selfTestCount": 1,
+      "proofRefCount": 3,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 8,
+      "requestSchemaRouteCount": 4,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/agents/ambient_workspace_saver.ts",
+        "app/orchestrator/src/routes/tasks.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/test/ambient_workspace_saver_integration.test.ts",
+        "bin/lab-mac-human-demo-setup",
+        "bin/task-workspace-memory-proof-smoke"
+      ],
+      "cli": [],
+      "selfTests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "latencyBudgets": [],
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/tasks",
+          "operation": "task_workspace_memory_post_tasks",
+          "requestSchema": "CreateTaskRequest",
+          "responseSchema": "CreateTaskResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/tasks.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/tasks",
+          "operation": "task_workspace_memory_get_tasks",
+          "responseSchema": "TaskListResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/tasks.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/tasks/:id",
+          "operation": "task_workspace_memory_get_tasks_by_id",
+          "responseSchema": "TaskGetResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/tasks.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/tasks/:id/layout",
+          "operation": "task_workspace_memory_get_tasks_by_id_layout",
+          "responseSchema": "TaskLayoutResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/tasks.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "PUT",
+          "path": "/tasks/:id/layout",
+          "operation": "task_workspace_memory_put_tasks_by_id_layout",
+          "requestSchema": "WorkspaceSnapshot",
+          "responseSchema": "TaskLayoutUpdateResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/tasks.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/tasks/:id/workspace-snapshot",
+          "operation": "task_workspace_memory_post_tasks_by_id_workspace_snapshot",
+          "requestSchema": "TaskWorkspaceSnapshotSaveRequest",
+          "responseSchema": "TaskWorkspaceSnapshotSaveResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/tasks.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/tasks/current",
+          "operation": "task_workspace_memory_get_tasks_current",
+          "responseSchema": "CurrentTaskResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/tasks.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/tasks/current",
+          "operation": "task_workspace_memory_post_tasks_current",
+          "requestSchema": "CurrentTaskSetRequest",
+          "responseSchema": "CurrentTaskResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/tasks.ts",
+          "latencyBudgets": []
+        }
+      ]
+    },
+    {
+      "id": "ambient_autosave",
+      "title": "Ambient Autosave",
+      "status": "dogfood",
+      "category": "runtime",
+      "summary": "Debounced current-task workspace capture with manual-mode skip, follows windows, blocklists, task-window claim filtering, tagged-window inference, process-tree claim inference, process-root claim expansion, and foreign claimed-window cleanup.",
+      "routeCount": 0,
+      "cliCommandCount": 0,
+      "selfTestCount": 1,
+      "proofRefCount": 1,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 0,
+      "requestSchemaRouteCount": 0,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/agents/ambient_workspace_saver.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/src/agents/ambient_workspace_saver.test.ts"
+      ],
+      "cli": [],
+      "selfTests": [
+        "pnpm --filter @eventloopos/orchestrator run test:ambient-autosave"
+      ],
+      "latencyBudgets": [],
+      "routes": []
+    },
+    {
+      "id": "task_window_claims",
+      "title": "Task Window Claims",
+      "status": "dogfood",
+      "category": "os_control",
+      "summary": "Declare or infer that windows belong to tasks by window identity or process root so foreign windows, including guarded app/title-filtered reused windows, do not pollute active paper snapshots and can be redirected home.",
+      "routeCount": 2,
+      "cliCommandCount": 1,
+      "selfTestCount": 1,
+      "proofRefCount": 7,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 2,
+      "requestSchemaRouteCount": 1,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/agents/ambient_workspace_saver.ts",
+        "app/orchestrator/src/agents/follows_window_orchestrator.ts",
+        "app/orchestrator/src/routes/events.ts",
+        "app/orchestrator/src/routes/task_window_claims.ts",
+        "examples/primitives/window-hotkey-router.mjs"
+      ],
+      "proofs": [
+        "app/orchestrator/src/agents/ambient_workspace_saver.test.ts",
+        "app/orchestrator/src/agents/follows_window_orchestrator.test.ts",
+        "app/orchestrator/src/routes/events_task_window_claims.test.ts",
+        "app/orchestrator/src/routes/task_window_claims.test.ts",
+        "app/orchestrator/test/follows_window_orchestrator_integration.test.ts",
+        "app/orchestrator/test/gateway_store_conformance.test.ts",
+        "examples/primitives/window-hotkey-router.mjs"
+      ],
+      "cli": [
+        "bin/task-window-spawn"
+      ],
+      "selfTests": [
+        "bin/task-window-spawn --self-test"
+      ],
+      "latencyBudgets": [],
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/task-window-claims",
+          "operation": "task_window_claims_post_task_window_claims",
+          "requestSchema": "TaskWindowClaimCreateRequest",
+          "responseSchema": "TaskWindowClaimResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/task_window_claims.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/task-window-claims",
+          "operation": "task_window_claims_get_task_window_claims",
+          "responseSchema": "TaskWindowClaimsListResponse",
+          "requestBody": false,
+          "queryParameters": [
+            "task_id"
+          ],
+          "routeFile": "app/orchestrator/src/routes/task_window_claims.ts",
+          "latencyBudgets": []
+        }
+      ]
+    },
+    {
+      "id": "follows_windows",
+      "title": "Follows Windows",
+      "status": "dogfood",
+      "category": "os_control",
+      "summary": "Detect windows seen across several workspaces and move them with focused task workspace unless excluded; redirect claimed foreign-task windows back home.",
+      "routeCount": 4,
+      "cliCommandCount": 1,
+      "selfTestCount": 2,
+      "proofRefCount": 4,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 4,
+      "requestSchemaRouteCount": 1,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/agents/follows_window_orchestrator.ts",
+        "app/orchestrator/src/routes/follows_windows.ts",
+        "bin/follows-window-rules",
+        "examples/primitives/window-hotkey-router.mjs"
+      ],
+      "proofs": [
+        "app/orchestrator/src/agents/follows_window_orchestrator.test.ts",
+        "app/orchestrator/test/follows_window_orchestrator_integration.test.ts",
+        "bin/follows-window-rules",
+        "examples/primitives/window-hotkey-router.mjs"
+      ],
+      "cli": [
+        "bin/follows-window-rules"
+      ],
+      "selfTests": [
+        "bin/follows-window-rules --self-test",
+        "pnpm --filter @eventloopos/orchestrator run test:follows-window-orchestrator"
+      ],
+      "latencyBudgets": [],
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/follows-windows",
+          "operation": "follows_windows_get_follows_windows",
+          "responseSchema": "FollowsWindowsListResponse",
+          "requestBody": false,
+          "queryParameters": [
+            "min_workspace_count",
+            "ttl_ms"
+          ],
+          "routeFile": "app/orchestrator/src/routes/follows_windows.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/follows-windows/exclude",
+          "operation": "follows_windows_post_follows_windows_exclude",
+          "requestSchema": "FollowsWindowExclusionCreateRequest",
+          "responseSchema": "FollowsWindowExclusionResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/follows_windows.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/follows-windows/exclusions",
+          "operation": "follows_windows_get_follows_windows_exclusions",
+          "responseSchema": "FollowsWindowExclusionsListResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/follows_windows.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "DELETE",
+          "path": "/follows-windows/exclusions/:id",
+          "operation": "follows_windows_delete_follows_windows_exclusions_by_id",
+          "responseSchema": "FollowsWindowExclusionResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/follows_windows.ts",
+          "latencyBudgets": []
+        }
+      ]
+    },
+    {
+      "id": "queue_paper_routing",
+      "title": "Queue And Paper Routing",
+      "status": "stable_enough",
+      "category": "attention_routing",
+      "summary": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+      "routeCount": 13,
+      "cliCommandCount": 0,
+      "selfTestCount": 1,
+      "proofRefCount": 3,
+      "latencyBudgetCount": 3,
+      "responsivenessCritical": true,
+      "responseSchemaRouteCount": 13,
+      "requestSchemaRouteCount": 8,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/routes/events.ts",
+        "app/orchestrator/src/routes/queue.ts",
+        "examples/primitives/agent-attention-queue.mjs"
+      ],
+      "proofs": [
+        "bin/event-loop-proof-smoke",
+        "bin/master-priority-proof-smoke",
+        "examples/primitives/agent-attention-queue.mjs"
+      ],
+      "cli": [],
+      "selfTests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "latencyBudgets": [
+        {
+          "primitiveId": "queue_paper_routing",
+          "primitiveTitle": "Queue And Paper Routing",
+          "primitiveStatus": "stable_enough",
+          "primitiveCategory": "attention_routing",
+          "primitiveSummary": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+          "name": "queue_list",
+          "p95Ms": 800,
+          "proof": "bin/queue-latency-proof",
+          "scope": "local_orchestrator",
+          "route": "GET /queue"
+        },
+        {
+          "primitiveId": "queue_paper_routing",
+          "primitiveTitle": "Queue And Paper Routing",
+          "primitiveStatus": "stable_enough",
+          "primitiveCategory": "attention_routing",
+          "primitiveSummary": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+          "name": "queue_next",
+          "p95Ms": 800,
+          "proof": "bin/queue-latency-proof",
+          "scope": "local_orchestrator",
+          "route": "GET /queue/next"
+        },
+        {
+          "primitiveId": "queue_paper_routing",
+          "primitiveTitle": "Queue And Paper Routing",
+          "primitiveStatus": "stable_enough",
+          "primitiveCategory": "attention_routing",
+          "primitiveSummary": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+          "name": "queue_lease_next",
+          "p95Ms": 1000,
+          "proof": "bin/queue-latency-proof",
+          "scope": "local_orchestrator",
+          "route": "POST /queue/lease-next"
+        }
+      ],
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/events",
+          "operation": "queue_paper_routing_post_events",
+          "requestSchema": "EventIngestRequest",
+          "responseSchema": "EventIngestResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/events.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/events/:id",
+          "operation": "queue_paper_routing_get_events_by_id",
+          "responseSchema": "EventGetResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/events.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/review-packets/:id",
+          "operation": "queue_paper_routing_get_review_packets_by_id",
+          "responseSchema": "ReviewPacketGetResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/events.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/queue",
+          "operation": "queue_paper_routing_get_queue",
+          "responseSchema": "QueueListResponse",
+          "requestBody": false,
+          "queryParameters": [
+            "state"
+          ],
+          "routeFile": "app/orchestrator/src/routes/queue.ts",
+          "latencyBudgets": [
+            {
+              "primitiveId": "queue_paper_routing",
+              "primitiveTitle": "Queue And Paper Routing",
+              "primitiveStatus": "stable_enough",
+              "primitiveCategory": "attention_routing",
+              "primitiveSummary": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+              "name": "queue_list",
+              "p95Ms": 800,
+              "proof": "bin/queue-latency-proof",
+              "scope": "local_orchestrator",
+              "route": "GET /queue"
+            }
+          ]
+        },
+        {
+          "method": "GET",
+          "path": "/queue/next",
+          "operation": "queue_paper_routing_get_queue_next",
+          "responseSchema": "QueueNextResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/queue.ts",
+          "latencyBudgets": [
+            {
+              "primitiveId": "queue_paper_routing",
+              "primitiveTitle": "Queue And Paper Routing",
+              "primitiveStatus": "stable_enough",
+              "primitiveCategory": "attention_routing",
+              "primitiveSummary": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+              "name": "queue_next",
+              "p95Ms": 800,
+              "proof": "bin/queue-latency-proof",
+              "scope": "local_orchestrator",
+              "route": "GET /queue/next"
+            }
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/queue/lease-next",
+          "operation": "queue_paper_routing_post_queue_lease_next",
+          "requestSchema": "QueueLeaseRequest",
+          "responseSchema": "QueueNextResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/queue.ts",
+          "latencyBudgets": [
+            {
+              "primitiveId": "queue_paper_routing",
+              "primitiveTitle": "Queue And Paper Routing",
+              "primitiveStatus": "stable_enough",
+              "primitiveCategory": "attention_routing",
+              "primitiveSummary": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+              "name": "queue_lease_next",
+              "p95Ms": 1000,
+              "proof": "bin/queue-latency-proof",
+              "scope": "local_orchestrator",
+              "route": "POST /queue/lease-next"
+            }
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/queue/:id/lease/renew",
+          "operation": "queue_paper_routing_post_queue_by_id_lease_renew",
+          "requestSchema": "QueueLeaseRenewRequest",
+          "responseSchema": "QueueLeaseRenewResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/queue.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/queue/:id/done",
+          "operation": "queue_paper_routing_post_queue_by_id_done",
+          "requestSchema": "QueueDoneRequest",
+          "responseSchema": "QueueActionResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/queue.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/queue/:id/defer",
+          "operation": "queue_paper_routing_post_queue_by_id_defer",
+          "requestSchema": "QueueDeferRequest",
+          "responseSchema": "QueueActionResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/queue.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/queue/:id/ignore",
+          "operation": "queue_paper_routing_post_queue_by_id_ignore",
+          "requestSchema": "QueueIgnoreRequest",
+          "responseSchema": "QueueActionResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/queue.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/queue/:id/actions/recommended",
+          "operation": "queue_paper_routing_post_queue_by_id_actions_recommended",
+          "requestSchema": "QueueRecommendedActionRequest",
+          "responseSchema": "QueueRecommendedActionResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/queue.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/queue/:id/lineage",
+          "operation": "queue_paper_routing_get_queue_by_id_lineage",
+          "responseSchema": "QueueLineageResponse",
+          "requestBody": false,
+          "queryParameters": [
+            "limit"
+          ],
+          "routeFile": "app/orchestrator/src/routes/queue.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/queue/:id/priority",
+          "operation": "queue_paper_routing_post_queue_by_id_priority",
+          "requestSchema": "QueuePriorityRequest",
+          "responseSchema": "QueuePriorityResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/queue.ts",
+          "latencyBudgets": []
+        }
+      ]
+    },
+    {
+      "id": "task_intake_onboarding",
+      "title": "Task Intake Onboarding",
+      "status": "dogfood",
+      "category": "runtime",
+      "summary": "Scan existing browser/window context into proposed tasks, then approve or reject onboarding workbenches.",
+      "routeCount": 4,
+      "cliCommandCount": 1,
+      "selfTestCount": 1,
+      "proofRefCount": 4,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 4,
+      "requestSchemaRouteCount": 3,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/onboarding/onboarding_scan_cli.ts",
+        "app/orchestrator/src/onboarding/task_grouping.ts",
+        "app/orchestrator/src/routes/onboarding.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/src/onboarding/onboarding_scan_cli.test.ts",
+        "app/orchestrator/src/onboarding/task_grouping.test.ts",
+        "app/orchestrator/test/onboarding_happy_path_e2e.test.ts",
+        "bin/onboarding-live-proof-smoke"
+      ],
+      "cli": [
+        "bin/onboarding-live-proof-smoke"
+      ],
+      "selfTests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "latencyBudgets": [],
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/onboarding/scan",
+          "operation": "task_intake_onboarding_get_onboarding_scan",
+          "responseSchema": "OnboardingScanResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/onboarding.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/onboarding/approvals",
+          "operation": "task_intake_onboarding_post_onboarding_approvals",
+          "requestSchema": "OnboardingApprovalRequest",
+          "responseSchema": "OnboardingApprovalResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/onboarding.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/onboarding/approvals/batch",
+          "operation": "task_intake_onboarding_post_onboarding_approvals_batch",
+          "requestSchema": "OnboardingApprovalBatchRequest",
+          "responseSchema": "OnboardingApprovalBatchResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/onboarding.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/onboarding/rejections",
+          "operation": "task_intake_onboarding_post_onboarding_rejections",
+          "requestSchema": "OnboardingRejectionRequest",
+          "responseSchema": "OnboardingRejectionResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/onboarding.ts",
+          "latencyBudgets": []
+        }
+      ]
+    },
+    {
+      "id": "reading_queue",
+      "title": "Reading Queue",
+      "status": "dogfood",
+      "category": "attention_routing",
+      "summary": "Promote idle unbound browser contexts into task_reading_queue papers manually or by age threshold.",
+      "routeCount": 3,
+      "cliCommandCount": 0,
+      "selfTestCount": 1,
+      "proofRefCount": 3,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 3,
+      "requestSchemaRouteCount": 2,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/routes/reading_queue.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/test/manual_mode_pause_integration.test.ts",
+        "app/orchestrator/test/reading_queue_auto_promote_integration.test.ts",
+        "app/orchestrator/test/reading_queue.test.ts"
+      ],
+      "cli": [],
+      "selfTests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "latencyBudgets": [],
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/reading-queue",
+          "operation": "reading_queue_get_reading_queue",
+          "responseSchema": "ReadingQueueListResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/reading_queue.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/reading-queue/promote",
+          "operation": "reading_queue_post_reading_queue_promote",
+          "requestSchema": "ReadingQueuePromoteRequest",
+          "responseSchema": "ReadingQueuePromoteResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/reading_queue.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/reading-queue/auto-promote",
+          "operation": "reading_queue_post_reading_queue_auto_promote",
+          "requestSchema": "ReadingQueueAutoPromoteRequest",
+          "responseSchema": "ReadingQueueAutoPromoteResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/reading_queue.ts",
+          "latencyBudgets": []
+        }
+      ]
+    },
+    {
+      "id": "master_command_router",
+      "title": "Master Command Router",
+      "status": "dogfood",
+      "category": "attention_routing",
+      "summary": "Route one universal command to tasks, idle sessions, fan-out targets, or queue prioritization.",
+      "routeCount": 1,
+      "cliCommandCount": 1,
+      "selfTestCount": 1,
+      "proofRefCount": 5,
+      "latencyBudgetCount": 1,
+      "responsivenessCritical": true,
+      "responseSchemaRouteCount": 1,
+      "requestSchemaRouteCount": 1,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/master/master_command_cli.ts",
+        "app/orchestrator/src/routes/master.ts",
+        "examples/primitives/agent-attention-queue.mjs"
+      ],
+      "proofs": [
+        "app/orchestrator/src/master/master_command_cli.test.ts",
+        "app/orchestrator/test/master_fan_out_idle_filter.test.ts",
+        "app/orchestrator/test/master_fan_out.test.ts",
+        "bin/master-priority-proof-smoke",
+        "examples/primitives/agent-attention-queue.mjs"
+      ],
+      "cli": [
+        "pnpm master:send"
+      ],
+      "selfTests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "latencyBudgets": [
+        {
+          "primitiveId": "master_command_router",
+          "primitiveTitle": "Master Command Router",
+          "primitiveStatus": "dogfood",
+          "primitiveCategory": "attention_routing",
+          "primitiveSummary": "Route one universal command to tasks, idle sessions, fan-out targets, or queue prioritization.",
+          "name": "master_fan_out_dry_run",
+          "p95Ms": 1200,
+          "proof": "bin/queue-latency-proof",
+          "scope": "local_orchestrator",
+          "route": "POST /master/fan-out"
+        }
+      ],
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/master/fan-out",
+          "operation": "master_command_router_post_master_fan_out",
+          "requestSchema": "MasterFanOutRequest",
+          "responseSchema": "MasterFanOutResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/master.ts",
+          "latencyBudgets": [
+            {
+              "primitiveId": "master_command_router",
+              "primitiveTitle": "Master Command Router",
+              "primitiveStatus": "dogfood",
+              "primitiveCategory": "attention_routing",
+              "primitiveSummary": "Route one universal command to tasks, idle sessions, fan-out targets, or queue prioritization.",
+              "name": "master_fan_out_dry_run",
+              "p95Ms": 1200,
+              "proof": "bin/queue-latency-proof",
+              "scope": "local_orchestrator",
+              "route": "POST /master/fan-out"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "task_session_control",
+      "title": "Task Session Control",
+      "status": "dogfood",
+      "category": "agent_context",
+      "summary": "Provider-neutral task session list/start/bind/followup/replace for Codex, Claude, fake, and terminal sessions.",
+      "routeCount": 8,
+      "cliCommandCount": 4,
+      "selfTestCount": 1,
+      "proofRefCount": 6,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 8,
+      "requestSchemaRouteCount": 5,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/routes/task_sessions.ts",
+        "app/orchestrator/src/task_sessions/pid_fields.ts",
+        "app/orchestrator/src/task_sessions/types.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/src/task_sessions/claude_cli_task_session_controller.test.ts",
+        "app/orchestrator/src/task_sessions/codex_app_server_thread_client.test.ts",
+        "app/orchestrator/src/task_sessions/codex_native_thread_controller.test.ts",
+        "app/orchestrator/src/task_sessions/development_task_session_controller.test.ts",
+        "app/orchestrator/src/task_sessions/task_session_cli.test.ts",
+        "bin/task-runtime-smoke"
+      ],
+      "cli": [
+        "pnpm task:bind",
+        "pnpm task:messages",
+        "pnpm task:replace",
+        "pnpm task:sessions"
+      ],
+      "selfTests": [
+        "pnpm --filter @eventloopos/orchestrator run test:task-sessions"
+      ],
+      "latencyBudgets": [],
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/task-sessions",
+          "operation": "task_session_control_get_task_sessions",
+          "responseSchema": "TaskSessionsListResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/task_sessions.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/task-sessions",
+          "operation": "task_session_control_post_task_sessions",
+          "requestSchema": "TaskSessionStartRequest",
+          "responseSchema": "TaskSessionStartResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/task_sessions.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/task-sessions/:id",
+          "operation": "task_session_control_get_task_sessions_by_id",
+          "responseSchema": "TaskSessionGetResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/task_sessions.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/task-sessions/:id/followup",
+          "operation": "task_session_control_post_task_sessions_by_id_followup",
+          "requestSchema": "TaskSessionFollowupRequest",
+          "responseSchema": "TaskSessionFollowupResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/task_sessions.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/task-sessions/:id/replacement",
+          "operation": "task_session_control_post_task_sessions_by_id_replacement",
+          "requestSchema": "TaskSessionReplacementRequest",
+          "responseSchema": "TaskSessionReplacementResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/task_sessions.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "PUT",
+          "path": "/task-sessions/:id/task-binding",
+          "operation": "task_session_control_put_task_sessions_by_id_task_binding",
+          "requestSchema": "TaskSessionBindingRequest",
+          "responseSchema": "TaskSessionBindingResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/task_sessions.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/task-messages",
+          "operation": "task_session_control_get_task_messages",
+          "responseSchema": "TaskMessagesListResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/task_sessions.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/task-messages/reconcile-attempted",
+          "operation": "task_session_control_post_task_messages_reconcile_attempted",
+          "requestSchema": "TaskMessagesReconcileAttemptedRequest",
+          "responseSchema": "TaskMessagesReconcileAttemptedResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/task_sessions.ts",
+          "latencyBudgets": []
+        }
+      ]
+    },
+    {
+      "id": "context_capture_restore",
+      "title": "Context Capture And Restore",
+      "status": "dogfood",
+      "category": "agent_context",
+      "summary": "Store context resources and manage local restore requests for browser tabs, files, and deeplinks.",
+      "routeCount": 9,
+      "cliCommandCount": 0,
+      "selfTestCount": 1,
+      "proofRefCount": 1,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 9,
+      "requestSchemaRouteCount": 5,
+      "noRequestBodyRouteCount": 1,
+      "code": [
+        "app/orchestrator/src/routes/context_restore.ts",
+        "app/orchestrator/src/store/context_restore_store.ts"
+      ],
+      "proofs": [
+        "docs/planning/17-deeplink-strategies.md"
+      ],
+      "cli": [],
+      "selfTests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "latencyBudgets": [],
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/contexts",
+          "operation": "context_capture_restore_get_contexts",
+          "responseSchema": "ContextsListResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/context_restore.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/contexts/restore-plan",
+          "operation": "context_capture_restore_post_contexts_restore_plan",
+          "requestSchema": "ContextRestorePlanRequest",
+          "responseSchema": "ContextRestorePlanResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/context_restore.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/contexts/restore-requests",
+          "operation": "context_capture_restore_post_contexts_restore_requests",
+          "requestSchema": "ContextRestorePlanRequest",
+          "responseSchema": "ContextRestoreRequestResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/context_restore.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/contexts/restore-requests/next",
+          "operation": "context_capture_restore_get_contexts_restore_requests_next",
+          "responseSchema": "ContextRestoreRequestMaybeResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/context_restore.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/contexts/restore-requests/claim-next",
+          "operation": "context_capture_restore_post_contexts_restore_requests_claim_next",
+          "requestSchema": "ContextRestoreClaimRequest",
+          "responseSchema": "ContextRestoreRequestMaybeResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/context_restore.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/contexts/restore-requests/:id",
+          "operation": "context_capture_restore_get_contexts_restore_requests_by_id",
+          "responseSchema": "ContextRestoreRequestResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/context_restore.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/contexts/restore-requests/:id/done",
+          "operation": "context_capture_restore_post_contexts_restore_requests_by_id_done",
+          "requestSchema": "ContextRestoreFinishRequest",
+          "responseSchema": "ContextRestoreRequestResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/context_restore.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/contexts/restore-requests/:id/failed",
+          "operation": "context_capture_restore_post_contexts_restore_requests_by_id_failed",
+          "requestSchema": "ContextRestoreFinishRequest",
+          "responseSchema": "ContextRestoreRequestResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/context_restore.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/contexts/restore-requests/:id/retry",
+          "operation": "context_capture_restore_post_contexts_restore_requests_by_id_retry",
+          "responseSchema": "ContextRestoreRequestResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/context_restore.ts",
+          "latencyBudgets": []
+        }
+      ]
+    },
+    {
+      "id": "manual_mode",
+      "title": "Manual Mode",
+      "status": "stable_enough",
+      "category": "os_control",
+      "summary": "Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
+      "routeCount": 2,
+      "cliCommandCount": 0,
+      "selfTestCount": 2,
+      "proofRefCount": 3,
+      "latencyBudgetCount": 3,
+      "responsivenessCritical": true,
+      "responseSchemaRouteCount": 2,
+      "requestSchemaRouteCount": 1,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/agents/ambient_workspace_saver.ts",
+        "app/orchestrator/src/routes/modes.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/test/manual_mode_pause_integration.test.ts",
+        "app/orchestrator/test/manual_mode_round_trip.test.ts",
+        "bin/manual-mode-latency-proof"
+      ],
+      "cli": [],
+      "selfTests": [
+        "bin/manual-mode-latency-proof --self-test",
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "latencyBudgets": [
+        {
+          "primitiveId": "manual_mode",
+          "primitiveTitle": "Manual Mode",
+          "primitiveStatus": "stable_enough",
+          "primitiveCategory": "os_control",
+          "primitiveSummary": "Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
+          "name": "manual_mode_get",
+          "p95Ms": 500,
+          "proof": "bin/manual-mode-latency-proof",
+          "scope": "local_orchestrator",
+          "route": "GET /modes/manual"
+        },
+        {
+          "primitiveId": "manual_mode",
+          "primitiveTitle": "Manual Mode",
+          "primitiveStatus": "stable_enough",
+          "primitiveCategory": "os_control",
+          "primitiveSummary": "Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
+          "name": "manual_mode_set",
+          "p95Ms": 800,
+          "proof": "bin/manual-mode-latency-proof",
+          "scope": "local_orchestrator_toggle_sample",
+          "route": "POST /modes/manual"
+        },
+        {
+          "primitiveId": "manual_mode",
+          "primitiveTitle": "Manual Mode",
+          "primitiveStatus": "stable_enough",
+          "primitiveCategory": "os_control",
+          "primitiveSummary": "Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
+          "name": "manual_mode_restore",
+          "p95Ms": 800,
+          "proof": "bin/manual-mode-latency-proof",
+          "scope": "local_orchestrator_restore_original_state",
+          "route": "POST /modes/manual"
+        }
+      ],
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/modes/manual",
+          "operation": "manual_mode_get_modes_manual",
+          "responseSchema": "ManualModeGetResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/modes.ts",
+          "latencyBudgets": [
+            {
+              "primitiveId": "manual_mode",
+              "primitiveTitle": "Manual Mode",
+              "primitiveStatus": "stable_enough",
+              "primitiveCategory": "os_control",
+              "primitiveSummary": "Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
+              "name": "manual_mode_get",
+              "p95Ms": 500,
+              "proof": "bin/manual-mode-latency-proof",
+              "scope": "local_orchestrator",
+              "route": "GET /modes/manual"
+            }
+          ]
+        },
+        {
+          "method": "POST",
+          "path": "/modes/manual",
+          "operation": "manual_mode_post_modes_manual",
+          "requestSchema": "ManualModeSetRequest",
+          "responseSchema": "ManualModeSetResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/modes.ts",
+          "latencyBudgets": [
+            {
+              "primitiveId": "manual_mode",
+              "primitiveTitle": "Manual Mode",
+              "primitiveStatus": "stable_enough",
+              "primitiveCategory": "os_control",
+              "primitiveSummary": "Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
+              "name": "manual_mode_set",
+              "p95Ms": 800,
+              "proof": "bin/manual-mode-latency-proof",
+              "scope": "local_orchestrator_toggle_sample",
+              "route": "POST /modes/manual"
+            },
+            {
+              "primitiveId": "manual_mode",
+              "primitiveTitle": "Manual Mode",
+              "primitiveStatus": "stable_enough",
+              "primitiveCategory": "os_control",
+              "primitiveSummary": "Pause automation, save manual desktop, block queue lease-next, and restore or preserve manual desk.",
+              "name": "manual_mode_restore",
+              "p95Ms": 800,
+              "proof": "bin/manual-mode-latency-proof",
+              "scope": "local_orchestrator_restore_original_state",
+              "route": "POST /modes/manual"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "agent_source_hooks",
+      "title": "Agent And Source Hooks",
+      "status": "dogfood",
+      "category": "agent_context",
+      "summary": "Poll Slack/GitHub/local/MCP/voice/agent-run sources into event routing and task sessions.",
+      "routeCount": 10,
+      "cliCommandCount": 0,
+      "selfTestCount": 1,
+      "proofRefCount": 10,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 10,
+      "requestSchemaRouteCount": 7,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/routes/agent_runs.ts",
+        "app/orchestrator/src/routes/mcp_sources.ts",
+        "bin/mcp-source-templates-audit",
+        "config/mcp-sources.dogfood.example.json",
+        "docs/codex-mcp-skill.md",
+        "docs/mcp-source-hooks.md"
+      ],
+      "proofs": [
+        "app/orchestrator/src/agents/agent_run_cli.test.ts",
+        "app/orchestrator/src/integrations/mcp_poll/mcp_poll.test.ts",
+        "app/orchestrator/src/master/master_command_cli.test.ts",
+        "app/orchestrator/src/mcp_sources/local_events_server.test.ts",
+        "app/orchestrator/src/mcp_sources/script_events_server.test.ts",
+        "app/orchestrator/src/mcp_sources/source_cli.test.ts",
+        "app/orchestrator/src/voice/send_voice_command.test.ts",
+        "bin/agent-run-cli-smoke",
+        "bin/mcp-source-templates-audit",
+        "bin/postgres-mcp-dogfood-smoke"
+      ],
+      "cli": [],
+      "selfTests": [
+        "pnpm --filter @eventloopos/orchestrator run test:agent-source-hooks"
+      ],
+      "latencyBudgets": [],
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/mcp/poll",
+          "operation": "agent_source_hooks_post_mcp_poll",
+          "requestSchema": "McpPollRequest",
+          "responseSchema": "McpPollResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/mcp_sources.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/mcp-sources",
+          "operation": "agent_source_hooks_get_mcp_sources",
+          "responseSchema": "McpSourcesListResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/mcp_sources.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/mcp-sources/poll-all-and-route",
+          "operation": "agent_source_hooks_post_mcp_sources_poll_all_and_route",
+          "requestSchema": "McpPollAllAndRouteRequest",
+          "responseSchema": "McpPollAllAndRouteResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/mcp_sources.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/mcp-sources/:id",
+          "operation": "agent_source_hooks_get_mcp_sources_by_id",
+          "responseSchema": "McpSourceGetResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/mcp_sources.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/mcp-sources/:id/poll",
+          "operation": "agent_source_hooks_post_mcp_sources_by_id_poll",
+          "requestSchema": "McpPollSourceRequest",
+          "responseSchema": "McpPollResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/mcp_sources.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/mcp-sources/:id/preview",
+          "operation": "agent_source_hooks_post_mcp_sources_by_id_preview",
+          "requestSchema": "McpPollSourceRequest",
+          "responseSchema": "McpPreviewResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/mcp_sources.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/mcp-sources/:id/poll-and-route",
+          "operation": "agent_source_hooks_post_mcp_sources_by_id_poll_and_route",
+          "requestSchema": "McpPollSourceRequest",
+          "responseSchema": "McpPollAndRouteResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/mcp_sources.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/agent-runs",
+          "operation": "agent_source_hooks_post_agent_runs",
+          "requestSchema": "AgentRunUpsertRequest",
+          "responseSchema": "AgentRunUpsertResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/agent_runs.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/agent-runs/:id",
+          "operation": "agent_source_hooks_get_agent_runs_by_id",
+          "responseSchema": "AgentRunGetResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/agent_runs.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/voice/commands",
+          "operation": "agent_source_hooks_post_voice_commands",
+          "requestSchema": "VoiceCommandRequest",
+          "responseSchema": "VoiceCommandResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/events.ts",
+          "latencyBudgets": []
+        }
+      ]
+    },
+    {
+      "id": "agent_focus_binding",
+      "title": "Agent Focus Binding",
+      "status": "dogfood",
+      "category": "agent_context",
+      "summary": "Resolve foreground Codex windows, inspect Codex/Claude session logs, and auto-bind task sessions from visible agent windows.",
+      "routeCount": 4,
+      "cliCommandCount": 0,
+      "selfTestCount": 1,
+      "proofRefCount": 6,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 4,
+      "requestSchemaRouteCount": 0,
+      "noRequestBodyRouteCount": 2,
+      "code": [
+        "app/orchestrator/src/agents/claude/session_inspector.ts",
+        "app/orchestrator/src/agents/codex/auto_bind.ts",
+        "app/orchestrator/src/agents/codex/foreground_resolver.ts",
+        "app/orchestrator/src/agents/codex/session_inspector.ts",
+        "app/orchestrator/src/routes/agents.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/src/agents/claude/session_inspector.test.ts",
+        "app/orchestrator/src/agents/codex/auto_bind.test.ts",
+        "app/orchestrator/src/agents/codex/foreground_resolver.test.ts",
+        "app/orchestrator/src/agents/codex/session_inspector.test.ts",
+        "app/orchestrator/test/auto_bind_integration.test.ts",
+        "app/orchestrator/test/resolve_foreground_route.test.ts"
+      ],
+      "cli": [],
+      "selfTests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "latencyBudgets": [],
+      "routes": [
+        {
+          "method": "POST",
+          "path": "/agents/codex/auto-bind",
+          "operation": "agent_focus_binding_post_agents_codex_auto_bind",
+          "responseSchema": "CodexAutoBindResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/agents.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/agents/codex/resolve-foreground",
+          "operation": "agent_focus_binding_post_agents_codex_resolve_foreground",
+          "responseSchema": "CodexForegroundResolveResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/agents.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/agents/codex/inspect/:id",
+          "operation": "agent_focus_binding_get_agents_codex_inspect_by_id",
+          "responseSchema": "CodexSessionInspectionResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/agents.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/agents/claude/inspect/:id",
+          "operation": "agent_focus_binding_get_agents_claude_inspect_by_id",
+          "responseSchema": "ClaudeSessionInspectionResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/agents.ts",
+          "latencyBudgets": []
+        }
+      ]
+    },
+    {
+      "id": "paper_triggers",
+      "title": "Paper Triggers",
+      "status": "dogfood",
+      "category": "attention_routing",
+      "summary": "Let tasks declare event-matching rules that can create routed papers from future agent/source events.",
+      "routeCount": 5,
+      "cliCommandCount": 0,
+      "selfTestCount": 1,
+      "proofRefCount": 3,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 5,
+      "requestSchemaRouteCount": 2,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/routes/events.ts",
+        "app/orchestrator/src/routes/triggers.ts",
+        "app/orchestrator/src/triggers/evaluator.ts"
+      ],
+      "proofs": [
+        "app/orchestrator/src/triggers/evaluator.test.ts",
+        "app/orchestrator/test/db_migrations.test.ts",
+        "app/orchestrator/test/triggers_route.test.ts"
+      ],
+      "cli": [],
+      "selfTests": [
+        "pnpm --filter @eventloopos/shared run test:primitive-ops"
+      ],
+      "latencyBudgets": [],
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/triggers",
+          "operation": "paper_triggers_get_triggers",
+          "responseSchema": "PaperTriggerListResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/triggers.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "POST",
+          "path": "/triggers",
+          "operation": "paper_triggers_post_triggers",
+          "requestSchema": "PaperTriggerCreateRequest",
+          "responseSchema": "PaperTriggerMutationResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/triggers.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/triggers/:id",
+          "operation": "paper_triggers_get_triggers_by_id",
+          "responseSchema": "PaperTriggerGetResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/triggers.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "PATCH",
+          "path": "/triggers/:id",
+          "operation": "paper_triggers_patch_triggers_by_id",
+          "requestSchema": "PaperTriggerPatchRequest",
+          "responseSchema": "PaperTriggerMutationResponse",
+          "requestBody": true,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/triggers.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "DELETE",
+          "path": "/triggers/:id",
+          "operation": "paper_triggers_delete_triggers_by_id",
+          "responseSchema": "PaperTriggerMutationResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/routes/triggers.ts",
+          "latencyBudgets": []
+        }
+      ]
+    },
+    {
+      "id": "mac_app_hotkeys",
+      "title": "Mac App And Hotkey Surface",
+      "status": "dogfood",
+      "category": "os_control",
+      "summary": "Swift macOS queue UI, hotkeys, manual mode, restore, voice capture, and master command shell.",
+      "routeCount": 0,
+      "cliCommandCount": 0,
+      "selfTestCount": 1,
+      "proofRefCount": 3,
+      "latencyBudgetCount": 1,
+      "responsivenessCritical": true,
+      "responseSchemaRouteCount": 0,
+      "requestSchemaRouteCount": 0,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/macos/Sources/EventLoopQueueApp",
+        "app/macos/Sources/EventLoopQueueCore"
+      ],
+      "proofs": [
+        "bin/lab-mac-human-demo-setup",
+        "bin/macos-hotkey-feedback-latency",
+        "docs/human-demo-walkthrough.md"
+      ],
+      "cli": [],
+      "selfTests": [
+        "bin/macos-hotkey-feedback-latency --self-test"
+      ],
+      "latencyBudgets": [
+        {
+          "primitiveId": "mac_app_hotkeys",
+          "primitiveTitle": "Mac App And Hotkey Surface",
+          "primitiveStatus": "dogfood",
+          "primitiveCategory": "os_control",
+          "primitiveSummary": "Swift macOS queue UI, hotkeys, manual mode, restore, voice capture, and master command shell.",
+          "name": "hotkey_to_feedback",
+          "p95Ms": 10000,
+          "proof": "bin/macos-hotkey-feedback-latency",
+          "scope": "macos_queue_app",
+          "hotkey": "Ctrl-Option-J"
+        }
+      ],
+      "routes": []
+    },
+    {
+      "id": "observability_proofs",
+      "title": "Observability And Proof Harnesses",
+      "status": "stable_enough",
+      "category": "observability",
+      "summary": "Health, metrics, activity, proof runners, latency checks, and machine-readable manifests.",
+      "routeCount": 3,
+      "cliCommandCount": 0,
+      "selfTestCount": 1,
+      "proofRefCount": 7,
+      "latencyBudgetCount": 0,
+      "responsivenessCritical": false,
+      "responseSchemaRouteCount": 3,
+      "requestSchemaRouteCount": 0,
+      "noRequestBodyRouteCount": 0,
+      "code": [
+        "app/orchestrator/src/routes/observability.ts"
+      ],
+      "proofs": [
+        "bin/macos-hotkey-feedback-latency",
+        "bin/primitives-readiness-report",
+        "bin/product-readiness-proof",
+        "bin/proof-agent",
+        "bin/proof-repeat",
+        "bin/queue-latency-proof",
+        "bin/workspace-latency-proof"
+      ],
+      "cli": [],
+      "selfTests": [
+        "bin/primitives-readiness-report --self-test"
+      ],
+      "latencyBudgets": [],
+      "routes": [
+        {
+          "method": "GET",
+          "path": "/health",
+          "operation": "observability_proofs_get_health",
+          "responseSchema": "HealthResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/server.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/metrics",
+          "operation": "observability_proofs_get_metrics",
+          "responseSchema": "MetricsResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/server.ts",
+          "latencyBudgets": []
+        },
+        {
+          "method": "GET",
+          "path": "/activity",
+          "operation": "observability_proofs_get_activity",
+          "responseSchema": "ActivityResponse",
+          "requestBody": false,
+          "queryParameters": [],
+          "routeFile": "app/orchestrator/src/server.ts",
+          "latencyBudgets": []
+        }
+      ]
+    }
+  ]
+}

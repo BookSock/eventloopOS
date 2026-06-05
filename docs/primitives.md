@@ -5,13 +5,16 @@ operating-system control primitives. This document catalogs the primitives that
 other tools could build on without taking the whole queue app.
 
 Machine-readable catalog: `docs/primitives.catalog.json`. Builder-facing HTTP
-OpenAPI artifact: `docs/primitives.openapi.json`. The catalog now requires a
-response schema for every HTTP route and either a request schema or
-`no_request_body: true` for every mutating route. Those schemas are exported
-from `@eventloopos/shared` and validated against contract fixtures. The shared
-package also exports `@eventloopos/shared/primitives` helpers for parsing the
-catalog, finding routes, and summarizing primitive coverage without importing
-the orchestrator server package.
+OpenAPI artifact: `docs/primitives.openapi.json`. Compact builder index:
+`docs/primitives.index.json`, which groups routes, operation ids, schemas,
+commands, proofs, and latency budgets by primitive for clients that do not want
+to parse OpenAPI. The catalog now requires a response schema for every HTTP
+route and either a request schema or `no_request_body: true` for every mutating
+route. Those schemas are exported from `@eventloopos/shared` and validated
+against contract fixtures. The shared package also exports
+`@eventloopos/shared/primitives` helpers for parsing the catalog, finding
+routes, building the compact API index, and summarizing primitive coverage
+without importing the orchestrator server package.
 The shared summary helper now returns both global totals and per-primitive
 capability rows with status, category, route count, CLI command count,
 self-test count, proof count, latency-budget count, responsiveness-critical
@@ -38,6 +41,8 @@ self-test commands, and latency proof hooks.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.
+Validate the compact API index with
+`bin/primitives-api-index-export --check docs/primitives.catalog.json docs/primitives.index.json`.
 Generate a builder-facing coverage/readiness summary with
 `bin/primitives-readiness-report docs/primitives.catalog.json` or use
 `--json` for machine-readable audit output.
