@@ -60,6 +60,7 @@ function openapiFromCatalog(catalog) {
 
   const paths = {};
   const tagsByName = new Map();
+  const seenOperations = new Set();
   for (const primitive of catalog.primitives) {
     if (!isRecord(primitive)) continue;
     const primitiveId = readString(primitive.id);
@@ -78,6 +79,14 @@ function openapiFromCatalog(catalog) {
       if (!method || !routePath) continue;
       const openapiPath = routePath.replace(/:([A-Za-z0-9_]+)/g, "{$1}");
       paths[openapiPath] ??= {};
+      if (paths[openapiPath][method]) {
+        throw new Error(`duplicate OpenAPI route collision: ${method.toUpperCase()} ${routePath} already exported at ${openapiPath}`);
+      }
+      const operationIdValue = operationId(primitiveId, method, routePath);
+      if (seenOperations.has(operationIdValue)) {
+        throw new Error(`duplicate OpenAPI operationId: ${operationIdValue}`);
+      }
+      seenOperations.add(operationIdValue);
       paths[openapiPath][method] = operationForRoute({
         primitive,
         primitiveId,
@@ -86,6 +95,7 @@ function openapiFromCatalog(catalog) {
         routePath,
         openapiPath,
         routeFile: readString(route.route_file),
+        operationId: operationIdValue,
         route,
       });
     }
@@ -132,7 +142,7 @@ function operationForRoute(input) {
   const status = readString(input.primitive.status);
   const summary = `${input.title} ${input.method.toUpperCase()} ${input.routePath}`;
   const operation = {
-    operationId: operationId(input.primitiveId, input.method, input.routePath),
+    operationId: input.operationId ?? operationId(input.primitiveId, input.method, input.routePath),
     tags: [input.primitiveId],
     summary,
     description: readString(input.primitive.summary),
@@ -337,6 +347,28 @@ function runSelfTest() {
   if (!retryTask || retryTask.requestBody) {
     throw new Error("self-test did not omit request body for no_request_body route");
   }
+  const duplicateRouteCatalog = structuredClone(catalog);
+  duplicateRouteCatalog.primitives[0].http.push({
+    method: "GET",
+    path: "/tasks/:id/layout",
+    route_file: "routes/tasks.ts",
+    no_request_body: true,
+    response_schema: "CreateTaskResponse",
+  });
+  assertThrows(() => openapiFromCatalog(duplicateRouteCatalog), /duplicate OpenAPI route collision/);
   fs.rmSync(root, { recursive: true, force: true });
   console.log("primitives-openapi-export self-test passed");
+}
+
+function assertThrows(fn, pattern) {
+  try {
+    fn();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!pattern.test(message)) {
+      throw new Error(`expected error matching ${pattern}, got ${message}`);
+    }
+    return;
+  }
+  throw new Error(`expected function to throw ${pattern}`);
 }
