@@ -7,6 +7,7 @@ import {
   type ExecFunction,
   type RestoreExecutionReceipt,
   type RestorePlan,
+  type WorkspaceCaptureOptions,
   type WorkspaceCapabilityStatus,
   type WorkspaceFrameCaptureStatus,
   type WorkspaceSnapshot,
@@ -14,7 +15,7 @@ import {
 
 export type WorkspaceController = {
   status(): Promise<WorkspaceCapabilityStatus> | WorkspaceCapabilityStatus;
-  capture(): Promise<WorkspaceSnapshot> | WorkspaceSnapshot;
+  capture(options?: WorkspaceCaptureOptions): Promise<WorkspaceSnapshot> | WorkspaceSnapshot;
   planRestore(snapshot: WorkspaceSnapshot, currentWindows?: AerospaceWindow[]): Promise<RestorePlan> | RestorePlan;
   executeRestorePlan?(plan: RestorePlan): Promise<RestoreExecutionReceipt> | RestoreExecutionReceipt;
   executeRestorePlanVerified?(
@@ -46,8 +47,8 @@ export class AerospaceWorkspaceController implements WorkspaceController {
     return await this.adapter.capabilityStatus();
   }
 
-  async capture(): Promise<WorkspaceSnapshot> {
-    return await this.adapter.capture();
+  async capture(options: WorkspaceCaptureOptions = {}): Promise<WorkspaceSnapshot> {
+    return await this.adapter.capture(options);
   }
 
   async planRestore(snapshot: WorkspaceSnapshot, currentWindows?: AerospaceWindow[]): Promise<RestorePlan> {
@@ -84,7 +85,14 @@ export class AerospaceWorkspaceController implements WorkspaceController {
 
   private async verifyRestorePlan(snapshot: WorkspaceSnapshot): Promise<RestorePlan> {
     await sleep(this.restoreVerifySettleMs);
-    return restoreWorkspaceResidualPlan(snapshot, await this.adapter.capture());
+    const frameWindowIds = snapshot.windows
+      .filter((window) => window.frame !== undefined)
+      .map((window) => window.id);
+    return restoreWorkspaceResidualPlan(snapshot, await this.adapter.capture({
+      frameWindowIds,
+      focusFrameWorkspaces: true,
+      restoreFrameCaptureFocus: true,
+    }));
   }
 }
 
@@ -111,6 +119,19 @@ export function parseWorkspaceSnapshot(input: unknown): WorkspaceSnapshot {
     activeWorkspace: readOptionalString(input, "activeWorkspace", "active_workspace"),
     focusedWindowId: readOptionalInteger(input, "focusedWindowId", "focused_window_id"),
     frameCapture: readOptionalFrameCapture(input),
+  };
+}
+
+export function parseWorkspaceCaptureRequest(input: unknown): WorkspaceCaptureOptions {
+  if (input === undefined || input === null) return {};
+  if (!isRecord(input)) {
+    throw new Error("workspace capture request must be an object");
+  }
+
+  return {
+    frameWindowIds: readOptionalIntegerArray(input, "frameWindowIds", "frame_window_ids"),
+    focusFrameWorkspaces: readOptionalBoolean(input, "focusFrameWorkspaces", "focus_frame_workspaces"),
+    restoreFrameCaptureFocus: readOptionalBoolean(input, "restoreFrameCaptureFocus", "restore_frame_capture_focus"),
   };
 }
 
@@ -168,6 +189,28 @@ function readOptionalInteger(input: Record<string, unknown>, ...keys: string[]):
   for (const key of keys) {
     const value = input[key];
     if (typeof value === "number" && Number.isInteger(value)) return value;
+  }
+  return undefined;
+}
+
+function readOptionalIntegerArray(input: Record<string, unknown>, ...keys: string[]): number[] | undefined {
+  for (const key of keys) {
+    const value = input[key];
+    if (value === undefined) continue;
+    if (!Array.isArray(value) || value.some((item) => typeof item !== "number" || !Number.isInteger(item))) {
+      throw new Error(`${key} must be an array of integer window ids`);
+    }
+    return value;
+  }
+  return undefined;
+}
+
+function readOptionalBoolean(input: Record<string, unknown>, ...keys: string[]): boolean | undefined {
+  for (const key of keys) {
+    const value = input[key];
+    if (value === undefined) continue;
+    if (typeof value !== "boolean") throw new Error(`${key} must be a boolean`);
+    return value;
   }
   return undefined;
 }

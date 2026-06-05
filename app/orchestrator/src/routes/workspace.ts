@@ -1,5 +1,5 @@
 import type { Runtime } from "../runtime.js";
-import { parseRestoreExecuteRequest, parseRestorePlanRequest } from "../workspace/controller.js";
+import { parseRestoreExecuteRequest, parseRestorePlanRequest, parseWorkspaceCaptureRequest } from "../workspace/controller.js";
 import type { RestoreExecutionReceipt, RestorePlan } from "../workspace/aerospace.js";
 import type { RouteResult } from "./types.js";
 
@@ -32,8 +32,18 @@ export async function handleWorkspaceRoute(input: {
       return error(501, "workspace_unavailable", "workspace controller is not configured");
     }
 
+    const parsed = await input.readJsonBody();
+    if (parsed.ok === false && parsed.message !== "request body must be JSON") return schemaError(parsed.message);
+
+    let options;
+    try {
+      options = parseWorkspaceCaptureRequest(parsed.ok ? parsed.value : {});
+    } catch (caught) {
+      return schemaError(caught instanceof Error ? caught.message : String(caught));
+    }
+
     return ok(200, {
-      snapshot: await workspace.capture(),
+      snapshot: await workspace.capture(options),
       request_id: input.requestId,
     });
   }

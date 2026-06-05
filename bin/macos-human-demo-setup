@@ -137,10 +137,11 @@ await putTaskLayout(paperCustomer.taskId, customerSnapshot);
 await saveTaskWorkspaceSnapshot(paperCustomer.taskId, customerSnapshot);
 const finalReadySnapshot = await captureWithDemoFrames("final ready customer restore", customerSnapshot);
 const finalReadyCustomerProof = assertRestoredSnapshot(finalReadySnapshot, customerSnapshot, "final ready customer restore");
-const queueWindow = positionQueueWindow();
+const queueWindow = positionQueueWindow(paperCustomer.workspace);
 await sleep(600);
-const finalSnapshot = await captureWithDemoFrames("final demo snapshot", customerSnapshot);
+const finalSnapshot = await captureWithDemoFrames("final demo snapshot", customerSnapshot, [queueWindow.window_id]);
 const finalWindows = resolveDemoWindows(finalSnapshot);
+const finalQueueWindowProof = assertQueueWindowVisible(finalSnapshot, paperCustomer.workspace);
 
 const manifest = {
   ok: true,
@@ -177,7 +178,10 @@ const manifest = {
     foreign_window_containment: foreignWindowContainmentProof,
     final_ready_customer_restore: finalReadyCustomerProof,
     demo_queue: queueProof,
-    queue_window: queueWindow,
+    queue_window: {
+      ...queueWindow,
+      final_visible: finalQueueWindowProof,
+    },
   },
   hotkeys: demoHotkeys,
   walkthrough: demoWalkthrough,
@@ -185,6 +189,7 @@ const manifest = {
     customerChrome: compactWindow(finalWindows.customerChrome),
     metricsChrome: compactWindow(finalWindows.metricsChrome),
     sharedText: compactWindow(finalWindows.sharedText),
+    queue: compactWindow(finalQueueWindowProof.window),
   },
 };
 fs.writeFileSync(path.join(run, "manifest.json"), JSON.stringify(manifest, null, 2));
@@ -332,7 +337,16 @@ end tell
 `]);
 }
 
-function positionQueueWindow() {
+function positionQueueWindow(workspace) {
+  const queueWindow = findQueueAerospaceWindow();
+  if (queueWindow?.id && workspace) {
+    try {
+      execFileSync("aerospace", ["move-node-to-workspace", "--window-id", String(queueWindow.id), workspace], { stdio: "ignore" });
+      execFileSync("aerospace", ["workspace", workspace], { stdio: "ignore" });
+    } catch {
+      // Accessibility positioning below still gives a useful failure artifact.
+    }
+  }
   try {
     const stdout = execFileSync("osascript", ["-e", `
 tell application "System Events"
@@ -341,8 +355,8 @@ tell application "System Events"
       tell process processName
         set frontmost to true
         if (count of windows) > 0 then
-          set position of window 1 to {1080, 730}
-          set size of window 1 to {760, 330}
+          set position of window 1 to {1080, 650}
+          set size of window 1 to {760, 380}
           perform action "AXRaise" of window 1
           return processName & "|" & (position of window 1 as string) & "|" & (size of window 1 as string)
         end if
@@ -356,12 +370,40 @@ return "missing||"
     const [processName, positionText, sizeText] = String(stdout).trim().split("|");
     return {
       ok: processName !== "missing",
+      window_id: queueWindow?.id,
+      original_workspace: queueWindow?.workspace,
+      target_workspace: workspace,
       process: processName,
       position: parseAppleScriptPair(positionText),
       size: parseAppleScriptPair(sizeText),
     };
   } catch {
     return { ok: false, error: "queue_window_position_failed" };
+  }
+}
+
+function findQueueAerospaceWindow() {
+  try {
+    const stdout = execFileSync("aerospace", [
+      "list-windows",
+      "--all",
+      "--json",
+      "--format",
+      "%{window-id}%{app-name}%{window-title}%{workspace}",
+    ], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const windows = JSON.parse(stdout);
+    const match = windows.find((window) =>
+      /eventloopOS Queue/i.test(`${window["app-name"] ?? ""} ${window["window-title"] ?? ""}`),
+    );
+    if (!match) return undefined;
+    return {
+      id: Number(match["window-id"]),
+      app: String(match["app-name"] ?? ""),
+      title: String(match["window-title"] ?? ""),
+      workspace: String(match.workspace ?? ""),
+    };
+  } catch {
+    return undefined;
   }
 }
 
@@ -384,7 +426,7 @@ async function waitForWindows() {
   for (let attempt = 1; attempt <= 30; attempt += 1) {
     lastSnapshot = await capture();
     try {
-      assertDemoFramesPresent(resolveDemoWindows(lastSnapshot));
+      resolveDemoWindows(lastSnapshot);
       return lastSnapshot;
     } catch (error) {
       lastError = error;
@@ -394,21 +436,34 @@ async function waitForWindows() {
   throw new Error(`demo windows were not captured: ${lastError instanceof Error ? lastError.message : String(lastError)} ${JSON.stringify(lastSnapshot?.windows?.map(compactWindow) ?? [])}`);
 }
 
-async function capture() {
+async function capture(options = {}) {
   const response = await fetch(`${orchestratorUrl}/workspace/capture`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: "{}",
+    body: JSON.stringify(options),
   });
   if (!response.ok) throw new Error(`capture HTTP ${response.status}: ${await response.text()}`);
   return (await response.json()).snapshot;
 }
 
-async function captureWithDemoFrames(label, expectedSnapshot) {
+async function captureWithDemoFrames(label, expectedSnapshot, extraFrameWindowIds = []) {
   let lastSnapshot;
   let lastError;
+  const frameWindowIds = expectedSnapshot
+    ? [
+        ...expectedSnapshot.windows.map((window) => window.id),
+        ...extraFrameWindowIds.filter((id) => Number.isInteger(id)),
+      ]
+    : extraFrameWindowIds.filter((id) => Number.isInteger(id));
+  const captureOptions = frameWindowIds.length > 0
+    ? {
+        frame_window_ids: frameWindowIds,
+        focus_frame_workspaces: true,
+        restore_frame_capture_focus: true,
+      }
+    : {};
   for (let attempt = 1; attempt <= 12; attempt += 1) {
-    lastSnapshot = await capture();
+    lastSnapshot = await capture(captureOptions);
     try {
       if (expectedSnapshot) {
         assertExpectedSnapshotFramesPresent(lastSnapshot, expectedSnapshot);
@@ -521,6 +576,29 @@ function assertRestoredSnapshot(actualSnapshot, expectedSnapshot, label) {
     expected_active_workspace: expectedSnapshot.activeWorkspace,
     shared_window_id: expectedSnapshot.focusedWindowId,
     windows,
+  };
+}
+
+function assertQueueWindowVisible(snapshot, expectedWorkspace) {
+  const window = snapshot.windows.find((candidate) =>
+    /eventloopOS Queue/i.test(`${candidate.app ?? ""} ${candidate.title ?? ""}`),
+  );
+  if (!window) {
+    throw new Error(`queue window missing from final demo snapshot on ${expectedWorkspace}`);
+  }
+  if (window.workspace !== expectedWorkspace) {
+    throw new Error(`queue window workspace expected ${expectedWorkspace}, got ${window.workspace}`);
+  }
+  if (window.layout !== "floating") {
+    throw new Error(`queue window layout expected floating, got ${window.layout}`);
+  }
+  const expectedFrame = { x: 1080, y: 650, width: 760, height: 380 };
+  assertNearFrame(window.frame, expectedFrame, "queue window final frame");
+  return {
+    ok: true,
+    workspace: window.workspace,
+    expected_workspace: expectedWorkspace,
+    window: compactWindow(window),
   };
 }
 
@@ -772,6 +850,12 @@ async function restore(snapshot, label) {
   });
   const body = await response.json();
   if (!response.ok) throw new Error(`restore ${label} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  if (body.restore_verified === false) {
+    throw new Error(`restore ${label} did not verify: ${JSON.stringify({
+      attempts: body.restore_attempts,
+      residual_plan: body.residual_plan,
+    })}`);
+  }
   return body;
 }
 

@@ -61,6 +61,12 @@ export type WorkspaceSnapshot = {
   frameCapture?: WorkspaceFrameCaptureStatus;
 };
 
+export type WorkspaceCaptureOptions = {
+  frameWindowIds?: readonly number[];
+  focusFrameWorkspaces?: boolean;
+  restoreFrameCaptureFocus?: boolean;
+};
+
 export type WorkspaceFrameCaptureStatus = {
   status: "captured" | "failed" | "skipped";
   timeoutMs: number;
@@ -115,7 +121,7 @@ export class AerospaceWorkspaceAdapter {
     }
   }
 
-  async capture(): Promise<WorkspaceSnapshot> {
+  async capture(options: WorkspaceCaptureOptions = {}): Promise<WorkspaceSnapshot> {
     const resultPromise = this.exec("aerospace", captureWorkspacePlan().args);
     const activeWorkspacePromise = this.captureFocusedWorkspace().catch(() => undefined);
     const focusedWindowIdPromise = this.captureFocusedWindowId().catch(() => undefined);
@@ -125,7 +131,14 @@ export class AerospaceWorkspaceAdapter {
       focusedWindowIdPromise,
     ]);
     const windows = parseAerospaceWindows(result.stdout);
-    const frameCapture = await this.captureWindowFrames(windows);
+    const frameWindows = filterWindowsForFrameCapture(windows, options.frameWindowIds);
+    const frameCapture = options.focusFrameWorkspaces === true
+      ? await this.captureWindowFramesAcrossWorkspaces(frameWindows, {
+          activeWorkspace,
+          focusedWindowId,
+          restoreFocus: options.restoreFrameCaptureFocus !== false,
+        })
+      : await this.captureWindowFrames(frameWindows);
 
     return {
       backend: this.backend,
@@ -199,6 +212,110 @@ export class AerospaceWorkspaceAdapter {
       };
     }
   }
+
+  private async captureWindowFramesAcrossWorkspaces(
+    windows: AerospaceWindow[],
+    restoreTarget: { activeWorkspace?: string; focusedWindowId?: number; restoreFocus: boolean },
+  ): Promise<{
+    observations: MacOSWindowFrameObservation[];
+    status: WorkspaceFrameCaptureStatus;
+  }> {
+    const candidates = windows.filter(hasWindowIdentityForFrameRestore);
+    if (candidates.length === 0) {
+      return {
+        observations: [],
+        status: { status: "skipped", timeoutMs: this.frameCaptureTimeoutMs, observed: 0 },
+      };
+    }
+
+    const observations: MacOSWindowFrameObservation[] = [];
+    const statuses: WorkspaceFrameCaptureStatus[] = [];
+    const byWorkspace = groupWindowsByWorkspace(candidates);
+
+    try {
+      for (const [workspace, workspaceWindows] of byWorkspace) {
+        if (workspace !== undefined) {
+          try {
+            await this.exec("aerospace", focusWorkspacePlan(workspace).args);
+            if (this.workspaceFocusSettleMs > 0) await this.sleep(this.workspaceFocusSettleMs);
+          } catch (error) {
+            statuses.push({
+              status: "failed",
+              timeoutMs: this.frameCaptureTimeoutMs,
+              observed: 0,
+              error: error instanceof Error ? error.message : String(error),
+            });
+            continue;
+          }
+        }
+
+        const result = await this.captureWindowFrames(workspaceWindows);
+        observations.push(...result.observations);
+        statuses.push(result.status);
+      }
+    } finally {
+      if (restoreTarget.restoreFocus) {
+        await this.restoreFrameCaptureFocus(restoreTarget);
+      }
+    }
+
+    return {
+      observations,
+      status: combineFrameCaptureStatuses(statuses, observations.length, this.frameCaptureTimeoutMs),
+    };
+  }
+
+  private async restoreFrameCaptureFocus(restoreTarget: { activeWorkspace?: string; focusedWindowId?: number }): Promise<void> {
+    try {
+      if (typeof restoreTarget.focusedWindowId === "number") {
+        await this.exec("aerospace", focusWindowPlan(restoreTarget.focusedWindowId).args);
+        return;
+      }
+      if (restoreTarget.activeWorkspace) {
+        await this.exec("aerospace", focusWorkspacePlan(restoreTarget.activeWorkspace).args);
+      }
+    } catch {
+      // Capture should report frame status, not fail because focus restoration raced a closing window.
+    }
+  }
+}
+
+function filterWindowsForFrameCapture(windows: AerospaceWindow[], frameWindowIds?: readonly number[]): AerospaceWindow[] {
+  if (frameWindowIds === undefined) return windows;
+  const ids = new Set(frameWindowIds);
+  return windows.filter((window) => ids.has(window.id));
+}
+
+function groupWindowsByWorkspace(windows: AerospaceWindow[]): Map<string | undefined, AerospaceWindow[]> {
+  const grouped = new Map<string | undefined, AerospaceWindow[]>();
+  for (const window of windows) {
+    const workspace = window.workspace.trim() ? window.workspace : undefined;
+    const group = grouped.get(workspace) ?? [];
+    group.push(window);
+    grouped.set(workspace, group);
+  }
+  return grouped;
+}
+
+function combineFrameCaptureStatuses(
+  statuses: WorkspaceFrameCaptureStatus[],
+  observed: number,
+  timeoutMs: number,
+): WorkspaceFrameCaptureStatus {
+  if (statuses.length === 0) return { status: "skipped", timeoutMs, observed: 0 };
+  const failures = statuses.filter((status) => status.status === "failed");
+  if (failures.length > 0) {
+    return {
+      status: "failed",
+      timeoutMs,
+      observed,
+      error: failures.map((failure) => failure.error).filter(Boolean).join("; ") || "frame capture failed",
+    };
+  }
+  if (statuses.every((status) => status.status === "skipped")) {
+    return { status: "skipped", timeoutMs, observed };
+  }
+  return { status: "captured", timeoutMs, observed };
 }
 
 export function captureWorkspacePlan(): AerospaceCommand {
@@ -290,7 +407,7 @@ export function restoreWorkspacePlan(snapshot: WorkspaceSnapshot, currentWindows
 
   const currentWindowsById = new Map(currentWindows.map((window) => [window.id, window]));
   const commands: AerospaceCommand[] = [];
-  const frameCommands: AerospaceCommand[] = [];
+  const frameCommands: WorkspaceFrameRestoreCommand[] = [];
   const skipped: RestoreSkip[] = [];
 
   for (const window of snapshot.windows) {
@@ -321,14 +438,14 @@ export function restoreWorkspacePlan(snapshot: WorkspaceSnapshot, currentWindows
       commands.push(layoutWindowPlan(window.id, "floating"));
     }
     const framePlan = restoreWindowFramePlan(window);
-    if (framePlan) frameCommands.push(framePlan);
+    if (framePlan) frameCommands.push({ workspace: window.workspace, command: framePlan });
   }
 
-  if (snapshot.activeWorkspace !== undefined) {
+  const lastFrameWorkspace = appendWorkspaceFrameRestoreCommands(commands, frameCommands);
+
+  if (snapshot.activeWorkspace !== undefined && lastFrameWorkspace !== snapshot.activeWorkspace) {
     commands.push(focusWorkspacePlan(snapshot.activeWorkspace));
   }
-
-  commands.push(...frameCommands);
 
   if (snapshot.focusedWindowId !== undefined && currentWindowsById.has(snapshot.focusedWindowId)) {
     commands.push(focusWindowPlan(snapshot.focusedWindowId));
@@ -347,7 +464,7 @@ export function restoreWorkspaceResidualPlan(snapshot: WorkspaceSnapshot, curren
 
   const currentWindowsById = new Map(currentSnapshot.windows.map((window) => [window.id, window]));
   const commands: AerospaceCommand[] = [];
-  const frameCommands: AerospaceCommand[] = [];
+  const frameCommands: WorkspaceFrameRestoreCommand[] = [];
   const skipped: RestoreSkip[] = [];
 
   for (const window of snapshot.windows) {
@@ -379,15 +496,22 @@ export function restoreWorkspaceResidualPlan(snapshot: WorkspaceSnapshot, curren
     }
     if (needsFrameRestore(window, current)) {
       const framePlan = restoreWindowFramePlan(window);
-      if (framePlan) frameCommands.push(framePlan);
+      if (framePlan) frameCommands.push({ workspace: window.workspace, command: framePlan });
     }
   }
 
-  if (snapshot.activeWorkspace !== undefined && currentSnapshot.activeWorkspace !== snapshot.activeWorkspace) {
+  const lastFrameWorkspace = appendWorkspaceFrameRestoreCommands(commands, frameCommands);
+
+  if (
+    snapshot.activeWorkspace !== undefined &&
+    (
+      lastFrameWorkspace !== undefined
+        ? lastFrameWorkspace !== snapshot.activeWorkspace
+        : currentSnapshot.activeWorkspace !== snapshot.activeWorkspace
+    )
+  ) {
     commands.push(focusWorkspacePlan(snapshot.activeWorkspace));
   }
-
-  commands.push(...frameCommands);
 
   if (
     snapshot.focusedWindowId !== undefined &&
@@ -401,6 +525,26 @@ export function restoreWorkspaceResidualPlan(snapshot: WorkspaceSnapshot, curren
     commands,
     skipped,
   };
+}
+
+type WorkspaceFrameRestoreCommand = {
+  workspace: string;
+  command: AerospaceCommand;
+};
+
+function appendWorkspaceFrameRestoreCommands(
+  commands: AerospaceCommand[],
+  frameCommands: WorkspaceFrameRestoreCommand[],
+): string | undefined {
+  let lastWorkspace: string | undefined;
+  for (const frameCommand of frameCommands) {
+    if (frameCommand.workspace !== lastWorkspace) {
+      commands.push(focusWorkspacePlan(frameCommand.workspace));
+      lastWorkspace = frameCommand.workspace;
+    }
+    commands.push(frameCommand.command);
+  }
+  return lastWorkspace;
 }
 
 export function parseAerospaceWindows(json: string | unknown): AerospaceWindow[] {

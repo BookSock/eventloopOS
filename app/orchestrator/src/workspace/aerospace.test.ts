@@ -206,6 +206,121 @@ describe("Aerospace workspace adapter", () => {
     assert.deepEqual(snapshot.frameCapture, { status: "captured", timeoutMs: 1_234, observed: 1 });
   });
 
+  it("limits frame capture to requested window ids", async () => {
+    const osascripts: string[] = [];
+    const adapter = new AerospaceWorkspaceAdapter(async (command, args) => {
+      if (command === "aerospace" && args[0] === "list-windows" && args.includes("--focused")) {
+        return { stdout: JSON.stringify([{ "window-id": 21, workspace: "paper-a" }]) };
+      }
+      if (command === "aerospace" && args[0] === "list-workspaces") {
+        return { stdout: "paper-a\n" };
+      }
+      if (command === "aerospace") {
+        return {
+          stdout: JSON.stringify([
+            {
+              "window-id": 21,
+              "app-name": "TextEdit",
+              "app-bundle-id": "com.apple.TextEdit",
+              "window-title": "Shared Note",
+              workspace: "paper-a",
+            },
+            {
+              "window-id": 22,
+              "app-name": "Ghostty",
+              "app-bundle-id": "com.mitchellh.ghostty",
+              "window-title": "~",
+              workspace: "paper-a",
+            },
+          ]),
+        };
+      }
+      osascripts.push(args[1] ?? "");
+      return { stdout: "TextEdit\tcom.apple.TextEdit\tShared Note\t10\t20\t500\t300\n" };
+    });
+
+    const snapshot = await adapter.capture({ frameWindowIds: [21] });
+
+    assert.deepEqual(snapshot.windows[0]?.frame, { x: 10, y: 20, width: 500, height: 300 });
+    assert.equal(snapshot.windows[1]?.frame, undefined);
+    assert.equal(osascripts.length, 1);
+    assert.match(osascripts[0] ?? "", /com\.apple\.TextEdit/);
+    assert.doesNotMatch(osascripts[0] ?? "", /com\.mitchellh\.ghostty/);
+  });
+
+  it("captures requested frames by workspace and restores prior focus", async () => {
+    const events: string[] = [];
+    let currentWorkspace = "paper-a";
+    const adapter = new AerospaceWorkspaceAdapter(async (command, args) => {
+      if (command === "aerospace" && args[0] === "list-windows" && args.includes("--focused")) {
+        return { stdout: JSON.stringify([{ "window-id": 21, workspace: "paper-a" }]) };
+      }
+      if (command === "aerospace" && args[0] === "list-workspaces") {
+        return { stdout: "paper-a\n" };
+      }
+      if (command === "aerospace" && args[0] === "workspace") {
+        currentWorkspace = args[1] ?? "";
+        events.push(`workspace:${currentWorkspace}`);
+        return { stdout: "ok" };
+      }
+      if (command === "aerospace" && args[0] === "focus") {
+        events.push(`focus:${args[2]}`);
+        return { stdout: "ok" };
+      }
+      if (command === "aerospace") {
+        return {
+          stdout: JSON.stringify([
+            {
+              "window-id": 21,
+              "app-name": "TextEdit",
+              "app-bundle-id": "com.apple.TextEdit",
+              "window-title": "Shared Note",
+              workspace: "paper-a",
+            },
+            {
+              "window-id": 22,
+              "app-name": "Google Chrome",
+              "app-bundle-id": "com.google.Chrome",
+              "window-title": "Metrics - Google Chrome",
+              workspace: "paper-b",
+            },
+            {
+              "window-id": 23,
+              "app-name": "Ghostty",
+              "app-bundle-id": "com.mitchellh.ghostty",
+              "window-title": "~",
+              workspace: "paper-b",
+            },
+          ]),
+        };
+      }
+      events.push(`osascript:${currentWorkspace}`);
+      return currentWorkspace === "paper-a"
+        ? { stdout: "TextEdit\tcom.apple.TextEdit\tShared Note\t10\t20\t500\t300\n" }
+        : { stdout: "Google Chrome\tcom.google.Chrome\tMetrics\t700\t100\t900\t650\n" };
+    }, {
+      workspaceFocusSettleMs: 0,
+    });
+
+    const snapshot = await adapter.capture({
+      frameWindowIds: [21, 22],
+      focusFrameWorkspaces: true,
+      restoreFrameCaptureFocus: true,
+    });
+
+    assert.deepEqual(snapshot.windows[0]?.frame, { x: 10, y: 20, width: 500, height: 300 });
+    assert.deepEqual(snapshot.windows[1]?.frame, { x: 700, y: 100, width: 900, height: 650 });
+    assert.equal(snapshot.windows[2]?.frame, undefined);
+    assert.deepEqual(snapshot.frameCapture, { status: "captured", timeoutMs: 2_500, observed: 2 });
+    assert.deepEqual(events, [
+      "workspace:paper-a",
+      "osascript:paper-a",
+      "workspace:paper-b",
+      "osascript:paper-b",
+      "focus:21",
+    ]);
+  });
+
   it("reports missing aerospace binary from injected exec", async () => {
     const adapter = new AerospaceWorkspaceAdapter(async () => {
       const error = new Error("spawn aerospace ENOENT") as Error & { code: string };
@@ -481,6 +596,52 @@ describe("Aerospace workspace adapter", () => {
 
     assert.match(planA.commands.find((command) => command.command === "osascript")?.args[1] ?? "", /\{10, 20\}/);
     assert.match(planB.commands.find((command) => command.command === "osascript")?.args[1] ?? "", /\{700, 100\}/);
+  });
+
+  it("focuses each target workspace before restoring that workspace's frames", () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "paper-a",
+      focusedWindowId: 44,
+      windows: [
+        {
+          id: 44,
+          app: "TextEdit",
+          appBundleId: "com.apple.TextEdit",
+          title: "Shared Note",
+          workspace: "paper-a",
+          layout: "floating",
+          frame: { x: 10, y: 20, width: 500, height: 300 },
+        },
+        {
+          id: 45,
+          app: "Google Chrome",
+          appBundleId: "com.google.Chrome",
+          title: "Metrics - Google Chrome",
+          workspace: "paper-b",
+          layout: "floating",
+          frame: { x: 700, y: 100, width: 900, height: 650 },
+        },
+      ],
+    };
+
+    const plan = restoreWorkspacePlan(snapshot, [
+      { ...snapshot.windows[0]!, frame: undefined },
+      { ...snapshot.windows[1]!, frame: undefined },
+    ]);
+
+    assert.deepEqual(plan.commands.map((command) =>
+      command.command === "osascript" ? [command.command, command.args[0]] : [command.command, ...command.args],
+    ), [
+      ["aerospace", "workspace", "paper-a"],
+      ["osascript", "-e"],
+      ["aerospace", "workspace", "paper-b"],
+      ["osascript", "-e"],
+      ["aerospace", "workspace", "paper-a"],
+      ["aerospace", "focus", "--window-id", "44"],
+    ]);
+    assert.match(plan.commands[1]?.args[1] ?? "", /set position of candidateWindow to \{10, 20\}/);
+    assert.match(plan.commands[3]?.args[1] ?? "", /set position of candidateWindow to \{700, 100\}/);
   });
 
   it("residual restore is empty when active workspace, focus, layout, and frame already match", () => {
