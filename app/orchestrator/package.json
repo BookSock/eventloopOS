@@ -41,6 +41,7 @@
     "onboarding:apply": "pnpm run build && node dist/src/onboarding/onboarding_scan_cli.js apply",
     "test": "pnpm run build && sh -c 'node --test $(find dist/test dist/src -name \"*.test.js\" -print) src/agents/codex/*.test.mjs src/task_sessions/*.test.mjs'",
     "test:ambient-autosave": "pnpm run build && node --test dist/src/agents/ambient_workspace_saver.test.js",
+    "test:follows-window-orchestrator": "pnpm run build && node --test dist/src/agents/follows_window_orchestrator.test.js",
     "test:agent-source-hooks": "pnpm run build && sh -c 'node --test dist/src/mcp_sources/*.test.js dist/src/mcp_sources/runtime/*.test.js dist/src/integrations/mcp_poll/mcp_poll.test.js dist/src/agents/agent_run_cli.test.js dist/src/voice/*.test.js dist/src/master/master_command_cli.test.js'",
     "test:runtime-spine": "pnpm run build && node --test dist/src/runtime.test.js",
     "test:task-sessions": "pnpm run build && node --test dist/src/task_sessions/*.test.js src/task_sessions/*.test.mjs",

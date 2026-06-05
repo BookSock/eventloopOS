@@ -2407,7 +2407,7 @@
         "bin/follows-window-rules",
         "examples/primitives/window-hotkey-router.mjs"
       ],
-      "self_tests": ["bin/follows-window-rules --self-test"]
+      "self_tests": ["bin/follows-window-rules --self-test", "pnpm --filter @eventloopos/orchestrator run test:follows-window-orchestrator"]
     },
     {
       "id": "queue_paper_routing",

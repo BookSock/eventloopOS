@@ -26,6 +26,7 @@ function makeDeps(overrides: Partial<{
     created_at: string;
   }>;
   taskWorkspaces: Record<string, string | undefined>;
+  taskLayoutWorkspaces: Record<string, string | undefined>;
   taskSessions: Array<Record<string, unknown>>;
 }> = {}): {
   deps: FollowsWindowOrchestratorDeps;
@@ -80,6 +81,19 @@ function makeDeps(overrides: Partial<{
           created_at: "2026-05-06T12:00:00.000Z",
           updated_at: "2026-05-06T12:00:00.000Z",
           auto_paper_idle_seconds: 300,
+        };
+      },
+      async getTaskLayout(taskId: string) {
+        const workspaceId = overrides.taskLayoutWorkspaces?.[taskId];
+        if (!workspaceId) return undefined;
+        return {
+          task_id: taskId,
+          layout: {
+            backend: "aerospace",
+            activeWorkspace: workspaceId,
+            windows: [],
+          },
+          updated_at: "2026-05-06T12:00:00.000Z",
         };
       },
     },
@@ -297,6 +311,43 @@ describe("follows_window_orchestrator", () => {
       ["workspace", "ws-a"],
     ]);
     assert.ok(activities.some((activity) => activity.type === "foreign_claimed_window_redirected"));
+  });
+
+  it("uses the owner task saved layout when explicit workspace id is missing", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "ws-a",
+      windows: [
+        { id: 100, app: "Ghostty", title: "paper A", workspace: "ws-a", pid: 100 },
+        { id: 303, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "Task B detached browser", workspace: "ws-a" },
+      ],
+    };
+    const { deps, ranCommands } = makeDeps({
+      focusedWorkspace: "ws-a",
+      follows: [],
+      snapshot,
+      claims: [
+        {
+          claim_id: "twc_b_detached",
+          task_id: "task_b",
+          window_id: "303",
+          created_at: "2026-05-06T12:00:00.000Z",
+        },
+      ],
+      taskWorkspaces: {},
+      taskLayoutWorkspaces: { task_b: "ws-b" },
+    });
+
+    const orch = createFollowsWindowOrchestrator(deps);
+    const result = await orch.tick();
+
+    assert.equal(result.decision, "switch_handled");
+    if (result.decision !== "switch_handled") return;
+    assert.equal(result.foreignClaimedMoved, 1);
+    assert.deepEqual(ranCommands.map((command) => command.args), [
+      ["move-node-to-workspace", "--window-id", "303", "ws-b"],
+      ["workspace", "ws-a"],
+    ]);
   });
 
   it("moves a detached agent-claimed browser window away from the user's current paper", async () => {

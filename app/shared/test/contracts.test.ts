@@ -351,7 +351,7 @@ describe("primitive catalog SDK boundary", () => {
 
     expect(selection.missingPrimitiveIds).toEqual([]);
     expect(selection.selectedPrimitiveIds).toHaveLength(18);
-    expect(selection.commands.length).toBe(11);
+    expect(selection.commands.length).toBe(12);
     expect(selection.commands).toContainEqual({
       command: "pnpm --filter @eventloopos/orchestrator run test:runtime-spine",
       primitiveIds: ["runtime_spine"]

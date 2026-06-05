@@ -25,6 +25,7 @@ export type FollowsWindowOrchestratorDeps = {
     | "pruneWindowWorkspaceObservations"
     | "listTaskWindowClaims"
     | "getTask"
+    | "getTaskLayout"
   >;
   workspace: Pick<WorkspaceController, "capture">;
   getFocusedWorkspace: FocusedWorkspaceReader;
@@ -374,7 +375,7 @@ async function redirectForeignClaimedWindows(
     if (!ownerTaskId) continue;
     let ownerWorkspace = taskWorkspaceCache.get(ownerTaskId);
     if (!taskWorkspaceCache.has(ownerTaskId)) {
-      ownerWorkspace = (await deps.store.getTask(ownerTaskId))?.aerospace_workspace_id;
+      ownerWorkspace = await ownerWorkspaceForTask(deps, ownerTaskId);
       taskWorkspaceCache.set(ownerTaskId, ownerWorkspace);
     }
     if (!ownerWorkspace || ownerWorkspace === input.focusedWorkspace) {
@@ -454,6 +455,15 @@ async function redirectForeignClaimedWindows(
   }
 
   return { moved, skipped, movedWindowIds };
+}
+
+async function ownerWorkspaceForTask(
+  deps: FollowsWindowOrchestratorDeps,
+  taskId: string,
+): Promise<string | undefined> {
+  const taskWorkspace = (await deps.store.getTask(taskId))?.aerospace_workspace_id;
+  if (taskWorkspace) return taskWorkspace;
+  return (await deps.store.getTaskLayout(taskId))?.layout.activeWorkspace;
 }
 
 async function taskIdsMatchingWindowOwner(
