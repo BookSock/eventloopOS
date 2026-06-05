@@ -89,7 +89,7 @@ struct OnboardingSheet: View {
                 }
             case let .failed(message):
                 VStack(alignment: .leading, spacing: 8) {
-                    Label(message, systemImage: "exclamationmark.triangle.fill")
+                    Label(userFacingQueueStatusDetail(message), systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.red)
                         .accessibilityIdentifier("onboarding-failed")
                     Button {

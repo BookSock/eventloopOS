@@ -358,7 +358,7 @@ struct MasterCommandSheet: View {
             )
             .accessibilityIdentifier("master-command-voice-status-listening")
         case let .failed(message):
-            Label(message, systemImage: "exclamationmark.triangle.fill")
+            Label(userFacingQueueStatusDetail(message), systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
                 .foregroundStyle(.red)
                 .accessibilityIdentifier("master-command-voice-status-failed")
@@ -435,7 +435,7 @@ private struct MasterCommandStatusView: View {
                 .foregroundStyle(.green)
                 .accessibilityIdentifier("master-command-status-started")
         case let .failed(message):
-            Label(message, systemImage: "exclamationmark.triangle.fill")
+            Label(userFacingQueueStatusDetail(message), systemImage: "exclamationmark.triangle.fill")
                 .font(.caption)
                 .foregroundStyle(.red)
                 .accessibilityIdentifier("master-command-status-failed")

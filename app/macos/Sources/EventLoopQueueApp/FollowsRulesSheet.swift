@@ -90,7 +90,7 @@ struct FollowsRulesSheet: View {
                 }
                 .accessibilityIdentifier("follows-rules-saving")
             case let .failed(message):
-                Label(message, systemImage: "exclamationmark.triangle.fill")
+                Label(userFacingQueueStatusDetail(message), systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
                     .accessibilityIdentifier("follows-rules-failed")
             case .idle, .loaded:

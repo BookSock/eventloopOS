@@ -79,6 +79,32 @@ final class QueueWindowPresentationTests: XCTestCase {
         XCTAssertTrue(summary.showsRetry)
     }
 
+    func testUserFacingQueueStatusDetailStripsHTTPClientPrefix() {
+        XCTAssertEqual(
+            userFacingQueueStatusDetail("Queue request failed with HTTP 409: idempotency_conflict: duplicate idempotency key"),
+            "idempotency_conflict: duplicate idempotency key"
+        )
+        XCTAssertEqual(
+            userFacingQueueStatusDetail("Workspace request failed with HTTP 422: schema_error: snapshot is required"),
+            "schema_error: snapshot is required"
+        )
+        XCTAssertEqual(
+            userFacingQueueStatusDetail("Queue request failed with HTTP 503"),
+            "HTTP 503"
+        )
+    }
+
+    func testActionableFailureMessageUsesCleanHTTPDetail() {
+        XCTAssertEqual(
+            actionableQueueFailureMessage("Queue request failed with HTTP 503: database is down"),
+            "Orchestrator returned a server error. Check dogfood logs, run pnpm readiness:summary, then refresh. Detail: database is down"
+        )
+        XCTAssertEqual(
+            actionableQueueFailureMessage("Queue request failed with HTTP 409: idempotency_conflict: duplicate idempotency key"),
+            "idempotency_conflict: duplicate idempotency key"
+        )
+    }
+
     func testActionableQueueFailureMessageMapsMissingPermissions() {
         XCTAssertEqual(
             actionableQueueFailureMessage("AeroSpace app is not running"),

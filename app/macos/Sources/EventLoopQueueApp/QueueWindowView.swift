@@ -997,7 +997,7 @@ struct ContextRestoreBanner: View {
             .clipShape(RoundedRectangle(cornerRadius: 6))
             .accessibilityIdentifier("context-restore-requested")
         case let .failed(resource, message):
-            Text("\(resource.title): \(message)")
+            Text("\(resource.title): \(userFacingQueueStatusDetail(message))")
                 .font(.caption)
                 .padding(8)
                 .background(.red.opacity(0.12))
@@ -1147,7 +1147,7 @@ private struct WorkspaceRestoreBanner: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityIdentifier("workspace-kept-current-layout")
         case let .failed(message):
-            Text(message)
+            Text(userFacingQueueStatusDetail(message))
                 .font(.caption)
                 .padding(8)
                 .background(.red.opacity(0.12))
@@ -1179,7 +1179,7 @@ private struct ManualWorkspaceCaptureBanner: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityIdentifier("manual-workspace-captured")
         case let .failed(message):
-            Text("Manual workspace capture failed: \(message)")
+            Text("Manual workspace capture failed: \(userFacingQueueStatusDetail(message))")
                 .font(.caption)
                 .padding(8)
                 .background(.red.opacity(0.12))

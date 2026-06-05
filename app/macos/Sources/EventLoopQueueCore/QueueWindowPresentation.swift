@@ -187,9 +187,30 @@ public struct QueuePacketIdentityPresentation: Equatable, Sendable {
     }
 }
 
+public func userFacingQueueStatusDetail(_ message: String) -> String {
+    let normalized = message
+        .replacingOccurrences(of: "\n", with: " ")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    for prefix in ["Queue request failed with HTTP ", "Workspace request failed with HTTP "] {
+        guard normalized.hasPrefix(prefix) else {
+            continue
+        }
+        let rest = normalized.dropFirst(prefix.count)
+        guard let colonIndex = rest.firstIndex(of: ":") else {
+            return "HTTP \(rest)".trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let status = rest[..<colonIndex]
+        let messageStart = rest.index(after: colonIndex)
+        let detail = rest[messageStart...].trimmingCharacters(in: .whitespacesAndNewlines)
+        return detail.isEmpty ? "HTTP \(status)" : detail
+    }
+    return normalized
+}
+
 public func actionableQueueFailureMessage(_ message: String) -> String {
-    let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-    let detail = trimmed.isEmpty ? "No error detail." : trimmed
+    let rawLowered = message.lowercased()
+    let cleaned = userFacingQueueStatusDetail(message)
+    let detail = cleaned.isEmpty ? "No error detail." : cleaned
     let lowered = detail.lowercased()
 
     if lowered.contains("client/server versions don't match")
@@ -257,7 +278,14 @@ public func actionableQueueFailureMessage(_ message: String) -> String {
         return "Orchestrator unavailable. Start dev dogfood with pnpm dev:dogfood or set EVENTLOOPOS_ORCHESTRATOR_URL, then refresh. Detail: \(detail)"
     }
 
-    if lowered.contains("http 500") || lowered.contains("http 502") || lowered.contains("http 503") || lowered.contains("http 504") {
+    if lowered.contains("http 500")
+        || lowered.contains("http 502")
+        || lowered.contains("http 503")
+        || lowered.contains("http 504")
+        || rawLowered.contains("http 500")
+        || rawLowered.contains("http 502")
+        || rawLowered.contains("http 503")
+        || rawLowered.contains("http 504") {
         return "Orchestrator returned a server error. Check dogfood logs, run pnpm readiness:summary, then refresh. Detail: \(detail)"
     }
 

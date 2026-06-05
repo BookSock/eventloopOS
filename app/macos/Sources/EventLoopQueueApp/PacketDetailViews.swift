@@ -268,7 +268,7 @@ private struct QueueLineageSection: View {
                     .accessibilityIdentifier("queue-lineage-loading")
             case let .failed(_, message):
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(message)
+                    Text(userFacingQueueStatusDetail(message))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .accessibilityIdentifier("queue-lineage-error")
@@ -609,7 +609,7 @@ private struct TaskSessionBindingSection: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("packet-task-binding-bound")
             case let .failed(message):
-                Text(message)
+                Text(userFacingQueueStatusDetail(message))
                     .font(.caption)
                     .foregroundStyle(.red)
                     .accessibilityIdentifier("packet-task-binding-failed")
