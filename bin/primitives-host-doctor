@@ -186,18 +186,23 @@ async function liveEndpointCheck(fetcher, baseUrl, endpointPath, { name = endpoi
     const response = await fetcher(target);
     const status = response.status;
     const body = await response.text();
-    const passed = status >= 200 && status < 300;
+    const httpOk = status >= 200 && status < 300;
+    const responseValidation = httpOk ? validateLiveEndpointBody(endpointPath, body) : { ok: false, reason: "http_status_not_2xx" };
+    const passed = httpOk && responseValidation.ok;
     return {
       name,
       status: passed ? "passed" : "failed",
       required: requireLive,
       url: target,
       http_status: status,
+      response_json_ok: responseValidation.jsonOk,
+      response_contract_ok: responseValidation.contractOk,
+      ...(responseValidation.schema ? { response_schema: responseValidation.schema } : {}),
       body_excerpt: body.trim().slice(0, 1_000),
       ...(passed ? {} : {
         diagnosis: {
-          reason: "http_status_not_2xx",
-          detail: `${endpointPath} returned HTTP ${status}`,
+          reason: responseValidation.reason,
+          detail: responseValidation.detail ?? `${endpointPath} returned HTTP ${status}`,
         },
       }),
     };
@@ -213,6 +218,95 @@ async function liveEndpointCheck(fetcher, baseUrl, endpointPath, { name = endpoi
       diagnosis: diagnoseLiveFetchError(error, endpointPath),
     };
   }
+}
+
+function validateLiveEndpointBody(endpointPath, body) {
+  if (!body.trim()) {
+    return {
+      ok: false,
+      jsonOk: false,
+      contractOk: false,
+      reason: "empty_response",
+      detail: `${endpointPath} returned an empty response body.`,
+    };
+  }
+  let payload;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    return {
+      ok: false,
+      jsonOk: false,
+      contractOk: false,
+      reason: "invalid_json",
+      detail: `${endpointPath} returned non-JSON content.`,
+    };
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return {
+      ok: false,
+      jsonOk: true,
+      contractOk: false,
+      reason: "invalid_response_shape",
+      detail: `${endpointPath} returned JSON but not an object.`,
+    };
+  }
+  const contract = validateLiveEndpointContract(endpointPath, payload);
+  return {
+    ...contract,
+    jsonOk: true,
+  };
+}
+
+function validateLiveEndpointContract(endpointPath, payload) {
+  if (endpointPath === "/health") {
+    const ok = payload.ok === true
+      && typeof payload.service === "string"
+      && typeof payload.time === "string"
+      && typeof payload.request_id === "string";
+    return liveContractResult(ok, "HealthResponse", endpointPath, "expected ok=true, service, time, and request_id");
+  }
+  if (endpointPath === "/metrics") {
+    const ok = payload.metrics
+      && typeof payload.metrics === "object"
+      && !Array.isArray(payload.metrics)
+      && typeof payload.generated_at === "string"
+      && typeof payload.request_id === "string";
+    return liveContractResult(ok, "MetricsResponse", endpointPath, "expected metrics, generated_at, and request_id");
+  }
+  if (endpointPath === "/activity") {
+    const ok = Array.isArray(payload.events)
+      && Number.isInteger(payload.count)
+      && typeof payload.request_id === "string";
+    return liveContractResult(ok, "ActivityResponse", endpointPath, "expected events array, count, and request_id");
+  }
+  if (endpointPath === "/workspace/status") {
+    const ok = payload.status
+      && typeof payload.status === "object"
+      && !Array.isArray(payload.status)
+      && typeof payload.status.available === "boolean"
+      && typeof payload.status.backend === "string"
+      && typeof payload.execute_supported === "boolean"
+      && typeof payload.request_id === "string";
+    return liveContractResult(ok, "WorkspaceStatusResponse", endpointPath, "expected status.available, status.backend, execute_supported, and request_id");
+  }
+  return {
+    ok: true,
+    contractOk: true,
+    schema: "unknown",
+  };
+}
+
+function liveContractResult(ok, schema, endpointPath, expected) {
+  return {
+    ok,
+    contractOk: ok,
+    schema,
+    ...(ok ? {} : {
+      reason: "response_contract_mismatch",
+      detail: `${endpointPath} did not match ${schema}: ${expected}.`,
+    }),
+  };
 }
 
 function diagnoseLiveFetchError(error, endpointPath) {
@@ -399,9 +493,9 @@ async function runSelfTest() {
     stdout: commandArgs.includes("bin/primitives-readiness-report") ? readinessStdout : "ok\n",
     stderr: "",
   });
-  const fetcher = async () => ({
+  const fetcher = async (url) => ({
     status: 200,
-    text: async () => "{\"ok\":true}",
+    text: async () => JSON.stringify(successfulLivePayload(new URL(url).pathname)),
   });
   const manifest = await runDoctor({
     url: "http://127.0.0.1:4377",
@@ -469,4 +563,72 @@ async function runSelfTest() {
   });
   assert.equal(requiredHttpFailureManifest.ok, false);
   assert.equal(requiredHttpFailureManifest.checks.at(-1).diagnosis.reason, "http_status_not_2xx");
+
+  const invalidJsonManifest = await runDoctor({
+    url: "http://127.0.0.1:4377",
+    requireLive: true,
+    skipLive: false,
+  }, {
+    commandRunner,
+    fetcher: async () => ({
+      status: 200,
+      text: async () => "<html>not json</html>",
+    }),
+  });
+  assert.equal(invalidJsonManifest.ok, false);
+  assert.equal(invalidJsonManifest.failed_checks[0], "live_orchestrator");
+  assert.equal(invalidJsonManifest.checks.at(-1).diagnosis.reason, "invalid_json");
+  assert.equal(invalidJsonManifest.checks.at(-1).response_json_ok, false);
+
+  const contractMismatchManifest = await runDoctor({
+    url: "http://127.0.0.1:4377",
+    requireLive: true,
+    skipLive: false,
+  }, {
+    commandRunner,
+    fetcher: async () => ({
+      status: 200,
+      text: async () => "{\"ok\":true}",
+    }),
+  });
+  assert.equal(contractMismatchManifest.ok, false);
+  assert.equal(contractMismatchManifest.failed_checks[0], "live_orchestrator");
+  assert.equal(contractMismatchManifest.checks.at(-1).diagnosis.reason, "response_contract_mismatch");
+  assert.equal(contractMismatchManifest.checks.at(-1).response_contract_ok, false);
+}
+
+function successfulLivePayload(endpointPath) {
+  if (endpointPath === "/health") {
+    return {
+      ok: true,
+      service: "eventloop-orchestrator",
+      time: "2026-05-10T12:00:00.000Z",
+      request_id: "req_health",
+    };
+  }
+  if (endpointPath === "/metrics") {
+    return {
+      metrics: { counters: {}, activity_count: 0 },
+      generated_at: "2026-05-10T12:00:00.000Z",
+      request_id: "req_metrics",
+    };
+  }
+  if (endpointPath === "/activity") {
+    return {
+      events: [],
+      count: 0,
+      request_id: "req_activity",
+    };
+  }
+  if (endpointPath === "/workspace/status") {
+    return {
+      status: {
+        available: false,
+        backend: "unavailable",
+      },
+      execute_supported: false,
+      request_id: "req_workspace_status",
+    };
+  }
+  return { ok: true };
 }

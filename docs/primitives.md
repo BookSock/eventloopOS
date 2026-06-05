@@ -911,7 +911,10 @@ can decide whether the host exposes a reusable primitive API surface without
 opening the full readiness report. When the live orchestrator probe is offline,
 non-2xx, or timed out, the same outputs include structured diagnosis and
 suggested commands to start the orchestrator, verify the URL, or intentionally
-skip live checks for catalog/SDK-only validation.
+skip live checks for catalog/SDK-only validation. Live probes also validate
+that `/health`, `/metrics`, `/activity`, and `/workspace/status` return JSON
+objects with the expected primitive response shape, so a 200 from the wrong
+server or proxy cannot pass host readiness.
 
 ## Near-Term Library Hardening
 
