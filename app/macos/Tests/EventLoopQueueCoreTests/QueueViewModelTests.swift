@@ -2567,17 +2567,15 @@ final class QueueViewModelTests: XCTestCase {
         let viewModel = QueueViewModel(client: client)
         await viewModel.pullNextPaper()
 
-        viewModel.startAutomaticLeaseRenewal(intervalNanoseconds: 1_000_000, maxRenewals: 100)
+        viewModel.startAutomaticLeaseRenewal(intervalNanoseconds: 50_000_000, maxRenewals: 100)
 
-        for _ in 0..<50 where client.renewedPacketIds.count < 2 {
-            try? await Task.sleep(nanoseconds: 1_000_000)
-        }
+        try? await Task.sleep(nanoseconds: 5_000_000)
         viewModel.stopAutomaticLeaseRenewal()
         let stoppedRenewalCount = client.renewedPacketIds.count
-        try? await Task.sleep(nanoseconds: 20_000_000)
+        try? await Task.sleep(nanoseconds: 100_000_000)
 
         XCTAssertEqual(client.renewedPacketIds.count, stoppedRenewalCount)
-        XCTAssertLessThan(stoppedRenewalCount, 100)
+        XCTAssertEqual(stoppedRenewalCount, 0)
     }
 
     func testAutomaticQueueRefreshFindsNewPackets() async {
