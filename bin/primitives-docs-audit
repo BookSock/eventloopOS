@@ -47,6 +47,7 @@ function auditPrimitiveDocs(catalogPath, docsPath, repoRoot) {
   requireIncludes(docs, catalogPath, `missing catalog path ${catalogPath}`, errors);
   requireIncludes(docs, "docs/primitives.openapi.json", "missing OpenAPI artifact path", errors);
   requireIncludes(docs, "every cataloged primitive has a `self_tests` command", "missing strict self-test invariant wording", errors);
+  requireIncludes(docs, "Responsiveness-critical primitives must also carry explicit p95 latency budgets", "missing responsiveness latency-budget invariant wording", errors);
 
   const totals = {
     primitives: catalog.primitives.length,
@@ -54,10 +55,11 @@ function auditPrimitiveDocs(catalogPath, docsPath, repoRoot) {
     cli: sum(catalog.primitives, (primitive) => Array.isArray(primitive.cli) ? primitive.cli.length : 0),
     selfTests: sum(catalog.primitives, (primitive) => Array.isArray(primitive.self_tests) ? primitive.self_tests.length : 0),
     proofs: sum(catalog.primitives, (primitive) => Array.isArray(primitive.proofs) ? primitive.proofs.length : 0),
+    latencyBudgets: sum(catalog.primitives, (primitive) => Array.isArray(primitive.latency_budgets) ? primitive.latency_budgets.length : 0),
   };
   requireIncludes(
     docs,
-    `${totals.primitives} primitives, ${totals.http} HTTP routes, ${totals.cli} CLI commands, ${totals.selfTests} self-tests, ${totals.proofs} proof refs`,
+    `${totals.primitives} primitives, ${totals.http} HTTP routes, ${totals.cli} CLI commands, ${totals.selfTests} self-tests, ${totals.proofs} proof refs, ${totals.latencyBudgets} latency budgets`,
     "missing or stale primitive totals",
     errors,
   );
@@ -130,13 +132,15 @@ function runSelfTest() {
       cli: ["bin/workspace-proof"],
       proofs: ["proof.test.ts", "proof-smoke"],
       self_tests: ["bin/workspace-proof --self-test"],
+      latency_budgets: [{ name: "workspace_capture", p95_ms: 5000, proof: "proof-smoke" }],
     }],
   }));
   fs.writeFileSync(docsPath, `# eventloopOS Primitives
 
 Machine-readable catalog: ${catalogPath}. Builder-facing HTTP OpenAPI artifact: docs/primitives.openapi.json.
 Strict readiness is expected to stay green: every cataloged primitive has a \`self_tests\` command.
-Current catalog summary: 2 primitives, 1 HTTP routes, 1 CLI commands, 2 self-tests, 3 proof refs.
+Responsiveness-critical primitives must also carry explicit p95 latency budgets linked to runnable proof commands.
+Current catalog summary: 2 primitives, 1 HTTP routes, 1 CLI commands, 2 self-tests, 3 proof refs, 1 latency budgets.
 
 ## Runtime Spine
 

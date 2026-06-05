@@ -15,11 +15,13 @@ if (args.includes("-h") || args.includes("--help") || args.length === 0) {
   console.log(`Usage:
   node examples/primitives/discover-primitives.mjs list [--status dogfood] [--category os_control]
   node examples/primitives/discover-primitives.mjs list --min-routes 4 --require-self-tests --require-proofs --json
+  node examples/primitives/discover-primitives.mjs list --require-responsive --require-latency-budgets
   node examples/primitives/discover-primitives.mjs list --catalog docs/primitives.catalog.json
 
 Small example app for discovering reusable eventloopOS primitive surfaces before
 building against them. It reads the machine-readable primitive catalog and
-filters by status, category, route count, self-test coverage, and proof coverage.
+filters by status, category, route count, self-test coverage, proof coverage,
+and latency-budget coverage.
 `);
   process.exit(0);
 }
@@ -45,6 +47,8 @@ function parseArgs(argv) {
     else if (arg === "--require-cli") options.requireCli = true;
     else if (arg === "--require-self-tests") options.requireSelfTests = true;
     else if (arg === "--require-proofs") options.requireProofs = true;
+    else if (arg === "--require-latency-budgets") options.requireLatencyBudgets = true;
+    else if (arg === "--require-responsive") options.requireResponsive = true;
     else if (arg === "--catalog") options.catalog = readValue(argv, ++index, arg);
     else if (arg === "--id") pushValue(options, "ids", readValue(argv, ++index, arg));
     else if (arg === "--status") pushValue(options, "statuses", readValue(argv, ++index, arg));
@@ -65,6 +69,7 @@ function summarizePrimitive(primitive) {
   const cli = arrayOfStrings(primitive.cli);
   const selfTests = arrayOfStrings(primitive.self_tests);
   const proofs = arrayOfStrings(primitive.proofs);
+  const latencyBudgets = Array.isArray(primitive.latency_budgets) ? primitive.latency_budgets : [];
   return {
     id: String(primitive.id ?? ""),
     title: String(primitive.title ?? primitive.id ?? ""),
@@ -74,6 +79,8 @@ function summarizePrimitive(primitive) {
     cli: cli.length,
     self_tests: selfTests.length,
     proofs: proofs.length,
+    latency_budgets: latencyBudgets.length,
+    responsiveness_critical: primitive.responsiveness_critical === true,
   };
 }
 
@@ -90,6 +97,8 @@ function selectCapabilities(capabilities, options) {
     if (options.requireCli === true && primitive.cli === 0) return false;
     if (options.requireSelfTests === true && primitive.self_tests === 0) return false;
     if (options.requireProofs === true && primitive.proofs === 0) return false;
+    if (options.requireLatencyBudgets === true && primitive.latency_budgets === 0) return false;
+    if (options.requireResponsive === true && primitive.responsiveness_critical !== true) return false;
     return true;
   });
 }
@@ -99,7 +108,7 @@ function printTable(capabilities) {
     console.log("no matching primitives");
     return;
   }
-  console.log(["id", "status", "category", "routes", "cli", "self_tests", "proofs"].join("\t"));
+  console.log(["id", "status", "category", "routes", "cli", "self_tests", "proofs", "latency_budgets"].join("\t"));
   for (const primitive of capabilities) {
     console.log([
       primitive.id,
@@ -109,6 +118,7 @@ function printTable(capabilities) {
       primitive.cli,
       primitive.self_tests,
       primitive.proofs,
+      primitive.latency_budgets,
     ].join("\t"));
   }
 }
@@ -167,6 +177,8 @@ function runSelfTest() {
         cli: [],
         self_tests: ["pnpm test"],
         proofs: ["proof.ts"],
+        responsiveness_critical: true,
+        latency_budgets: [{ name: "workspace_capture", p95_ms: 5000, proof: "proof.ts" }],
       },
       {
         id: "runtime_spine",
@@ -187,4 +199,8 @@ function runSelfTest() {
   assert.deepEqual(selectCapabilities(summarizeCatalog(fixture), {
     statuses: ["stable_enough"],
   }).map((primitive) => primitive.id), ["runtime_spine"]);
+  assert.deepEqual(selectCapabilities(summarizeCatalog(fixture), {
+    requireResponsive: true,
+    requireLatencyBudgets: true,
+  }).map((primitive) => primitive.id), ["workspace_control"]);
 }

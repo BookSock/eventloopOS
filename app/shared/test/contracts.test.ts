@@ -256,6 +256,8 @@ describe("primitive catalog SDK boundary", () => {
     expect(summary.responseSchemaCount).toBe(summary.routeCount);
     expect(summary.requestSchemaCount + summary.noRequestBodyCount).toBeGreaterThan(40);
     expect(summary.schemaCount).toBeGreaterThan(100);
+    expect(summary.latencyBudgetCount).toBe(8);
+    expect(summary.responsivenessCriticalCount).toBe(4);
     expect(summary.statusCounts).toMatchObject({ dogfood: 12, mixed: 1, stable_enough: 5 });
     expect(summary.categoryCounts).toMatchObject({
       agent_context: 4,
@@ -270,6 +272,8 @@ describe("primitive catalog SDK boundary", () => {
         category: "os_control",
         routeCount: 4,
         responseSchemaRouteCount: 4,
+        latencyBudgetCount: expect.any(Number),
+        responsivenessCritical: true,
         proofRefCount: expect.any(Number)
       })
     );
@@ -322,6 +326,17 @@ describe("primitive catalog SDK boundary", () => {
 
     expect(selectPrimitiveCapabilities(catalog, { ids: ["workspace_control"] })).toEqual([
       expect.objectContaining({ id: "workspace_control", routeCount: 4 })
+    ]);
+
+    const latencyBudgetedCritical = selectPrimitiveCapabilities(catalog, {
+      requireResponsivenessCritical: true,
+      requireLatencyBudgets: true
+    });
+    expect(latencyBudgetedCritical.map((primitive) => primitive.id)).toEqual([
+      "workspace_control",
+      "queue_paper_routing",
+      "master_command_router",
+      "mac_app_hotkeys"
     ]);
   });
 

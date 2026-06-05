@@ -14,10 +14,12 @@ catalog, finding routes, and summarizing primitive coverage without importing
 the orchestrator server package.
 The shared summary helper now returns both global totals and per-primitive
 capability rows with status, category, route count, CLI command count,
-self-test count, proof count, and request/response schema coverage.
+self-test count, proof count, latency-budget count, responsiveness-critical
+flag, and request/response schema coverage.
 `selectPrimitiveCapabilities` filters that matrix by id, status, category,
 minimum route count, CLI availability, self-test coverage, and proof coverage
-so builder tools can choose reusable surfaces without parsing prose docs.
+plus latency-budget and responsiveness-critical coverage so builder tools can
+choose reusable surfaces without parsing prose docs.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.
@@ -25,10 +27,12 @@ Generate a builder-facing coverage/readiness summary with
 `bin/primitives-readiness-report docs/primitives.catalog.json` or use
 `--json` for machine-readable audit output.
 Current catalog summary: 18 primitives, 80 HTTP routes, 8 CLI commands, 18
-self-tests, 73 proof refs.
+self-tests, 73 proof refs, 8 latency budgets.
 Strict readiness is expected to stay green: every cataloged primitive
 has a `self_tests` command, and the shared primitive operation-helper test
 proves typed helper coverage for every cataloged HTTP route.
+Responsiveness-critical primitives must also carry explicit p95 latency budgets
+linked to runnable proof commands.
 `bin/primitives-self-test-runner` executes the cataloged self-test commands
 once per unique command and records a manifest that maps each proof back to the
 primitive ids it covers. Builders can run a subset with repeated

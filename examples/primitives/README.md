@@ -10,6 +10,7 @@ export EVENTLOOPOS_ORCHESTRATOR_URL=http://127.0.0.1:4377
 node examples/primitives/restore-my-desk.mjs capture --output /tmp/desk.json
 node examples/primitives/restore-my-desk.mjs plan --input /tmp/desk.json
 node examples/primitives/discover-primitives.mjs list --category os_control --require-self-tests
+node examples/primitives/discover-primitives.mjs list --require-responsive --require-latency-budgets
 node examples/primitives/agent-attention-queue.mjs list
 node examples/primitives/window-hotkey-router.mjs claim --task-id task_demo --window-id 123
 ```

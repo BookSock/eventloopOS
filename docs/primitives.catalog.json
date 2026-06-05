@@ -2170,6 +2170,12 @@
       "title": "Workspace Control",
       "status": "dogfood",
       "summary": "Capture macOS/AeroSpace window state, plan bounded restores, execute safe workspace/window/frame moves.",
+      "responsiveness_critical": true,
+      "latency_budgets": [
+        { "name": "workspace_capture", "p95_ms": 5000, "proof": "bin/workspace-latency-proof", "route": "POST /workspace/capture", "scope": "local_orchestrator" },
+        { "name": "workspace_restore_plan", "p95_ms": 2000, "proof": "bin/workspace-latency-proof", "route": "POST /workspace/restore-plan", "scope": "local_orchestrator" },
+        { "name": "workspace_restore_execute", "p95_ms": 5000, "proof": "bin/workspace-latency-proof", "route": "POST /workspace/restore", "scope": "local_orchestrator_execute_enabled" }
+      ],
       "http": [
         {
           "method": "GET",
@@ -2405,6 +2411,12 @@
       "title": "Queue And Paper Routing",
       "status": "stable_enough",
       "summary": "Route external events into prioritized human-review papers with actions, leases, lineage, and idempotency.",
+      "responsiveness_critical": true,
+      "latency_budgets": [
+        { "name": "queue_list", "p95_ms": 800, "proof": "bin/queue-latency-proof", "route": "GET /queue", "scope": "local_orchestrator" },
+        { "name": "queue_next", "p95_ms": 800, "proof": "bin/queue-latency-proof", "route": "GET /queue/next", "scope": "local_orchestrator" },
+        { "name": "queue_lease_next", "p95_ms": 1000, "proof": "bin/queue-latency-proof", "route": "POST /queue/lease-next", "scope": "local_orchestrator" }
+      ],
       "http": [
         { "method": "POST", "path": "/events", "route_file": "app/orchestrator/src/routes/events.ts", "request_schema": "EventIngestRequest", "response_schema": "EventIngestResponse" },
         { "method": "GET", "path": "/events/:id", "route_file": "app/orchestrator/src/routes/events.ts", "response_schema": "EventGetResponse" },
@@ -2527,6 +2539,10 @@
       "title": "Master Command Router",
       "status": "dogfood",
       "summary": "Route one universal command to tasks, idle sessions, fan-out targets, or queue prioritization.",
+      "responsiveness_critical": true,
+      "latency_budgets": [
+        { "name": "master_fan_out_dry_run", "p95_ms": 1200, "proof": "bin/queue-latency-proof", "route": "POST /master/fan-out", "scope": "local_orchestrator" }
+      ],
       "http": [
         {
           "method": "POST",
@@ -2715,6 +2731,10 @@
       "title": "Mac App And Hotkey Surface",
       "status": "dogfood",
       "summary": "Swift macOS queue UI, hotkeys, manual mode, restore, voice capture, and master command shell.",
+      "responsiveness_critical": true,
+      "latency_budgets": [
+        { "name": "hotkey_to_feedback", "p95_ms": 10000, "proof": "bin/macos-hotkey-feedback-latency", "hotkey": "Ctrl-Option-J", "scope": "macos_queue_app" }
+      ],
       "hotkeys": [
         "Ctrl-Option-J",
         "Ctrl-Option-E",

@@ -127,6 +127,23 @@ function auditPrimitive(primitive, index, repoRoot, allowedStatuses, schemaNames
     assertSelfTestCommandExists(repoRoot, selfTest, `${prefix}.self_tests`, packageScripts, errors);
   }
 
+  if (primitive.responsiveness_critical !== undefined && typeof primitive.responsiveness_critical !== "boolean") {
+    errors.push(`${prefix}.responsiveness_critical must be boolean when present`);
+  }
+  const latencyBudgets = primitive.latency_budgets;
+  if (latencyBudgets !== undefined) {
+    if (!Array.isArray(latencyBudgets)) {
+      errors.push(`${prefix}.latency_budgets must be an array when present`);
+    } else {
+      for (const [budgetIndex, budget] of latencyBudgets.entries()) {
+        auditLatencyBudget(budget, `${prefix}.latency_budgets[${budgetIndex}]`, repoRoot, errors);
+      }
+    }
+  }
+  if (primitive.responsiveness_critical === true && (!Array.isArray(latencyBudgets) || latencyBudgets.length === 0)) {
+    errors.push(`${prefix}.responsiveness_critical requires at least one latency_budgets entry`);
+  }
+
   const http = primitive.http;
   if (http !== undefined) {
     if (!Array.isArray(http)) {
@@ -135,6 +152,28 @@ function auditPrimitive(primitive, index, repoRoot, allowedStatuses, schemaNames
       for (const [httpIndex, route] of http.entries()) {
         auditHttpRoute(route, `${prefix}.http[${httpIndex}]`, repoRoot, schemaNames, errors);
       }
+    }
+  }
+}
+
+function auditLatencyBudget(budget, prefix, repoRoot, errors) {
+  if (!isRecord(budget)) {
+    errors.push(`${prefix} must be an object`);
+    return;
+  }
+  if (!readNonEmptyString(budget.name)) errors.push(`${prefix}.name is required`);
+  if (typeof budget.p95_ms !== "number" || !Number.isFinite(budget.p95_ms) || budget.p95_ms <= 0) {
+    errors.push(`${prefix}.p95_ms must be a positive number`);
+  }
+  const proof = readNonEmptyString(budget.proof);
+  if (!proof) {
+    errors.push(`${prefix}.proof is required`);
+  } else {
+    assertPathExists(repoRoot, proof, `${prefix}.proof`, errors);
+  }
+  for (const key of ["scope", "route", "hotkey"]) {
+    if (budget[key] !== undefined && !readNonEmptyString(budget[key])) {
+      errors.push(`${prefix}.${key} must be non-empty when present`);
     }
   }
 }
@@ -538,6 +577,8 @@ function runSelfTest() {
       code: ["code.ts"],
       proofs: ["proof.test.ts"],
       cli: ["bin/proof"],
+      responsiveness_critical: true,
+      latency_budgets: [{ name: "example_tick", p95_ms: 500, proof: "bin/proof", route: "POST /example/tick" }],
       self_tests: [
         "bin/proof --self-test",
         "node bin/proof --self-test",
@@ -642,6 +683,35 @@ function runSelfTest() {
   auditCatalog(missingResponse, root, missingResponseErrors);
   if (!missingResponseErrors.some((error) => error.includes(".response_schema is required"))) {
     throw new Error(`missing response schema fixture did not fail as expected: ${missingResponseErrors.join("; ")}`);
+  }
+
+  const missingLatencyBudget = {
+    ...good,
+    primitives: [{
+      ...good.primitives[0],
+      latency_budgets: [],
+    }],
+  };
+  const missingLatencyBudgetErrors = [];
+  auditCatalog(missingLatencyBudget, root, missingLatencyBudgetErrors);
+  if (!missingLatencyBudgetErrors.some((error) => error.includes("responsiveness_critical requires"))) {
+    throw new Error(`missing latency budget fixture did not fail as expected: ${missingLatencyBudgetErrors.join("; ")}`);
+  }
+
+  const badLatencyBudget = {
+    ...good,
+    primitives: [{
+      ...good.primitives[0],
+      latency_budgets: [{ name: "bad", p95_ms: 0, proof: "missing-proof" }],
+    }],
+  };
+  const badLatencyBudgetErrors = [];
+  auditCatalog(badLatencyBudget, root, badLatencyBudgetErrors);
+  if (!badLatencyBudgetErrors.some((error) => error.includes("p95_ms must be a positive number"))) {
+    throw new Error(`bad latency budget fixture did not fail as expected: ${badLatencyBudgetErrors.join("; ")}`);
+  }
+  if (!badLatencyBudgetErrors.some((error) => error.includes("missing-proof"))) {
+    throw new Error(`bad latency proof fixture did not fail as expected: ${badLatencyBudgetErrors.join("; ")}`);
   }
 
   fs.writeFileSync(

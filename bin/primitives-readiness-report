@@ -58,6 +58,8 @@ function buildReadinessReport(catalogPath, repoRoot) {
       cli_commands: sum(rows, (row) => row.cli_commands),
       self_tests: sum(rows, (row) => row.self_tests),
       proof_refs: sum(rows, (row) => row.proof_refs),
+      latency_budgets: sum(rows, (row) => row.latency_budgets),
+      responsiveness_critical: rows.filter((row) => row.responsiveness_critical).length,
       missing_refs: sum(rows, (row) => row.missing_refs.length),
     },
     gaps,
@@ -72,18 +74,27 @@ function summarizePrimitive(primitive, repoRoot) {
   const proofs = arrayOfStrings(primitive.proofs);
   const cli = arrayOfStrings(primitive.cli);
   const selfTests = arrayOfStrings(primitive.self_tests);
-  const refs = [...code, ...proofs, ...cli.filter((entry) => entry.startsWith("bin/"))];
+  const latencyBudgets = Array.isArray(primitive.latency_budgets) ? primitive.latency_budgets : [];
+  const latencyProofs = latencyBudgets
+    .map((budget) => typeof budget?.proof === "string" ? budget.proof : "")
+    .filter(Boolean);
+  const refs = [...code, ...proofs, ...cli.filter((entry) => entry.startsWith("bin/")), ...latencyProofs];
   const missingRefs = refs.filter((entry) => !entryExists(repoRoot, entry));
   const routeGaps = http.flatMap((route, index) => routeContractGaps(route, index));
+  const latencyGaps = latencyBudgets.flatMap((budget, index) => latencyBudgetGaps(budget, index));
   const gaps = [
     ...missingRefs.map((entry) => `missing reference: ${entry}`),
     ...routeGaps,
+    ...latencyGaps,
   ];
   if (code.length === 0) gaps.push("missing code/doc references");
   if (proofs.length === 0) gaps.push("missing proof references");
   if (http.length > 0 && !http.every((route) => route.response_schema)) gaps.push("http response schema missing");
   const hardeningGaps = [];
   if (selfTests.length === 0) hardeningGaps.push("missing dedicated self-test command");
+  if (primitive.responsiveness_critical === true && latencyBudgets.length === 0) {
+    hardeningGaps.push("missing latency budget for responsiveness-critical primitive");
+  }
 
   return {
     id: String(primitive.id ?? ""),
@@ -95,11 +106,25 @@ function summarizePrimitive(primitive, repoRoot) {
     cli_commands: cli.length,
     self_tests: selfTests.length,
     proof_refs: proofs.length,
+    latency_budgets: latencyBudgets.length,
+    responsiveness_critical: primitive.responsiveness_critical === true,
     code_refs: code.length,
     missing_refs: missingRefs,
     gaps,
     hardening_gaps: hardeningGaps,
   };
+}
+
+function latencyBudgetGaps(budget, index) {
+  const gaps = [];
+  const label = `latency_budgets[${index}]`;
+  if (!budget || typeof budget !== "object" || Array.isArray(budget)) return [`${label}: must be object`];
+  if (!nonEmptyString(budget.name)) gaps.push(`${label}: missing name`);
+  if (typeof budget.p95_ms !== "number" || !Number.isFinite(budget.p95_ms) || budget.p95_ms <= 0) {
+    gaps.push(`${label}: p95_ms must be positive number`);
+  }
+  if (!nonEmptyString(budget.proof)) gaps.push(`${label}: missing proof`);
+  return gaps;
 }
 
 function routeContractGaps(route, index) {
@@ -129,13 +154,15 @@ function renderReadinessReport(report) {
   lines.push(`status: ${formatCounts(report.status_counts)}`);
   lines.push(`category: ${formatCounts(report.category_counts)}`);
   lines.push(`surfaces: ${report.totals.http_routes} HTTP routes, ${report.totals.cli_commands} CLI commands, ${report.totals.self_tests} self-tests, ${report.totals.proof_refs} proof refs`);
+  lines.push(`responsiveness: ${report.totals.responsiveness_critical} critical primitives, ${report.totals.latency_budgets} latency budgets`);
   lines.push(`contract result: ${report.ok ? "ok" : `${report.gaps.length} gap(s)`}`);
   lines.push(`strict hardening: ${report.strict_ok ? "ok" : `${report.hardening_gaps.length} backlog item(s)`}`);
   lines.push("");
   for (const primitive of report.primitives) {
     const structuralText = primitive.gaps.length === 0 ? "ok" : primitive.gaps.join("; ");
     const hardeningText = primitive.hardening_gaps.length === 0 ? "" : `; hardening: ${primitive.hardening_gaps.join("; ")}`;
-    lines.push(`- ${primitive.id} [${primitive.status}/${primitive.category}]: ${primitive.http_routes} routes, ${primitive.cli_commands} cli, ${primitive.self_tests} self-tests, ${primitive.proof_refs} proofs -> ${structuralText}${hardeningText}`);
+    const responsivenessText = primitive.responsiveness_critical ? `, ${primitive.latency_budgets} latency budgets` : "";
+    lines.push(`- ${primitive.id} [${primitive.status}/${primitive.category}]: ${primitive.http_routes} routes, ${primitive.cli_commands} cli, ${primitive.self_tests} self-tests, ${primitive.proof_refs} proofs${responsivenessText} -> ${structuralText}${hardeningText}`);
   }
   return lines.join("\n");
 }
@@ -148,6 +175,10 @@ function entryExists(repoRoot, entry) {
 
 function arrayOfStrings(value) {
   return Array.isArray(value) ? value.filter((entry) => typeof entry === "string" && entry.trim()) : [];
+}
+
+function nonEmptyString(value) {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function countBy(items, keyFn) {
@@ -185,6 +216,8 @@ function runSelfTest() {
       proofs: ["proof.test.ts"],
       cli: ["bin/proof"],
       self_tests: ["bin/proof --self-test"],
+      responsiveness_critical: true,
+      latency_budgets: [{ name: "workspace_capture", p95_ms: 5000, proof: "bin/proof" }],
       http: [{
         method: "POST",
         path: "/workspace/capture",
@@ -199,6 +232,9 @@ function runSelfTest() {
   assert.equal(good.strict_ok, true);
   assert.equal(good.primitive_count, 1);
   assert.equal(good.totals.http_routes, 1);
+  assert.equal(good.totals.latency_budgets, 1);
+  assert.equal(good.totals.responsiveness_critical, 1);
+  assert.equal(good.primitives[0].responsiveness_critical, true);
   assert.equal(good.primitives[0].category, "os_control");
   assert.match(renderReadinessReport(good), /workspace_control/);
 
@@ -211,12 +247,14 @@ function runSelfTest() {
       summary: "Flat runtime dependency record.",
       code: ["code.ts"],
       proofs: ["proof.test.ts"],
+      responsiveness_critical: true,
     }],
   }));
   const missingSelfTest = buildReadinessReport(catalogPath, root);
   assert.equal(missingSelfTest.ok, true);
   assert.equal(missingSelfTest.strict_ok, false);
   assert.ok(missingSelfTest.hardening_gaps.some((gap) => gap.gap.includes("missing dedicated self-test command")));
+  assert.ok(missingSelfTest.hardening_gaps.some((gap) => gap.gap.includes("missing latency budget")));
 
   fs.writeFileSync(catalogPath, JSON.stringify({
     schema_version: 1,

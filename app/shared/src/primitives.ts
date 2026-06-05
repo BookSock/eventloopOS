@@ -170,6 +170,18 @@ export const PrimitiveHttpRouteSchema = z
   });
 export type PrimitiveHttpRoute = z.infer<typeof PrimitiveHttpRouteSchema>;
 
+export const PrimitiveLatencyBudgetSchema = z
+  .object({
+    name: nonEmpty,
+    p95_ms: z.number().positive(),
+    proof: nonEmpty,
+    scope: nonEmpty.optional(),
+    route: nonEmpty.optional(),
+    hotkey: nonEmpty.optional()
+  })
+  .strict();
+export type PrimitiveLatencyBudget = z.infer<typeof PrimitiveLatencyBudgetSchema>;
+
 export const PrimitiveDefinitionSchema = z
   .object({
     id: nonEmpty,
@@ -180,7 +192,9 @@ export const PrimitiveDefinitionSchema = z
     cli: z.array(nonEmpty).optional(),
     code: z.array(nonEmpty),
     proofs: z.array(nonEmpty),
-    self_tests: z.array(nonEmpty).optional()
+    self_tests: z.array(nonEmpty).optional(),
+    latency_budgets: z.array(PrimitiveLatencyBudgetSchema).optional(),
+    responsiveness_critical: z.boolean().optional()
   })
   .passthrough();
 export type PrimitiveDefinition = z.infer<typeof PrimitiveDefinitionSchema>;
@@ -204,6 +218,8 @@ export type PrimitiveCatalogSummary = {
   requestSchemaCount: number;
   noRequestBodyCount: number;
   schemaCount: number;
+  latencyBudgetCount: number;
+  responsivenessCriticalCount: number;
   statusCounts: Record<string, number>;
   categoryCounts: Record<string, number>;
   primitives: PrimitiveCapabilitySummary[];
@@ -219,6 +235,8 @@ export type PrimitiveCapabilitySummary = {
   cliCommandCount: number;
   selfTestCount: number;
   proofRefCount: number;
+  latencyBudgetCount: number;
+  responsivenessCritical: boolean;
   responseSchemaRouteCount: number;
   requestSchemaRouteCount: number;
   noRequestBodyRouteCount: number;
@@ -232,6 +250,8 @@ export type PrimitiveCapabilityFilter = {
   requireCli?: boolean;
   requireSelfTests?: boolean;
   requireProofs?: boolean;
+  requireLatencyBudgets?: boolean;
+  requireResponsivenessCritical?: boolean;
 };
 
 export type PrimitiveRequestBuildInput = {
@@ -1030,6 +1050,8 @@ export function summarizePrimitiveCatalog(catalog: PrimitiveCatalog): PrimitiveC
     requestSchemaCount: routes.filter((route) => route.request_schema).length,
     noRequestBodyCount: routes.filter((route) => route.no_request_body === true).length,
     schemaCount: Object.keys(catalog.schemas).length,
+    latencyBudgetCount: sumBy(primitives, (primitive) => primitive.latencyBudgetCount),
+    responsivenessCriticalCount: primitives.filter((primitive) => primitive.responsivenessCritical).length,
     statusCounts: countBy(primitives, (primitive) => primitive.status),
     categoryCounts: countBy(primitives, (primitive) => primitive.category),
     primitives
@@ -1052,6 +1074,8 @@ export function selectPrimitiveCapabilities(
     if (filter.requireCli === true && primitive.cliCommandCount === 0) return false;
     if (filter.requireSelfTests === true && primitive.selfTestCount === 0) return false;
     if (filter.requireProofs === true && primitive.proofRefCount === 0) return false;
+    if (filter.requireLatencyBudgets === true && primitive.latencyBudgetCount === 0) return false;
+    if (filter.requireResponsivenessCritical === true && primitive.responsivenessCritical !== true) return false;
     return true;
   });
 }
@@ -1061,6 +1085,7 @@ function summarizePrimitiveCapability(primitive: PrimitiveDefinition): Primitive
   const cli = primitive.cli ?? [];
   const selfTests = primitive.self_tests ?? [];
   const proofs = primitive.proofs ?? [];
+  const latencyBudgets = primitive.latency_budgets ?? [];
   return {
     id: primitive.id,
     title: primitive.title,
@@ -1071,6 +1096,8 @@ function summarizePrimitiveCapability(primitive: PrimitiveDefinition): Primitive
     cliCommandCount: cli.length,
     selfTestCount: selfTests.length,
     proofRefCount: proofs.length,
+    latencyBudgetCount: latencyBudgets.length,
+    responsivenessCritical: primitive.responsiveness_critical === true,
     responseSchemaRouteCount: http.filter((route) => route.response_schema).length,
     requestSchemaRouteCount: http.filter((route) => route.request_schema).length,
     noRequestBodyRouteCount: http.filter((route) => route.no_request_body === true).length
@@ -1101,6 +1128,10 @@ function countBy<T>(items: T[], keyFn: (item: T) => string): Record<string, numb
     counts[key] = (counts[key] ?? 0) + 1;
   }
   return Object.fromEntries(Object.entries(counts).sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function sumBy<T>(items: T[], valueFn: (item: T) => number): number {
+  return items.reduce((total, item) => total + valueFn(item), 0);
 }
 
 function normalizePrimitiveMethod(method: PrimitiveHttpMethod | Lowercase<PrimitiveHttpMethod>): PrimitiveHttpMethod {
