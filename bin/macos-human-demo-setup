@@ -30,6 +30,31 @@ const paperMetrics = {
   priority: 1450,
 };
 
+const demoHotkeys = Object.freeze({
+  eventloopos_restore_paper: "Ctrl-Option-R",
+  eventloopos_master_command: "Ctrl-Option-K",
+  eventloopos_manual_mode: "Ctrl-Option-M",
+  eventloopos_return_restore_manual: "Ctrl-Option-M",
+  eventloopos_return_keep_current: "Ctrl-Option-Shift-M",
+  rectangle_left_half: "Ctrl-Option-Left",
+  rectangle_right_half: "Ctrl-Option-Right",
+  rectangle_top_half: "Ctrl-Option-Up",
+  rectangle_bottom_half: "Ctrl-Option-Down",
+  rectangle_center: "Ctrl-Option-C",
+  rectangle_maximize: "Ctrl-Option-Shift-Return",
+});
+
+const demoWalkthrough = Object.freeze([
+  "Start on demo-customer. Press Ctrl-Option-R; Customer Chrome and shared TextEdit should come forward.",
+  "Move shared TextEdit with Ctrl-Option-Left or drag it toward center/left. It starts on the right side, so right-half can look unchanged. Wait 2-3 seconds for ambient autosave.",
+  "Select Demo Metrics Review in queue and press Ctrl-Option-R. Same TextEdit window should move to metrics position with Metrics Chrome.",
+  "Select Demo Customer Reply and press Ctrl-Option-R. Same TextEdit window should return to customer position.",
+  "Containment proof already ran during setup: Metrics Chrome was pushed into Customer paper and eventloopOS moved it back to Metrics.",
+  "Try Rectangle-style hotkeys on shared TextEdit: Ctrl-Option-Left/Right/Up/Down/C and Ctrl-Option-Shift-Return.",
+  "Press Ctrl-Option-M, move/open a dummy app, then Ctrl-Option-M again. eventloopOS should restore saved paper context.",
+  "Use Ctrl-Option-Shift-M only when you want to return from Manual Mode and keep current windows where they are.",
+]);
+
 if (dryRun) {
   assertSnapshotShape(buildSnapshot({
     customerChrome: sampleWindow(100, "Google Chrome", paperCustomer.chromeTitle),
@@ -41,6 +66,7 @@ if (dryRun) {
     metricsChrome: sampleWindow(101, "Google Chrome", paperMetrics.chromeTitle),
     sharedText: sampleWindow(102, "TextEdit", paperCustomer.textTitle),
   }, "metrics"));
+  assertDemoInstructions();
   console.log(JSON.stringify({ ok: true, self_test: true }));
   process.exit(0);
 }
@@ -149,27 +175,8 @@ const manifest = {
     demo_queue: queueProof,
     queue_window: queueWindow,
   },
-  hotkeys: {
-    eventloopos_restore_paper: "Ctrl-Option-R",
-    eventloopos_master_command: "Ctrl-Option-K",
-    eventloopos_manual_mode: "Ctrl-Option-M",
-    eventloopos_return_from_manual: "Ctrl-Option-Shift-M",
-    rectangle_left_half: "Ctrl-Option-Left",
-    rectangle_right_half: "Ctrl-Option-Right",
-    rectangle_top_half: "Ctrl-Option-Up",
-    rectangle_bottom_half: "Ctrl-Option-Down",
-    rectangle_center: "Ctrl-Option-C",
-    rectangle_maximize: "Ctrl-Option-Shift-Return",
-  },
-  walkthrough: [
-    "Start on demo-customer. Press Ctrl-Option-R; Customer Chrome and shared TextEdit should come forward.",
-    "Move shared TextEdit with Ctrl-Option-Left or drag it toward center/left. It starts on the right side, so right-half can look unchanged. Wait 2-3 seconds for ambient autosave.",
-    "Select Demo Metrics Review in queue and press Ctrl-Option-R. Same TextEdit window should move to metrics position with Metrics Chrome.",
-    "Select Demo Customer Reply and press Ctrl-Option-R. Same TextEdit window should return to customer position.",
-    "Containment proof already ran during setup: Metrics Chrome was pushed into Customer paper and eventloopOS moved it back to Metrics.",
-    "Try Rectangle-style hotkeys on shared TextEdit: Ctrl-Option-Left/Right/Up/Down/C and Ctrl-Option-Shift-Return.",
-    "Press Ctrl-Option-M, move/open a dummy app, then Ctrl-Option-Shift-M. eventloopOS should restore saved paper context.",
-  ],
+  hotkeys: demoHotkeys,
+  walkthrough: demoWalkthrough,
   final_windows: {
     customerChrome: compactWindow(finalWindows.customerChrome),
     metricsChrome: compactWindow(finalWindows.metricsChrome),
@@ -923,6 +930,22 @@ function escapeHtml(value) {
 function parseAppleScriptPair(value) {
   const parts = String(value ?? "").split(",").map((part) => Number(part.trim())).filter(Number.isFinite);
   return parts.length === 2 ? { x: parts[0], y: parts[1] } : undefined;
+}
+
+function assertDemoInstructions() {
+  if (demoHotkeys.eventloopos_return_restore_manual !== "Ctrl-Option-M") {
+    throw new Error("manual-mode restore hotkey drifted from Ctrl-Option-M");
+  }
+  if (demoHotkeys.eventloopos_return_keep_current !== "Ctrl-Option-Shift-M") {
+    throw new Error("manual-mode keep-current hotkey drifted from Ctrl-Option-Shift-M");
+  }
+  const restoreLine = demoWalkthrough.find((line) => line.includes("restore saved paper context"));
+  if (!restoreLine?.includes("then Ctrl-Option-M again")) {
+    throw new Error(`manual-mode restore walkthrough is unclear: ${restoreLine ?? "missing"}`);
+  }
+  if (restoreLine.includes("Ctrl-Option-Shift-M")) {
+    throw new Error("manual-mode restore walkthrough must not use keep-current hotkey");
+  }
 }
 
 function sleep(ms) {

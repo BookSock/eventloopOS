@@ -588,7 +588,7 @@ function captureWindowFramesAppleScript(windows: AerospaceWindow[]): string {
       .map((window) => window.app)
       .filter((value) => value.length > 0),
   );
-  const titles = uniqueStrings(windows.map((window) => window.title).filter((value) => value.length > 0));
+  const titles = uniqueStrings(windows.flatMap(windowFrameTitleCandidates));
   const processCondition = appleScriptOrCondition("bundleId", bundleIds, "appName", appNames);
   const titleCondition = appleScriptOrCondition("windowName", titles);
 
@@ -697,11 +697,20 @@ function hasWindowIdentityForFrameRestore(window: AerospaceWindow): boolean {
 }
 
 function windowFrameObservationMatches(window: AerospaceWindow, observation: MacOSWindowFrameObservation): boolean {
-  if (window.title !== observation.title) return false;
+  if (!windowFrameTitleCandidates(window).includes(observation.title)) return false;
   if (window.appBundleId && observation.appBundleId) {
     return window.appBundleId === observation.appBundleId;
   }
   return window.app === observation.app;
+}
+
+function windowFrameTitleCandidates(window: Pick<AerospaceWindow, "title" | "app">): string[] {
+  const titles = [window.title];
+  const appSuffix = ` - ${window.app}`;
+  if (window.app && window.title.endsWith(appSuffix)) {
+    titles.push(window.title.slice(0, -appSuffix.length));
+  }
+  return uniqueStrings(titles.filter((title) => title.length > 0));
 }
 
 function assertSafeLayout(layout: string): asserts layout is AerospaceLayout {

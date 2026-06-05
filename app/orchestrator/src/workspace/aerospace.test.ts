@@ -113,6 +113,46 @@ describe("Aerospace workspace adapter", () => {
     assert.equal(windows[1]?.frame, undefined);
   });
 
+  it("attaches Chrome frames when AeroSpace appends the app name to the title", () => {
+    const observations = parseWindowFrameObservations(
+      "Google Chrome\tcom.google.Chrome\teventloopOS Human Demo Customer Thread\t40\t60\t980\t720\n",
+    );
+    const windows = attachWindowFrames(
+      [
+        {
+          id: 514,
+          app: "Google Chrome",
+          appBundleId: "com.google.Chrome",
+          title: "eventloopOS Human Demo Customer Thread - Google Chrome",
+          workspace: "demo-customer",
+        },
+      ],
+      observations,
+    );
+
+    assert.deepEqual(windows[0]?.frame, { x: 40, y: 60, width: 980, height: 720 });
+  });
+
+  it("does not attach stripped-title observations across different Chrome windows", () => {
+    const observations = parseWindowFrameObservations(
+      "Google Chrome\tcom.google.Chrome\teventloopOS Human Demo Metrics Review\t760\t70\t980\t690\n",
+    );
+    const windows = attachWindowFrames(
+      [
+        {
+          id: 514,
+          app: "Google Chrome",
+          appBundleId: "com.google.Chrome",
+          title: "eventloopOS Human Demo Customer Thread - Google Chrome",
+          workspace: "demo-customer",
+        },
+      ],
+      observations,
+    );
+
+    assert.equal(windows[0]?.frame, undefined);
+  });
+
   it("uses a bounded timeout for System Events frame capture", async () => {
     const calls: Array<{ command: string; timeoutMs?: number }> = [];
     const adapter = new AerospaceWorkspaceAdapter(async (command, args, options) => {
