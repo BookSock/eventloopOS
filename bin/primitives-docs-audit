@@ -48,6 +48,8 @@ function auditPrimitiveDocs(catalogPath, docsPath, repoRoot) {
   requireIncludes(docs, "docs/primitives.openapi.json", "missing OpenAPI artifact path", errors);
   requireIncludes(docs, "every cataloged primitive has a `self_tests` command", "missing strict self-test invariant wording", errors);
   requireIncludes(docs, "Responsiveness-critical primitives must also carry explicit p95 latency budgets", "missing responsiveness latency-budget invariant wording", errors);
+  requireIncludes(docs, "buildPrimitiveProofPlan", "missing primitive proof-plan SDK helper wording", errors);
+  requireIncludes(docs, "discover-primitives.mjs proof-plan", "missing discovery proof-plan command wording", errors);
 
   const totals = {
     primitives: catalog.primitives.length,
@@ -140,6 +142,8 @@ function runSelfTest() {
 Machine-readable catalog: ${catalogPath}. Builder-facing HTTP OpenAPI artifact: docs/primitives.openapi.json.
 Strict readiness is expected to stay green: every cataloged primitive has a \`self_tests\` command.
 Responsiveness-critical primitives must also carry explicit p95 latency budgets linked to runnable proof commands.
+\`buildPrimitiveProofPlan\` combines those selectors into one verification plan.
+Example: node examples/primitives/discover-primitives.mjs proof-plan --id workspace_control --json.
 Current catalog summary: 2 primitives, 1 HTTP routes, 1 CLI commands, 2 self-tests, 3 proof refs, 1 latency budgets.
 
 ## Runtime Spine

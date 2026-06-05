@@ -74,7 +74,9 @@ the shared `@eventloopos/shared/primitives` SDK instead of duplicating catalog
 parsing, can also print self-test commands for a primitive subset, and builds
 `app/shared/dist` on demand for clean checkouts. It can also print latency
 budgets for responsiveness-critical primitives or a combined proof plan for a
-builder-selected primitive subset. Root `pnpm typecheck` runs their self-tests.
+builder-selected primitive subset with
+`node examples/primitives/discover-primitives.mjs proof-plan --id workspace_control --json`.
+Root `pnpm typecheck` runs their self-tests.
 
 Status labels:
 
