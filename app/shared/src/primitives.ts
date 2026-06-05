@@ -272,6 +272,20 @@ export type PrimitiveSelfTestSelection = {
   commands: PrimitiveSelfTestCommand[];
 };
 
+export type PrimitiveLatencyBudgetSummary = {
+  primitiveId: string;
+  primitiveTitle: string;
+  primitiveStatus: string;
+  primitiveCategory: string;
+  primitiveSummary: string;
+  name: string;
+  p95Ms: number;
+  proof: string;
+  scope?: string;
+  route?: string;
+  hotkey?: string;
+};
+
 export type PrimitiveRequestBuildInput = {
   catalog: PrimitiveCatalog;
   method: PrimitiveHttpMethod | Lowercase<PrimitiveHttpMethod>;
@@ -1134,6 +1148,36 @@ export function selectPrimitiveSelfTestCommands(
       }))
       .sort((left, right) => left.command.localeCompare(right.command))
   };
+}
+
+export function selectPrimitiveLatencyBudgets(
+  catalog: PrimitiveCatalog,
+  filter: PrimitiveCapabilityFilter = {}
+): PrimitiveLatencyBudgetSummary[] {
+  const capabilities = summarizePrimitiveCatalog(catalog).primitives;
+  const selectedIds = new Set(selectPrimitiveCapabilities(catalog, filter).map((primitive) => primitive.id));
+  const capabilityById = new Map(capabilities.map((primitive) => [primitive.id, primitive]));
+  const budgets: PrimitiveLatencyBudgetSummary[] = [];
+  for (const primitive of catalog.primitives) {
+    if (!selectedIds.has(primitive.id)) continue;
+    const capability = capabilityById.get(primitive.id);
+    for (const budget of primitive.latency_budgets ?? []) {
+      budgets.push({
+        primitiveId: primitive.id,
+        primitiveTitle: primitive.title,
+        primitiveStatus: primitive.status,
+        primitiveCategory: capability?.category ?? classifyPrimitiveCapability(primitive, primitive.http ?? []),
+        primitiveSummary: primitive.summary,
+        name: budget.name,
+        p95Ms: budget.p95_ms,
+        proof: budget.proof,
+        scope: budget.scope,
+        route: budget.route,
+        hotkey: budget.hotkey
+      });
+    }
+  }
+  return budgets;
 }
 
 function summarizePrimitiveCapability(primitive: PrimitiveDefinition): PrimitiveCapabilitySummary {

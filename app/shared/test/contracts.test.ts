@@ -33,6 +33,7 @@ import {
   PrimitiveResponseValidationError,
   primitiveRoutes,
   routeHasRequestBody,
+  selectPrimitiveLatencyBudgets,
   selectPrimitiveSelfTestCommands,
   selectPrimitiveCapabilities,
   summarizePrimitiveCatalog,
@@ -364,6 +365,44 @@ describe("primitive catalog SDK boundary", () => {
       command: "pnpm --filter @eventloopos/shared run test:primitive-ops",
       primitiveIds: ["workspace_control"]
     }]);
+  });
+
+  it("selects primitive latency budgets by builder-facing filters", () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const allBudgets = selectPrimitiveLatencyBudgets(catalog);
+
+    expect(allBudgets).toHaveLength(8);
+    expect(allBudgets).toContainEqual(expect.objectContaining({
+      primitiveId: "workspace_control",
+      primitiveCategory: "os_control",
+      name: "workspace_capture",
+      p95Ms: 5000,
+      proof: "bin/workspace-latency-proof",
+      route: "POST /workspace/capture"
+    }));
+
+    const osControlBudgets = selectPrimitiveLatencyBudgets(catalog, { categories: ["os_control"] });
+    expect(osControlBudgets.map((budget) => budget.primitiveId)).toEqual([
+      "workspace_control",
+      "workspace_control",
+      "workspace_control",
+      "mac_app_hotkeys"
+    ]);
+
+    const criticalBudgetNames = selectPrimitiveLatencyBudgets(catalog, {
+      requireResponsivenessCritical: true,
+      requireLatencyBudgets: true
+    }).map((budget) => budget.name);
+    expect(criticalBudgetNames).toEqual([
+      "workspace_capture",
+      "workspace_restore_plan",
+      "workspace_restore_execute",
+      "queue_list",
+      "queue_next",
+      "queue_lease_next",
+      "master_fan_out_dry_run",
+      "hotkey_to_feedback"
+    ]);
   });
 
   it("rejects primitive routes that drift back to freeform mutating bodies", () => {

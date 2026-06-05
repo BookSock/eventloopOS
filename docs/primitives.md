@@ -23,6 +23,9 @@ choose reusable surfaces without parsing prose docs.
 `selectPrimitiveSelfTestCommands` returns the runnable self-test commands for
 all primitives or a requested primitive subset, including selected ids, missing
 ids, and the primitive ids covered by each de-duplicated command.
+`selectPrimitiveLatencyBudgets` returns cataloged p95 budgets and proof hooks by
+the same builder-facing filters, so responsiveness guarantees are machine
+discoverable instead of prose-only.
 Validate both with
 `bin/primitives-catalog-audit docs/primitives.catalog.json` and
 `bin/primitives-openapi-export --check docs/primitives.catalog.json docs/primitives.openapi.json`.
@@ -66,8 +69,9 @@ surfaces, restore a saved desk, inspect and rerank an attention queue, and wire
 external hotkeys to task-window/follows rules. The discovery example consumes
 the shared `@eventloopos/shared/primitives` SDK instead of duplicating catalog
 parsing, can also print self-test commands for a primitive subset, and builds
-`app/shared/dist` on demand for clean checkouts. Root `pnpm typecheck` runs
-their self-tests.
+`app/shared/dist` on demand for clean checkouts. It can also print latency
+budgets for responsiveness-critical primitives. Root `pnpm typecheck` runs their
+self-tests.
 
 Status labels:
 
