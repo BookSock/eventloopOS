@@ -26,6 +26,7 @@ describe("workspace restore flow routes", () => {
     ];
     const parsedSnapshot = {
       ...snapshot,
+      frameCapture: undefined,
       windows: snapshot.windows.map((window) => ({
         ...window,
         monitorId: undefined,

@@ -302,7 +302,9 @@ export function restoreWorkspacePlan(snapshot: WorkspaceSnapshot, currentWindows
       commands.push(moveToMonitorPlan(window.id, window.monitorId));
     }
 
-    commands.push(moveToWorkspacePlan(window.id, window.workspace));
+    if (current.workspace !== window.workspace) {
+      commands.push(moveToWorkspacePlan(window.id, window.workspace));
+    }
     if (window.layout !== undefined && window.layout !== current.layout) {
       commands.push(layoutWindowPlan(window.id, window.layout));
     } else if (window.frame !== undefined && current.layout !== "floating") {

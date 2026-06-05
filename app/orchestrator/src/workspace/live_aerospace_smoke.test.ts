@@ -92,7 +92,7 @@ describe("live AeroSpace smoke", () => {
       },
       window_count: 2,
       restore_plan_target_window_id: 8,
-      restore_plan_command_count: 4,
+      restore_plan_command_count: 2,
       restore_plan_skip_count: 0,
     });
   });
@@ -138,7 +138,7 @@ describe("live AeroSpace smoke", () => {
       assert.equal(result.execution_proof?.disturbed_workspace, "eventloop-smoke");
       assert.equal(result.execution_proof?.restored_workspace, "eventloop-dev");
       assert.equal(result.execution_proof?.disturb_command_count, 3);
-      assert.equal(result.execution_proof?.restore_command_count, 4);
+      assert.equal(result.execution_proof?.restore_command_count, 3);
     }
     assert.equal(windows[0]?.workspace, "eventloop-dev");
     assert.deepEqual(
@@ -146,7 +146,6 @@ describe("live AeroSpace smoke", () => {
       [
         ["move-node-to-workspace", "--window-id", "8", "eventloop-smoke"],
         ["move-node-to-workspace", "--window-id", "8", "eventloop-dev"],
-        ["move-node-to-workspace", "--window-id", "9", "eventloop-web"],
       ],
     );
   });

@@ -116,6 +116,7 @@ describe("workspace controller", () => {
         backend: "aerospace",
         active_workspace: "eventloop-blog",
         focused_window_id: 9,
+        frame_capture: { status: "captured", timeout_ms: 2_500, observed: 1 },
         windows: [{ id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog" }],
       },
       current_windows: [{ id: 9, app: "Ghostty", title: "codex", workspace: "manual" }],
@@ -123,6 +124,7 @@ describe("workspace controller", () => {
 
     assert.equal(request.snapshot.activeWorkspace, "eventloop-blog");
     assert.equal(request.snapshot.focusedWindowId, 9);
+    assert.deepEqual(request.snapshot.frameCapture, { status: "captured", timeoutMs: 2_500, observed: 1, error: undefined });
     assert.equal(request.currentWindows?.[0].workspace, "manual");
   });
 
@@ -149,6 +151,14 @@ describe("workspace controller", () => {
     assert.throws(
       () => parseWorkspaceSnapshot({ backend: "aerospace", windows: [{ id: 1, workspace: "bad;name" }] }),
       /unsafe aerospace workspace/,
+    );
+    assert.throws(
+      () => parseWorkspaceSnapshot({ backend: "aerospace", windows: [], frameCapture: { status: "partial", timeoutMs: 1, observed: 0 } }),
+      /frame capture status/,
+    );
+    assert.throws(
+      () => parseWorkspaceSnapshot({ backend: "aerospace", windows: [], frameCapture: { status: "captured", timeoutMs: -1, observed: 0 } }),
+      /timeoutMs/,
     );
   });
 

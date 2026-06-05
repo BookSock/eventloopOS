@@ -7,6 +7,7 @@ import {
   type RestoreExecutionReceipt,
   type RestorePlan,
   type WorkspaceCapabilityStatus,
+  type WorkspaceFrameCaptureStatus,
   type WorkspaceSnapshot,
 } from "./aerospace.js";
 
@@ -53,6 +54,7 @@ export function parseWorkspaceSnapshot(input: unknown): WorkspaceSnapshot {
     windows: parseAerospaceWindows(input.windows),
     activeWorkspace: readOptionalString(input, "activeWorkspace", "active_workspace"),
     focusedWindowId: readOptionalInteger(input, "focusedWindowId", "focused_window_id"),
+    frameCapture: readOptionalFrameCapture(input),
   };
 }
 
@@ -112,6 +114,39 @@ function readOptionalInteger(input: Record<string, unknown>, ...keys: string[]):
     if (typeof value === "number" && Number.isInteger(value)) return value;
   }
   return undefined;
+}
+
+function readOptionalFrameCapture(input: Record<string, unknown>): WorkspaceFrameCaptureStatus | undefined {
+  const value = input.frameCapture ?? input.frame_capture;
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw new Error("workspace frame capture status must be an object");
+  }
+
+  const status = value.status;
+  const timeoutMs = value.timeoutMs ?? value.timeout_ms;
+  const observed = value.observed;
+  const error = value.error;
+
+  if (status !== "captured" && status !== "failed" && status !== "skipped") {
+    throw new Error("workspace frame capture status must be captured, failed, or skipped");
+  }
+  if (typeof timeoutMs !== "number" || !Number.isInteger(timeoutMs) || timeoutMs < 0) {
+    throw new Error("workspace frame capture timeoutMs must be a non-negative integer");
+  }
+  if (typeof observed !== "number" || !Number.isInteger(observed) || observed < 0) {
+    throw new Error("workspace frame capture observed must be a non-negative integer");
+  }
+  if (error !== undefined && typeof error !== "string") {
+    throw new Error("workspace frame capture error must be a string");
+  }
+
+  return {
+    status,
+    timeoutMs,
+    observed,
+    error,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

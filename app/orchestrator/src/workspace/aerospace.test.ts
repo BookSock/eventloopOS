@@ -322,6 +322,41 @@ describe("Aerospace workspace adapter", () => {
     });
   });
 
+  it("does not move windows that are already on the saved paper workspace", () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "dev",
+      focusedWindowId: 11,
+      windows: [
+        { id: 11, app: "Terminal", title: "shell", workspace: "dev" },
+        { id: 12, app: "Safari", title: "docs", workspace: "web" },
+      ],
+    };
+
+    const plan = restoreWorkspacePlan(snapshot, [
+      { id: 11, app: "Terminal", title: "shell", workspace: "dev" },
+      { id: 12, app: "Safari", title: "docs", workspace: "manual" },
+    ]);
+
+    assert.deepEqual(plan, {
+      skipped: [],
+      commands: [
+        {
+          command: "aerospace",
+          args: ["move-node-to-workspace", "--window-id", "12", "web"],
+        },
+        {
+          command: "aerospace",
+          args: ["workspace", "dev"],
+        },
+        {
+          command: "aerospace",
+          args: ["focus", "--window-id", "11"],
+        },
+      ],
+    });
+  });
+
   it("restores floating layout, focuses workspace, then restores geometry before final focus", () => {
     const snapshot: WorkspaceSnapshot = {
       backend: "aerospace",
