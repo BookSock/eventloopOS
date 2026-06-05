@@ -894,11 +894,12 @@ Useful standalone uses:
 
 Status: stable enough internally. `bin/primitives-host-doctor` is the small
 "prove my host" entrypoint for builders: it validates catalog/OpenAPI drift,
-runs strict readiness, executes the cataloged primitive self-tests, verifies
-this builder-facing docs index against the catalog, runs primitive example
-self-tests, audits MCP/source-hook templates plus present local source config,
-and optionally gates live orchestrator `/health`, `/metrics`, `/activity`, and
-`/workspace/status` with `--require-live`. Its manifest,
+runs strict readiness, audits the shared SDK package tarball/import surface,
+executes the cataloged primitive self-tests, verifies this builder-facing docs
+index against the catalog, runs primitive example self-tests, audits
+MCP/source-hook templates plus present local source config, and optionally gates
+live orchestrator `/health`, `/metrics`, `/activity`, and `/workspace/status`
+with `--require-live`. Its manifest,
 Markdown report, and `--json` output include a compact primitive-readiness
 summary with primitive count, HTTP route count, CLI command count, self-test
 count, proof count, status/category counts, and strict gap counts so an agent
