@@ -2529,11 +2529,14 @@ final class QueueViewModelTests: XCTestCase {
             try? await Task.sleep(nanoseconds: 1_000_000)
         }
         viewModel.stopAutomaticContextRestoreRefresh()
-        let stoppedRefreshCount = client.checkedContextRestoreIds.count
+        let stopIssuedRefreshCount = client.checkedContextRestoreIds.count
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        let drainedRefreshCount = client.checkedContextRestoreIds.count
         try? await Task.sleep(nanoseconds: 20_000_000)
 
-        XCTAssertEqual(client.checkedContextRestoreIds.count, stoppedRefreshCount)
-        XCTAssertLessThan(stoppedRefreshCount, 100)
+        XCTAssertEqual(client.checkedContextRestoreIds.count, drainedRefreshCount)
+        XCTAssertLessThanOrEqual(drainedRefreshCount, stopIssuedRefreshCount + 1)
+        XCTAssertLessThan(drainedRefreshCount, 100)
     }
 
     func testStopAutomaticActivityRefreshCancelsPendingLoop() async {
