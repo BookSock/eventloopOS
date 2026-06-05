@@ -85,7 +85,9 @@ The live queue, workspace, and window-hotkey examples now use the same shared
 operation client instead of hand-rolled fetch calls, so example apps exercise
 catalog validation, typed response parsing, idempotency headers, and request
 timeouts.
-Root `pnpm typecheck` runs their self-tests.
+Root `pnpm typecheck` runs their self-tests and
+`bin/primitives-examples-audit` prevents example drift back to custom HTTP
+clients.
 
 Status labels:
 

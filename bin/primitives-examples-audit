@@ -1,0 +1,119 @@
+#!/usr/bin/env node
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
+const args = process.argv.slice(2);
+
+if (args.includes("-h") || args.includes("--help")) {
+  console.log(`Usage: bin/primitives-examples-audit [--self-test] [examples/primitives]
+
+Checks builder-facing primitive examples so live examples keep using the shared
+@eventloopos/shared/primitives operation client instead of drifting back to
+hand-rolled fetch clients.
+`);
+  process.exit(0);
+}
+
+if (args.includes("--self-test")) {
+  runSelfTest();
+  process.exit(0);
+}
+
+const positional = args.filter((arg) => !arg.startsWith("-"));
+const examplesDir = positional[0] ?? "examples/primitives";
+const result = auditPrimitiveExamples(path.resolve(process.cwd(), examplesDir));
+if (!result.ok) {
+  for (const error of result.errors) console.error(error);
+  process.exit(1);
+}
+console.log(`primitives examples audit passed: ${examplesDir} (${result.example_count} examples)`);
+
+function auditPrimitiveExamples(examplesDir) {
+  const errors = [];
+  const liveExamples = [
+    "agent-attention-queue.mjs",
+    "restore-my-desk.mjs",
+    "window-hotkey-router.mjs",
+  ];
+  const allExamples = [
+    "discover-primitives.mjs",
+    ...liveExamples,
+  ];
+  const loaderPath = path.join(examplesDir, "lib", "primitive-sdk-loader.mjs");
+  const loader = readText(loaderPath, errors);
+  if (loader !== undefined) {
+    requireIncludes(loader, "export async function loadPrimitiveSdk", "loader must export loadPrimitiveSdk", errors);
+    requireIncludes(loader, "export async function createPrimitiveExampleOperations", "loader must export createPrimitiveExampleOperations", errors);
+    requireIncludes(loader, "createPrimitiveOperationsClient", "loader must create shared primitive operations client", errors);
+    requireIncludes(loader, "pnpm\", [\"--filter\", \"@eventloopos/shared\", \"build\"]", "loader must build shared SDK on demand", errors);
+  }
+
+  for (const file of allExamples) {
+    const text = readText(path.join(examplesDir, file), errors);
+    if (text === undefined) continue;
+    requireIncludes(text, "--self-test", `${file} must expose a self-test`, errors);
+    if (file === "discover-primitives.mjs") {
+      requireIncludes(text, "loadPrimitiveSdk", "discover-primitives must use shared loader", errors);
+      rejectIncludes(text, "execFileSync", "discover-primitives must not duplicate shared SDK build loader", errors);
+      continue;
+    }
+
+    requireIncludes(text, "createPrimitiveExampleOperations", `${file} must use shared primitive operations client`, errors);
+    requireIncludes(text, "--timeout-ms", `${file} must expose timeout option`, errors);
+    rejectIncludes(text, "fetch(", `${file} must not hand-roll fetch calls`, errors);
+    rejectIncludes(text, "requestJson(", `${file} must not hand-roll requestJson calls`, errors);
+  }
+
+  return { ok: errors.length === 0, example_count: allExamples.length, errors };
+}
+
+function readText(filePath, errors) {
+  try {
+    return fs.readFileSync(filePath, "utf8");
+  } catch (error) {
+    errors.push(`${filePath} read failed: ${error instanceof Error ? error.message : String(error)}`);
+    return undefined;
+  }
+}
+
+function requireIncludes(text, needle, error, errors) {
+  if (!text.includes(needle)) errors.push(error);
+}
+
+function rejectIncludes(text, needle, error, errors) {
+  if (text.includes(needle)) errors.push(error);
+}
+
+function runSelfTest() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-primitives-examples-"));
+  const examplesDir = path.join(root, "examples", "primitives");
+  const libDir = path.join(examplesDir, "lib");
+  fs.mkdirSync(libDir, { recursive: true });
+  fs.writeFileSync(path.join(libDir, "primitive-sdk-loader.mjs"), `
+export async function loadPrimitiveSdk() {}
+export async function createPrimitiveExampleOperations() {}
+const command = ["pnpm", ["--filter", "@eventloopos/shared", "build"]];
+const helper = "createPrimitiveOperationsClient";
+`);
+  fs.writeFileSync(path.join(examplesDir, "discover-primitives.mjs"), `
+import { loadPrimitiveSdk } from "./lib/primitive-sdk-loader.mjs";
+if (process.argv.includes("--self-test")) {}
+`);
+  for (const file of ["agent-attention-queue.mjs", "restore-my-desk.mjs", "window-hotkey-router.mjs"]) {
+    fs.writeFileSync(path.join(examplesDir, file), `
+import { createPrimitiveExampleOperations } from "./lib/primitive-sdk-loader.mjs";
+if (process.argv.includes("--self-test")) {}
+const usage = "--timeout-ms";
+`);
+  }
+  const good = auditPrimitiveExamples(examplesDir);
+  assert.equal(good.ok, true, good.errors.join("; "));
+  fs.appendFileSync(path.join(examplesDir, "agent-attention-queue.mjs"), "\nawait fetch('http://127.0.0.1');\n");
+  const bad = auditPrimitiveExamples(examplesDir);
+  assert.equal(bad.ok, false);
+  assert.ok(bad.errors.includes("agent-attention-queue.mjs must not hand-roll fetch calls"));
+  fs.rmSync(root, { recursive: true, force: true });
+  console.log("primitives-examples-audit self-test passed");
+}

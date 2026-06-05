@@ -26,3 +26,5 @@ Examples:
 - `window-hotkey-router.mjs`: attach external hotkeys to task-window claims and follows-window rules.
 
 Each script has `--self-test`; root `pnpm typecheck` checks syntax and self-tests.
+`bin/primitives-examples-audit` also keeps live examples on the shared
+operation client and rejects hand-rolled fetch/request helpers.
