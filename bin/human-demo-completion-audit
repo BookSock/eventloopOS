@@ -58,7 +58,8 @@ function buildAudit(root, options = {}) {
   const readiness = readinessPath ? readJson(path.resolve(root, readinessPath)) : undefined;
   const readinessAt = manifestTimestamp(readiness);
   const readinessFreshness = manifestFreshness(readinessAt, readinessMaxAgeHours);
-  const resultPath = options.resultPath ?? latestResultPath(root);
+  const expectedResultPath = expectedCurrentResultPath(root, readiness);
+  const resultPath = options.resultPath ?? expectedResultPath ?? latestResultPath(root);
   const resultAudit = inspectHumanResult(root, resultPath);
   const verificationPath = options.verificationPath ?? latestVerificationPath(root, resultPath);
   const verification = verificationPath ? readJson(path.resolve(root, verificationPath)) : undefined;
@@ -94,6 +95,7 @@ function buildAudit(root, options = {}) {
     readiness_observed_at: readinessAt ?? null,
     readiness_generated_at: readinessAt ?? null,
     readiness_freshness: readinessFreshness,
+    expected_result_path: expectedResultPath,
     result_path: resultPath,
     result_audit: resultAudit,
     verification_manifest_path: verificationPath,
@@ -125,6 +127,36 @@ function latestResultPath(root) {
     .sort();
   const latest = candidates.at(-1);
   return latest ? path.relative(root, latest) : undefined;
+}
+
+function expectedCurrentResultPath(root, readiness) {
+  const fromReadiness = readiness?.latest_human_demo?.suggested_result_path;
+  if (typeof fromReadiness === "string" && fromReadiness.trim()) return fromReadiness.trim();
+  const latestDemoPath = latestDemoManifestPath(root);
+  if (!latestDemoPath) return undefined;
+  try {
+    const demo = readJson(path.resolve(root, latestDemoPath));
+    return defaultResultPathForDemo(demo);
+  } catch {
+    return undefined;
+  }
+}
+
+function latestDemoManifestPath(root) {
+  const labRuns = path.join(root, "artifacts", "lab-runs");
+  if (!fs.existsSync(labRuns)) return undefined;
+  const candidates = fs.readdirSync(labRuns, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && entry.name.endsWith("-human-demo"))
+    .map((entry) => path.join(labRuns, entry.name, "manifest.json"))
+    .filter((candidate) => fs.existsSync(candidate))
+    .sort();
+  const latest = candidates.at(-1);
+  return latest ? path.relative(root, latest) : undefined;
+}
+
+function defaultResultPathForDemo(demo) {
+  const stamp = (demo?.generated_at ?? new Date().toISOString()).replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+  return path.join("artifacts", "human-demo-results", `${stamp}-human-demo-result.md`);
 }
 
 function latestVerificationPath(root, resultPath) {
@@ -325,6 +357,11 @@ function runSelfTest() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-human-demo-completion-audit-"));
   const readinessPath = path.join(root, "artifacts", "lab-runs", "20260605T000000Z-human-demo-ready", "manifest.json");
   writeJson(readinessPath, { ok: true, finished_at: new Date().toISOString() });
+  const oldResultPath = path.join(root, "artifacts", "human-demo-results", "20260601T000000Z-human-demo-result.md");
+  fs.mkdirSync(path.dirname(oldResultPath), { recursive: true });
+  fs.writeFileSync(oldResultPath, "stale blank result\n", "utf8");
+  const demoPath = path.join(root, "artifacts", "lab-runs", "20260605-001000-human-demo", "manifest.json");
+  writeJson(demoPath, { ok: true, generated_at: "2026-06-05T00:10:00.000Z" });
 
   const pending = buildAudit(root);
   assert.equal(pending.ok, false);
@@ -332,6 +369,8 @@ function runSelfTest() {
   assert.ok(pending.failed_checks.includes("verification_manifest_present"));
   assert.equal(pending.checks.readiness_fresh, true);
   assert.ok(pending.readiness_observed_at);
+  assert.equal(pending.expected_result_path, "artifacts/human-demo-results/20260605T001000Z-human-demo-result.md");
+  assert.equal(pending.result_path, pending.expected_result_path);
 
   const resultPath = path.join(root, "artifacts", "human-demo-results", "20260605T001000Z-human-demo-result.md");
   fs.mkdirSync(path.dirname(resultPath), { recursive: true });
