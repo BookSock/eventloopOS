@@ -225,8 +225,10 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         await viewModel.advance()
 
         XCTAssertEqual(aero.switchedWorkspaces, ["ws_b"], "advance must resolve task_b's workspace via getTaskWithLayout")
-        if case let .switchedToPaper(packetId) = viewModel.advanceToast {
+        if case let .switchedToPaper(packetId, title, decision) = viewModel.advanceToast {
             XCTAssertEqual(packetId, "pkt_b")
+            XCTAssertEqual(title, "B paper")
+            XCTAssertEqual(decision, "review")
         } else {
             XCTFail("expected switchedToPaper toast, got \(String(describing: viewModel.advanceToast))")
         }
@@ -295,8 +297,10 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [paperWorkspace])
         XCTAssertTrue(workspaceClient.restoreIdempotencyKeys.first?.hasPrefix("mac_advance_restore_pkt_b_") ?? false)
         XCTAssertEqual(viewModel.selectedPacketID, "pkt_b")
-        if case let .switchedToPaper(packetId) = viewModel.advanceToast {
+        if case let .switchedToPaper(packetId, title, decision) = viewModel.advanceToast {
             XCTAssertEqual(packetId, "pkt_b")
+            XCTAssertEqual(title, "B paper")
+            XCTAssertEqual(decision, "review")
         } else {
             XCTFail("expected switchedToPaper toast, got \(String(describing: viewModel.advanceToast))")
         }

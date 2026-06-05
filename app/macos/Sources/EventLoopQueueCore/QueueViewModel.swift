@@ -76,7 +76,7 @@ public enum AdvanceToast: Equatable, Sendable {
     case deferredUntil(Date)
     case enteredLimbo
     case taskCreated(taskId: String)
-    case switchedToPaper(packetId: String)
+    case switchedToPaper(packetId: String, title: String, decision: String)
     case returnedToTask(taskId: String)
 }
 
@@ -642,7 +642,7 @@ public final class QueueViewModel: ObservableObject {
             } else if selectedPacketID == nil, packets.isEmpty {
                 advanceToast = .queueEmpty
             } else if let packetId = selectedPacketID {
-                advanceToast = .switchedToPaper(packetId: packetId)
+                advanceToast = switchToPaperToast(packetId: packetId)
             }
         } catch {
             state = .failed(error.localizedDescription)
@@ -835,7 +835,8 @@ public final class QueueViewModel: ObservableObject {
                 currentTaskId: currentTaskId,
                 workspaceId: nextWorkspaceId,
                 packetId: nextPacketId,
-                toastForSwitch: .switchedToPaper(packetId: nextPacketId)
+                toastForSwitch: switchToPaperToast(packetId: nextPacketId)
+                    ?? .actionComplete("Showing next paper.")
             )
         case let .saveLayoutAndEnterLimbo(currentTaskId, limboWorkspaceId):
             await runSaveLayoutAndSwitch(
@@ -850,7 +851,8 @@ public final class QueueViewModel: ObservableObject {
                 packetId: packetId,
                 workspaceId: nextWorkspaceId,
                 nextSelectionPacketId: nextPacketId,
-                toast: .switchedToPaper(packetId: nextPacketId),
+                toast: switchToPaperToast(packetId: nextPacketId)
+                    ?? .actionComplete("Showing next paper."),
                 snapshot: snapshot
             )
         case let .markPaperDoneAndReturnToTask(packetId, taskId, taskWorkspaceId):
@@ -920,7 +922,7 @@ public final class QueueViewModel: ObservableObject {
                     await syncCurrentTaskForPacketIfPossible(packetId)
                 }
             }
-            advanceToast = toastForSwitch
+            advanceToast = switchToPaperToast(packetId: packetId) ?? toastForSwitch
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -953,7 +955,7 @@ public final class QueueViewModel: ObservableObject {
                     await syncCurrentTaskForPacketIfPossible(nextSelectionPacketId)
                 }
             }
-            advanceToast = toast
+            advanceToast = switchToPaperToast(packetId: nextSelectionPacketId) ?? toast
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -1939,6 +1941,7 @@ public final class QueueViewModel: ObservableObject {
                 let restored = await executeWorkspaceRestore(snapshot: snapshot, idempotencyPrefix: "mac_workspace_restore")
                 if restored {
                     await syncSelectedCurrentTaskIfPossible()
+                    showSelectedPaperBriefingIfMatching(snapshot: snapshot)
                 }
             }
         } catch {
@@ -1965,6 +1968,7 @@ public final class QueueViewModel: ObservableObject {
         let restored = await executeWorkspaceRestore(snapshot: snapshot, idempotencyPrefix: "mac_workspace_restore")
         if restored {
             await syncSelectedCurrentTaskIfPossible()
+            showSelectedPaperBriefingIfMatching(snapshot: snapshot)
         }
     }
 
@@ -2022,6 +2026,29 @@ public final class QueueViewModel: ObservableObject {
         }
 
         await confirmWorkspaceRestore(snapshot: snapshot)
+    }
+
+    private func switchToPaperToast(packetId: String?) -> AdvanceToast? {
+        guard let packetId else {
+            return nil
+        }
+        guard let packet = packets.first(where: { $0.id == packetId }) else {
+            return .switchedToPaper(packetId: packetId, title: packetId, decision: "Review this paper.")
+        }
+
+        let briefing = QueuePaperBriefingPresentation(
+            packet: packet,
+            selectedTaskSessions: packet.id == selectedPacketID ? selectedTaskSessions : []
+        )
+        return .switchedToPaper(packetId: packetId, title: briefing.title, decision: briefing.decision)
+    }
+
+    private func showSelectedPaperBriefingIfMatching(snapshot: WorkspaceSnapshot) {
+        guard selectedWorkspaceSnapshot == snapshot,
+              let toast = switchToPaperToast(packetId: selectedPacketID) else {
+            return
+        }
+        advanceToast = toast
     }
 
     public func saveSelectedTaskLayout() async {
@@ -2160,7 +2187,7 @@ public final class QueueViewModel: ObservableObject {
                 await loadTaskSessionsForSelectedPacketIfNeeded()
                 await prepareSelectedWorkspaceRestore()
                 await requestSelectedBrowserContextRestoresIfNeeded()
-                advanceToast = .switchedToPaper(packetId: nextPacket.id)
+                advanceToast = switchToPaperToast(packetId: nextPacket.id)
             } else {
                 advanceToast = .actionComplete("No other paper ready.")
             }

@@ -3229,7 +3229,10 @@ final class QueueViewModelTests: XCTestCase {
             XCTFail("expected executed workspace restore state")
             return
         }
-        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restored."))
+        XCTAssertEqual(
+            viewModel.advanceToast,
+            .switchedToPaper(packetId: "packet-with-workspace", title: "Review with workspace", decision: "Review")
+        )
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }
 
@@ -3271,7 +3274,10 @@ final class QueueViewModelTests: XCTestCase {
 
         XCTAssertEqual(client.setCurrentTaskRequests, ["task_blog"])
         XCTAssertEqual(viewModel.currentTask?.taskId, "task_blog")
-        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restored."))
+        XCTAssertEqual(
+            viewModel.advanceToast,
+            .switchedToPaper(packetId: "packet-with-task-workspace", title: "Review with workspace", decision: "Review")
+        )
     }
 
     func testWorkspaceRestoreFailureToastShowsServerMessageWithoutHTTPPrefix() async {
@@ -3363,7 +3369,10 @@ final class QueueViewModelTests: XCTestCase {
         await firstRestore.value
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
-        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restored."))
+        XCTAssertEqual(
+            viewModel.advanceToast,
+            .switchedToPaper(packetId: "packet-with-workspace", title: "Review with workspace", decision: "Review")
+        )
     }
 
     func testImmediateSelectedWorkspaceRestoreRepeatReusesRecentReceipt() async {
@@ -3405,7 +3414,10 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.confirmSelectedWorkspaceRestore()
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestored(receipt))
-        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace already restored."))
+        XCTAssertEqual(
+            viewModel.advanceToast,
+            .switchedToPaper(packetId: "packet-with-workspace", title: "Review with workspace", decision: "Review")
+        )
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }
 

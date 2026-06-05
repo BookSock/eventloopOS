@@ -49,4 +49,23 @@ final class AdvanceToastBannerPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.icon, "pause.circle.fill")
         XCTAssertEqual(presentation.foregroundRole, .warning)
     }
+
+    func testPaperSwitchToastShowsDecisionBriefing() {
+        let presentation = AdvanceToastBannerPresentation.make(
+            toast: .switchedToPaper(
+                packetId: "qit_demo_customer",
+                title: "Customer reply",
+                decision: "Decide whether to send or ask agent for another pass."
+            ),
+            queueCount: 1,
+            feedbackSequence: 1
+        )
+
+        XCTAssertEqual(
+            presentation.message,
+            "Showing paper: Customer reply. Decide whether to send or ask agent for another pass."
+        )
+        XCTAssertEqual(presentation.icon, "doc.text.magnifyingglass")
+        XCTAssertEqual(presentation.foregroundRole, .success)
+    }
 }

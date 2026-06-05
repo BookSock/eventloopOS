@@ -667,11 +667,21 @@ struct QueueHarnessStatusText {
             return "Moved to limbo workspace"
         case let .taskCreated(taskId):
             return "Task created: \(taskId)"
-        case let .switchedToPaper(packetId):
-            return "Showing paper: \(packetId)"
+        case let .switchedToPaper(packetId, title, decision):
+            return paperBriefingStatus(packetId: packetId, title: title, decision: decision)
         case let .returnedToTask(taskId):
             return "Returned to task: \(taskId)"
         }
+    }
+
+    private static func paperBriefingStatus(packetId: String, title: String, decision: String) -> String {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let decision = decision.trimmingCharacters(in: .whitespacesAndNewlines)
+        let paper = title.isEmpty ? packetId : title
+        if decision.isEmpty {
+            return "Showing paper: \(paper)"
+        }
+        return "Showing paper: \(paper) - \(decision)"
     }
 }
 
@@ -694,10 +704,13 @@ private struct AdvanceToastBanner: View {
                     .opacity(presentation.pulseOpacity)
                 Label {
                     Text(presentation.message)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: presentation.icon)
                 }
             }
+            .frame(maxWidth: 560, alignment: .leading)
             .font(.caption.weight(.medium))
             .foregroundStyle(foreground(for: presentation.foregroundRole))
             .padding(.horizontal, 10)
@@ -762,11 +775,21 @@ struct AdvanceToastBannerPresentation: Equatable {
             return "No ready papers. Moved to limbo workspace."
         case let .taskCreated(taskId):
             return "Task created: \(taskId)"
-        case let .switchedToPaper(packetId):
-            return "Showing next paper: \(packetId)"
+        case let .switchedToPaper(packetId, title, decision):
+            return paperBriefingMessage(packetId: packetId, title: title, decision: decision)
         case let .returnedToTask(taskId):
             return "Returned to task: \(taskId)"
         }
+    }
+
+    private static func paperBriefingMessage(packetId: String, title: String, decision: String) -> String {
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let decision = decision.trimmingCharacters(in: .whitespacesAndNewlines)
+        let paper = title.isEmpty ? packetId : title
+        if decision.isEmpty {
+            return "Showing paper: \(paper)"
+        }
+        return "Showing paper: \(paper). \(decision)"
     }
 
     private static func icon(for toast: AdvanceToast) -> String {

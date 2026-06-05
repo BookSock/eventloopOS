@@ -63,10 +63,14 @@ final class QueueHarnessStatusTextTests: XCTestCase {
             selectedTaskId: "task_demo_customer",
             taskSessionCount: 0,
             summary: makeSummary(workspaceRestoreState: .keptCurrentLayout),
-            advanceToast: .switchedToPaper(packetId: "qit_demo_metrics")
+            advanceToast: .switchedToPaper(
+                packetId: "qit_demo_metrics",
+                title: "Review metrics",
+                decision: "Choose retry or send back."
+            )
         )
 
-        XCTAssertTrue(text.contains("feedback=Showing paper: qit_demo_metrics"))
+        XCTAssertTrue(text.contains("feedback=Showing paper: Review metrics - Choose retry or send back."))
         XCTAssertTrue(text.contains("workspace=Returned without moving windows"))
     }
 
