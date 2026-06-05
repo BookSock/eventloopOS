@@ -6,14 +6,18 @@ import {
   type AutoPaperTaskRecord,
 } from "./auto_paper_codex_idle.js";
 import type { CodexSessionInspection } from "./codex/session_inspector.js";
+import type { ClaudeSessionInspection } from "./claude/session_inspector.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import type { StoredEventResult } from "../store.js";
+import type { TaskRuntimeSession } from "../task_sessions/types.js";
 
 type RecordedIngest = { event: McpEvent; now: Date };
 
 function createDeps(input: {
   tasks: AutoPaperTaskRecord[];
   inspections: Map<string, CodexSessionInspection | CodexSessionInspection[]>;
+  claudeInspections?: Map<string, ClaudeSessionInspection | ClaudeSessionInspection[]>;
+  taskSessions?: TaskRuntimeSession[];
   manualModeActive?: boolean;
   activeTaskId?: string | null;
   focusedCodex?: {
@@ -37,6 +41,7 @@ function createDeps(input: {
   const markedDormant: Array<{ taskId: string; dormantAt: Date }> = [];
   let now = input.now ?? new Date("2026-05-09T12:00:00.000Z");
   const inspectionMap = new Map<string, CodexSessionInspection | CodexSessionInspection[]>(input.inspections);
+  const claudeInspectionMap = new Map<string, ClaudeSessionInspection | ClaudeSessionInspection[]>(input.claudeInspections ?? []);
   return {
     registry: {
       async listTasks() {
@@ -83,6 +88,13 @@ function createDeps(input: {
           },
         }
       : undefined,
+    taskSessions: input.taskSessions
+      ? {
+          listSessions() {
+            return input.taskSessions ?? [];
+          },
+        }
+      : undefined,
     inspect: async (threadId) => {
       const value = inspectionMap.get(threadId);
       if (Array.isArray(value)) {
@@ -91,6 +103,16 @@ function createDeps(input: {
         return next;
       }
       if (!value) return { thread_id: threadId, exists: false };
+      return value;
+    },
+    inspectClaude: async (sessionId) => {
+      const value = claudeInspectionMap.get(sessionId);
+      if (Array.isArray(value)) {
+        const next = value.shift();
+        if (!next) throw new Error(`no more claude inspections queued for ${sessionId}`);
+        return next;
+      }
+      if (!value) return { session_id: sessionId, exists: false };
       return value;
     },
     defaultIdleSeconds: input.defaultIdleSeconds,
@@ -263,6 +285,143 @@ describe("AutoPaperCodexIdleWatcher", () => {
     assert.equal(result.considered, 1);
     assert.equal(result.emitted.length, 1);
     assert.equal(result.emitted[0]!.task_id, "task_codex");
+  });
+
+  it("emits a paper for an idle Claude task session even when the task anchor is not Codex", async () => {
+    const deps = createDeps({
+      tasks: [
+        { id: "task_claude_review", primary_anchor_kind: "ghostty_window", primary_anchor_id: "win-claude" },
+      ],
+      taskSessions: [
+        {
+          id: "task_session_claude_review",
+          task_id: "task_claude_review",
+          provider: "claude",
+          native_session_id: "claude_session_review",
+          status: "idle",
+          updated_at: "2026-05-09T11:00:00.000Z",
+        },
+      ],
+      inspections: new Map(),
+      claudeInspections: new Map([
+        ["claude_session_review", {
+          session_id: "claude_session_review",
+          exists: true,
+          rollout_path: "/tmp/claude.jsonl",
+          last_event_at: "2026-05-09T11:00:00.000Z",
+          idle_seconds: 3600,
+          event_count: 2,
+          recent_event_types: ["assistant"],
+          recent_summary: "assistant: Ready for review",
+        }],
+      ]),
+    });
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+    assert.equal(result.considered, 1);
+    assert.equal(result.emitted.length, 1);
+    assert.equal(result.emitted[0]!.task_id, "task_claude_review");
+    assert.equal(deps.ingested[0]!.event.type, "claude.task_idle");
+    assert.match(deps.ingested[0]!.event.title, /Claude session idle/);
+    assert.match(deps.ingested[0]!.event.summary, /Ready for review/);
+  });
+
+  it("still considers a Claude task session when the same task has a Codex primary anchor", async () => {
+    const deps = createDeps({
+      tasks: [
+        { id: "task_mixed_agents", primary_anchor_kind: "codex_thread", primary_anchor_id: "thread_mixed" },
+      ],
+      taskSessions: [
+        {
+          id: "task_session_claude_mixed",
+          task_id: "task_mixed_agents",
+          provider: "claude",
+          native_session_id: "claude_session_mixed",
+          status: "idle",
+          updated_at: "2026-05-09T11:00:00.000Z",
+        },
+      ],
+      inspections: new Map([
+        ["thread_mixed", {
+          thread_id: "thread_mixed",
+          exists: true,
+          last_event_at: "2026-05-09T11:45:00.000Z",
+          idle_seconds: 10,
+          event_count: 1,
+        }],
+      ]),
+      claudeInspections: new Map([
+        ["claude_session_mixed", {
+          session_id: "claude_session_mixed",
+          exists: true,
+          rollout_path: "/tmp/claude-mixed.jsonl",
+          last_event_at: "2026-05-09T11:00:00.000Z",
+          idle_seconds: 3600,
+          event_count: 2,
+        }],
+      ]),
+    });
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+    assert.equal(result.considered, 2);
+    assert.deepEqual(deps.ingested.map((entry) => entry.event.type), ["claude.task_idle"]);
+  });
+
+  it("emits a blocked session paper once, then waits for session update before re-emitting", async () => {
+    const sessions: TaskRuntimeSession[] = [
+      {
+        id: "task_session_blocked",
+        task_id: "task_agent_blocked",
+        provider: "fake",
+        status: "blocked",
+        updated_at: "2026-05-09T11:00:00.000Z",
+      },
+    ];
+    const deps = createDeps({
+      tasks: [],
+      taskSessions: sessions,
+      inspections: new Map(),
+    });
+    const watcher = new AutoPaperCodexIdleWatcher(deps);
+    const first = await watcher.tick();
+    const second = await watcher.tick();
+    assert.equal(first.emitted.length, 1);
+    assert.equal(deps.ingested[0]!.event.type, "fake.task_blocked");
+    assert.equal(second.emitted.length, 0);
+    assert.equal(second.skipped[0]?.reason, "already_emitted_for_window");
+
+    sessions[0] = { ...sessions[0]!, updated_at: "2026-05-09T11:10:00.000Z" };
+    const third = await watcher.tick();
+    assert.equal(third.emitted.length, 1);
+    assert.equal(deps.ingested.length, 2);
+  });
+
+  it("does not double-consider a Codex task when both task primary anchor and task session point at it", async () => {
+    const deps = createDeps({
+      tasks: [
+        { id: "task_codex_dupe", primary_anchor_kind: "codex_thread", primary_anchor_id: "thread_dupe" },
+      ],
+      taskSessions: [
+        {
+          id: "task_session_codex_dupe",
+          task_id: "task_codex_dupe",
+          provider: "codex",
+          native_thread_id: "thread_dupe",
+          status: "idle",
+        },
+      ],
+      inspections: new Map([
+        ["thread_dupe", {
+          thread_id: "thread_dupe",
+          exists: true,
+          last_event_at: "2026-05-09T11:00:00.000Z",
+          idle_seconds: 3600,
+          event_count: 1,
+        }],
+      ]),
+    });
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+    assert.equal(result.considered, 1);
+    assert.equal(result.emitted.length, 1);
+    assert.equal(deps.ingested.length, 1);
   });
 
   it("skips the currently active task so reading output does not paper the task under the user's eyes", async () => {

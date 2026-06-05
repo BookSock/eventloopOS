@@ -104,7 +104,7 @@ let ambientWorkspaceSaver: AmbientWorkspaceSaver | undefined;
 if (process.env.EVENTLOOPOS_AMBIENT_WORKSPACE_SAVE === "1" && workspace) {
   const runtime = createRuntime({
     store: gatewayRuntime.store,
-    taskSessions,
+    taskSessions: taskSessions?.listSessions ? taskSessions : undefined,
     workspace,
     observability,
   });
@@ -186,11 +186,15 @@ if (process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED === "1") {
   const idleSeconds = parsePositiveInteger(process.env.EVENTLOOPOS_AUTO_PAPER_IDLE_SECONDS);
   const dormantHours = parsePositiveNumber(process.env.EVENTLOOPOS_AUTO_DORMANT_HOURS);
   const registry = createAutoPaperTaskRegistry(gatewayRuntime.store);
+  const autoPaperTaskSessions = taskSessions?.listSessions
+    ? { listSessions: () => taskSessions.listSessions ? taskSessions.listSessions() : [] }
+    : undefined;
   autoPaperWatcher = startAutoPaperCodexIdleWatcher({
     registry,
     ingestor: gatewayRuntime.store,
     manualMode: gatewayRuntime.store,
     activeTask: gatewayRuntime.store,
+    taskSessions: autoPaperTaskSessions,
     focusedCodex: runOsascript
       ? createAutoPaperFocusedCodexReader({
           runOsascript,
@@ -200,6 +204,7 @@ if (process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED === "1") {
       : undefined,
     observability,
     codexHome: process.env.EVENTLOOPOS_CODEX_HOME,
+    claudeHome: process.env.EVENTLOOPOS_CLAUDE_HOME,
     defaultIdleSeconds: idleSeconds,
     autoDormantSeconds: dormantHours === undefined ? undefined : Math.floor(dormantHours * 60 * 60),
     intervalMs: tickMs,

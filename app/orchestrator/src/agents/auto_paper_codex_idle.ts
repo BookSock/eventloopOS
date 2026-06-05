@@ -1,8 +1,10 @@
 import { inspectCodexSession, type CodexSessionInspection } from "./codex/session_inspector.js";
+import { inspectClaudeSession, type ClaudeSessionInspection } from "./claude/session_inspector.js";
 import type { Observability } from "../observability.js";
 import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js";
 import type { McpEvent } from "../integrations/mcp_poll/types.js";
 import type { StoredEventResult } from "../store.js";
+import type { TaskRuntimeSession } from "../task_sessions/types.js";
 
 // Phase 5 of the hotkey-state-machine spec — auto-paper-on-Codex-idle.
 //
@@ -56,10 +58,19 @@ export type AutoPaperEventIngestor = {
   ingestEventAsReviewPacket(event: McpEvent, now: Date): Promise<StoredEventResult>;
 };
 
+export type AutoPaperTaskSessionReader = {
+  listSessions(): Promise<TaskRuntimeSession[]> | TaskRuntimeSession[];
+};
+
 export type AutoPaperInspectFn = (
   threadId: string,
   options: { codexHome?: string; now?: Date },
 ) => Promise<CodexSessionInspection>;
+
+export type AutoPaperClaudeInspectFn = (
+  sessionId: string,
+  options: { claudeHome?: string; now?: Date },
+) => Promise<ClaudeSessionInspection>;
 
 export type AutoPaperCodexIdleDeps = {
   registry: AutoPaperTaskRegistry;
@@ -67,9 +78,12 @@ export type AutoPaperCodexIdleDeps = {
   manualMode: AutoPaperManualModeReader;
   activeTask?: AutoPaperActiveTaskReader;
   focusedCodex?: AutoPaperFocusedCodexReader;
+  taskSessions?: AutoPaperTaskSessionReader;
   inspect?: AutoPaperInspectFn;
+  inspectClaude?: AutoPaperClaudeInspectFn;
   observability?: Observability;
   codexHome?: string;
+  claudeHome?: string;
   defaultIdleSeconds?: number;
   autoDormantSeconds?: number;
   now: () => Date;
@@ -92,6 +106,16 @@ type IdleWindowState = {
   lastPaperWindowAnchor: string | undefined;
 };
 
+type AutoPaperCandidate = {
+  key: string;
+  task: AutoPaperTaskRecord;
+  provider: string;
+  anchorId: string;
+  anchorKind: "codex_thread" | "claude_session" | "task_session";
+  session?: TaskRuntimeSession;
+  status?: string;
+};
+
 export class AutoPaperCodexIdleWatcher {
   private readonly idleState = new Map<string, IdleWindowState>();
 
@@ -100,6 +124,7 @@ export class AutoPaperCodexIdleWatcher {
   async tick(): Promise<AutoPaperTickResult> {
     const now = this.deps.now();
     const inspect = this.deps.inspect ?? inspectCodexSession;
+    const inspectClaude = this.deps.inspectClaude ?? inspectClaudeSession;
     const defaultIdle = this.deps.defaultIdleSeconds ?? DEFAULT_IDLE_THRESHOLD_SECONDS;
     const autoDormantSeconds = this.deps.autoDormantSeconds ?? DEFAULT_AUTO_DORMANT_SECONDS;
 
@@ -121,7 +146,7 @@ export class AutoPaperCodexIdleWatcher {
     }
 
     const tasks = await this.deps.registry.listTasks();
-    const codexTasks = tasks.filter((task) => task.primary_anchor_kind === "codex_thread" && task.primary_anchor_id);
+    const candidates = await this.buildCandidates(tasks);
     const currentTaskId = this.deps.activeTask
       ? (await this.deps.activeTask.getCurrentTaskState().catch(() => ({ current_task_id: null }))).current_task_id
       : null;
@@ -132,7 +157,8 @@ export class AutoPaperCodexIdleWatcher {
     const emitted: AutoPaperTickResult["emitted"] = [];
     const skipped: AutoPaperTickResult["skipped"] = [];
 
-    for (const task of codexTasks) {
+    for (const candidate of candidates) {
+      const task = candidate.task;
       if (task.dormant_at) {
         skipped.push({ task_id: task.id, reason: "task_dormant" });
         continue;
@@ -145,11 +171,56 @@ export class AutoPaperCodexIdleWatcher {
         skipped.push({ task_id: task.id, reason: "task_focused_by_terminal" });
         continue;
       }
-      if (focusedCodex?.codex_thread_id === task.primary_anchor_id) {
+      if (candidate.anchorKind === "codex_thread" && focusedCodex?.codex_thread_id === candidate.anchorId) {
         skipped.push({ task_id: task.id, reason: "codex_thread_focused" });
         continue;
       }
-      const inspection = await inspect(task.primary_anchor_id, { codexHome: this.deps.codexHome, now });
+      if (sessionTerminalRef(candidate.session) && focusedCodex?.terminal_ref === sessionTerminalRef(candidate.session)) {
+        skipped.push({ task_id: task.id, reason: "task_focused_by_terminal" });
+        continue;
+      }
+
+      if (candidate.status === "blocked") {
+        const anchor = sessionUpdatedAt(candidate.session) ?? now.toISOString();
+        const state = this.idleState.get(candidate.key) ?? { lastActivityAt: undefined, lastPaperWindowAnchor: undefined };
+        if (state.lastPaperWindowAnchor === anchor) {
+          skipped.push({ task_id: task.id, reason: "already_emitted_for_window" });
+          continue;
+        }
+        const event = buildAgentAttentionEvent({
+          task,
+          provider: candidate.provider,
+          anchorId: candidate.anchorId,
+          reason: "blocked",
+          occurredAt: anchor,
+          now,
+          summary: `${providerLabel(candidate.provider)} session blocked on ${task.id}.`,
+          rawUri: `eventloopos://task-sessions/${encodeURIComponent(candidate.anchorId)}`,
+          rawMediaType: "application/json",
+        });
+        const result = await this.deps.ingestor.ingestEventAsReviewPacket(event, now);
+        state.lastActivityAt = anchor;
+        state.lastPaperWindowAnchor = anchor;
+        this.idleState.set(candidate.key, state);
+        await this.deps.registry.recordTaskPaperEmitted(task.id, now);
+        emitted.push({
+          task_id: task.id,
+          idle_seconds: 0,
+          event_id: event.id,
+          queue_item_id: result.queue_item?.id,
+        });
+        continue;
+      }
+
+      const inspection = candidate.anchorKind === "claude_session"
+        ? await inspectClaude(candidate.anchorId, { claudeHome: this.deps.claudeHome, now })
+        : candidate.anchorKind === "codex_thread"
+          ? await inspect(candidate.anchorId, { codexHome: this.deps.codexHome, now })
+          : undefined;
+      if (!inspection) {
+        skipped.push({ task_id: task.id, reason: "unsupported_session_provider" });
+        continue;
+      }
       if (!inspection.exists) {
         skipped.push({ task_id: task.id, reason: "rollout_missing" });
         continue;
@@ -180,7 +251,7 @@ export class AutoPaperCodexIdleWatcher {
         continue;
       }
 
-      const state = this.idleState.get(task.id) ?? { lastActivityAt: undefined, lastPaperWindowAnchor: undefined };
+      const state = this.idleState.get(candidate.key) ?? { lastActivityAt: undefined, lastPaperWindowAnchor: undefined };
       // Detect new activity: last_event_at advanced past the timestamp we last saw.
       if (state.lastActivityAt && state.lastActivityAt !== inspection.last_event_at) {
         // Thread became active again — clear the per-window anchor so the next
@@ -190,7 +261,7 @@ export class AutoPaperCodexIdleWatcher {
         }
       }
       state.lastActivityAt = inspection.last_event_at;
-      this.idleState.set(task.id, state);
+      this.idleState.set(candidate.key, state);
 
       const threshold = task.auto_paper_idle_seconds ?? defaultIdle;
       if (inspection.idle_seconds < threshold) {
@@ -203,14 +274,22 @@ export class AutoPaperCodexIdleWatcher {
         continue;
       }
 
-      const event = buildTaskIdleEvent({
+      const event = buildAgentAttentionEvent({
         task,
-        inspection,
+        provider: candidate.provider,
+        anchorId: candidate.anchorId,
+        reason: "idle",
+        occurredAt: inspection.last_event_at,
+        rawUri: inspection.rollout_path ? `file://${inspection.rollout_path}` : `eventloopos://tasks/${task.id}`,
+        rawMediaType: "application/jsonl",
+        summary: inspection.recent_summary
+          ? `${providerLabel(candidate.provider)} session idle ${inspection.idle_seconds ?? 0}s: ${inspection.recent_summary}`
+          : `${providerLabel(candidate.provider)} session idle ${inspection.idle_seconds ?? 0}s.`,
         now,
       });
       const result = await this.deps.ingestor.ingestEventAsReviewPacket(event, now);
       state.lastPaperWindowAnchor = inspection.last_event_at;
-      this.idleState.set(task.id, state);
+      this.idleState.set(candidate.key, state);
       await this.deps.registry.recordTaskPaperEmitted(task.id, now);
 
       emitted.push({
@@ -230,7 +309,9 @@ export class AutoPaperCodexIdleWatcher {
         status: "ok",
         summary: `Auto-paper emitted for ${task.id} after ${inspection.idle_seconds}s idle.`,
         details: sanitizeActivityDetails({
-          thread_id: task.primary_anchor_id,
+          provider: candidate.provider,
+          anchor_kind: candidate.anchorKind,
+          anchor_id: candidate.anchorId,
           idle_seconds: inspection.idle_seconds,
           last_event_at: inspection.last_event_at,
           recent_summary: inspection.recent_summary,
@@ -238,46 +319,139 @@ export class AutoPaperCodexIdleWatcher {
       });
     }
 
-    return { paused: false, considered: codexTasks.length, emitted, skipped };
+    return { paused: false, considered: candidates.length, emitted, skipped };
+  }
+
+  private async buildCandidates(tasks: AutoPaperTaskRecord[]): Promise<AutoPaperCandidate[]> {
+    const candidates: AutoPaperCandidate[] = [];
+    const tasksById = new Map(tasks.map((task) => [task.id, task]));
+    const primaryCodexAnchorsByTaskId = new Map<string, string>();
+
+    for (const task of tasks) {
+      if (task.primary_anchor_kind !== "codex_thread" || !task.primary_anchor_id) continue;
+      candidates.push({
+        key: `task:${task.id}:codex:${task.primary_anchor_id}`,
+        task,
+        provider: "codex",
+        anchorId: task.primary_anchor_id,
+        anchorKind: "codex_thread",
+      });
+      primaryCodexAnchorsByTaskId.set(task.id, task.primary_anchor_id);
+    }
+
+    const sessions = this.deps.taskSessions?.listSessions
+      ? await Promise.resolve(this.deps.taskSessions.listSessions()).catch(() => [] as TaskRuntimeSession[])
+      : [];
+
+    for (const session of sessions) {
+      const taskId = sessionTaskId(session);
+      const sessionId = sessionIdForCandidate(session);
+      if (!taskId || !sessionId) continue;
+      const provider = sessionProvider(session);
+      const status = sessionStatus(session);
+      const anchor = sessionAnchor(session, provider);
+      if (provider === "codex" && anchor && primaryCodexAnchorsByTaskId.get(taskId) === anchor) continue;
+      if (!anchor && status !== "blocked") continue;
+      const task = tasksById.get(taskId) ?? {
+        id: taskId,
+        primary_anchor_kind: "task_session",
+        primary_anchor_id: sessionId,
+      };
+      candidates.push({
+        key: `session:${sessionId}`,
+        task,
+        provider,
+        anchorId: anchor ?? sessionId,
+        anchorKind: provider === "claude" && anchor ? "claude_session" : provider === "codex" && anchor ? "codex_thread" : "task_session",
+        session,
+        status,
+      });
+    }
+
+    return candidates;
   }
 }
 
-function buildTaskIdleEvent(input: {
+function buildAgentAttentionEvent(input: {
   task: AutoPaperTaskRecord;
-  inspection: CodexSessionInspection;
+  provider: string;
+  anchorId: string;
+  reason: "idle" | "blocked";
+  occurredAt: string;
   now: Date;
+  summary: string;
+  rawUri: string;
+  rawMediaType?: string;
 }): McpEvent {
-  const { task, inspection, now } = input;
-  const occurredAt = inspection.last_event_at ?? now.toISOString();
-  const idempotencyKey = `auto_paper_codex_idle:${task.id}:${occurredAt}`;
-  const eventId = `evt_auto_paper_codex_idle_${stableId(task.id)}_${stableId(occurredAt)}`;
-  const summary = inspection.recent_summary
-    ? `Codex thread idle ${inspection.idle_seconds ?? 0}s: ${inspection.recent_summary}`
-    : `Codex thread idle ${inspection.idle_seconds ?? 0}s.`;
+  const { task, provider, reason, occurredAt, now } = input;
+  const idempotencyKey = `auto_paper_${provider}_${reason}:${task.id}:${occurredAt}`;
+  const eventId = `evt_auto_paper_${stableId(provider)}_${reason}_${stableId(task.id)}_${stableId(occurredAt)}`;
   // The ingestion pipeline normalizes task_hint via taskIdForHint("task_<slug>"),
   // which prefixes "task_" again. Strip our leading "task_" so the resulting
   // packet.task_id round-trips back to the original task.id.
   const taskHint = task.id.startsWith("task_") ? task.id.slice("task_".length) : task.id;
+  const label = providerLabel(provider);
   return {
     id: eventId,
-    source: "auto_paper_codex_idle",
-    source_id: "auto_paper_codex_idle",
+    source: `auto_paper_${provider}_${reason}`,
+    source_id: `auto_paper_${provider}_${reason}`,
     idempotency_key: idempotencyKey,
     occurred_at: occurredAt,
     received_at: now.toISOString(),
-    actor: { id: "auto_paper_codex_idle", type: "system", name: "Auto-paper watcher" },
+    actor: { id: "auto_paper_agent_attention", type: "system", name: "Auto-paper watcher" },
     task_hint: taskHint,
-    type: "codex.task_idle",
-    title: `Codex thread idle on ${task.id}`,
-    summary,
+    type: `${provider}.${reason === "blocked" ? "task_blocked" : "task_idle"}`,
+    title: `${label} ${reason === "blocked" ? "session blocked" : "session idle"} on ${task.id}`,
+    summary: input.summary,
     raw_ref: {
       id: `raw_${eventId}`,
-      uri: inspection.rollout_path ? `file://${inspection.rollout_path}` : `eventloopos://tasks/${task.id}`,
-      media_type: "application/jsonl",
+      uri: input.rawUri,
+      media_type: input.rawMediaType ?? "application/json",
     },
     links: [],
     resources: [],
   };
+}
+
+function sessionTaskId(session: TaskRuntimeSession): string | undefined {
+  return stringField(session, "task_id");
+}
+
+function sessionIdForCandidate(session: TaskRuntimeSession): string | undefined {
+  return stringField(session, "id");
+}
+
+function sessionProvider(session: TaskRuntimeSession): string {
+  return stringField(session, "provider") ?? "agent";
+}
+
+function sessionStatus(session: TaskRuntimeSession): string | undefined {
+  return stringField(session, "status");
+}
+
+function sessionUpdatedAt(session: TaskRuntimeSession | undefined): string | undefined {
+  return stringField(session, "updated_at") ?? stringField(session, "last_seen_at") ?? stringField(session, "created_at");
+}
+
+function sessionTerminalRef(session: TaskRuntimeSession | undefined): string | undefined {
+  return stringField(session, "terminal_ref");
+}
+
+function sessionAnchor(session: TaskRuntimeSession, provider: string): string | undefined {
+  if (provider === "claude") return stringField(session, "native_session_id");
+  if (provider === "codex") return stringField(session, "native_thread_id");
+  return undefined;
+}
+
+function stringField(record: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function providerLabel(provider: string): string {
+  if (provider === "codex") return "Codex";
+  if (provider === "claude") return "Claude";
+  return "Agent";
 }
 
 function stableId(input: string): string {
