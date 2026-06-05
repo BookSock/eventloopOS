@@ -500,6 +500,17 @@ describe("primitive catalog SDK boundary", () => {
 
     expect(lineage.url).toBe("http://localhost:4377/queue/qit_feedback_001/lineage?limit=25&ignored_future_filter=yes");
     expect(lineage.body).toBeUndefined();
+
+    expect(() =>
+      buildPrimitiveRequest({
+        catalog,
+        method: "GET",
+        path: "/queue/:id/lineage",
+        pathParams: { id: "qit_feedback_001" },
+        query: { limit: 25, limti: 10 },
+        strictQuery: true
+      })
+    ).toThrow(/Unknown primitive query parameter: limti/);
   });
 
   it("validates declared primitive query parameter schemas", () => {
@@ -612,6 +623,29 @@ describe("primitive catalog SDK boundary", () => {
       expect(primitiveError.kind).toBe("invalid_query_param");
       expect(primitiveError.parameter).toBe("limit");
       expect(primitiveError.message).toMatch(/must be an integer/);
+    }
+
+    try {
+      buildPrimitiveRequest({
+        catalog,
+        method: "GET",
+        path: "/queue",
+        query: { sttae: "ready" },
+        strictQuery: true
+      });
+      throw new Error("expected unknown query parameter");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PrimitiveRequestBuildError);
+      const primitiveError = error as PrimitiveRequestBuildError;
+      expect(primitiveError.kind).toBe("unknown_query_param");
+      expect(primitiveError.parameter).toBe("sttae");
+      expect(primitiveErrorSummary(error)).toMatchObject({
+        name: "PrimitiveRequestBuildError",
+        method: "GET",
+        path: "/queue",
+        kind: "unknown_query_param",
+        parameter: "sttae"
+      });
     }
 
     try {

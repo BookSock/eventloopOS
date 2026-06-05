@@ -301,6 +301,7 @@ export type PrimitiveRequestBuildInput = {
   baseUrl?: string;
   pathParams?: Record<string, string | number | boolean>;
   query?: Record<string, string | number | boolean | null | undefined>;
+  strictQuery?: boolean;
   body?: unknown;
   headers?: Record<string, string>;
 };
@@ -517,6 +518,7 @@ export type PrimitiveRequestBuildErrorKind =
   | "unknown_route"
   | "missing_path_param"
   | "missing_query_param"
+  | "unknown_query_param"
   | "invalid_query_param"
   | "request_body_required"
   | "request_body_forbidden"
@@ -670,7 +672,7 @@ export function buildPrimitiveRequest(input: PrimitiveRequestBuildInput): Primit
   }
 
   const path = interpolatePrimitivePath(route, input.pathParams ?? {});
-  const query = encodePrimitiveQuery(route, input.query ?? {});
+  const query = encodePrimitiveQuery(route, input.query ?? {}, input.strictQuery === true);
   const baseUrl = input.baseUrl ?? "http://127.0.0.1:4377";
   const url = new URL(path, baseUrl);
   url.search = query;
@@ -1292,9 +1294,14 @@ function interpolatePrimitivePath(route: PrimitiveHttpRoute, pathParams: Record<
   });
 }
 
-function encodePrimitiveQuery(route: PrimitiveHttpRoute, query: Record<string, string | number | boolean | null | undefined>): string {
+function encodePrimitiveQuery(
+  route: PrimitiveHttpRoute,
+  query: Record<string, string | number | boolean | null | undefined>,
+  strictQuery: boolean
+): string {
   const search = new URLSearchParams();
   const declared = route.query_parameters ?? route.parameters ?? [];
+  const declaredNames = new Set(declared.map((parameter) => parameter.name));
   for (const parameter of declared) {
     const value = query[parameter.name];
     if (value === undefined || value === null) {
@@ -1314,7 +1321,16 @@ function encodePrimitiveQuery(route: PrimitiveHttpRoute, query: Record<string, s
   }
   for (const [name, value] of Object.entries(query)) {
     if (value === undefined || value === null) continue;
-    if (declared.some((parameter) => parameter.name === name)) continue;
+    if (declaredNames.has(name)) continue;
+    if (strictQuery) {
+      throw new PrimitiveRequestBuildError(`Unknown primitive query parameter: ${name}`, {
+        kind: "unknown_query_param",
+        route,
+        method: route.method,
+        path: route.path,
+        parameter: name
+      });
+    }
     search.set(name, String(value));
   }
   return search.toString();

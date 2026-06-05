@@ -62,7 +62,8 @@ const request = buildPrimitiveRequest({
   method: "GET",
   path: "/queue/:id/lineage",
   pathParams: { id: "qit_feedback_001" },
-  query: { limit: 25 }
+  query: { limit: 25 },
+  strictQuery: true
 });
 
 const client = createPrimitiveHttpClient({
@@ -101,7 +102,10 @@ await ops.workspace.restore(workspaceRestoreRequest, "idem_restore_checkout");
 Use this when building tools on top of eventloopOS primitives without importing
 or running the orchestrator server package. Request helpers interpolate route
 templates, encode query strings, enforce `no_request_body`, and validate known
-request/response schemas through the exported Zod contract registry.
+request/response schemas through the exported Zod contract registry. By
+default, undeclared query keys pass through for forward compatibility; set
+`strictQuery: true` in request options to fail fast on typos or unsupported
+filters.
 `summarizePrimitiveCatalog` returns both global totals and per-primitive
 capability rows, including status/category, route count, CLI command count,
 self-test count, proof count, and request/response schema coverage, so tools can
