@@ -95,6 +95,7 @@ const demoItems = demoQueueItems(queue.items);
 const queueProof = assertDemoQueueItems(demoItems);
 
 await setCurrentTask(paperCustomer.taskId);
+const foreignWindowContainmentProof = await proveForeignWindowContainment(windows);
 const readySnapshotTarget = buildReadySnapshot(customerSnapshot, metricsSnapshot, windows);
 await restore(readySnapshotTarget, "ready-customer-layout");
 await sleep(1_200);
@@ -143,6 +144,7 @@ const manifest = {
     metrics_restore: metricsProof,
     ready_customer_restore: readyCustomerProof,
     ambient_autosave: ambientAutosaveProof,
+    foreign_window_containment: foreignWindowContainmentProof,
     final_ready_customer_restore: finalReadyCustomerProof,
     demo_queue: queueProof,
     queue_window: queueWindow,
@@ -164,6 +166,7 @@ const manifest = {
     "Move shared TextEdit with Ctrl-Option-Left or drag it toward center/left. It starts on the right side, so right-half can look unchanged. Wait 2-3 seconds for ambient autosave.",
     "Select Demo Metrics Review in queue and press Ctrl-Option-R. Same TextEdit window should move to metrics position with Metrics Chrome.",
     "Select Demo Customer Reply and press Ctrl-Option-R. Same TextEdit window should return to customer position.",
+    "Containment proof already ran during setup: Metrics Chrome was pushed into Customer paper and eventloopOS moved it back to Metrics.",
     "Try Rectangle-style hotkeys on shared TextEdit: Ctrl-Option-Left/Right/Up/Down/C and Ctrl-Option-Shift-Return.",
     "Press Ctrl-Option-M, move/open a dummy app, then Ctrl-Option-Shift-M. eventloopOS should restore saved paper context.",
   ],
@@ -586,6 +589,34 @@ async function proveAmbientAutosave(paper, baselineSnapshot) {
     task_layout: layoutProof,
     probe_queue_context: probeProof,
   };
+}
+
+async function proveForeignWindowContainment(windows) {
+  const metricsWindowId = windows.metricsChrome.id;
+  execFileSync("aerospace", ["move-node-to-workspace", "--window-id", String(metricsWindowId), paperCustomer.workspace]);
+  execFileSync("aerospace", ["workspace", paperCustomer.workspace]);
+
+  let last;
+  for (let attempt = 1; attempt <= 30; attempt += 1) {
+    const snapshot = await capture();
+    const metricsChrome = findWindow(snapshot, "Google Chrome", paperMetrics.chromeTitle);
+    last = {
+      active_workspace: snapshot.activeWorkspace,
+      metrics_workspace: metricsChrome?.workspace,
+    };
+    if (snapshot.activeWorkspace === paperCustomer.workspace && metricsChrome?.workspace === paperMetrics.workspace) {
+      return {
+        ok: true,
+        attempts: attempt,
+        contaminated_workspace: paperCustomer.workspace,
+        owner_workspace: paperMetrics.workspace,
+        restored_focus_workspace: snapshot.activeWorkspace,
+        window_id: metricsWindowId,
+      };
+    }
+    await sleep(500);
+  }
+  throw new Error(`foreign window containment did not return metrics Chrome to owner workspace: ${JSON.stringify(last)}`);
 }
 
 async function waitForTaskLayoutFrame(taskId, windowId, expectedFrame) {

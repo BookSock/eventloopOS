@@ -2696,6 +2696,13 @@ describe("orchestrator gateway API", () => {
           };
         };
         task_created?: boolean;
+        task_window_claims?: Array<{
+          task_id: string;
+          window_id?: string;
+          app_bundle?: string;
+          title_prefix?: string;
+          source?: string;
+        }>;
         queue_item?: {
           id: string;
           task_id: string;
@@ -2730,6 +2737,30 @@ describe("orchestrator gateway API", () => {
       assert.equal(createdTask?.aerospace_workspace_id, "blog-workspace");
       const createdTaskLayout = await store.getTaskLayout("task_blog");
       assert.equal(createdTaskLayout?.layout.activeWorkspace, "blog-workspace");
+      assert.deepEqual(body.task_window_claims?.map((claim) => ({
+        task_id: claim.task_id,
+        window_id: claim.window_id,
+        app_bundle: claim.app_bundle,
+        title_prefix: claim.title_prefix,
+        source: claim.source,
+      })), [
+        {
+          task_id: "task_blog",
+          window_id: "101",
+          app_bundle: "ghostty",
+          title_prefix: "[task:blog] codex",
+          source: "onboarding_approval",
+        },
+        {
+          task_id: "task_blog",
+          window_id: "102",
+          app_bundle: "google chrome",
+          title_prefix: "blog draft",
+          source: "onboarding_approval",
+        },
+      ]);
+      const taskWindowClaims = await store.listTaskWindowClaims({ now: new Date("2026-05-06T12:01:00.000Z"), taskId: "task_blog" });
+      assert.deepEqual(taskWindowClaims.map((claim) => claim.window_id).sort(), ["101", "102"]);
       assert.deepEqual(bindings, [{ task_session_id: "codex_thread_blog", task_id: "task_blog" }]);
       assert.deepEqual(body.bindings, [{ ok: true, task_session_id: "codex_thread_blog", task_id: "task_blog" }]);
       assert.equal(body.browser_context_bindings.length, 1);

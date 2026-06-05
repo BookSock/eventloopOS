@@ -4,6 +4,7 @@ export const humanDemoPassFailLabels = Object.freeze([
   "Moving shared TextEdit is remembered after 2-3 seconds",
   "Metrics paper brings same TextEdit to metrics position",
   "Customer paper brings same TextEdit back to customer position",
+  "Background window containment proof passed",
   "Paper briefing strip shows current decision",
   "Rectangle hotkeys feel usable",
   "Manual Mode entry/return works",

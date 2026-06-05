@@ -220,6 +220,7 @@ type ApprovalSuccess = {
     task?: unknown;
     task_layout?: unknown;
     task_created?: boolean;
+    task_window_claims?: unknown[];
     queue_item?: unknown;
     review_packet?: unknown;
     warnings: string[];
@@ -291,6 +292,9 @@ async function processOnboardingApproval(
     selectedSnapshot,
     now: input.now,
   });
+  const taskWindowClaims = selectedSnapshot
+    ? await claimApprovedTaskWindows(input, validation.taskId, selectedSnapshot)
+    : [];
   const browserContextBindings = await bindBrowserContextsToTask(input, validation, resolved.browserContexts);
   const queuedPaper = validation.queuePaper
     ? await queueOnboardingPaper(input, validation, resolved.proposalTitle)
@@ -332,11 +336,31 @@ async function processOnboardingApproval(
       task: taskCreation?.task,
       task_layout: taskCreation?.layout,
       task_created: taskCreation?.created,
+      task_window_claims: taskWindowClaims,
       queue_item: queuedPaper?.queue_item,
       review_packet: queuedPaper?.review_packet,
       warnings,
     },
   };
+}
+
+async function claimApprovedTaskWindows(
+  input: { runtime: Runtime; now: Date },
+  taskId: string,
+  selectedSnapshot: WorkspaceSnapshot,
+): Promise<unknown[]> {
+  const claims = [];
+  for (const window of selectedSnapshot.windows) {
+    claims.push(await input.runtime.store.claimTaskWindow({
+      taskId,
+      windowId: String(window.id),
+      appBundle: window.appBundleId || window.app,
+      titlePrefix: window.title,
+      source: "onboarding_approval",
+      now: input.now,
+    }));
+  }
+  return claims;
 }
 
 async function createOnboardingTaskIfPossible(input: {

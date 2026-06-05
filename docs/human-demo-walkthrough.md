@@ -20,6 +20,7 @@ The setup script:
 - queues exactly two papers,
 - proves the shared TextEdit window restores to different positions per paper,
 - proves ambient autosave updates future queue context after the shared window moves,
+- proves a background/foreign paper window is moved back to its owning paper,
 - captures a local Screen Sharing window-only screenshot, or falls back to a lab Mac desktop capture when Screen Sharing is unavailable.
 
 Before handing the keyboard to Jason, run a non-destructive readiness check:
@@ -107,17 +108,20 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 9. Click `Review Demo Customer Reply` again.
 10. Press `Ctrl-Option-R`.
 11. Confirm the same TextEdit window returns to the customer position.
-12. Confirm the Queue detail starts with a compact briefing strip that repeats
+12. Confirm the setup proof reports background window containment passed:
+    Metrics Chrome was intentionally moved into the Customer paper and
+    eventloopOS moved it back to the Metrics paper.
+13. Confirm the Queue detail starts with a compact briefing strip that repeats
     the current paper title, exact decision needed, task id, priority, and
     session/binding state.
-13. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
-14. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
+14. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
+15. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
     confirm the Queue footer acknowledges `No paper selected.` instead of
     staying silent.
-15. Press `Ctrl-Option-M` to enter Manual Mode.
-16. Open or move a dummy app.
-17. Press `Ctrl-Option-M`.
-18. Confirm eventloopOS restores the saved paper context and Queue remains usable.
+16. Press `Ctrl-Option-M` to enter Manual Mode.
+17. Open or move a dummy app.
+18. Press `Ctrl-Option-M`.
+19. Confirm eventloopOS restores the saved paper context and Queue remains usable.
 
 ## What To Report
 
@@ -170,6 +174,7 @@ Pass/fail:
 - Moving shared TextEdit is remembered after 2-3 seconds:
 - Metrics paper brings same TextEdit to metrics position:
 - Customer paper brings same TextEdit back to customer position:
+- Background window containment proof passed:
 - Paper briefing strip shows current decision:
 - Rectangle hotkeys feel usable:
 - Manual Mode entry/return works:
