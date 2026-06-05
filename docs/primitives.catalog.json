@@ -850,7 +850,7 @@
       "required": ["task_id"],
       "properties": {
         "task_id": { "type": "string", "minLength": 1, "pattern": "^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$" },
-        "terminal_ref": { "type": "string", "pattern": "^(ghostty|tmux|kitty|wezterm):" }
+        "terminal_ref": { "type": "string", "pattern": "^(ghostty|tmux):" }
       }
     },
     "TaskSessionBindingResponse": {
@@ -2586,7 +2586,12 @@
         { "method": "POST", "path": "/task-messages/reconcile-attempted", "route_file": "app/orchestrator/src/routes/task_sessions.ts", "request_schema": "TaskMessagesReconcileAttemptedRequest", "response_schema": "TaskMessagesReconcileAttemptedResponse" }
       ],
       "cli": ["pnpm task:sessions", "pnpm task:bind", "pnpm task:messages", "pnpm task:replace"],
-      "code": ["app/orchestrator/src/task_sessions/types.ts", "app/orchestrator/src/task_sessions/pid_fields.ts", "app/orchestrator/src/routes/task_sessions.ts"],
+      "code": [
+        "app/orchestrator/src/task_sessions/types.ts",
+        "app/orchestrator/src/task_sessions/pid_fields.ts",
+        "app/orchestrator/src/routes/task_sessions.ts",
+        "docs/task-session-provider-compatibility.md"
+      ],
       "proofs": [
         "app/orchestrator/src/task_sessions/task_session_cli.test.ts",
         "app/orchestrator/src/task_sessions/codex_app_server_thread_client.test.ts",

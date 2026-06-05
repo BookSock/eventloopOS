@@ -1392,7 +1392,7 @@ export type TaskSessionReplacementResponse = z.infer<typeof TaskSessionReplaceme
 export const TaskSessionBindingRequestSchema = z
   .object({
     task_id: id.regex(/^task_[a-zA-Z0-9][a-zA-Z0-9_-]*$/),
-    terminal_ref: z.string().regex(/^(ghostty|tmux|kitty|wezterm):/i).optional()
+    terminal_ref: z.string().regex(/^(ghostty|tmux):/i).optional()
   })
   .passthrough();
 export type TaskSessionBindingRequest = z.infer<typeof TaskSessionBindingRequestSchema>;

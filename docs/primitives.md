@@ -680,14 +680,19 @@ Useful standalone uses:
 - detect stale/lost task sessions and create human papers
 - expose normalized `root_pid`/`pids` for Codex, Claude, and fake sessions so
   process-tree window claims can attribute agent-spawned windows
+- use only execution-backed `terminal_ref` schemes: `ghostty:` and `tmux:`.
+  Keep unsupported terminal apps as provider metadata until a send executor is
+  implemented.
 
 Proof:
 
 - `app/orchestrator/src/task_sessions/*.test.ts`
 - `bin/task-runtime-smoke`
 - `bin/event-loop-codex-completion-workspace-proof-smoke`
+- `docs/task-session-provider-compatibility.md`
 
-Status: dogfood; provider schemas still need clearer compatibility docs.
+Status: dogfood; provider compatibility is documented and schema-gated for the
+current Codex, Claude, fake, terminal, and composite controllers.
 
 ## Context Capture And Restore
 
@@ -971,8 +976,11 @@ Highest-leverage steps before calling this a real primitives library:
    follows-window, reading-queue, onboarding, context-restore, and trigger
    primitives, with route-coverage tests across every cataloged HTTP
    primitive.
-2. Split `@eventloopos/orchestrator` into public contracts and private server
-   implementation packages.
+2. Keep splitting public contracts away from private server implementation
+   details. The current builder-facing boundary is `@eventloopos/shared`,
+   `docs/primitives.catalog.json`, `docs/primitives.openapi.json`,
+   `docs/primitives.index.json`, and provider compatibility docs such as
+   `docs/task-session-provider-compatibility.md`.
 3. Keep `bin/human-demo-ready`'s default macOS hotkey-latency gate green before
    release demos; use `--skip-hotkey-latency` only for Accessibility bootstrap.
 4. Grow the generic `WorkspaceCommand` envelope into richer backend-specific

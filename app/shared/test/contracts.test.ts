@@ -14,6 +14,7 @@ import {
   PrimitiveCatalogSchema,
   ReviewPacketSchema,
   TaskWindowClaimCreateRequestSchema,
+  TaskSessionBindingRequestSchema,
   WorkspaceSnapshotResourceSchema,
   getPrimitive,
   getPrimitiveRoute,
@@ -215,6 +216,13 @@ describe("contract schemas", () => {
         ignored_future_field: true
       }).active
     ).toBe(true);
+
+    expect(
+      TaskSessionBindingRequestSchema.safeParse({
+        task_id: "task_demo",
+        terminal_ref: "kitty:demo"
+      }).success
+    ).toBe(false);
   });
 
   it("allows failed context restore requests for retryable browser failures", () => {
@@ -788,6 +796,22 @@ describe("primitive catalog SDK boundary", () => {
         kind: "unknown_query_param",
         parameter: "sttae"
       });
+    }
+
+    try {
+      buildPrimitiveRequest({
+        catalog,
+        method: "PUT",
+        path: "/task-sessions/:id/task-binding",
+        pathParams: { id: "codex_thread_123" },
+        body: { task_id: "task_demo", terminal_ref: "kitty:demo" }
+      });
+      throw new Error("expected invalid terminal_ref");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PrimitiveRequestBuildError);
+      const primitiveError = error as PrimitiveRequestBuildError;
+      expect(primitiveError.kind).toBe("request_body_invalid");
+      expect(primitiveError.cause).toBeTruthy();
     }
 
     try {

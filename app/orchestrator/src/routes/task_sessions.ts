@@ -1030,8 +1030,8 @@ function validateTaskBindingRequest(input: unknown): { ok: true; taskId: string;
     if (trimmed.length > 200) {
       return { ok: false, message: "terminal_ref must be 200 characters or fewer" };
     }
-    if (!/^(ghostty|tmux|kitty|wezterm):/i.test(trimmed)) {
-      return { ok: false, message: "terminal_ref must start with ghostty:, tmux:, kitty:, or wezterm:" };
+    if (!/^(ghostty|tmux):/i.test(trimmed)) {
+      return { ok: false, message: "terminal_ref must start with ghostty: or tmux:" };
     }
     terminalRef = trimmed;
   }

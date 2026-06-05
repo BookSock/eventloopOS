@@ -14,7 +14,7 @@ export type TerminalSendOptions = {
 };
 
 export type TerminalSendResult =
-  | { ok: true; commandCount: number; transport: "ghostty" | "tmux" | "kitty" | "wezterm" | "unknown" }
+  | { ok: true; commandCount: number; transport: "ghostty" | "tmux" | "unknown" }
   | { ok: false; reason: "disabled" | "no_terminal_ref" | "no_executor" | "build_failed" | "execute_failed"; error?: string };
 
 export async function triggerTerminalKeystroke(options: TerminalSendOptions): Promise<TerminalSendResult> {
@@ -118,11 +118,9 @@ export function appleScriptString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, "\\\"")}"`;
 }
 
-function terminalTransport(terminalRef: string): "ghostty" | "tmux" | "kitty" | "wezterm" | "unknown" {
+function terminalTransport(terminalRef: string): "ghostty" | "tmux" | "unknown" {
   const lowered = terminalRef.toLowerCase();
   if (lowered.startsWith("ghostty:")) return "ghostty";
   if (lowered.startsWith("tmux:")) return "tmux";
-  if (lowered.startsWith("kitty:")) return "kitty";
-  if (lowered.startsWith("wezterm:")) return "wezterm";
   return "unknown";
 }

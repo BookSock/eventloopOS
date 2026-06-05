@@ -354,7 +354,8 @@
       "x-eventloopos-code": [
         "app/orchestrator/src/routes/task_sessions.ts",
         "app/orchestrator/src/task_sessions/pid_fields.ts",
-        "app/orchestrator/src/task_sessions/types.ts"
+        "app/orchestrator/src/task_sessions/types.ts",
+        "docs/task-session-provider-compatibility.md"
       ],
       "x-eventloopos-proofs": [
         "app/orchestrator/src/task_sessions/claude_cli_task_session_controller.test.ts",
@@ -8378,7 +8379,7 @@
             "type": "string"
           },
           "terminal_ref": {
-            "pattern": "^(ghostty|tmux|kitty|wezterm):",
+            "pattern": "^(ghostty|tmux):",
             "type": "string"
           }
         },

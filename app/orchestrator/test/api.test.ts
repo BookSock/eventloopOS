@@ -2549,6 +2549,17 @@ describe("orchestrator gateway API", () => {
         body: JSON.stringify({ task_id: "blog feedback" }),
       });
       assert.equal(malformed.status, 400);
+
+      const unsupportedTerminal = await fetch(`${taskBaseUrl}/task-sessions/codex_thread_abc/task-binding`, {
+        method: "PUT",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ task_id: "task_blog_feedback", terminal_ref: "kitty:demo" }),
+      });
+      const unsupportedBody = await unsupportedTerminal.json() as { error?: { message?: string } };
+      assert.equal(unsupportedTerminal.status, 400);
+      assert.match(unsupportedBody.error?.message ?? "", /terminal_ref must start with ghostty: or tmux:/);
     } finally {
       await new Promise<void>((resolve, reject) => {
         taskServer.close((error) => (error ? reject(error) : resolve()));
