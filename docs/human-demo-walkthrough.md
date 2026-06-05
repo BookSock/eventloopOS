@@ -31,13 +31,15 @@ bin/human-demo-ready
 This does not restart or reseed the demo. It checks the current lab dogfood stack,
 verifies the latest human-demo proof artifact, captures only the local Screen
 Sharing window, and writes `artifacts/lab-runs/*-human-demo-ready/READY.md`.
-Run `bin/human-demo-ready` after the queue app has Accessibility permission.
-It also writes read-only queue/master latency and workspace capture/restore-plan
-latency manifests, so demo readiness proves the Queue path and workspace path
-are responsive without mutating the active paper. On macOS it includes a live
-hotkey-to-feedback p95 latency gate in the readiness artifact by running the
-latency probe on the Mac Studio. Use `--skip-hotkey-latency` only while
-bootstrapping permission setup.
+Run `bin/human-demo-ready` after the queue app has Accessibility permission. By
+default the latest proof must be no older than 24 hours; use
+`EVENTLOOPOS_HUMAN_DEMO_PROOF_MAX_AGE_HOURS` or
+`--demo-proof-max-age-hours` to change that window. It also writes read-only
+queue/master latency and workspace capture/restore-plan latency manifests, so
+demo readiness proves the Queue path and workspace path are responsive without
+mutating the active paper. On macOS it includes a live hotkey-to-feedback p95
+latency gate in the readiness artifact by running the latency probe on the Mac
+Studio. Use `--skip-hotkey-latency` only while bootstrapping permission setup.
 
 Latest known-good proof:
 
@@ -114,9 +116,10 @@ bin/human-demo-ready
 bin/human-demo-result-template --write
 ```
 
-The template write refuses stale or incomplete readiness by default. If it says
-readiness is not green, rerun `bin/human-demo-ready` and fix any failed gate
-before starting the human result artifact. It writes
+The template write refuses stale or incomplete readiness by default, including
+stale latest-demo proof freshness failures. If it says readiness is not green,
+rerun `bin/human-demo-ready` and fix any failed gate before starting the human
+result artifact. It writes
 `artifacts/human-demo-results/*-human-demo-result.md` with the latest proof
 manifest, proof screenshot, readiness manifest, readiness screenshot, and
 latency manifest paths. Fill the generated file after the hands-on pass. The

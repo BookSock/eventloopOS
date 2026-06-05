@@ -10,6 +10,8 @@ process.chdir(repoRoot);
 
 const args = process.argv.slice(2);
 const skipScreenshot = args.includes("--skip-screenshot");
+const allowStaleDemoProof = args.includes("--allow-stale-demo-proof") || process.env.EVENTLOOPOS_HUMAN_DEMO_ALLOW_STALE_PROOF === "1";
+const demoProofMaxAgeHours = numberOption("--demo-proof-max-age-hours", process.env.EVENTLOOPOS_HUMAN_DEMO_PROOF_MAX_AGE_HOURS ?? "24");
 const skipQueueLatency = args.includes("--skip-queue-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY === "0";
 const queueLatencyEnabled = !skipQueueLatency;
 const skipWorkspaceLatency = args.includes("--skip-workspace-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_WORKSPACE_LATENCY === "0";
@@ -20,7 +22,7 @@ const hotkeyLatencyEnabled = !skipHotkeyLatency && (hotkeyLatencyRequested || pr
 const jsonOnly = args.includes("--json");
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-queue-latency] [--skip-workspace-latency] [--skip-hotkey-latency] [--hotkey-latency] [--json]
+  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-queue-latency] [--skip-workspace-latency] [--skip-hotkey-latency] [--hotkey-latency] [--demo-proof-max-age-hours n] [--allow-stale-demo-proof] [--json]
 
 Check current Mac Studio human-demo readiness without resetting demo state.
 Includes read-only queue/master and workspace capture/restore-plan latency gates
@@ -31,6 +33,8 @@ Environment:
   LAB_DOGFOOD_PROFILE  default: lab-human-demo
   LAB_DOGFOOD_URL      default: http://127.0.0.1:4480
   SCREEN_SHARING_TITLE default: Zeus
+  EVENTLOOPOS_HUMAN_DEMO_PROOF_MAX_AGE_HOURS default: 24
+  EVENTLOOPOS_HUMAN_DEMO_ALLOW_STALE_PROOF=1 skips demo proof freshness gate
   EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY=1 keeps queue latency on
   EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY=0 skips queue latency
   EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_RUNS default: 3
@@ -66,6 +70,7 @@ const dogfood = runStep("dogfood status", "bin/lab-mac-dogfood", ["status"], env
 const dogfoodManifest = extractJsonObject(dogfood.stdout);
 const template = runStep("human demo result template", "node", ["bin/human-demo-result-template", "--json"], env);
 const templateJson = extractJsonObject(template.stdout);
+const latestHumanDemoFreshness = demoProofFreshness(templateJson?.generated_at, startedAt, demoProofMaxAgeHours, allowStaleDemoProof);
 
 let screenshot;
 if (!skipScreenshot) {
@@ -90,6 +95,7 @@ const hotkeyLatencyManifest = hotkeyLatency ? readJsonIfPresent(hotkeyLatencyMan
 const checks = {
   dogfood_status_ok: dogfood.status === 0 && dogfoodManifest?.ok === true,
   latest_human_demo_proof_ok: template.status === 0 && templateJson?.ok === true,
+  latest_human_demo_proof_fresh: latestHumanDemoFreshness.ok === true,
   latest_human_demo_queue_has_two_papers: Number(templateJson?.queue_count ?? 0) >= 2,
   ambient_autosave_proof_ok: templateJson?.ambient_autosave_ok === true,
   screen_sharing_capture_ok: skipScreenshot || screenshot?.status === 0,
@@ -113,6 +119,8 @@ const manifest = {
   queue_latency_required: queueLatencyEnabled,
   workspace_latency_required: workspaceLatencyEnabled,
   hotkey_latency_required: hotkeyLatencyEnabled,
+  demo_proof_max_age_hours: demoProofMaxAgeHours,
+  allow_stale_demo_proof: allowStaleDemoProof,
   checks,
   failed_checks: failedChecks,
   dogfood_status: dogfoodManifest ? {
@@ -128,6 +136,7 @@ const manifest = {
     queue_count: templateJson.queue_count,
     ambient_autosave_ok: templateJson.ambient_autosave_ok === true,
     generated_at: templateJson.generated_at,
+    freshness: latestHumanDemoFreshness,
   } : undefined,
   screen_sharing_capture: screenshot ? {
     ok: screenshot.status === 0,
@@ -225,6 +234,17 @@ function runStep(name, command, commandArgs, envOverride) {
   };
 }
 
+function numberOption(flag, defaultValue) {
+  const index = args.indexOf(flag);
+  const raw = index === -1 ? defaultValue : args[index + 1];
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.error(`Invalid ${flag}: ${String(raw)}`);
+    process.exit(2);
+  }
+  return parsed;
+}
+
 function runHotkeyLatencyStep(manifestPath, envOverride) {
   if (process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_TARGET === "local") {
     return runStep("hotkey feedback latency", "node", [
@@ -295,6 +315,7 @@ function renderReadyMarkdown(manifest) {
   const queueLatency = manifest.queue_latency;
   const workspaceLatency = manifest.workspace_latency;
   const hotkey = manifest.hotkey_feedback_latency;
+  const freshness = latest?.freshness;
   return `# eventloopOS Human Demo Ready
 
 - Ready: ${manifest.ok ? "yes" : "no"}
@@ -302,6 +323,7 @@ function renderReadyMarkdown(manifest) {
 - URL: ${manifest.url}
 - Latest proof: ${latest?.manifest_path ?? ""}
 - Latest proof screenshot: ${latest?.screenshot_path ?? ""}
+- Latest proof freshness: ${freshness ? `${freshness.ok ? "ok" : "stale"} age=${freshness.age_hours ?? ""}h max=${freshness.max_age_hours}h${freshness.allowed_stale ? " allowed" : ""}` : ""}
 - Fresh Screen Sharing capture: ${screenshot?.output ?? "skipped"}
 - Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
 - Workspace latency: ${workspaceLatency?.manifest_path ?? "skipped"}${manifest.workspace_latency_required ? " (required)" : ""}
@@ -316,16 +338,59 @@ function utcStamp() {
   return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 }
 
+function demoProofFreshness(generatedAt, nowIso, maxAgeHours, allowStale) {
+  const generatedMs = Date.parse(String(generatedAt ?? ""));
+  const nowMs = Date.parse(nowIso);
+  if (!Number.isFinite(generatedMs) || !Number.isFinite(nowMs)) {
+    return {
+      ok: allowStale,
+      generated_at: generatedAt ?? null,
+      age_ms: null,
+      age_hours: null,
+      max_age_hours: maxAgeHours,
+      allowed_stale: allowStale,
+      reason: "missing_or_invalid_generated_at",
+    };
+  }
+  const ageMs = Math.max(0, nowMs - generatedMs);
+  const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
+  const fresh = ageMs <= maxAgeMs;
+  return {
+    ok: fresh || allowStale,
+    generated_at: generatedAt,
+    age_ms: ageMs,
+    age_hours: Number((ageMs / 60 / 60 / 1000).toFixed(3)),
+    max_age_hours: maxAgeHours,
+    allowed_stale: allowStale && !fresh,
+    reason: fresh ? "fresh" : "stale",
+  };
+}
+
 function runSelfTest() {
   const noisyJson = `prefix\n{\"ok\":true,\"queue_count\":2,\"ambient_autosave_ok\":true}`;
   assert.deepEqual(extractJsonObject(noisyJson), { ok: true, queue_count: 2, ambient_autosave_ok: true });
   assert.equal(extractJsonObject("no json"), undefined);
+  assert.deepEqual(demoProofFreshness("2026-06-03T10:00:00.000Z", "2026-06-03T20:00:00.000Z", 24, false), {
+    ok: true,
+    generated_at: "2026-06-03T10:00:00.000Z",
+    age_ms: 36000000,
+    age_hours: 10,
+    max_age_hours: 24,
+    allowed_stale: false,
+    reason: "fresh",
+  });
+  assert.equal(demoProofFreshness("2026-06-03T10:00:00.000Z", "2026-06-04T20:00:00.000Z", 24, false).ok, false);
+  assert.equal(demoProofFreshness("bad", "2026-06-04T20:00:00.000Z", 24, true).ok, true);
   const markdown = renderReadyMarkdown({
     ok: true,
     profile: "lab-human-demo",
     url: "http://127.0.0.1:4480",
     failed_checks: [],
-    latest_human_demo: { manifest_path: "artifacts/lab-runs/demo/manifest.json", screenshot_path: "artifacts/lab-runs/demo/screen-sharing.png" },
+    latest_human_demo: {
+      manifest_path: "artifacts/lab-runs/demo/manifest.json",
+      screenshot_path: "artifacts/lab-runs/demo/screen-sharing.png",
+      freshness: { ok: true, age_hours: 1.25, max_age_hours: 24, allowed_stale: false },
+    },
     screen_sharing_capture: { output: "artifacts/lab-runs/ready/screen-sharing.png" },
     queue_latency: { manifest_path: "artifacts/lab-runs/ready/queue-latency.json" },
     queue_latency_required: true,
@@ -335,6 +400,7 @@ function runSelfTest() {
   });
   assert.match(markdown, /Ready: yes/);
   assert.match(markdown, /artifacts\/lab-runs\/demo\/manifest\.json/);
+  assert.match(markdown, /Latest proof freshness: ok age=1.25h max=24h/);
   assert.match(markdown, /Hotkey feedback latency: skipped/);
   assert.match(markdown, /Queue latency: artifacts\/lab-runs\/ready\/queue-latency\.json/);
   assert.match(markdown, /Workspace latency: artifacts\/lab-runs\/ready\/workspace-latency\.json/);
