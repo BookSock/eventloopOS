@@ -164,6 +164,7 @@ public final class QueueViewModel: ObservableObject {
     private var autoBindLoopTask: Task<Void, Never>?
     private var autoRestoredContextPacketIds = Set<String>()
     private var paperActionInFlight = false
+    private var paperActionInFlightStatus: String?
     private var workspaceRestoreInFlight = false
     private var lastWorkspaceRestore: RecentWorkspaceRestore?
     private let workspaceRestoreRepeatWindow: TimeInterval = 2.0
@@ -544,16 +545,19 @@ public final class QueueViewModel: ObservableObject {
 
     private func beginPaperAction(_ status: String) -> Bool {
         guard !paperActionInFlight else {
-            advanceToast = .actionComplete("Already working...")
+            let currentStatus = paperActionInFlightStatus ?? "Working..."
+            advanceToast = .actionComplete("\(currentStatus) Still running.")
             return false
         }
         paperActionInFlight = true
+        paperActionInFlightStatus = status
         advanceToast = .actionComplete(status)
         return true
     }
 
     private func finishPaperAction() {
         paperActionInFlight = false
+        paperActionInFlightStatus = nil
     }
 
     private func isQueueConflict(_ error: Error) -> Bool {

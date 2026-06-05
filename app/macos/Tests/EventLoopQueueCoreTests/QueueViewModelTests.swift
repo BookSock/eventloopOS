@@ -114,6 +114,39 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.state, .loaded)
     }
 
+    func testRapidDoneNextShowsSpecificInFlightFeedback() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: SeededQueue.blogFeedbackWorkspace,
+            captureDelayNanoseconds: 100_000_000
+        )
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+
+        await viewModel.pullNextPaper()
+
+        let firstDone = Task { @MainActor in
+            await viewModel.doneAndNext()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Completing paper..."))
+        let firstFeedbackSequence = viewModel.feedbackSequence
+
+        let secondDone = Task { @MainActor in
+            await viewModel.doneAndNext()
+        }
+        await secondDone.value
+
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Completing paper... Still running."))
+        XCTAssertGreaterThan(viewModel.feedbackSequence, firstFeedbackSequence)
+        XCTAssertEqual(client.completedPacketIds, [])
+
+        await firstDone.value
+
+        XCTAssertEqual(client.completedPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Done. Next paper ready."))
+    }
+
     func testPullNextPaperLeasesTopPacketAndPlansWorkspace() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let plan = WorkspaceRestorePlan(
