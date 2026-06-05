@@ -109,9 +109,10 @@ budgets for responsiveness-critical primitives or a combined proof plan for a
 builder-selected primitive subset with
 `node examples/primitives/discover-primitives.mjs proof-plan --id workspace_control --json`.
 `node examples/primitives/primitive-workbench-walkthrough.mjs --id workspace_control`
-turns the compact API index into a fixture-backed starter workbench: prerequisites,
-proof commands, route operation ids, schemas, and latency budgets for selected
-primitive ids or categories without needing a live orchestrator.
+turns the primitive catalog into a fixture-backed starter workbench through the
+shared proof-plan and operation-list helpers: prerequisites, proof commands,
+route operation ids, schemas, and latency budgets for selected primitive ids or
+categories without needing a live orchestrator.
 `node examples/primitives/operation-id-client.mjs list --category os_control`,
 `node examples/primitives/operation-id-client.mjs describe workspace_control_get_workspace_status`,
 and `node examples/primitives/operation-id-client.mjs workspace_control_get_workspace_status --json`

@@ -19,9 +19,9 @@ if (args.includes("-h") || args.includes("--help")) {
   node examples/primitives/primitive-workbench-walkthrough.mjs --category os_control --json
   node examples/primitives/primitive-workbench-walkthrough.mjs --catalog docs/primitives.catalog.json --id queue_paper_routing
 
-Builds a starter workbench from the primitive API index: selected primitives,
-routes, schemas, self-test commands, and latency proof hooks. No live
-orchestrator is required.
+Builds a starter workbench from the primitive catalog: selected primitives,
+stable route operation ids, schemas, self-test commands, and latency proof
+hooks. No live orchestrator is required.
 `);
   process.exit(0);
 }
@@ -39,7 +39,6 @@ if (options.json) {
 }
 
 function buildWalkthrough(sdk, catalog, catalogPath, options) {
-  const apiIndex = sdk.buildPrimitiveApiIndex(catalog);
   const filter = {
     ids: options.ids,
     categories: options.categories,
@@ -50,7 +49,11 @@ function buildWalkthrough(sdk, catalog, catalogPath, options) {
   };
   const proofPlan = sdk.buildPrimitiveProofPlan(catalog, filter);
   const selected = new Set(proofPlan.selectedPrimitiveIds);
-  const primitives = apiIndex.primitives
+  const operationRoutesByPrimitive = groupOperationsByPrimitive(
+    sdk.listPrimitiveOperations(catalog).filter((route) => selected.has(route.primitiveId))
+  );
+  const latencyBudgetsByPrimitive = groupLatencyBudgetsByPrimitive(proofPlan.latencyBudgets);
+  const primitives = proofPlan.primitives
     .filter((primitive) => selected.has(primitive.id))
     .map((primitive) => ({
       id: primitive.id,
@@ -58,19 +61,21 @@ function buildWalkthrough(sdk, catalog, catalogPath, options) {
       status: primitive.status,
       category: primitive.category,
       summary: primitive.summary,
-      route_count: primitive.routes.length,
-      routes: primitive.routes.map((route) => ({
+      route_count: primitive.routeCount,
+      routes: (operationRoutesByPrimitive.get(primitive.id) ?? []).map((route) => ({
         operation: route.operation,
-        method: route.method,
-        path: route.path,
-        request_schema: route.requestSchema ?? null,
-        response_schema: route.responseSchema,
-        query_parameters: route.queryParameters,
-        latency_budgets: route.latencyBudgets.map((budget) => budget.name),
+        method: route.route.method,
+        path: route.route.path,
+        request_schema: schemaReferenceName(route.route.request_schema),
+        response_schema: schemaReferenceName(route.route.response_schema) ?? "FreeformJsonObject",
+        query_parameters: queryParameterNames(route.route),
+        latency_budgets: (latencyBudgetsByPrimitive.get(primitive.id) ?? [])
+          .filter((budget) => budget.route === `${route.route.method} ${route.route.path}`)
+          .map((budget) => budget.name),
       })),
-      self_tests: primitive.selfTests,
-      proofs: primitive.proofs,
-      latency_budgets: primitive.latencyBudgets.map((budget) => ({
+      self_tests: selfTestsForPrimitive(catalog, primitive.id),
+      proofs: proofsForPrimitive(catalog, primitive.id),
+      latency_budgets: (latencyBudgetsByPrimitive.get(primitive.id) ?? []).map((budget) => ({
         name: budget.name,
         p95_ms: budget.p95Ms,
         proof: budget.proof,
@@ -81,7 +86,7 @@ function buildWalkthrough(sdk, catalog, catalogPath, options) {
   return {
     ok: proofPlan.missingPrimitiveIds.length === 0,
     catalog: catalogPath,
-    source_index: "docs/primitives.index.json",
+    source_catalog: "docs/primitives.catalog.json",
     selected_primitive_ids: proofPlan.selectedPrimitiveIds,
     missing_primitive_ids: proofPlan.missingPrimitiveIds,
     primitive_count: primitives.length,
@@ -97,6 +102,52 @@ function buildWalkthrough(sdk, catalog, catalogPath, options) {
     ],
     primitives,
   };
+}
+
+function groupOperationsByPrimitive(operationRoutes) {
+  const grouped = new Map();
+  for (const route of operationRoutes) {
+    const routes = grouped.get(route.primitiveId) ?? [];
+    routes.push(route);
+    grouped.set(route.primitiveId, routes);
+  }
+  for (const routes of grouped.values()) {
+    routes.sort((left, right) => left.operation.localeCompare(right.operation));
+  }
+  return grouped;
+}
+
+function groupLatencyBudgetsByPrimitive(latencyBudgets) {
+  const grouped = new Map();
+  for (const budget of latencyBudgets) {
+    const budgets = grouped.get(budget.primitiveId) ?? [];
+    budgets.push(budget);
+    grouped.set(budget.primitiveId, budgets);
+  }
+  return grouped;
+}
+
+function primitiveDefinition(catalog, primitiveId) {
+  return catalog.primitives.find((primitive) => primitive.id === primitiveId);
+}
+
+function selfTestsForPrimitive(catalog, primitiveId) {
+  return [...(primitiveDefinition(catalog, primitiveId)?.self_tests ?? [])].sort((left, right) => left.localeCompare(right));
+}
+
+function proofsForPrimitive(catalog, primitiveId) {
+  return [...(primitiveDefinition(catalog, primitiveId)?.proofs ?? [])].sort((left, right) => left.localeCompare(right));
+}
+
+function queryParameterNames(route) {
+  return (route.query_parameters ?? route.parameters ?? [])
+    .map((parameter) => parameter.name)
+    .sort((left, right) => left.localeCompare(right));
+}
+
+function schemaReferenceName(schema) {
+  if (typeof schema === "string") return schema;
+  return schema?.$ref?.split("/").at(-1) ?? null;
 }
 
 function parseArgs(argv) {

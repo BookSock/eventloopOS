@@ -25,7 +25,7 @@ node examples/primitives/window-hotkey-router.mjs claim --task-id task_demo --wi
 Examples:
 
 - `discover-primitives.mjs`: inspect the primitive catalog, self-test command coverage, latency budgets, and combined proof plans through the shared `@eventloopos/shared/primitives` SDK before choosing which API surfaces to build on. If `app/shared/dist` is missing in a clean checkout, it builds the shared package on demand.
-- `primitive-workbench-walkthrough.mjs`: turn selected primitive ids/categories into a starter workbench with prerequisites, proof commands, route operations, schemas, and latency budgets, backed by `examples/primitives/fixtures/workbench-catalog.json`.
+- `primitive-workbench-walkthrough.mjs`: turn selected primitive ids/categories into a starter workbench with prerequisites, proof commands, route operations, schemas, and latency budgets through the shared catalog/proof-plan/operation-list helpers, backed by `examples/primitives/fixtures/workbench-catalog.json`.
 - `operation-id-client.mjs`: list/describe cataloged operation ids and call any HTTP primitive by stable operation id, with path/query/body options and shared SDK request/response validation.
 - `restore-my-desk.mjs`: save, preview, and restore a workspace snapshot.
 - `agent-attention-queue.mjs`: list, boost, and defer attention papers.

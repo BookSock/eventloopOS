@@ -68,7 +68,8 @@ function auditPrimitiveExamples(examplesDir) {
       }
       rejectIncludes(text, "execFileSync", "discover-primitives must not duplicate shared SDK build loader", errors);
       if (file === "primitive-workbench-walkthrough.mjs") {
-        requireIncludes(text, "buildPrimitiveApiIndex", "primitive-workbench-walkthrough must use compact primitive API index", errors);
+        requireIncludes(text, "listPrimitiveOperations", "primitive-workbench-walkthrough must use shared operation-list helper", errors);
+        requireIncludes(text, "buildPrimitiveProofPlan", "primitive-workbench-walkthrough must use shared proof-plan helper", errors);
         requireIncludes(text, "examples/primitives/fixtures/workbench-catalog.json", "primitive-workbench-walkthrough must have fixture-backed self-test", errors);
       }
       if (file === "operation-id-client.mjs") {
@@ -130,7 +131,8 @@ if (process.argv.includes("--self-test")) {}
   fs.mkdirSync(path.join(examplesDir, "fixtures"), { recursive: true });
   fs.writeFileSync(path.join(examplesDir, "primitive-workbench-walkthrough.mjs"), `
 import { loadPrimitiveSdk } from "./lib/primitive-sdk-loader.mjs";
-const helper = "buildPrimitiveApiIndex";
+const operationListHelper = "listPrimitiveOperations";
+const proofPlanHelper = "buildPrimitiveProofPlan";
 const fixture = "examples/primitives/fixtures/workbench-catalog.json";
 if (process.argv.includes("--self-test")) {}
 `);
