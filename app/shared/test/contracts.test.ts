@@ -26,6 +26,7 @@ import {
   buildPrimitiveProofPlan,
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
+  createPrimitiveOperationHttpClient,
   createPrimitiveOperationsClient,
   getPrimitiveOperation,
   isPrimitiveHttpError,
@@ -826,6 +827,46 @@ describe("primitive catalog SDK boundary", () => {
         body: expect.stringContaining("idem_onboarding_batch")
       }
     ]);
+  });
+
+  it("creates a primitive operation HTTP client for stable operation ids", async () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const responseBody = readFixture(join(fixturesDir, "valid/queue_lineage_response.json")).data;
+    const calls: Array<{ url: string; method?: string }> = [];
+    const fakeFetch: typeof fetch = async (url, init) => {
+      calls.push({
+        url: String(url),
+        method: init?.method
+      });
+      return new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    };
+    const client = createPrimitiveOperationHttpClient({
+      catalog,
+      baseUrl: "http://127.0.0.1:4480",
+      fetch: fakeFetch
+    });
+
+    const result = await client.requestOperation("queue_paper_routing_get_queue_by_id_lineage", {
+      pathParams: { id: "qit_feedback_001" },
+      query: { limit: 25 },
+      strictQuery: true
+    });
+
+    expect(result).toMatchObject({ lineage: { queue_item: { id: "qit_feedback_001" } } });
+    expect(calls).toEqual([
+      {
+        url: "http://127.0.0.1:4480/queue/qit_feedback_001/lineage?limit=25",
+        method: "GET"
+      }
+    ]);
+
+    await expect(client.requestOperation("queue_paper_routing_get_queue_by_id_missing")).rejects.toMatchObject({
+      kind: "unknown_operation",
+      parameter: "queue_paper_routing_get_queue_by_id_missing"
+    });
   });
 
   it("exposes typed primitive HTTP failures with status, route, and payload", async () => {

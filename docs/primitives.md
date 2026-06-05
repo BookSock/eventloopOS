@@ -84,6 +84,8 @@ The shared SDK also resolves stable operation ids from
 `getPrimitiveOperation` and `buildPrimitiveOperationRequest`, so generated
 tools can target `queue_paper_routing_get_queue_by_id_lineage`-style operations
 without hard-coding method/path pairs.
+`createPrimitiveOperationHttpClient` executes the same operation ids over HTTP
+with request/response validation and typed timeout/status/schema errors.
 The SDK now exports guard helpers for every recoverable primitive error class:
 `isPrimitiveHttpError`, `isPrimitiveRequestBuildError`,
 `isPrimitiveResponseParseError`, `isPrimitiveResponseValidationError`, and

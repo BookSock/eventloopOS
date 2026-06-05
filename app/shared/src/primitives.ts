@@ -371,6 +371,13 @@ export type PrimitiveHttpClient = {
   ): Promise<T>;
 };
 
+export type PrimitiveOperationHttpClient = PrimitiveHttpClient & {
+  requestOperation<T = unknown>(
+    operation: string,
+    input?: PrimitiveOperationHttpClientRequestOptions
+  ): Promise<T>;
+};
+
 export type PrimitiveQueueListOptions = {
   state?: "ready" | "leased" | "deferred" | "done" | "dead";
 };
@@ -507,6 +514,9 @@ export type PrimitiveHttpClientRequestRuntimeOptions = {
 };
 export type PrimitiveHttpClientRequestOptions =
   & Omit<PrimitiveRequestBuildInput, "catalog" | "method" | "path" | "baseUrl">
+  & PrimitiveHttpClientRequestRuntimeOptions;
+export type PrimitiveOperationHttpClientRequestOptions =
+  & Omit<PrimitiveOperationRequestBuildInput, "catalog" | "operation" | "baseUrl">
   & PrimitiveHttpClientRequestRuntimeOptions;
 
 export type PrimitiveHttpClientOptions = {
@@ -980,6 +990,26 @@ export function createPrimitiveHttpClient(options: PrimitiveHttpClientOptions): 
           }
         );
       }
+    }
+  };
+}
+
+export function createPrimitiveOperationHttpClient(options: PrimitiveHttpClientOptions): PrimitiveOperationHttpClient {
+  const client = createPrimitiveHttpClient(options);
+  return {
+    ...client,
+    async requestOperation<T = unknown>(
+      operation: string,
+      input: PrimitiveOperationHttpClientRequestOptions = {}
+    ) {
+      const route = getPrimitiveOperation(options.catalog, operation);
+      if (!route) {
+        throw new PrimitiveRequestBuildError(`Unknown primitive operation: ${operation}`, {
+          kind: "unknown_operation",
+          parameter: operation
+        });
+      }
+      return client.request<T>(route.route.method, route.route.path, input);
     }
   };
 }

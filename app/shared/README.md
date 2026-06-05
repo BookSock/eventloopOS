@@ -27,6 +27,7 @@ import {
   buildPrimitiveProofPlan,
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
+  createPrimitiveOperationHttpClient,
   createPrimitiveOperationsClient,
   getPrimitiveOperation,
   getPrimitiveRoute,
@@ -95,6 +96,20 @@ const lineage = await client.request("GET", "/queue/:id/lineage", {
   timeoutMs: 1_500
 });
 
+const operationClient = createPrimitiveOperationHttpClient({
+  catalog,
+  baseUrl: "http://127.0.0.1:4377",
+  timeoutMs: 5_000
+});
+const lineageByOperation = await operationClient.requestOperation(
+  "queue_paper_routing_get_queue_by_id_lineage",
+  {
+    pathParams: { id: "qit_feedback_001" },
+    query: { limit: 25 },
+    strictQuery: true
+  }
+);
+
 const ops = createPrimitiveOperationsClient({
   catalog,
   baseUrl: "http://127.0.0.1:4377",
@@ -147,6 +162,9 @@ primitive subset.
 operation ids from `docs/primitives.index.json` back into catalog routes and
 validated requests, so generated/LLM-authored builders can call primitives
 without hard-coding method/path pairs.
+`createPrimitiveOperationHttpClient` executes those operation ids through the
+same validating HTTP client, preserving timeout, request-build, HTTP-status,
+response-parse, and response-schema errors.
 `createPrimitiveOperationsClient` layers small typed convenience methods over
 the same validated routes for common master-command, manual-mode,
 task-workspace, queue, workspace, task-session, Codex/Claude agent,

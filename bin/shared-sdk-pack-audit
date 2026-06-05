@@ -102,6 +102,7 @@ import { ContractJsonSchemas } from "@eventloopos/shared/json-schema";
 import {
   PrimitiveCatalogSchema,
   buildPrimitiveOperationRequest,
+  createPrimitiveOperationHttpClient,
   getPrimitiveOperation,
   summarizePrimitiveCatalog
 } from "@eventloopos/shared/primitives";
@@ -149,6 +150,21 @@ assert.equal(buildPrimitiveOperationRequest({
   operation: "pack_smoke_get_health",
   baseUrl: "http://127.0.0.1:4377"
 }).url, "http://127.0.0.1:4377/health");
+const operationClient = createPrimitiveOperationHttpClient({
+  catalog,
+  baseUrl: "http://127.0.0.1:4377",
+  fetch: async (url, init) => {
+    assert.equal(String(url), "http://127.0.0.1:4377/health");
+    assert.equal(init?.method, "GET");
+    return new Response(JSON.stringify({
+      ok: true,
+      service: "eventloop-orchestrator",
+      time: "2026-05-10T12:00:00.000Z",
+      request_id: "req_health"
+    }), { status: 200 });
+  }
+});
+assert.equal((await operationClient.requestOperation("pack_smoke_get_health")).ok, true);
 `, "utf8");
     execFileSync(process.execPath, [smokePath], {
       cwd: consumerDir,
