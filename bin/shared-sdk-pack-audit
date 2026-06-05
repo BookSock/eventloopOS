@@ -99,7 +99,12 @@ function runPackedImportSmoke(tarballPath) {
 import assert from "node:assert/strict";
 import { EventSchema } from "@eventloopos/shared";
 import { ContractJsonSchemas } from "@eventloopos/shared/json-schema";
-import { PrimitiveCatalogSchema, summarizePrimitiveCatalog } from "@eventloopos/shared/primitives";
+import {
+  PrimitiveCatalogSchema,
+  buildPrimitiveOperationRequest,
+  getPrimitiveOperation,
+  summarizePrimitiveCatalog
+} from "@eventloopos/shared/primitives";
 
 assert.equal(EventSchema.parse({
   id: "evt_pack_smoke",
@@ -127,10 +132,23 @@ const catalog = PrimitiveCatalogSchema.parse({
     summary: "Packed import smoke",
     code: ["dist/index.js"],
     proofs: ["bin/shared-sdk-pack-audit"],
-    self_tests: ["pnpm --filter @eventloopos/shared pack:audit"]
+    self_tests: ["pnpm --filter @eventloopos/shared pack:audit"],
+    http: [{
+      method: "GET",
+      path: "/health",
+      route_file: "dist/index.js",
+      no_request_body: true,
+      response_schema: "HealthResponse"
+    }]
   }]
 });
 assert.equal(summarizePrimitiveCatalog(catalog).primitiveCount, 1);
+assert.equal(getPrimitiveOperation(catalog, "pack_smoke_get_health")?.route.path, "/health");
+assert.equal(buildPrimitiveOperationRequest({
+  catalog,
+  operation: "pack_smoke_get_health",
+  baseUrl: "http://127.0.0.1:4377"
+}).url, "http://127.0.0.1:4377/health");
 `, "utf8");
     execFileSync(process.execPath, [smokePath], {
       cwd: consumerDir,

@@ -22,10 +22,12 @@ import {
 import {
   bindPrimitiveOperationsClient,
   buildPrimitiveApiIndex,
+  buildPrimitiveOperationRequest,
   buildPrimitiveProofPlan,
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
   createPrimitiveOperationsClient,
+  getPrimitiveOperation,
   isPrimitiveHttpError,
   isPrimitiveRequestBuildError,
   isPrimitiveResponseParseError,
@@ -34,6 +36,7 @@ import {
   parsePrimitiveCatalog,
   primitiveErrorSummary,
   PrimitiveHttpError,
+  primitiveOperationId,
   PrimitiveRequestBuildError,
   PrimitiveResponseParseError,
   PrimitiveResponseValidationError,
@@ -513,6 +516,56 @@ describe("primitive catalog SDK boundary", () => {
       queryParameters: ["limit"],
       responseSchema: "QueueLineageResponse"
     });
+  });
+
+  it("resolves compact primitive operation ids back to validated requests", () => {
+    const catalog = parsePrimitiveCatalog(readJsonObject(primitiveCatalogPath));
+    const operation = getPrimitiveOperation(catalog, "queue_paper_routing_get_queue_by_id_lineage");
+
+    expect(operation).toMatchObject({
+      operation: "queue_paper_routing_get_queue_by_id_lineage",
+      primitiveId: "queue_paper_routing",
+      primitiveCategory: "attention_routing",
+      route: {
+        method: "GET",
+        path: "/queue/:id/lineage"
+      }
+    });
+    expect(primitiveOperationId("queue_paper_routing", "GET", "/queue/:id/lineage")).toBe(
+      "queue_paper_routing_get_queue_by_id_lineage"
+    );
+
+    const request = buildPrimitiveOperationRequest({
+      catalog,
+      operation: "queue_paper_routing_get_queue_by_id_lineage",
+      baseUrl: "http://localhost:4377",
+      pathParams: { id: "qit_feedback_001" },
+      query: { limit: 25 },
+      strictQuery: true
+    });
+
+    expect(request.method).toBe("GET");
+    expect(request.path).toBe("/queue/qit_feedback_001/lineage");
+    expect(request.url).toBe("http://localhost:4377/queue/qit_feedback_001/lineage?limit=25");
+    expect(request.route.path).toBe("/queue/:id/lineage");
+
+    expect(() =>
+      buildPrimitiveOperationRequest({
+        catalog,
+        operation: "queue_paper_routing_get_queue_by_id_missing",
+        pathParams: { id: "qit_feedback_001" }
+      })
+    ).toThrow(PrimitiveRequestBuildError);
+    try {
+      buildPrimitiveOperationRequest({
+        catalog,
+        operation: "queue_paper_routing_get_queue_by_id_missing"
+      });
+      throw new Error("expected unknown operation");
+    } catch (error) {
+      expect(error).toBeInstanceOf(PrimitiveRequestBuildError);
+      expect((error as PrimitiveRequestBuildError).kind).toBe("unknown_operation");
+    }
   });
 
   it("rejects primitive routes that drift back to freeform mutating bodies", () => {

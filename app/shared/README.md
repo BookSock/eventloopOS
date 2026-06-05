@@ -23,10 +23,12 @@ HTTP route, and each mutating route must either declare a request schema or
 ```ts
 import {
   parsePrimitiveCatalog,
+  buildPrimitiveOperationRequest,
   buildPrimitiveProofPlan,
   buildPrimitiveRequest,
   createPrimitiveHttpClient,
   createPrimitiveOperationsClient,
+  getPrimitiveOperation,
   getPrimitiveRoute,
   PrimitiveHttpError,
   isPrimitiveHttpError,
@@ -46,6 +48,7 @@ import {
 
 const catalog = parsePrimitiveCatalog(catalogJson);
 const route = getPrimitiveRoute(catalog, "POST", "/onboarding/approvals/batch");
+const operation = getPrimitiveOperation(catalog, "queue_paper_routing_get_queue_by_id_lineage");
 const summary = summarizePrimitiveCatalog(catalog);
 
 console.log(summary.statusCounts);
@@ -61,12 +64,21 @@ console.log(selectPrimitiveSelfTestCommands(catalog, ["workspace_control"]));
 console.log(selectPrimitiveLatencyBudgets(catalog, { requireResponsivenessCritical: true }));
 console.log(buildPrimitiveProofPlan(catalog, { ids: ["workspace_control"] }));
 console.log(route?.request_schema);
+console.log(operation?.route.path);
 console.log(route ? routeHasRequestBody(route) : false);
 
 const request = buildPrimitiveRequest({
   catalog,
   method: "GET",
   path: "/queue/:id/lineage",
+  pathParams: { id: "qit_feedback_001" },
+  query: { limit: 25 },
+  strictQuery: true
+});
+
+const requestFromOperation = buildPrimitiveOperationRequest({
+  catalog,
+  operation: "queue_paper_routing_get_queue_by_id_lineage",
   pathParams: { id: "qit_feedback_001" },
   query: { limit: 25 },
   strictQuery: true
@@ -131,6 +143,10 @@ responsiveness checks for selected API surfaces.
 primitive ids, de-duplicated self-test commands, and latency proof hooks in one
 object for builders that need a single verification plan before using a
 primitive subset.
+`getPrimitiveOperation` and `buildPrimitiveOperationRequest` resolve the stable
+operation ids from `docs/primitives.index.json` back into catalog routes and
+validated requests, so generated/LLM-authored builders can call primitives
+without hard-coding method/path pairs.
 `createPrimitiveOperationsClient` layers small typed convenience methods over
 the same validated routes for common master-command, manual-mode,
 task-workspace, queue, workspace, task-session, Codex/Claude agent,

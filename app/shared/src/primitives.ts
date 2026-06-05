@@ -294,6 +294,16 @@ export type PrimitiveProofPlan = {
   latencyBudgets: PrimitiveLatencyBudgetSummary[];
 };
 
+export type PrimitiveOperationRoute = {
+  operation: string;
+  primitiveId: string;
+  primitiveTitle: string;
+  primitiveStatus: string;
+  primitiveCategory: string;
+  primitiveSummary: string;
+  route: PrimitiveHttpRoute;
+};
+
 export type PrimitiveApiIndexRoute = {
   method: PrimitiveHttpMethod;
   path: string;
@@ -337,6 +347,12 @@ export type PrimitiveRequestBuildInput = {
   body?: unknown;
   headers?: Record<string, string>;
 };
+
+export type PrimitiveOperationRequestBuildInput =
+  & Omit<PrimitiveRequestBuildInput, "method" | "path">
+  & {
+    operation: string;
+  };
 
 export type PrimitiveRequest = {
   method: PrimitiveHttpMethod;
@@ -555,6 +571,7 @@ export class PrimitiveHttpError extends PrimitiveError {
 export type PrimitiveRequestBuildErrorKind =
   | "invalid_method"
   | "unknown_route"
+  | "unknown_operation"
   | "missing_path_param"
   | "missing_query_param"
   | "unknown_query_param"
@@ -753,6 +770,35 @@ export function getPrimitiveRoute(
   return primitiveRoutes(catalog).find((route) => route.method === normalizedMethod && route.path === path);
 }
 
+export function primitiveOperationId(primitiveId: string, method: string, routePath: string): string {
+  const routeName = routePath
+    .replace(/^\/+/, "")
+    .replace(/:([A-Za-z0-9_]+)/g, "by_$1")
+    .replace(/[^A-Za-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return [primitiveId, method.toLowerCase(), routeName].filter(Boolean).join("_");
+}
+
+export function getPrimitiveOperation(catalog: PrimitiveCatalog, operation: string): PrimitiveOperationRoute | undefined {
+  for (const primitive of catalog.primitives) {
+    const category = classifyPrimitiveCapability(primitive, primitive.http ?? []);
+    for (const route of primitive.http ?? []) {
+      const routeOperation = primitiveOperationId(primitive.id, route.method, route.path);
+      if (routeOperation !== operation) continue;
+      return {
+        operation: routeOperation,
+        primitiveId: primitive.id,
+        primitiveTitle: primitive.title,
+        primitiveStatus: primitive.status,
+        primitiveCategory: category,
+        primitiveSummary: primitive.summary,
+        route
+      };
+    }
+  }
+  return undefined;
+}
+
 export function buildPrimitiveRequest(input: PrimitiveRequestBuildInput): PrimitiveRequest {
   let method: PrimitiveHttpMethod;
   try {
@@ -826,6 +872,21 @@ export function buildPrimitiveRequest(input: PrimitiveRequestBuildInput): Primit
     });
   }
   return request;
+}
+
+export function buildPrimitiveOperationRequest(input: PrimitiveOperationRequestBuildInput): PrimitiveRequest {
+  const operation = getPrimitiveOperation(input.catalog, input.operation);
+  if (!operation) {
+    throw new PrimitiveRequestBuildError(`Unknown primitive operation: ${input.operation}`, {
+      kind: "unknown_operation",
+      parameter: input.operation
+    });
+  }
+  return buildPrimitiveRequest({
+    ...input,
+    method: operation.route.method,
+    path: operation.route.path
+  });
 }
 
 export function validatePrimitiveRequestBody<T = unknown>(route: PrimitiveHttpRoute, body: unknown): T {
@@ -1464,15 +1525,6 @@ function summarizePrimitiveCapability(primitive: PrimitiveDefinition): Primitive
     requestSchemaRouteCount: http.filter((route) => route.request_schema).length,
     noRequestBodyRouteCount: http.filter((route) => route.no_request_body === true).length
   };
-}
-
-function primitiveOperationId(primitiveId: string, method: string, routePath: string): string {
-  const routeName = routePath
-    .replace(/^\/+/, "")
-    .replace(/:([A-Za-z0-9_]+)/g, "by_$1")
-    .replace(/[^A-Za-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return [primitiveId, method.toLowerCase(), routeName].filter(Boolean).join("_");
 }
 
 function schemaReferenceName(value: unknown): string | undefined {
