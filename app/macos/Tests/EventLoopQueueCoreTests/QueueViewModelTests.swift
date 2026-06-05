@@ -2326,6 +2326,24 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
     }
 
+    func testStopAutomaticLeaseRenewalCancelsPendingLoop() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+
+        viewModel.startAutomaticLeaseRenewal(intervalNanoseconds: 1_000_000, maxRenewals: 100)
+
+        for _ in 0..<50 where client.renewedPacketIds.count < 2 {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        viewModel.stopAutomaticLeaseRenewal()
+        let stoppedRenewalCount = client.renewedPacketIds.count
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(client.renewedPacketIds.count, stoppedRenewalCount)
+        XCTAssertLessThan(stoppedRenewalCount, 100)
+    }
+
     func testAutomaticQueueRefreshFindsNewPackets() async {
         let client = FakeQueueClient(packets: [])
         let viewModel = QueueViewModel(client: client)
@@ -2342,6 +2360,31 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.packets.map(\.id), ["packet-blog-feedback"])
         XCTAssertNil(viewModel.selectedPacketID)
         XCTAssertEqual(client.leasedPacketIds, [])
+    }
+
+    func testStopAutomaticContextRestoreRefreshCancelsPendingLoop() async {
+        let resource = ReviewContextResource(
+            id: "ctx_browser_refresh_loop",
+            kind: "browser_tab",
+            title: "Refresh loop",
+            url: "https://example.test/refresh-loop",
+            restoreConfidence: "high"
+        )
+        let client = FakeQueueClient()
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.requestContextRestore(resource: resource)
+
+        viewModel.startAutomaticContextRestoreRefresh(intervalNanoseconds: 1_000_000, maxRefreshes: 100)
+
+        for _ in 0..<50 where client.checkedContextRestoreIds.count < 2 {
+            try? await Task.sleep(nanoseconds: 1_000_000)
+        }
+        viewModel.stopAutomaticContextRestoreRefresh()
+        let stoppedRefreshCount = client.checkedContextRestoreIds.count
+        try? await Task.sleep(nanoseconds: 20_000_000)
+
+        XCTAssertEqual(client.checkedContextRestoreIds.count, stoppedRefreshCount)
+        XCTAssertLessThan(stoppedRefreshCount, 100)
     }
 
     func testManualModePausesWorkspaceRestoreWithoutClearingQueue() async {
