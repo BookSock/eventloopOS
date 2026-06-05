@@ -57,6 +57,7 @@ function parseArgs(rawArgs) {
   };
   for (let index = 0; index < rawArgs.length; index += 1) {
     const arg = rawArgs[index];
+    if (arg === "--") continue;
     if (arg === "--json") options.json = true;
     else if (arg === "--require-latency") options.requireLatency = true;
     else if (arg === "--latency-max-age-hours") options.latencyMaxAgeHours = positiveNumber(requireValue(rawArgs, ++index, arg), arg);
@@ -258,6 +259,10 @@ function runSelfTest() {
   assert.ok(good.commands.some((command) => command.name === "catalog_self_tests"));
   assert.ok(good.commands.some((command) => command.name === "shared_sdk_pack_audit"));
   assert.match(renderManifest(good), /primitives builder gate: ok/);
+  const pnpmForwarded = parseArgs(["--", "--json", "--require-latency", "--latency-max-age-hours", "24"]);
+  assert.equal(pnpmForwarded.json, true);
+  assert.equal(pnpmForwarded.requireLatency, true);
+  assert.equal(pnpmForwarded.latencyMaxAgeHours, 24);
 
   const failed = runBuilderGate(
     {

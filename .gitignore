@@ -48,6 +48,8 @@ artifacts/product-readiness-artifact-audit/*
 artifacts/product-next/*
 artifacts/proof-repeat/*
 artifacts/primitives-self-tests/*
+artifacts/primitives-builder-gate/*
+artifacts/primitives-host-doctor/*
 artifacts/readiness-summary/*
 artifacts/lab-runs/*
 artifacts/.cache/*

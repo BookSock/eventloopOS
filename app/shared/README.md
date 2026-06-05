@@ -171,7 +171,10 @@ shape, and catalog self-test list. Add `--require-latency` to require current
 latency evidence, `--latency-max-age-hours 24` to reject stale responsiveness
 proofs, and `--run-self-tests` to execute the full cataloged primitive
 self-test set. Use `pnpm primitives:builder-gate:release` before a
-builder-facing release handoff.
+builder-facing release handoff. Use
+`pnpm --silent primitives:builder-gate:release -- --json` or pass `--manifest`
+`artifacts/primitives-builder-gate/release.json` when an agent needs
+machine-readable release evidence.
 `listPrimitiveOperations`, `getPrimitiveOperation`, and
 `buildPrimitiveOperationRequest` expose the stable operation ids from
 `docs/primitives.index.json` back into catalog routes and validated requests,

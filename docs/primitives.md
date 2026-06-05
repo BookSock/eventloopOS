@@ -56,6 +56,9 @@ handoff should execute every cataloged primitive self-test instead of only
 proving the command list. Use `pnpm primitives:builder-gate:release` for a
 release-grade primitive handoff: docs, generated artifacts, SDK pack/import
 shape, full catalog self-tests, and latency evidence no older than 24 hours.
+Use `pnpm --silent primitives:builder-gate:release -- --json` or add
+`--manifest artifacts/primitives-builder-gate/release.json` when another agent
+needs a machine-readable release gate result.
 Current catalog summary: 18 primitives, 80 HTTP routes, 8 CLI commands, 21
 self-tests, 75 proof refs, 11 latency budgets.
 Strict readiness is expected to stay green: every cataloged primitive
