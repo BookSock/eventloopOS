@@ -389,6 +389,7 @@ public final class QueueViewModel: ObservableObject {
         }
 
         selectedPacketID = packetId
+        await syncSelectedCurrentTaskIfPossible()
         await loadTaskSessionsForSelectedPacketIfNeeded()
         await prepareSelectedWorkspaceRestore()
         await requestSelectedBrowserContextRestoresIfNeeded()
@@ -463,6 +464,19 @@ public final class QueueViewModel: ObservableObject {
             workspaceSnapshot: workspaceSnapshot,
             sourceQueueItemId: selectedPacketID
         )
+    }
+
+    private func syncSelectedCurrentTaskIfPossible() async {
+        guard let taskId = selectedTaskId else {
+            return
+        }
+        do {
+            let state = try await client.setCurrentTask(taskId: taskId)
+            currentTask = state.task
+        } catch {
+            // Legacy or unbound papers may not have a task record yet; paper switching
+            // and restore should still work.
+        }
     }
 
     public func returnToEventLoopMode() async {
@@ -1933,14 +1947,18 @@ public final class QueueViewModel: ObservableObject {
             return
         }
 
-        await executeWorkspaceRestore(snapshot: snapshot, idempotencyPrefix: "mac_workspace_restore")
+        let restored = await executeWorkspaceRestore(snapshot: snapshot, idempotencyPrefix: "mac_workspace_restore")
+        if restored {
+            await syncSelectedCurrentTaskIfPossible()
+        }
     }
 
-    private func executeWorkspaceRestore(snapshot: WorkspaceSnapshot, idempotencyPrefix: String) async {
+    @discardableResult
+    private func executeWorkspaceRestore(snapshot: WorkspaceSnapshot, idempotencyPrefix: String) async -> Bool {
         guard !workspaceRestoreInFlight else {
             workspaceRestoreState = .alreadyRestoring
             advanceToast = .actionComplete("Workspace restore already running...")
-            return
+            return false
         }
 
         if let recent = lastWorkspaceRestore,
@@ -1949,7 +1967,7 @@ public final class QueueViewModel: ObservableObject {
            Date().timeIntervalSince(recent.completedAt) < workspaceRestoreRepeatWindow {
             workspaceRestoreState = .alreadyRestored(recent.receipt)
             advanceToast = .actionComplete("Workspace already restored.")
-            return
+            return true
         }
 
         workspaceRestoreInFlight = true
@@ -1973,9 +1991,11 @@ public final class QueueViewModel: ObservableObject {
                 receipt: response.receipt
             )
             advanceToast = .actionComplete("Workspace restored.")
+            return true
         } catch {
             workspaceRestoreState = .failed(error.localizedDescription)
             advanceToast = .actionComplete("Workspace restore failed: \(Self.shortStatusMessage(error.localizedDescription))")
+            return false
         }
     }
 

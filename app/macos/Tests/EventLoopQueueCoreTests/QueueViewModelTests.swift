@@ -437,6 +437,22 @@ final class QueueViewModelTests: XCTestCase {
             ),
         ]
         let client = FakeQueueClient(packets: packets)
+        client.setFakeTasks([
+            TaskRecord(
+                taskId: "task_blog",
+                primaryAnchorKind: .codexThread,
+                primaryAnchorId: "thr_blog",
+                createdAt: Date(timeIntervalSince1970: 0),
+                updatedAt: Date(timeIntervalSince1970: 0)
+            ),
+            TaskRecord(
+                taskId: "task_email",
+                primaryAnchorKind: .codexThread,
+                primaryAnchorId: "thr_email",
+                createdAt: Date(timeIntervalSince1970: 0),
+                updatedAt: Date(timeIntervalSince1970: 0)
+            ),
+        ])
         let workspaceClient = FakeWorkspaceClient(captureSnapshot: currentSnapshot)
         let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
         await viewModel.pullNextPaper()
@@ -448,6 +464,8 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.sourceQueueItemId, "packet-blog")
         XCTAssertEqual(client.taskWorkspaceSnapshotSaves.first?.workspaceSnapshot, currentSnapshot)
         XCTAssertEqual(viewModel.selectedPacketID, "packet-email")
+        XCTAssertEqual(client.setCurrentTaskRequests, ["task_email"])
+        XCTAssertEqual(viewModel.currentTask?.taskId, "task_email")
         XCTAssertEqual(workspaceClient.restorePlanSnapshots, [currentSnapshot, nextSnapshot])
     }
 
@@ -3166,6 +3184,47 @@ final class QueueViewModelTests: XCTestCase {
         }
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restored."))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+    }
+
+    func testSelectedWorkspaceRestoreSetsCurrentTaskForSelectedPaper() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+        let packet = ReviewPacket(
+            id: "packet-with-task-workspace",
+            taskId: "task_blog",
+            title: "Review with workspace",
+            summary: "Needs workspace restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: snapshot
+        )
+        let client = FakeQueueClient(packets: [packet])
+        client.setFakeTasks([
+            TaskRecord(
+                taskId: "task_blog",
+                primaryAnchorKind: .codexThread,
+                primaryAnchorId: "thr_blog",
+                createdAt: Date(timeIntervalSince1970: 0),
+                updatedAt: Date(timeIntervalSince1970: 0)
+            ),
+        ])
+        let workspaceClient = FakeWorkspaceClient()
+        let viewModel = QueueViewModel(
+            client: client,
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-with-task-workspace")
+
+        await viewModel.confirmSelectedWorkspaceRestore()
+
+        XCTAssertEqual(client.setCurrentTaskRequests, ["task_blog"])
+        XCTAssertEqual(viewModel.currentTask?.taskId, "task_blog")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restored."))
     }
 
     func testWorkspaceRestoreFailureToastShowsServerMessageWithoutHTTPPrefix() async {
