@@ -16,6 +16,30 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(client.leasedPacketIds, [])
     }
 
+    func testHotkeyBackedActionsShowFeedbackWithoutSelectedPaper() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.loadQueue()
+
+        await viewModel.doneAndNext()
+        let firstFeedbackSequence = viewModel.feedbackSequence
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("No paper selected."))
+
+        await viewModel.deferSelectedPacketForOneHour(now: Date(timeIntervalSince1970: 0))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("No paper selected."))
+        XCTAssertGreaterThan(viewModel.feedbackSequence, firstFeedbackSequence)
+
+        await viewModel.executeRecommendedActionAndNext()
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("No paper selected."))
+
+        await viewModel.moveToNext()
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("No paper selected."))
+
+        XCTAssertEqual(client.completedPacketIds, [])
+        XCTAssertEqual(client.deferredPacketIds, [])
+        XCTAssertEqual(client.leasedPacketIds, [])
+    }
+
     func testPullNextPaperLeasesSelectedPacketBeforeRenewal() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)

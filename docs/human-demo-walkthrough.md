@@ -104,10 +104,13 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 10. Press `Ctrl-Option-R`.
 11. Confirm the same TextEdit window returns to the customer position.
 12. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
-13. Press `Ctrl-Option-M` to enter Manual Mode.
-14. Open or move a dummy app.
-15. Press `Ctrl-Option-M`.
-16. Confirm eventloopOS restores the saved paper context and Queue remains usable.
+13. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
+    confirm the Queue footer acknowledges `No paper selected.` instead of
+    staying silent.
+14. Press `Ctrl-Option-M` to enter Manual Mode.
+15. Open or move a dummy app.
+16. Press `Ctrl-Option-M`.
+17. Confirm eventloopOS restores the saved paper context and Queue remains usable.
 
 ## What To Report
 
@@ -120,6 +123,7 @@ Report any of these as product issues:
 - Rectangle-style hotkeys feel surprising or conflict with another common app,
 - Manual Mode return restores the wrong workspace or loses a user-opened window unexpectedly.
 - Queue footer feedback stays stale or does not acknowledge restore/manual actions.
+- Queue hotkeys do nothing silently when no paper is selected.
 
 ## Result Template
 

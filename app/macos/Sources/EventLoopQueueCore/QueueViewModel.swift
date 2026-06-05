@@ -560,6 +560,10 @@ public final class QueueViewModel: ObservableObject {
         paperActionInFlightStatus = nil
     }
 
+    private func showNoSelectedPaperFeedback() {
+        advanceToast = .actionComplete("No paper selected.")
+    }
+
     private func beginMasterAction(_ status: String) -> Bool {
         guard masterCommandState != .sending else {
             advanceToast = .actionComplete("Master command still running.")
@@ -932,6 +936,7 @@ public final class QueueViewModel: ObservableObject {
 
     public func doneAndNext() async {
         guard let packetId = selectedPacketID else {
+            showNoSelectedPaperFeedback()
             return
         }
         guard beginPaperAction("Completing paper...") else { return }
@@ -949,6 +954,7 @@ public final class QueueViewModel: ObservableObject {
 
     public func deferSelectedPacket(until dueAt: Date) async {
         guard let packetId = selectedPacketID else {
+            showNoSelectedPaperFeedback()
             return
         }
         guard beginPaperAction("Deferring paper...") else { return }
@@ -970,6 +976,7 @@ public final class QueueViewModel: ObservableObject {
 
     public func ignoreSelectedPacket() async {
         guard let packetId = selectedPacketID else {
+            showNoSelectedPaperFeedback()
             return
         }
         guard beginPaperAction("Ignoring paper...") else { return }
@@ -987,10 +994,12 @@ public final class QueueViewModel: ObservableObject {
 
     public func executeRecommendedActionAndNext() async {
         guard let packetId = selectedPacketID else {
+            showNoSelectedPaperFeedback()
             return
         }
         guard canExecuteSelectedRecommendedAction else {
             taskBindingState = .failed(selectedRecommendedActionBlockReason ?? "Recommended action is not ready")
+            advanceToast = .actionComplete(Self.shortStatusMessage(selectedRecommendedActionBlockReason ?? "Recommended action is not ready"))
             return
         }
 
@@ -2059,6 +2068,10 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func moveToNext() async {
+        guard selectedPacketID != nil else {
+            showNoSelectedPaperFeedback()
+            return
+        }
         guard beginPaperAction("Skipping paper...") else { return }
         defer { finishPaperAction() }
 
