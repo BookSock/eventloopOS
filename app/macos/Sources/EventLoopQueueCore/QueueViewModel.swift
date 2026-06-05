@@ -990,6 +990,7 @@ public final class QueueViewModel: ObservableObject {
             _ = try await client.complete(packetId: packetId, workspaceSnapshot: workspaceSnapshot)
             try await loadNextAfterQueueAction(successToast: .actionComplete("Done. Next paper ready."))
         } catch {
+            if await recoverFromQueueActionConflict(error) { return }
             state = .failed(error.localizedDescription)
         }
     }
@@ -1008,6 +1009,7 @@ public final class QueueViewModel: ObservableObject {
             _ = try await client.deferPacket(packetId: packetId, until: dueAt, workspaceSnapshot: workspaceSnapshot)
             try await loadNextAfterQueueAction(successToast: .deferredUntil(dueAt))
         } catch {
+            if await recoverFromQueueActionConflict(error) { return }
             state = .failed(error.localizedDescription)
         }
     }
@@ -1030,6 +1032,7 @@ public final class QueueViewModel: ObservableObject {
             _ = try await client.ignorePacket(packetId: packetId, workspaceSnapshot: workspaceSnapshot)
             try await loadNextAfterQueueAction(successToast: .actionComplete("Ignored. Next paper ready."))
         } catch {
+            if await recoverFromQueueActionConflict(error) { return }
             state = .failed(error.localizedDescription)
         }
     }
@@ -1110,8 +1113,25 @@ public final class QueueViewModel: ObservableObject {
             _ = try await client.executeRecommendedAction(packetId: packetId, workspaceSnapshot: workspaceSnapshot)
             try await loadNextAfterQueueAction(successToast: .actionComplete("Sent to agent. Next paper ready."))
         } catch {
+            if await recoverFromQueueActionConflict(error) { return }
             state = .failed(error.localizedDescription)
         }
+    }
+
+    private func recoverFromQueueActionConflict(_ error: Error) async -> Bool {
+        guard isQueueConflict(error) else {
+            return false
+        }
+        packets = (try? await client.fetchQueue()) ?? packets
+        if let selectedPacketID, !packets.contains(where: { $0.id == selectedPacketID }) {
+            self.selectedPacketID = packets.first?.id
+        } else if selectedPacketID == nil {
+            selectedPacketID = packets.first?.id
+        }
+        state = .loaded
+        advanceToast = queuePausedToast(for: error)
+        await loadTaskSessionsForSelectedPacketIfNeeded()
+        return true
     }
 
     private func loadNextAfterQueueAction(successToast: AdvanceToast) async throws {

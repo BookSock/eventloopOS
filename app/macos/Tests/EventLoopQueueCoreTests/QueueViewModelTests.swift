@@ -640,6 +640,40 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Action saved. Manual Mode active; no next paper claimed."))
     }
 
+    func testDoneAndNextTreatsActionConflictAsRecoverableFeedback() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+        client.setQueueActionError(QueueClientError.httpStatus(409))
+        let beforeFeedbackSequence = viewModel.feedbackSequence
+
+        await viewModel.doneAndNext()
+
+        XCTAssertEqual(client.completedPacketIds, [])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.packets.map(\.id), ["packet-blog-feedback", "packet-ci-failed", "packet-external-send"])
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Queue paused. Try again."))
+        XCTAssertGreaterThan(viewModel.feedbackSequence, beforeFeedbackSequence)
+    }
+
+    func testDoneAndNextShowsManualModeFeedbackForActionConflict() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+        client.setQueueActionError(QueueClientError.httpStatusMessage(
+            409,
+            "manual_mode_active: queue is paused while manual mode is active"
+        ))
+
+        await viewModel.doneAndNext()
+
+        XCTAssertEqual(client.completedPacketIds, [])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Press Ctrl-Option-M to return."))
+    }
+
     func testDeferSelectedPacketShowsSuccessToastWhenNextPaperExists() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
@@ -1051,6 +1085,41 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.packets.map(\.id), ["packet-followup"])
         XCTAssertEqual(viewModel.selectedPacketID, "packet-followup")
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Action saved. Queue paused; no next paper claimed."))
+    }
+
+    func testExecuteRecommendedActionTreatsActionConflictAsRecoverableFeedback() async {
+        let routePacket = ReviewPacket(
+            id: "packet-route",
+            taskId: "task_blog_feedback",
+            title: "Route feedback",
+            summary: "Human approved agent handoff.",
+            source: "manual://review",
+            priority: 90,
+            recommendedAction: "Route to task agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let followupPacket = ReviewPacket(
+            id: "packet-followup",
+            title: "Review followup",
+            summary: "Next queued paper.",
+            source: "manual://review",
+            priority: 80,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let client = FakeQueueClient(packets: [routePacket, followupPacket])
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+        client.setQueueActionError(QueueClientError.httpStatus(409))
+
+        await viewModel.executeRecommendedActionAndNext()
+
+        XCTAssertEqual(client.executedRecommendedActions, [])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.packets.map(\.id), ["packet-route", "packet-followup"])
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-route")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Queue paused. Try again."))
     }
 
     func testRecommendedActionAvailabilityFollowsSelectedPacket() async {

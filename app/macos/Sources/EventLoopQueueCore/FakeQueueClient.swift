@@ -18,6 +18,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var leaseOrder: [String] = []
     private var renewedIds: [String] = []
     private var nextLeaseError: Error?
+    private var queueActionError: Error?
     private var contextRestoreResources: [ReviewContextResource] = []
     private var contextRestoreRequestResources: [ReviewContextResource] = []
     private var contextRestoreRequestIdempotencyKeys: [String] = []
@@ -245,6 +246,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         lock.withLock { nextLeaseError = error }
     }
 
+    public func setQueueActionError(_ error: Error?) {
+        lock.withLock { queueActionError = error }
+    }
+
     public func setBatchApprovalFailureCount(_ count: Int) {
         lock.withLock { batchApprovalFailureCount = count }
     }
@@ -270,6 +275,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     public func complete(packetId: String, workspaceSnapshot: WorkspaceSnapshot? = nil) async throws -> QueueActionResult {
         await sleepQueueActionDelayIfNeeded()
         return try lock.withLock {
+            if let error = queueActionError {
+                queueActionError = nil
+                throw error
+            }
             guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
                 throw QueueClientError.packetNotFound(packetId)
             }
@@ -284,6 +293,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     public func deferPacket(packetId: String, until dueAt: Date, workspaceSnapshot: WorkspaceSnapshot? = nil) async throws -> QueueActionResult {
         await sleepQueueActionDelayIfNeeded()
         return try lock.withLock {
+            if let error = queueActionError {
+                queueActionError = nil
+                throw error
+            }
             guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
                 throw QueueClientError.packetNotFound(packetId)
             }
@@ -299,6 +312,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     public func ignorePacket(packetId: String, workspaceSnapshot: WorkspaceSnapshot? = nil) async throws -> QueueActionResult {
         await sleepQueueActionDelayIfNeeded()
         return try lock.withLock {
+            if let error = queueActionError {
+                queueActionError = nil
+                throw error
+            }
             guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
                 throw QueueClientError.packetNotFound(packetId)
             }
@@ -313,6 +330,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     public func executeRecommendedAction(packetId: String, workspaceSnapshot: WorkspaceSnapshot? = nil) async throws -> QueueActionResult {
         await sleepQueueActionDelayIfNeeded()
         return try lock.withLock {
+            if let error = queueActionError {
+                queueActionError = nil
+                throw error
+            }
             guard let index = packets.firstIndex(where: { $0.id == packetId }) else {
                 throw QueueClientError.packetNotFound(packetId)
             }

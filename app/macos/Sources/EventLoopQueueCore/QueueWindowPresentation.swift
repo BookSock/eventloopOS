@@ -223,7 +223,11 @@ public func userFacingQueueStatusDetail(_ message: String) -> String {
         }
         let rest = normalized.dropFirst(prefix.count)
         guard let colonIndex = rest.firstIndex(of: ":") else {
-            return "HTTP \(rest)".trimmingCharacters(in: .whitespacesAndNewlines)
+            let status = String(rest).trimmingCharacters(in: .whitespacesAndNewlines)
+            if let known = knownUserFacingStatusDetail(status: status, detail: "") {
+                return known
+            }
+            return "HTTP \(status)".trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let status = rest[..<colonIndex]
         let messageStart = rest.index(after: colonIndex)
@@ -240,6 +244,9 @@ private func knownUserFacingStatusDetail(status: String, detail: String) -> Stri
     let lowered = detail.lowercased()
     guard status.trimmingCharacters(in: .whitespacesAndNewlines) == "409" else {
         return nil
+    }
+    if lowered.isEmpty {
+        return "Queue paused. Try again."
     }
     if lowered.contains("manual_mode_active") {
         return "Manual Mode active. Press Ctrl-Option-M to return."

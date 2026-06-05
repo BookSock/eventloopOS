@@ -96,6 +96,10 @@ final class QueueWindowPresentationTests: XCTestCase {
             userFacingQueueStatusDetail("Queue request failed with HTTP 503"),
             "HTTP 503"
         )
+        XCTAssertEqual(
+            userFacingQueueStatusDetail("Queue request failed with HTTP 409"),
+            "Queue paused. Try again."
+        )
     }
 
     func testActionableFailureMessageUsesCleanHTTPDetail() {
