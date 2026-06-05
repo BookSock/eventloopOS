@@ -8,6 +8,10 @@ on:
       - "docs/**/*.md"
       - "artifacts/**"
   pull_request:
+    paths-ignore:
+      - "README.md"
+      - "docs/**/*.md"
+      - "artifacts/**"
   workflow_dispatch:
 
 concurrency:
