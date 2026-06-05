@@ -106,7 +106,7 @@ describe("auto-paper codex idle integration", () => {
     assert.equal(after.items.length, beforeCount + 1, "queue grew by exactly one");
     const newItem = after.items.find((item) => item.task_id === "task_p5_integration");
     assert.ok(newItem, "queue contains item with the auto-paper task_id");
-    assert.match(newItem!.review_packet.title, /Codex thread idle/);
+    assert.match(newItem!.review_packet.title, /Codex session idle/);
   });
 
   it("does not double-emit on a second tick when the rollout is unchanged", async () => {
