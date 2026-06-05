@@ -11,7 +11,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 - Latest readiness manifest: `artifacts/lab-runs/20260605T064720Z-human-demo-ready/manifest.json`
 - Current result template/artifact writer: `bin/human-demo-result-template --write`
 - Current result verifier: `bin/human-demo-result-verify --lab-status`
-- Current closeout auditor: `bin/human-demo-completion-audit --strict`
+- Current closeout auditor: `bin/human-demo-completion-audit --strict` (JSON output includes `next_actions` with the exact result-template, verification, and closeout commands while pending)
 - Walkthrough: `docs/human-demo-walkthrough.md`
 - Mac Studio status check: `bin/lab-mac-dogfood status`
 

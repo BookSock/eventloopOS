@@ -103,6 +103,7 @@ function buildAudit(root, options = {}) {
     verification_lab_status_manifest_path: verification?.lab_status?.manifest_path ?? null,
     verification_result_sha256: verification?.result_sha256 ?? null,
     current_result_sha256: currentResultSha256 ?? null,
+    next_actions: nextActions(failedChecks, resultPath),
   };
 }
 
@@ -281,6 +282,49 @@ function completionStatus(failedChecks) {
   return "pending_readiness";
 }
 
+function nextActions(failedChecks, resultPath) {
+  if (failedChecks.length === 0) return [];
+  const actions = [];
+  if (failedChecks.includes("human_result_recorded")) {
+    actions.push({
+      id: "write_result_template",
+      command: "bin/human-demo-result-template --write",
+      expected_result_path: resultPath ?? null,
+    });
+  }
+  if (failedChecks.includes("human_result_filled")) {
+    actions.push({
+      id: "run_and_record_human_walkthrough",
+      walkthrough_path: "docs/human-demo-walkthrough.md",
+      result_path: resultPath ?? null,
+    });
+  }
+  if (
+    failedChecks.includes("verification_manifest_present")
+    || failedChecks.includes("verification_ok")
+    || failedChecks.includes("verification_matches_result")
+    || failedChecks.includes("verification_matches_current_result_content")
+    || failedChecks.includes("lab_status_checked_and_ok")
+  ) {
+    actions.push({
+      id: "verify_result_with_lab_status",
+      command: resultPath
+        ? `bin/human-demo-result-verify ${shellQuote(resultPath)} --lab-status`
+        : "bin/human-demo-result-verify artifacts/human-demo-results/<result>.md --lab-status",
+      result_path: resultPath ?? null,
+    });
+  }
+  actions.push({
+    id: "closeout_audit",
+    command: "bin/human-demo-completion-audit --strict",
+  });
+  return actions;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
 function manifestTimestamp(manifest) {
   if (!manifest || typeof manifest !== "object") return undefined;
   for (const key of ["finished_at", "generated_at", "checked_at", "verified_at", "started_at"]) {
@@ -380,6 +424,16 @@ function runSelfTest() {
   assert.equal(pending.expected_result_path, "artifacts/human-demo-results/20260605T001000Z-human-demo-result.md");
   assert.equal(pending.result_path, pending.expected_result_path);
   assert.equal(pending.verification_manifest_path, undefined);
+  assert.deepEqual(pending.next_actions.map((action) => action.id), [
+    "write_result_template",
+    "run_and_record_human_walkthrough",
+    "verify_result_with_lab_status",
+    "closeout_audit",
+  ]);
+  assert.equal(
+    pending.next_actions.find((action) => action.id === "verify_result_with_lab_status")?.command,
+    "bin/human-demo-result-verify 'artifacts/human-demo-results/20260605T001000Z-human-demo-result.md' --lab-status",
+  );
 
   const resultPath = path.join(root, "artifacts", "human-demo-results", "20260605T001000Z-human-demo-result.md");
   fs.mkdirSync(path.dirname(resultPath), { recursive: true });
@@ -408,6 +462,7 @@ ship
   const complete = buildAudit(root);
   assert.equal(complete.ok, true);
   assert.equal(complete.status, "complete");
+  assert.deepEqual(complete.next_actions, []);
 
   writeJson(readinessPath, { ok: true, finished_at: "2000-01-01T00:00:00.000Z" });
   const staleReadiness = buildAudit(root, {
