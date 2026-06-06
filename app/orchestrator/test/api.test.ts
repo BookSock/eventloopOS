@@ -5323,6 +5323,51 @@ describe("orchestrator gateway API", () => {
     assert.equal(artifacts.queue_item.review_packet_id, artifacts.review_packet.id);
   });
 
+  it("builds agent-attention review artifacts for auto-paper waiting events", () => {
+    const artifacts = buildReviewArtifactsFromEvent({
+      id: "evt_auto_paper_codex_waiting_task_checkout_status_waiting",
+      source: "auto_paper_codex_waiting",
+      source_id: "auto_paper_codex_waiting",
+      idempotency_key: "auto_paper_codex_waiting:task_checkout:status:waiting_approval",
+      occurred_at: "2026-05-06T12:00:00.000Z",
+      received_at: "2026-05-06T12:00:01.000Z",
+      actor: {
+        id: "auto_paper_agent_attention",
+        type: "system",
+        name: "Auto-paper watcher",
+      },
+      task_hint: "checkout",
+      type: "codex.task_waiting",
+      title: "Codex session waiting on task_checkout",
+      summary: "Codex session waiting for human input on task_checkout: approve final copy.",
+      raw_ref: {
+        id: "raw_evt_auto_paper_codex_waiting_task_checkout",
+        uri: "eventloopos://task-sessions/task_session_checkout",
+        media_type: "application/json",
+      },
+      links: [],
+      resources: [],
+    }, new Date("2026-05-06T12:00:02.000Z"));
+
+    assert.equal(artifacts.route_decision.target_task_id, "task_checkout");
+    assert.equal(artifacts.review_packet.task_id, "task_checkout");
+    assert.equal(
+      artifacts.review_packet.decision_needed,
+      "Agent is waiting for human input. Send followup instructions or mark handled.",
+    );
+    assert.deepEqual(artifacts.review_packet.risk_tags, []);
+    assert.equal(artifacts.review_packet.risk_level, "medium");
+    assert.equal(artifacts.review_packet.recommended_action.type, "resume_agent");
+    assert.equal(artifacts.review_packet.recommended_action.label, "Send followup to waiting agent");
+    assert.equal(artifacts.review_packet.alternate_actions[0]?.label, "Mark handled");
+    assert.equal(artifacts.queue_item.priority_score, 800);
+    assert.deepEqual(artifacts.queue_item.priority_reasons, [
+      "agent_attention",
+      "agent_waiting",
+      "task_hint_present",
+    ]);
+  });
+
   it("returns review packet by id", async () => {
     const response = await fetch(`${baseUrl}/review-packets/pkt_seed_review`);
     const body = await response.json() as {

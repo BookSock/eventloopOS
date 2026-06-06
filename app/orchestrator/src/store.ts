@@ -1024,10 +1024,15 @@ function createReviewPacketFromEvent(
   const stableEventId = stableId(event.id);
   const taskId = taskIdForHint(event.task_hint);
   const isOnboardingWorkbenchPaper = event.source === "onboarding" && event.type === "manual.review_requested";
+  const agentAttentionReason = autoPaperAgentAttentionReason(event);
   const recommendedAction: Action = {
     id: `act_${stableEventId}_review`,
     type: isOnboardingWorkbenchPaper ? "mark_done" : "resume_agent",
-    label: isOnboardingWorkbenchPaper ? "Work this paper, then Done / Next" : "Route to task agent",
+    label: isOnboardingWorkbenchPaper
+      ? "Work this paper, then Done / Next"
+      : agentAttentionReason
+        ? autoPaperRecommendedActionLabel(agentAttentionReason)
+        : "Route to task agent",
     requires_confirmation: !isOnboardingWorkbenchPaper,
     side_effect: isOnboardingWorkbenchPaper ? "none" : "local",
     payload: {
@@ -1043,10 +1048,12 @@ function createReviewPacketFromEvent(
     task_id: taskId,
     title: `Review ${event.title}`,
     summary: event.summary || event.title,
-    decision_needed: decisionNeededForRoute(routeDecision),
-    risk_level: "medium",
+    decision_needed: agentAttentionReason
+      ? autoPaperDecisionNeeded(agentAttentionReason)
+      : decisionNeededForRoute(routeDecision),
+    risk_level: agentAttentionReason === "idle" ? "low" : "medium",
     confidence: isOnboardingWorkbenchPaper ? "high" : routeDecision.confidence,
-    risk_tags: isOnboardingWorkbenchPaper ? ["onboarding_workbench"] : ["external_send"],
+    risk_tags: isOnboardingWorkbenchPaper ? ["onboarding_workbench"] : agentAttentionReason ? [] : ["external_send"],
     evidence,
     context: event.resources.map(resourceFromEvent),
     recommended_action: recommendedAction,
@@ -1054,7 +1061,7 @@ function createReviewPacketFromEvent(
       {
         id: `act_${stableEventId}_done`,
         type: "mark_done",
-        label: "Ignore for now",
+        label: agentAttentionReason ? "Mark handled" : "Ignore for now",
         requires_confirmation: false,
         side_effect: "none",
         payload: {
@@ -1272,6 +1279,43 @@ function decisionNeededForRoute(routeDecision: RouteDecision): string {
   return "Decide whether to route this new event into a task agent now.";
 }
 
+type AutoPaperAgentAttentionReason = "idle" | "waiting" | "blocked" | "lost";
+
+function autoPaperAgentAttentionReason(event: McpEvent): AutoPaperAgentAttentionReason | undefined {
+  if (!event.source.startsWith("auto_paper_")) return undefined;
+  if (event.type.endsWith(".task_idle")) return "idle";
+  if (event.type.endsWith(".task_waiting")) return "waiting";
+  if (event.type.endsWith(".task_blocked")) return "blocked";
+  if (event.type.endsWith(".task_lost")) return "lost";
+  return undefined;
+}
+
+function autoPaperDecisionNeeded(reason: AutoPaperAgentAttentionReason): string {
+  switch (reason) {
+    case "idle":
+      return "Agent has been idle. Review context, send followup instructions if needed, otherwise mark handled.";
+    case "waiting":
+      return "Agent is waiting for human input. Send followup instructions or mark handled.";
+    case "blocked":
+      return "Agent is blocked. Unblock with instructions or mark handled.";
+    case "lost":
+      return "Agent session appears lost. Send recovery instructions, start a replacement, or mark handled.";
+  }
+}
+
+function autoPaperRecommendedActionLabel(reason: AutoPaperAgentAttentionReason): string {
+  switch (reason) {
+    case "idle":
+      return "Send followup to idle agent";
+    case "waiting":
+      return "Send followup to waiting agent";
+    case "blocked":
+      return "Send unblock instructions";
+    case "lost":
+      return "Send recovery instructions";
+  }
+}
+
 function resourceFromEvent(resource: Record<string, unknown>): ContextResource {
   const id = typeof resource.id === "string" && resource.id ? resource.id : "ctx_unknown";
   const kind = typeof resource.kind === "string" && resource.kind ? resource.kind : "url";
@@ -1291,6 +1335,16 @@ function resourceFromEvent(resource: Record<string, unknown>): ContextResource {
 }
 
 function scoreEventPriority(event: McpEvent): number {
+  const agentAttentionReason = autoPaperAgentAttentionReason(event);
+  if (agentAttentionReason) {
+    const score = agentAttentionReason === "blocked" || agentAttentionReason === "lost"
+      ? 850
+      : agentAttentionReason === "waiting"
+        ? 800
+        : 760;
+    return event.task_hint ? score : score - 100;
+  }
+
   let score = 500;
   if (event.task_hint) score += 200;
   if (event.project_hint) score += 100;
@@ -1299,6 +1353,15 @@ function scoreEventPriority(event: McpEvent): number {
 }
 
 function priorityReasonsForEvent(event: McpEvent): string[] {
+  const agentAttentionReason = autoPaperAgentAttentionReason(event);
+  if (agentAttentionReason) {
+    return [
+      "agent_attention",
+      `agent_${agentAttentionReason}`,
+      event.task_hint ? "task_hint_present" : "needs_routing",
+    ];
+  }
+
   return [
     "new_background_event",
     event.source === "slack" ? "slack_message" : `${event.source}_event`,

@@ -148,6 +148,14 @@ try {
   if (!/needs user decision/i.test(item.review_packet.summary ?? "")) {
     throw new Error(`expected paper summary to include useful recent context, got: ${item.review_packet.summary}`);
   }
+  assertAgentAttentionItem(item, {
+    label: "idle",
+    priorityScore: 760,
+    priorityReason: "agent_idle",
+    riskLevel: "low",
+    decisionIncludes: "Agent has been idle.",
+    actionLabel: "Send followup to idle agent",
+  });
   if (queueAfter.items.some((i) => i.task_id === currentTaskId || i.task_id === staleTaskId)) {
     throw new Error("expected no queue items for current focused task or stale dormant task");
   }
@@ -159,6 +167,14 @@ try {
   if (!/waiting for human input/i.test(waitingItem.review_packet.summary ?? "")) {
     throw new Error(`expected waiting paper summary to mention human input, got: ${waitingItem.review_packet.summary}`);
   }
+  assertAgentAttentionItem(waitingItem, {
+    label: "waiting",
+    priorityScore: 800,
+    priorityReason: "agent_waiting",
+    riskLevel: "medium",
+    decisionIncludes: "Agent is waiting for human input.",
+    actionLabel: "Send followup to waiting agent",
+  });
   const lostItem = queueAfter.items.find((i) => i.task_id === lostTaskId);
   if (!lostItem) throw new Error("expected lost session queue item with task_id present");
   if (!/Codex session lost/i.test(lostItem.review_packet.title)) {
@@ -167,6 +183,14 @@ try {
   if (!/Native Codex thread disappeared/i.test(lostItem.review_packet.summary ?? "")) {
     throw new Error(`expected lost paper summary to mention recovery context, got: ${lostItem.review_packet.summary}`);
   }
+  assertAgentAttentionItem(lostItem, {
+    label: "lost",
+    priorityScore: 850,
+    priorityReason: "agent_lost",
+    riskLevel: "medium",
+    decisionIncludes: "Agent session appears lost.",
+    actionLabel: "Send recovery instructions",
+  });
 
   // Second tick: same idle window remains throttled, current task stays suppressed,
   // stale thread remains recoverable through the dormant marker rather than queue spam.
@@ -237,5 +261,33 @@ function assertSkipped(result, taskId, reason) {
   const skipped = result.skipped.find((entry) => entry.task_id === taskId && entry.reason === reason);
   if (!skipped) {
     throw new Error(`expected skipped ${taskId} with reason ${reason}, got ${JSON.stringify(result.skipped)}`);
+  }
+}
+
+function assertAgentAttentionItem(item, expected) {
+  assertEqual(item.priority_score, expected.priorityScore, `${expected.label} priority score`);
+  assertEqual(item.review_packet.risk_level, expected.riskLevel, `${expected.label} risk level`);
+  assertDeepEqual(item.review_packet.risk_tags, [], `${expected.label} risk tags`);
+  assertEqual(item.review_packet.recommended_action?.type, "resume_agent", `${expected.label} action type`);
+  assertEqual(item.review_packet.recommended_action?.label, expected.actionLabel, `${expected.label} action label`);
+  assertEqual(item.review_packet.alternate_actions?.[0]?.label, "Mark handled", `${expected.label} alternate action`);
+  if (!String(item.review_packet.decision_needed ?? "").includes(expected.decisionIncludes)) {
+    throw new Error(
+      `expected ${expected.label} decision text to include ${JSON.stringify(expected.decisionIncludes)}, got ${JSON.stringify(item.review_packet.decision_needed)}`,
+    );
+  }
+  const priorityReasons = item.priority_reasons ?? [];
+  for (const reason of ["agent_attention", expected.priorityReason, "task_hint_present"]) {
+    if (!priorityReasons.includes(reason)) {
+      throw new Error(`expected ${expected.label} priority reasons to include ${reason}, got ${JSON.stringify(priorityReasons)}`);
+    }
+  }
+}
+
+function assertDeepEqual(actual, expected, label) {
+  const actualJson = JSON.stringify(actual);
+  const expectedJson = JSON.stringify(expected);
+  if (actualJson !== expectedJson) {
+    throw new Error(`assertion failed [${label}]: expected ${expectedJson}, got ${actualJson}`);
   }
 }
