@@ -173,6 +173,7 @@ const checks = {
   latest_human_demo_proof_fresh: latestHumanDemoFreshness.ok === true,
   latest_human_demo_screenshot_ok: latestHumanDemoScreenshot.ok === true,
   latest_human_demo_queue_has_two_papers: Number(templateJson?.queue_count ?? 0) >= 2,
+  demo_task_sessions_bound: templateJson?.demo_task_sessions_ok === true,
   ambient_autosave_proof_ok: templateJson?.ambient_autosave_ok === true,
   new_window_autosave_proof_ok: templateJson?.new_window_autosave_ok === true,
   foreign_window_containment_proof_ok: templateJson?.foreign_window_containment_ok === true,
@@ -233,6 +234,8 @@ const manifest = {
     suggested_result_path: templateJson.suggested_output_path,
     ok: templateJson.ok === true,
     queue_count: templateJson.queue_count,
+    demo_task_session_count: templateJson.demo_task_session_count,
+    demo_task_sessions_ok: templateJson.demo_task_sessions_ok === true,
     ambient_autosave_ok: templateJson.ambient_autosave_ok === true,
     new_window_autosave_ok: templateJson.new_window_autosave_ok === true,
     foreign_window_containment_ok: templateJson.foreign_window_containment_ok === true,
@@ -1444,6 +1447,7 @@ function renderReadyMarkdown(manifest) {
 - Latest proof screenshot: ${latest?.screenshot_path ?? ""}
 - Suggested result file: ${suggestedResult}
 - Latest proof freshness: ${freshness ? `${freshness.ok ? "ok" : "stale"} age=${freshness.age_hours ?? ""}h max=${freshness.max_age_hours}h${freshness.allowed_stale ? " allowed" : ""}` : ""}
+- Demo task sessions: ${latest?.demo_task_sessions_ok === true ? "ok" : "missing"}${Number.isFinite(Number(latest?.demo_task_session_count)) ? ` count=${latest.demo_task_session_count}` : ""}
 - Opened-window autosave proof: ${latest?.new_window_autosave_ok === true ? "ok" : "missing"}
 - Foreign-window containment proof: ${latest?.foreign_window_containment_ok === true ? "ok" : "missing"}
 - Agent-spawn Chrome containment proof: ${latest?.agent_spawn_window_containment_chrome_ok === true ? "ok" : "missing"}${latest?.agent_spawn_window_containment_app ? ` app=${latest.agent_spawn_window_containment_app}` : ""}

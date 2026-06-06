@@ -115,6 +115,7 @@ windows = resolveDemoWindows(snapshot);
 await approveTask(paperCustomer, [windows.customerChrome.id]);
 await putTaskLayout(paperCustomer.taskId, customerSnapshot);
 await saveTaskWorkspaceSnapshot(paperCustomer.taskId, customerSnapshot);
+const customerTaskSession = await startDemoTaskSession(paperCustomer, customerSnapshot);
 await queuePaper(paperCustomer, "Customer asks whether eventloopOS is ready for hands-on Mac dogfood.");
 
 const metricsSnapshot = buildSnapshot(windows, "metrics");
@@ -126,6 +127,7 @@ windows = resolveDemoWindows(snapshot);
 await approveTask(paperMetrics, [windows.metricsChrome.id]);
 await putTaskLayout(paperMetrics.taskId, metricsSnapshot);
 await saveTaskWorkspaceSnapshot(paperMetrics.taskId, metricsSnapshot);
+const metricsTaskSession = await startDemoTaskSession(paperMetrics, metricsSnapshot);
 await queuePaper(paperMetrics, "Review ambient save and shared-window position behavior across papers.");
 
 const initialQueue = await listQueue();
@@ -199,6 +201,10 @@ const manifest = {
       final_visible: finalQueueWindowProof,
     },
   },
+  task_sessions: [
+    demoTaskSessionSummary(customerTaskSession),
+    demoTaskSessionSummary(metricsTaskSession),
+  ],
   hotkeys: demoHotkeys,
   walkthrough: demoWalkthrough,
   final_windows: {
@@ -1058,6 +1064,39 @@ async function approveTask(paper, windowIds) {
   const body = await response.json();
   if (!response.ok) throw new Error(`approve ${paper.taskId} HTTP ${response.status}: ${JSON.stringify(body)}`);
   return body;
+}
+
+async function startDemoTaskSession(paper, workspaceSnapshot) {
+  const response = await fetch(`${orchestratorUrl}/task-sessions`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "idempotency-key": `human-demo-task-session-${paper.taskId}-${stamp}`,
+    },
+    body: JSON.stringify({
+      task_id: paper.taskId,
+      prompt: `${paper.title}: ${paper.decisionNeeded}`,
+      queue_paper: false,
+      workspace_snapshot: workspaceSnapshot,
+    }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`start task session ${paper.taskId} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  const session = body.started?.session;
+  if (!session?.id || session.task_id !== paper.taskId) {
+    throw new Error(`start task session ${paper.taskId} returned unexpected session: ${JSON.stringify(body)}`);
+  }
+  return body.started;
+}
+
+function demoTaskSessionSummary(started) {
+  return {
+    ok: started.ok === true,
+    task_id: started.task_id,
+    task_session_id: started.task_session_id,
+    provider: started.session?.provider,
+    status: started.session?.status,
+  };
 }
 
 async function queuePaper(paper, summary) {

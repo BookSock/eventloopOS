@@ -141,6 +141,9 @@ const template = renderTemplate({
   ready,
 });
 const readiness = readinessSummary(ready);
+const demoTaskSessions = Array.isArray(manifest.task_sessions) ? manifest.task_sessions : [];
+const demoTaskSessionsOk = demoTaskSessionBound(manifest, "task_demo_customer")
+  && demoTaskSessionBound(manifest, "task_demo_metrics");
 if (outputPath) {
   if (!allowStaleReadiness && readiness.ok !== true) {
     console.error("Latest human-demo readiness is not green. Run `bin/human-demo-ready`, then retry.");
@@ -186,6 +189,8 @@ const result = {
   output_path: outputPath,
   ok: manifest.ok === true,
   queue_count: manifest.proofs?.demo_queue?.count ?? null,
+  demo_task_session_count: demoTaskSessions.length,
+  demo_task_sessions_ok: demoTaskSessionsOk,
   ambient_autosave_ok: manifest.proofs?.ambient_autosave?.ok === true,
   new_window_autosave_ok: manifest.proofs?.new_window_autosave?.ok === true,
   foreign_window_containment_ok: manifest.proofs?.foreign_window_containment?.ok === true,
@@ -203,6 +208,16 @@ if (json) {
   console.log(outputPath);
 } else {
   console.log(result.template);
+}
+
+function demoTaskSessionBound(manifest, taskId) {
+  const sessions = Array.isArray(manifest.task_sessions) ? manifest.task_sessions : [];
+  return sessions.some((session) =>
+    session?.ok === true
+      && session.task_id === taskId
+      && typeof session.task_session_id === "string"
+      && session.task_session_id.length > 0
+  );
 }
 
 function valueAfter(flag) {
