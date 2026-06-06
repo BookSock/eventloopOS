@@ -94,6 +94,8 @@ final class GlobalHotKeyController: @unchecked Sendable {
     private let returnHere: @MainActor @Sendable () -> Void
     private let toggleManualMode: @MainActor @Sendable () -> Void
     private let masterCommand: @MainActor @Sendable () -> Void
+    private let repeatDebounceInterval: TimeInterval
+    private var lastDispatchByActionKey: [UInt32: Date] = [:]
 
     init(
         advance: @escaping @MainActor @Sendable () -> Void,
@@ -103,7 +105,8 @@ final class GlobalHotKeyController: @unchecked Sendable {
         restoreWorkspace: @escaping @MainActor @Sendable () -> Void,
         returnHere: @escaping @MainActor @Sendable () -> Void,
         toggleManualMode: @escaping @MainActor @Sendable () -> Void,
-        masterCommand: @escaping @MainActor @Sendable () -> Void
+        masterCommand: @escaping @MainActor @Sendable () -> Void,
+        repeatDebounceInterval: TimeInterval = 0.30
     ) {
         self.advance = advance
         self.doneNext = doneNext
@@ -113,6 +116,7 @@ final class GlobalHotKeyController: @unchecked Sendable {
         self.returnHere = returnHere
         self.toggleManualMode = toggleManualMode
         self.masterCommand = masterCommand
+        self.repeatDebounceInterval = repeatDebounceInterval
     }
 
     deinit {
@@ -150,13 +154,12 @@ final class GlobalHotKeyController: @unchecked Sendable {
                 let controller = Unmanaged<GlobalHotKeyController>
                     .fromOpaque(userData)
                     .takeUnretainedValue()
-                guard hotKeyID.signature == GlobalHotKeyController.signature,
-                      let action = controller.action(for: hotKeyID.id) else {
+                guard hotKeyID.signature == GlobalHotKeyController.signature else {
                     return noErr
                 }
 
                 Task { @MainActor in
-                    action()
+                    _ = controller.dispatchHotKeyAction(hotKeyID: hotKeyID.id)
                 }
                 return noErr
             },
@@ -171,6 +174,40 @@ final class GlobalHotKeyController: @unchecked Sendable {
 
         for binding in Self.registeredBindings {
             registerHotKey(binding)
+        }
+    }
+
+    @MainActor
+    @discardableResult
+    func dispatchHotKeyAction(hotKeyID: UInt32, now: Date = Date()) -> Bool {
+        guard let action = action(for: hotKeyID) else {
+            return false
+        }
+
+        let actionKey = debounceKey(for: hotKeyID)
+        if repeatDebounceInterval > 0,
+           let lastDispatchedAt = lastDispatchByActionKey[actionKey] {
+            let elapsed = now.timeIntervalSince(lastDispatchedAt)
+            if elapsed >= 0, elapsed < repeatDebounceInterval {
+                return false
+            }
+        }
+
+        lastDispatchByActionKey[actionKey] = now
+        action()
+        return true
+    }
+
+    private func debounceKey(for hotKeyID: UInt32) -> UInt32 {
+        switch hotKeyID {
+        case Self.legacyAdvanceHotKeyID, Self.advanceHotKeyID:
+            return Self.advanceHotKeyID
+        case Self.legacyToggleManualModeHotKeyID, Self.toggleManualModeHotKeyID:
+            return Self.toggleManualModeHotKeyID
+        case Self.legacyMasterCommandHotKeyID, Self.masterCommandHotKeyID:
+            return Self.masterCommandHotKeyID
+        default:
+            return hotKeyID
         }
     }
 
