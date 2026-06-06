@@ -6,6 +6,7 @@ public struct QueueMenuSummary: Equatable, Sendable {
     public let modeLabel: String
     public let restoreLabel: String?
     public let workspaceRestoreLabel: String?
+    public let workspaceHealthLabel: String?
     public let manualWorkspaceLabel: String?
     public let recommendedActionBlockReason: String?
 
@@ -15,6 +16,7 @@ public struct QueueMenuSummary: Equatable, Sendable {
         queueState: QueueState,
         mode: EventLoopMode,
         contextRestoreState: ContextRestoreState,
+        workspaceHealthState: WorkspaceHealthState = .idle,
         workspaceRestoreState: WorkspaceRestoreState = .idle,
         manualWorkspaceCaptureState: ManualWorkspaceCaptureState = .idle,
         recommendedActionBlockReason: String? = nil
@@ -29,6 +31,7 @@ public struct QueueMenuSummary: Equatable, Sendable {
             title = "Queue error"
             subtitle = message
             restoreLabel = Self.restoreLabel(contextRestoreState)
+            workspaceHealthLabel = Self.workspaceHealthLabel(workspaceHealthState)
             workspaceRestoreLabel = Self.workspaceRestoreLabel(workspaceRestoreState)
             manualWorkspaceLabel = Self.manualWorkspaceLabel(manualWorkspaceCaptureState)
             return
@@ -44,6 +47,7 @@ public struct QueueMenuSummary: Equatable, Sendable {
 
         subtitle = selectedPacket?.title ?? "No selection"
         restoreLabel = Self.restoreLabel(contextRestoreState)
+        workspaceHealthLabel = Self.workspaceHealthLabel(workspaceHealthState)
         workspaceRestoreLabel = Self.workspaceRestoreLabel(workspaceRestoreState)
         manualWorkspaceLabel = Self.manualWorkspaceLabel(manualWorkspaceCaptureState)
     }
@@ -85,6 +89,17 @@ public struct QueueMenuSummary: Equatable, Sendable {
             return "Returned without moving windows"
         case .failed:
             return "Workspace restore failed"
+        }
+    }
+
+    private static func workspaceHealthLabel(_ state: WorkspaceHealthState) -> String? {
+        switch state {
+        case .idle, .available:
+            return nil
+        case .checking:
+            return "Checking workspace health"
+        case let .degraded(message):
+            return message
         }
     }
 

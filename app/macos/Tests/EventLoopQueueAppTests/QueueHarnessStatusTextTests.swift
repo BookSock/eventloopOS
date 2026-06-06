@@ -56,6 +56,20 @@ final class QueueHarnessStatusTextTests: XCTestCase {
         XCTAssertTrue(text.contains("manual=Manual workspace saved: 2 windows"))
     }
 
+    func testWorkspaceHealthFeedbackIsVisibleInHarnessStatus() {
+        let text = QueueHarnessStatusText.make(
+            queueState: .loaded,
+            queueCount: 1,
+            selectedTaskId: "task_demo_customer",
+            taskSessionCount: 0,
+            summary: makeSummary(workspaceHealthState: .degraded("AeroSpace unavailable. Launch AeroSpace, then refresh.")),
+            advanceToast: nil
+        )
+
+        XCTAssertTrue(text.contains("feedback=AeroSpace unavailable. Launch AeroSpace, then refresh."))
+        XCTAssertTrue(text.contains("workspace_health=AeroSpace unavailable. Launch AeroSpace, then refresh."))
+    }
+
     func testAdvanceToastTakesFeedbackPriority() {
         let text = QueueHarnessStatusText.make(
             queueState: .loaded,
@@ -113,6 +127,7 @@ final class QueueHarnessStatusTextTests: XCTestCase {
     }
 
     private func makeSummary(
+        workspaceHealthState: WorkspaceHealthState = .idle,
         workspaceRestoreState: WorkspaceRestoreState = .idle,
         manualWorkspaceCaptureState: ManualWorkspaceCaptureState = .idle
     ) -> QueueMenuSummary {
@@ -122,6 +137,7 @@ final class QueueHarnessStatusTextTests: XCTestCase {
             queueState: .loaded,
             mode: .eventLoop,
             contextRestoreState: .idle,
+            workspaceHealthState: workspaceHealthState,
             workspaceRestoreState: workspaceRestoreState,
             manualWorkspaceCaptureState: manualWorkspaceCaptureState
         )

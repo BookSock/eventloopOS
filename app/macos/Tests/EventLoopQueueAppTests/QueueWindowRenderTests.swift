@@ -151,6 +151,32 @@ final class QueueWindowRenderTests: XCTestCase {
         try writePNGArtifact(cgImage, name: "queue-window-task-identity.png")
     }
 
+    func testQueueWindowRendersWorkspaceHealthWarningWithoutBlanking() async throws {
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: FakeWorkspaceClient(statusEnvelope: WorkspaceStatusEnvelope(
+                status: WorkspaceCapabilityStatus(
+                    available: false,
+                    backend: "aerospace",
+                    reason: "server_unavailable",
+                    detail: "AeroSpace app is not running"
+                ),
+                executeSupported: false
+            )),
+            initialPackets: SeededQueue.packets
+        )
+        await viewModel.refreshWorkspaceStatus()
+        let view = QueueWindowView(viewModel: viewModel)
+            .frame(width: 760, height: 560)
+
+        let cgImage = try render(view, width: 760, height: 560)
+
+        XCTAssertEqual(cgImage.width, 760)
+        XCTAssertEqual(cgImage.height, 560)
+        try assertQueueSurfaceRendered(in: cgImage)
+        try writePNGArtifact(cgImage, name: "queue-window-workspace-health-warning.png")
+    }
+
     func testFollowsRulesSheetRendersExactWindowActionWithoutBlanking() throws {
         let view = FollowsRulesSheet(
             exclusions: [

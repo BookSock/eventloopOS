@@ -16,6 +16,67 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(client.leasedPacketIds, [])
     }
 
+    func testRefreshWorkspaceStatusMarksAvailableWhenAeroSpaceExecutableReady() async {
+        let workspaceClient = FakeWorkspaceClient(statusEnvelope: WorkspaceStatusEnvelope(
+            status: WorkspaceCapabilityStatus(available: true, backend: "aerospace"),
+            executeSupported: true
+        ))
+        let viewModel = QueueViewModel(client: FakeQueueClient(), workspaceClient: workspaceClient)
+
+        await viewModel.refreshWorkspaceStatus()
+
+        XCTAssertEqual(viewModel.workspaceHealthState, .available)
+    }
+
+    func testRefreshWorkspaceStatusShowsActionableAeroSpaceDegradedMessage() async {
+        let workspaceClient = FakeWorkspaceClient(statusEnvelope: WorkspaceStatusEnvelope(
+            status: WorkspaceCapabilityStatus(
+                available: false,
+                backend: "aerospace",
+                reason: "server_unavailable",
+                detail: "AeroSpace app is not running"
+            ),
+            executeSupported: false
+        ))
+        let viewModel = QueueViewModel(client: FakeQueueClient(), workspaceClient: workspaceClient)
+
+        await viewModel.refreshWorkspaceStatus()
+
+        XCTAssertEqual(
+            viewModel.workspaceHealthState,
+            .degraded("AeroSpace unavailable. Launch AeroSpace, grant Accessibility in System Settings > Privacy & Security, then refresh. Detail: AeroSpace app is not running")
+        )
+    }
+
+    func testRefreshWorkspaceStatusShowsReadOnlyRestoreMode() async {
+        let workspaceClient = FakeWorkspaceClient(statusEnvelope: WorkspaceStatusEnvelope(
+            status: WorkspaceCapabilityStatus(available: true, backend: "aerospace"),
+            executeSupported: false
+        ))
+        let viewModel = QueueViewModel(client: FakeQueueClient(), workspaceClient: workspaceClient)
+
+        await viewModel.refreshWorkspaceStatus()
+
+        XCTAssertEqual(
+            viewModel.workspaceHealthState,
+            .degraded("Workspace restore is read-only. Start dogfood with restore execution enabled, then refresh.")
+        )
+    }
+
+    func testBootstrapRefreshesWorkspaceStatusBeforeLoadingQueue() async {
+        let workspaceClient = FakeWorkspaceClient(statusEnvelope: WorkspaceStatusEnvelope(
+            status: WorkspaceCapabilityStatus(available: true, backend: "aerospace"),
+            executeSupported: true
+        ))
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+
+        await viewModel.bootstrap()
+
+        XCTAssertEqual(viewModel.workspaceHealthState, .available)
+        XCTAssertEqual(viewModel.state, .loaded)
+    }
+
     func testHotkeyBackedActionsShowFeedbackWithoutSelectedPaper() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)

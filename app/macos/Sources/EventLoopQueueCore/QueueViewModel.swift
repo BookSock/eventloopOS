@@ -117,6 +117,7 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var state: QueueState
     @Published public private(set) var mode: EventLoopMode
     @Published public private(set) var shouldRestoreWorkspace: Bool
+    @Published public private(set) var workspaceHealthState: WorkspaceHealthState = .idle
     @Published public private(set) var workspaceRestoreState: WorkspaceRestoreState
     @Published public private(set) var manualWorkspaceSnapshot: WorkspaceSnapshot?
     @Published public private(set) var manualWorkspaceCaptureState: ManualWorkspaceCaptureState
@@ -306,8 +307,23 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func bootstrap() async {
+        await refreshWorkspaceStatus()
         await syncManualModeFromServer()
         await loadQueue()
+    }
+
+    public func refreshWorkspaceStatus() async {
+        workspaceHealthState = .checking
+        do {
+            let envelope = try await workspaceClient.status()
+            if let degradedMessage = Self.workspaceHealthDegradedMessage(envelope) {
+                workspaceHealthState = .degraded(degradedMessage)
+            } else {
+                workspaceHealthState = .available
+            }
+        } catch {
+            workspaceHealthState = .degraded(actionableQueueFailureMessage(error.localizedDescription))
+        }
     }
 
     public func syncManualModeFromServer() async {
@@ -2526,6 +2542,28 @@ public final class QueueViewModel: ObservableObject {
 
     private static func masterCommandRoutedStatus(_ result: MasterCommandResult) -> String {
         result.userFacingStatus
+    }
+
+    private static func workspaceHealthDegradedMessage(_ envelope: WorkspaceStatusEnvelope) -> String? {
+        if !envelope.status.available {
+            let detail = [
+                envelope.status.detail,
+                envelope.status.reason,
+                envelope.status.backend.isEmpty ? nil : envelope.status.backend,
+            ]
+                .compactMap { value -> String? in
+                    guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty else {
+                        return nil
+                    }
+                    return value
+                }
+                .first ?? "workspace unavailable"
+            return actionableQueueFailureMessage(detail)
+        }
+        if !envelope.executeSupported {
+            return "Workspace restore is read-only. Start dogfood with restore execution enabled, then refresh."
+        }
+        return nil
     }
 }
 

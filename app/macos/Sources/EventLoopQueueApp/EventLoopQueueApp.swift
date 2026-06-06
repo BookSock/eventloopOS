@@ -381,6 +381,7 @@ private struct QueueMenuView: View {
             queueState: viewModel.state,
             mode: viewModel.mode,
             contextRestoreState: viewModel.contextRestoreState,
+            workspaceHealthState: viewModel.workspaceHealthState,
             workspaceRestoreState: viewModel.workspaceRestoreState,
             manualWorkspaceCaptureState: viewModel.manualWorkspaceCaptureState,
             recommendedActionBlockReason: viewModel.selectedRecommendedActionBlockReason
@@ -401,6 +402,11 @@ private struct QueueMenuView: View {
                 Text(restoreLabel)
                     .lineLimit(2)
                     .accessibilityIdentifier("queue-menu-restore")
+            }
+            if let workspaceHealthLabel = summary.workspaceHealthLabel {
+                Text(workspaceHealthLabel)
+                    .lineLimit(3)
+                    .accessibilityIdentifier("queue-menu-workspace-health")
             }
             if let workspaceRestoreLabel = summary.workspaceRestoreLabel {
                 Text(workspaceRestoreLabel)
@@ -428,6 +434,7 @@ private struct QueueMenuView: View {
 
             Button("Refresh Queue") {
                 Task {
+                    await viewModel.refreshWorkspaceStatus()
                     await viewModel.refreshQueue()
                 }
             }

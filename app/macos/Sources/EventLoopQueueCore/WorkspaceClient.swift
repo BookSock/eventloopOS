@@ -253,6 +253,13 @@ public enum WorkspaceRestoreState: Equatable, Sendable {
     case failed(String)
 }
 
+public enum WorkspaceHealthState: Equatable, Sendable {
+    case idle
+    case checking
+    case available
+    case degraded(String)
+}
+
 public struct HTTPWorkspaceClient: WorkspaceClient {
     public let baseURL: URL
     private let session: URLSession

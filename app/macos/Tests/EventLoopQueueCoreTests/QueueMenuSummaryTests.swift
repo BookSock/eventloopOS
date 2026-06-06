@@ -120,6 +120,32 @@ final class QueueMenuSummaryTests: XCTestCase {
         XCTAssertEqual(summary.workspaceRestoreLabel, "Restoring workspace...")
     }
 
+    func testSummaryShowsWorkspaceHealthDegradedMessage() {
+        let summary = QueueMenuSummary(
+            packets: SeededQueue.packets,
+            selectedPacket: SeededQueue.packets[0],
+            queueState: .loaded,
+            mode: .eventLoop,
+            contextRestoreState: .idle,
+            workspaceHealthState: .degraded("AeroSpace unavailable. Launch AeroSpace, then refresh.")
+        )
+
+        XCTAssertEqual(summary.workspaceHealthLabel, "AeroSpace unavailable. Launch AeroSpace, then refresh.")
+    }
+
+    func testSummarySuppressesAvailableWorkspaceHealth() {
+        let summary = QueueMenuSummary(
+            packets: SeededQueue.packets,
+            selectedPacket: SeededQueue.packets[0],
+            queueState: .loaded,
+            mode: .eventLoop,
+            contextRestoreState: .idle,
+            workspaceHealthState: .available
+        )
+
+        XCTAssertNil(summary.workspaceHealthLabel)
+    }
+
     func testSummaryShowsReturnedHereStatus() {
         let summary = QueueMenuSummary(
             packets: SeededQueue.packets,

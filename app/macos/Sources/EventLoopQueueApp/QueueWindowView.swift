@@ -17,6 +17,7 @@ struct QueueWindowView: View {
             queueState: viewModel.state,
             mode: viewModel.mode,
             contextRestoreState: viewModel.contextRestoreState,
+            workspaceHealthState: viewModel.workspaceHealthState,
             workspaceRestoreState: viewModel.workspaceRestoreState,
             manualWorkspaceCaptureState: viewModel.manualWorkspaceCaptureState,
             recommendedActionBlockReason: viewModel.selectedRecommendedActionBlockReason
@@ -257,6 +258,7 @@ struct QueueWindowView: View {
 
                     Button {
                         Task {
+                            await viewModel.refreshWorkspaceStatus()
                             await viewModel.refreshQueue()
                         }
                     } label: {
@@ -330,6 +332,7 @@ struct QueueWindowView: View {
         .overlay(alignment: .bottomLeading) {
             VStack(alignment: .leading, spacing: 8) {
                 StatusBanner(state: viewModel.state)
+                WorkspaceHealthBanner(state: viewModel.workspaceHealthState)
                 WorkspaceRestoreBanner(state: viewModel.workspaceRestoreState)
                 ManualWorkspaceCaptureBanner(state: viewModel.manualWorkspaceCaptureState)
                 ContextRestoreBanner(state: viewModel.contextRestoreState) {
@@ -510,6 +513,7 @@ struct QueueWindowView: View {
         }
         .task {
             QueueHarnessStatusFile.write(harnessStatusText, feedbackSequence: viewModel.feedbackSequence)
+            await viewModel.refreshWorkspaceStatus()
             await viewModel.loadQueue()
             viewModel.startAutomaticQueueRefresh()
             viewModel.startAutomaticLeaseRenewal()
@@ -644,6 +648,9 @@ struct QueueHarnessStatusText {
         if let restoreLabel = summary.restoreLabel {
             parts.append("context=\(restoreLabel)")
         }
+        if let workspaceHealthLabel = summary.workspaceHealthLabel {
+            parts.append("workspace_health=\(workspaceHealthLabel)")
+        }
         if let workspaceRestoreLabel = summary.workspaceRestoreLabel {
             parts.append("workspace=\(workspaceRestoreLabel)")
         }
@@ -659,6 +666,9 @@ struct QueueHarnessStatusText {
         }
         if let workspaceRestoreLabel = summary.workspaceRestoreLabel {
             return workspaceRestoreLabel
+        }
+        if let workspaceHealthLabel = summary.workspaceHealthLabel {
+            return workspaceHealthLabel
         }
         if let manualWorkspaceLabel = summary.manualWorkspaceLabel {
             return manualWorkspaceLabel
@@ -1171,6 +1181,35 @@ private struct StatusBanner: View {
                 .clipShape(RoundedRectangle(cornerRadius: 6))
                 .accessibilityIdentifier("queue-error-message")
                 .accessibilityLabel(actionableMessage)
+        }
+    }
+}
+
+private struct WorkspaceHealthBanner: View {
+    let state: WorkspaceHealthState
+
+    var body: some View {
+        switch state {
+        case .idle, .available:
+            EmptyView()
+        case .checking:
+            Label("Checking workspace health", systemImage: "arrow.clockwise")
+                .font(.caption)
+                .padding(8)
+                .background(.secondary.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("workspace-health-checking")
+        case let .degraded(message):
+            Label(message, systemImage: "exclamationmark.triangle.fill")
+                .font(.caption)
+                .lineLimit(4)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 560, alignment: .leading)
+                .padding(8)
+                .background(.orange.opacity(0.14))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .accessibilityIdentifier("workspace-health-degraded")
+                .accessibilityLabel(message)
         }
     }
 }
