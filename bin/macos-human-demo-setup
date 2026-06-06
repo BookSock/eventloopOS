@@ -28,8 +28,8 @@ const paperMetrics = {
   workspace: "demo-metrics",
   chromeTitle: "eventloopOS Human Demo Metrics Review",
   chromeFile: path.join(demoDir, "eventloopOS Demo Metrics Review.html"),
-  agentSpawnTitle: "eventloopOS Human Demo Agent Spawn",
-  agentSpawnFile: path.join(demoDir, "eventloopOS Human Demo Agent Spawn.txt"),
+  agentSpawnTitle: "eventloopOS Human Demo Agent Spawned Chrome",
+  agentSpawnFile: path.join(demoDir, "eventloopOS Human Demo Agent Spawned Chrome.html"),
   textTitle: "eventloopOS Human Demo Shared Notes.txt",
   priority: 1450,
 };
@@ -62,7 +62,7 @@ const demoWalkthrough = Object.freeze([
   "Select Demo Metrics Review in queue and press Ctrl-Option-R. Same TextEdit window should move to metrics position with Metrics Chrome.",
   "Select Demo Customer Reply and press Ctrl-Option-R. Same TextEdit window should return to customer position.",
   "Containment proof already ran during setup: Metrics Chrome was pushed into Customer paper and eventloopOS moved it back to Metrics.",
-  "Agent-spawn containment proof also ran during setup: a background Metrics-owned TextEdit window was opened while Customer was focused, then moved back to Metrics and Customer focus was restored.",
+  "Agent-spawn containment proof also ran during setup: a background Metrics-owned Chrome window was opened while Customer was focused, then moved back to Metrics and Customer focus was restored.",
   "Try Rectangle-style hotkeys on shared TextEdit: Ctrl-Option-Left/Right/Up/Down/C and Ctrl-Option-Shift-Return.",
   "Press Ctrl-Option-M, move/open a dummy app, then Ctrl-Option-M again. eventloopOS should restore saved paper context.",
   "Use Ctrl-Option-Shift-M only when you want to return from Manual Mode and keep current windows where they are.",
@@ -224,13 +224,13 @@ function writeDemoFiles() {
     "The harness closes it again before the hands-on demo starts.",
     "",
   ].join("\n"));
-  fs.writeFileSync(paperMetrics.agentSpawnFile, [
-    "eventloopOS Human Demo Agent Spawn",
-    "",
-    "This window is opened during setup while Customer is focused.",
-    "eventloopOS should claim it for Metrics, move it back there, and restore Customer focus.",
-    "",
-  ].join("\n"));
+  fs.writeFileSync(paperMetrics.agentSpawnFile, demoHtml({
+    eyebrow: "Agent spawned browser",
+    title: paperMetrics.agentSpawnTitle,
+    prompt: "This Chrome window belongs to Metrics.",
+    note: "It opens while Customer is focused. eventloopOS should claim it for Metrics, move it back there, and restore Customer focus.",
+    accent: "#b42318",
+  }));
   fs.writeFileSync(paperCustomer.chromeFile, demoHtml({
     eyebrow: "Customer paper",
     title: paperCustomer.chromeTitle,
@@ -801,33 +801,38 @@ async function proveForeignWindowContainment(windows) {
 
 async function proveAgentSpawnWindowContainment() {
   execFileSync("aerospace", ["workspace", paperCustomer.workspace]);
+  const agentSpawnUrl = pathToFileUrl(paperMetrics.agentSpawnFile);
   const spawnOutput = execFileSync("node", [
     "bin/task-window-spawn",
     "--url", orchestratorUrl,
     "--task-id", paperMetrics.taskId,
     "--source", "human-demo-agent-spawn",
-    "--app", "TextEdit",
+    "--app", "Google Chrome",
     "--title", paperMetrics.agentSpawnTitle,
     "--claim-existing-matching",
-    "--wait-ms", "8000",
+    "--wait-ms", "10000",
     "--settle-ms", "1200",
     "--poll-ms", "100",
     "--",
-    "open",
-    "-a",
-    "TextEdit",
-    paperMetrics.agentSpawnFile,
+    "osascript",
+    "-e",
+    `
+tell application "Google Chrome"
+  set spawnedWindow to make new window
+  set URL of active tab of spawnedWindow to "${agentSpawnUrl}"
+end tell
+`,
   ], { encoding: "utf8", maxBuffer: 1024 * 1024 });
   const spawnResult = JSON.parse(spawnOutput);
   const claimedCount = Number(spawnResult.claimed_count ?? 0) + Number(spawnResult.late_matching_existing_claimed_count ?? 0);
   if (spawnResult.ok !== true || claimedCount < 1) {
-    throw new Error(`agent-spawn containment did not claim spawned window: ${JSON.stringify(spawnResult)}`);
+    throw new Error(`agent-spawn Chrome containment did not claim spawned window: ${JSON.stringify(spawnResult)}`);
   }
 
   let last;
   for (let attempt = 1; attempt <= 30; attempt += 1) {
     const snapshot = await capture();
-    const spawned = findWindow(snapshot, "TextEdit", paperMetrics.agentSpawnTitle);
+    const spawned = findWindow(snapshot, "Google Chrome", paperMetrics.agentSpawnTitle);
     last = {
       active_workspace: snapshot.activeWorkspace,
       spawned_workspace: spawned?.workspace,
@@ -839,6 +844,8 @@ async function proveAgentSpawnWindowContainment() {
         ok: true,
         attempts: attempt,
         spawned_window_id: spawned.id,
+        spawned_app: "Google Chrome",
+        spawned_title: paperMetrics.agentSpawnTitle,
         task_id: paperMetrics.taskId,
         contaminated_workspace: paperCustomer.workspace,
         owner_workspace: paperMetrics.workspace,
@@ -853,7 +860,7 @@ async function proveAgentSpawnWindowContainment() {
     }
     await sleep(500);
   }
-  throw new Error(`agent-spawn containment did not return spawned window to owner workspace: ${JSON.stringify(last)}`);
+  throw new Error(`agent-spawn Chrome containment did not return spawned window to owner workspace: ${JSON.stringify(last)}`);
 }
 
 async function waitForWindow(app, titlePart) {
@@ -1237,6 +1244,10 @@ function assertDemoInstructions() {
   }
   if (restoreLine.includes("Ctrl-Option-Shift-M")) {
     throw new Error("manual-mode restore walkthrough must not use keep-current hotkey");
+  }
+  const agentSpawnLine = demoWalkthrough.find((line) => line.includes("Agent-spawn containment proof"));
+  if (!agentSpawnLine?.includes("Chrome")) {
+    throw new Error(`agent-spawn walkthrough must demonstrate Chrome contamination, got: ${agentSpawnLine ?? "missing"}`);
   }
 }
 

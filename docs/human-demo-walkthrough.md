@@ -24,7 +24,7 @@ The setup script:
   into future queue context without pressing Done/Defer/Advance, then closes it
   before the hands-on walkthrough,
 - proves a background/foreign paper window is moved back to its owning paper,
-- proves a real agent-spawned TextEdit window opened while Customer is focused
+- proves a real agent-spawned Chrome window opened while Customer is focused
   is claimed for Metrics, moved back to Metrics, and leaves Customer focused,
 - captures a local Screen Sharing window-only screenshot, or falls back to a lab Mac desktop capture when Screen Sharing is unavailable.
 
@@ -70,14 +70,14 @@ orchestrator is running on the controller Mac; the lab demo default keeps
 
 Latest known-good proof:
 
-- Manifest: `artifacts/lab-runs/20260605-185031-human-demo/manifest.json`
-- Screenshot: `artifacts/lab-runs/20260605-185031-human-demo/screen-sharing.png`
-- Readiness manifest: `artifacts/lab-runs/20260606T015217Z-human-demo-ready/manifest.json`
-- Readiness screenshot: `artifacts/lab-runs/20260606T015217Z-human-demo-ready/screen-sharing.png`
+- Manifest: `artifacts/lab-runs/20260605-191509-human-demo/manifest.json`
+- Screenshot: `artifacts/lab-runs/20260605-191509-human-demo/screen-sharing.png`
+- Readiness manifest: `artifacts/lab-runs/20260606T022414Z-human-demo-ready/manifest.json`
+- Readiness screenshot: `artifacts/lab-runs/20260606T022414Z-human-demo-ready/captures/human-demo-ready/screen.png`
 - Queue proof: 2 current-run papers.
 - Ambient proof: customer paper context saved the moved shared TextEdit, and the automated scratch window was remembered by the current paper before cleanup.
 - Background containment proof: Metrics Chrome was intentionally pushed into the Customer paper and moved back to the Metrics paper.
-- Agent-spawn containment proof: a Metrics-owned TextEdit window was opened while Customer was focused, claimed, moved back to Metrics, and Customer focus was restored.
+- Agent-spawn containment proof: a Metrics-owned Chrome window was opened while Customer was focused, claimed, moved back to Metrics, and Customer focus was restored.
 - Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture.
 - Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper.
 

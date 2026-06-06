@@ -77,7 +77,8 @@ function buildAudit(root, options = {}) {
     readiness_foreign_window_containment_proof_ok: readiness?.checks?.foreign_window_containment_proof_ok === true
       && readiness?.latest_human_demo?.foreign_window_containment_ok === true,
     readiness_agent_spawn_window_containment_proof_ok: readiness?.checks?.agent_spawn_window_containment_proof_ok === true
-      && readiness?.latest_human_demo?.agent_spawn_window_containment_ok === true,
+      && readiness?.latest_human_demo?.agent_spawn_window_containment_ok === true
+      && readiness?.latest_human_demo?.agent_spawn_window_containment_chrome_ok === true,
     human_result_recorded: Boolean(resultPath && fs.existsSync(path.resolve(root, resultPath))),
     human_result_filled: resultAudit.filled === true,
     verification_manifest_present: Boolean(verificationPath),
@@ -437,6 +438,8 @@ function runSelfTest() {
       new_window_autosave_ok: true,
       foreign_window_containment_ok: true,
       agent_spawn_window_containment_ok: true,
+      agent_spawn_window_containment_app: "Google Chrome",
+      agent_spawn_window_containment_chrome_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });
@@ -526,6 +529,8 @@ ship
       new_window_autosave_ok: true,
       foreign_window_containment_ok: true,
       agent_spawn_window_containment_ok: true,
+      agent_spawn_window_containment_app: "Google Chrome",
+      agent_spawn_window_containment_chrome_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });
@@ -550,6 +555,8 @@ ship
       new_window_autosave_ok: true,
       foreign_window_containment_ok: true,
       agent_spawn_window_containment_ok: true,
+      agent_spawn_window_containment_app: "Google Chrome",
+      agent_spawn_window_containment_chrome_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });
@@ -575,6 +582,8 @@ ship
       new_window_autosave_ok: true,
       foreign_window_containment_ok: true,
       agent_spawn_window_containment_ok: true,
+      agent_spawn_window_containment_app: "Google Chrome",
+      agent_spawn_window_containment_chrome_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });
@@ -584,6 +593,34 @@ ship
   });
   assert.equal(missingPaperReminderHud.ok, false);
   assert.ok(missingPaperReminderHud.failed_checks.includes("readiness_paper_reminder_hud_visible"));
+
+  writeJson(readinessPath, {
+    ok: true,
+    started_at: new Date().toISOString(),
+    checks: {
+      latest_human_demo_screenshot_ok: true,
+      queue_briefing_strip_visible: true,
+      paper_reminder_hud_visible: true,
+      new_window_autosave_proof_ok: true,
+      foreign_window_containment_proof_ok: true,
+      agent_spawn_window_containment_proof_ok: true,
+    },
+    latest_human_demo: {
+      new_window_autosave_ok: true,
+      foreign_window_containment_ok: true,
+      agent_spawn_window_containment_ok: true,
+      agent_spawn_window_containment_app: "TextEdit",
+      agent_spawn_window_containment_chrome_ok: false,
+      screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
+    },
+  });
+  const weakAgentSpawnProof = buildAudit(root, {
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(weakAgentSpawnProof.ok, false);
+  assert.ok(weakAgentSpawnProof.failed_checks.includes("readiness_agent_spawn_window_containment_proof_ok"));
+
   writeJson(readinessPath, readyManifest(new Date().toISOString()));
 
   fs.writeFileSync(resultPath, `Pass/fail:
