@@ -45,6 +45,7 @@ curl -fsS --max-time 10 "$url/task-sessions" >"$run/task-sessions.json" 2>"$run/
 curl -fsS --max-time 10 "$url/queue?state=ready" >"$run/queue-ready.json" 2>"$run/queue-ready.err" || echo "queue: unavailable" >"$run/queue-ready.unavailable"
 
 pgrep -fl "bin/dev-dogfood|codex app-server|EventLoopQueueApp|node dist/src/index" >"$run/processes-interesting.txt" 2>/dev/null || true
+pgrep -fl "AeroSpace.app/Contents/MacOS/AeroSpace|AeroSpaceApp|run-aerospace.command" >"$run/aerospace-processes.txt" 2>/dev/null || true
 ps -axo pid,ppid,comm,args >"$run/ps.txt" 2>/dev/null || true
 lsof -nP -iTCP -sTCP:LISTEN >"$run/listeners.txt" 2>"$run/listeners.err" || true
 
@@ -93,8 +94,23 @@ const taskSessions = readJson("task-sessions.json");
 const queueReady = readJson("queue-ready.json");
 const windows = readJson("windows.json");
 const processes = read("processes-interesting.txt");
+const aerospaceProcesses = read("aerospace-processes.txt");
 const listeners = read("listeners.txt");
 const queueAppRequired = process.env.QUEUE_APP !== "0";
+const windowsStatusEnabled = process.env.STATUS_WINDOWS !== "0";
+const processLines = processes.split(/\r?\n/).filter(Boolean);
+const aerospaceProcessLines = aerospaceProcesses.split(/\r?\n/).filter(Boolean);
+const actualQueueAppProcesses = processLines.filter((line) => /\/Contents\/MacOS\/EventLoopQueueApp\b/.test(line));
+const queueWindows = Array.isArray(windows)
+  ? windows.filter((window) => {
+      const app = String(window["app-name"] ?? "");
+      const title = String(window["window-title"] ?? "");
+      return /^(eventloopOS Queue|EventLoopQueueApp)$/i.test(app) || /eventloopOS Queue/i.test(title);
+    })
+  : [];
+const queueAppProcessCount = actualQueueAppProcesses.length;
+const queueWindowCount = queueWindows.length;
+const aerospaceProcessCount = aerospaceProcessLines.length;
 const checks = {
   health_ok: health?.ok === true,
   task_sessions_api_ok: Array.isArray(taskSessions?.sessions),
@@ -102,6 +118,9 @@ const checks = {
   dogfood_process_visible: /bin\/dev-dogfood|node .*dist\/src\/index\.js|node dist\/src\/index\.js/.test(processes),
   listener_4480_visible: /:4480\b/.test(listeners),
   queue_app_process_visible: !queueAppRequired || /EventLoopQueueApp/.test(processes),
+  queue_app_process_singleton_ok: queueAppRequired ? queueAppProcessCount === 1 : queueAppProcessCount === 0,
+  queue_window_not_duplicated: !windowsStatusEnabled || queueWindowCount <= 1,
+  aerospace_process_not_duplicated: aerospaceProcessCount <= 1,
   windows_artifact_exists: Array.isArray(windows),
   ps_nonempty: statSize("ps.txt") > 100,
 };
@@ -116,14 +135,23 @@ const manifest = {
   passed: failedChecks.length === 0,
   url: process.env.URL,
   queue_app_required: queueAppRequired,
-  windows_status_enabled: process.env.STATUS_WINDOWS !== "0",
+  windows_status_enabled: windowsStatusEnabled,
   checks,
   failed_checks: failedChecks,
+  diagnostics: {
+    queue_app_process_count: queueAppProcessCount,
+    queue_window_count: queueWindowCount,
+    aerospace_process_count: aerospaceProcessCount,
+    queue_app_processes: actualQueueAppProcesses,
+    queue_windows: queueWindows,
+    aerospace_processes: aerospaceProcessLines,
+  },
   artifacts: {
     health: "health.json",
     task_sessions: "task-sessions.json",
     queue_ready: "queue-ready.json",
     processes: "processes-interesting.txt",
+    aerospace_processes: "aerospace-processes.txt",
     ps: "ps.txt",
     listeners: "listeners.txt",
     windows: "windows.json",

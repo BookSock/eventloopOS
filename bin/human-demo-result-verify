@@ -316,15 +316,30 @@ function runLabStatus() {
     encoding: "utf8",
     shell: false,
   });
+  const manifest = parseStatusManifestFromOutput(result.stdout);
   return {
-    ok: result.status === 0,
+    ok: result.status === 0 && (manifest?.ok ?? true) === true,
     exit_code: result.status ?? 1,
     manifest_path: firstMatch(result.stdout, /dogfood status manifest: (.+?\/manifest\.json)/),
+    failed_checks: Array.isArray(manifest?.failed_checks) ? manifest.failed_checks : undefined,
+    diagnostics: manifest?.diagnostics,
   };
 }
 
 function firstMatch(value, pattern) {
   return value.match(pattern)?.[1];
+}
+
+function parseStatusManifestFromOutput(stdout) {
+  const markerIndex = stdout.lastIndexOf("dogfood status manifest:");
+  const searchStart = markerIndex >= 0 ? markerIndex : 0;
+  const jsonStart = stdout.indexOf("{", searchStart);
+  if (jsonStart < 0) return undefined;
+  try {
+    return JSON.parse(stdout.slice(jsonStart).trim());
+  } catch {
+    return undefined;
+  }
 }
 
 function parseImageDimensions(buffer) {
@@ -419,6 +434,10 @@ Ship/block decision: ship
 `;
   const ok = verifyResultText(filled);
   assert.equal(ok.failed_checks.length, 0);
+  assert.deepEqual(
+    parseStatusManifestFromOutput("noise\ndogfood status manifest: artifacts/x/manifest.json\n{\"ok\":true,\"failed_checks\":[],\"diagnostics\":{\"queue_window_count\":1}}\n")?.diagnostics,
+    { queue_window_count: 1 },
+  );
   const missingLatency = verifyResultText(filled.replace("Readiness queue latency: artifacts/lab-runs/ready/queue-latency.json ok=true required=true\n", ""));
   assert.ok(missingLatency.failed_checks.includes("readiness_queue_latency_ok"));
   const missingMasterCommandHotkey = verifyResultText(filled.replace("Readiness master command hotkey: artifacts/lab-runs/ready/master-command-hotkey.json ok=true required=true\n", ""));
