@@ -978,6 +978,7 @@ public final class QueueViewModel: ObservableObject {
             }
             advanceToast = switchToPaperToast(packetId: nextSelectionPacketId) ?? toast
         } catch {
+            if await recoverFromQueueActionConflict(error) { return }
             state = .failed(error.localizedDescription)
         }
     }

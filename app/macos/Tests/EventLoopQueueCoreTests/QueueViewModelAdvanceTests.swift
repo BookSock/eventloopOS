@@ -165,6 +165,61 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         XCTAssertEqual(client.setCurrentTaskRequests, [])
     }
 
+    func testAdvanceCompletionConflictShowsActionableFeedback() async {
+        let paper = ReviewPacket(
+            id: "pkt_a",
+            reviewPacketId: "rpkt_a",
+            taskId: "task_a",
+            title: "A paper",
+            summary: "finish me",
+            source: "manual",
+            priority: 500,
+            recommendedAction: "review",
+            createdAt: Date(timeIntervalSince1970: 1)
+        )
+        let client = FakeQueueClient(packets: [paper])
+        client.setQueueActionError(QueueClientError.httpStatusMessage(
+            409,
+            "manual_mode_active: queue is paused while manual mode is active"
+        ))
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: WorkspaceSnapshot(
+                windows: [],
+                activeWorkspace: "ws_a",
+                focusedWindowId: nil
+            )
+        )
+        let aero = FakeAeroSpaceWorkspaceClient(focused: "ws_a")
+        let resolver = FakeCodexForegroundResolver(.none)
+        let viewModel = QueueViewModel(
+            client: client,
+            workspaceClient: workspaceClient,
+            aeroSpaceClient: aero,
+            codexForegroundResolver: resolver,
+            limboWorkspaceId: "limbo"
+        )
+
+        let taskA = TaskRecord(
+            taskId: "task_a",
+            primaryAnchorKind: .codexThread,
+            primaryAnchorId: "thr_a",
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+        client.setFakeTasks([taskA])
+        client.setFakeCurrentTask("task_a")
+        client.setFakeTaskLayout(taskId: "task_a", layout: WorkspaceSnapshot(windows: [], activeWorkspace: "ws_a"))
+        await viewModel.loadQueue()
+
+        await viewModel.advance()
+
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "pkt_a")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Press Ctrl-Option-M to return."))
+        XCTAssertEqual(client.completedPacketIds, [])
+        XCTAssertEqual(aero.switchedWorkspaces, [])
+    }
+
     func testLoadAdvanceSnapshotPopulatesTasksByWorkspaceViaGetTaskWithLayout() async {
         let paperForB = ReviewPacket(
             id: "pkt_b",
