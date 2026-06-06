@@ -60,10 +60,11 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK=0 skips desktop HUD feedback proof
   EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_TARGET=local runs proof on this Mac instead of the lab Mac
   EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_HOTKEY default: ctrl-option-r
-  EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_EXPECT optional expected HUD feedback substring (default for ctrl-option-r: Restoring paper:)
+  EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_EXPECT optional expected HUD feedback substring (default for ctrl-option-r: Review Demo Customer Reply)
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_FEEDBACK=1 forces Manual Mode enter/return feedback proof on
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_FEEDBACK=0 skips Manual Mode enter/return feedback proof
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_FEEDBACK_TARGET=local runs proof on this Mac instead of the lab Mac
+  EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_BUDGET_MS default: 3000
   EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=auto|local|lab default: auto
     auto captures local Screen Sharing window first, then falls back to lab Mac desktop only
 `);
@@ -103,6 +104,7 @@ if (!skipScreenshot) {
 }
 const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
 const paperReminderFeedbackManifestPath = path.join(runDir, "paper-reminder-feedback.json");
+const manualModeResetFeedbackManifestPath = path.join(runDir, "manual-mode-reset-feedback.json");
 const manualModeEnterFeedbackManifestPath = path.join(runDir, "manual-mode-enter-feedback.json");
 const manualModeReturnFeedbackManifestPath = path.join(runDir, "manual-mode-return-feedback.json");
 const queueLatencyManifestPath = path.join(runDir, "queue-latency.json");
@@ -116,9 +118,6 @@ const workspaceLatency = workspaceLatencyEnabled
   : undefined;
 const workspaceLatencyManifest = workspaceLatency ? readJsonIfPresent(workspaceLatencyManifestPath) : undefined;
 const hotkeyProofsCanRun = skipScreenshot || screenshotStage?.ok === true;
-const manualModeFeedback = manualModeFeedbackEnabled && hotkeyProofsCanRun
-  ? runManualModeFeedbackStep(manualModeEnterFeedbackManifestPath, manualModeReturnFeedbackManifestPath, env)
-  : undefined;
 const paperReminderFeedback = paperReminderFeedbackEnabled && hotkeyProofsCanRun
   ? runPaperReminderFeedbackStep(paperReminderFeedbackManifestPath, env)
   : undefined;
@@ -127,6 +126,14 @@ const hotkeyLatency = hotkeyLatencyEnabled && hotkeyProofsCanRun
   ? runHotkeyLatencyStep(hotkeyLatencyManifestPath, env)
   : undefined;
 const hotkeyLatencyManifest = hotkeyLatency ? readJsonIfPresent(hotkeyLatencyManifestPath) : undefined;
+const manualModeFeedback = manualModeFeedbackEnabled && hotkeyProofsCanRun
+  ? runManualModeFeedbackStep(
+    manualModeResetFeedbackManifestPath,
+    manualModeEnterFeedbackManifestPath,
+    manualModeReturnFeedbackManifestPath,
+    env,
+  )
+  : undefined;
 
 const checks = {
   dogfood_status_ok: dogfood.status === 0 && dogfoodManifest?.ok === true,
@@ -747,7 +754,14 @@ function hotkeyLatencyArgs() {
   return args;
 }
 
-function runManualModeFeedbackStep(enterManifestPath, returnManifestPath, envOverride) {
+function runManualModeFeedbackStep(resetManifestPath, enterManifestPath, returnManifestPath, envOverride) {
+  const reset = runManualModeHotkeyStep(
+    "manual mode reset feedback",
+    resetManifestPath,
+    ["--hotkey", "ctrl-option-shift-m", "--expect", "Returned to Event Loop", "--budget-ms", manualModeReturnBudgetMs()],
+    envOverride,
+  );
+  const resetManifest = readJsonIfPresent(resetManifestPath);
   const enter = runManualModeHotkeyStep(
     "manual mode enter feedback",
     enterManifestPath,
@@ -758,15 +772,24 @@ function runManualModeFeedbackStep(enterManifestPath, returnManifestPath, envOve
   const returnResult = runManualModeHotkeyStep(
     "manual mode return feedback",
     returnManifestPath,
-    ["--hotkey", "ctrl-option-shift-m", "--expect", "Returning to Event Loop..."],
+    ["--hotkey", "ctrl-option-shift-m", "--expect", "Returned to Event Loop", "--budget-ms", manualModeReturnBudgetMs()],
     envOverride,
   );
   const returnManifest = readJsonIfPresent(returnManifestPath);
+  const resetOk = reset.status === 0 && resetManifest?.ok === true;
   const enterOk = enter.status === 0 && enterManifest?.ok === true;
   const returnOk = returnResult.status === 0 && returnManifest?.ok === true;
   return {
-    ok: enterOk && returnOk,
+    ok: resetOk && enterOk && returnOk,
     manifest_path: enterManifestPath,
+    reset: {
+      ok: resetOk,
+      manifest_path: resetManifestPath,
+      exit_code: reset.status,
+      failed_budgets: resetManifest?.failed_budgets ?? [],
+      summary: resetManifest?.summary,
+      samples: resetManifest?.samples ?? [],
+    },
     enter: {
       ok: enterOk,
       manifest_path: enterManifestPath,
@@ -784,6 +807,16 @@ function runManualModeFeedbackStep(enterManifestPath, returnManifestPath, envOve
       samples: returnManifest?.samples ?? [],
     },
   };
+}
+
+function manualModeReturnBudgetMs() {
+  const raw = process.env.EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_BUDGET_MS ?? "3000";
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.error(`Invalid EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_BUDGET_MS: ${String(raw)}`);
+    process.exit(2);
+  }
+  return String(Math.round(parsed));
 }
 
 function runManualModeHotkeyStep(name, manifestPath, proofArgs, envOverride) {
@@ -825,7 +858,7 @@ function paperReminderFeedbackArgs() {
     chord,
   ];
   const expected = process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_EXPECT
-    ?? (normalizeHotkeyText(chord) === "ctrl-option-r" ? "Restoring paper:" : undefined);
+    ?? (normalizeHotkeyText(chord) === "ctrl-option-r" ? "Review Demo Customer Reply" : undefined);
   if (expected) args.push("--expect", expected);
   return args;
 }
@@ -1276,7 +1309,7 @@ function runSelfTest() {
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h", "--expect", "No paper selected."]);
   delete process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD;
   delete process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT;
-  assert.deepEqual(paperReminderFeedbackArgs(), ["--hotkey", "ctrl-option-r", "--expect", "Restoring paper:"]);
+  assert.deepEqual(paperReminderFeedbackArgs(), ["--hotkey", "ctrl-option-r", "--expect", "Review Demo Customer Reply"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_HOTKEY = "ctrl-option-h";
   assert.deepEqual(paperReminderFeedbackArgs(), ["--hotkey", "ctrl-option-h"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_EXPECT = "No paper selected.";

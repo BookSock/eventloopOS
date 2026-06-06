@@ -3043,6 +3043,61 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Manual workspace restored."))
     }
 
+    func testManualWorkspaceRestoreCompletionDoesNotReenterAfterReturn() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "manual-workspace")
+            ],
+            activeWorkspace: "manual-workspace"
+        )
+        let receipt = WorkspaceRestoreReceipt(
+            commands: [
+                WorkspaceExecutedCommand(command: "aerospace", args: ["workspace", "manual-workspace"], stdout: "ok")
+            ],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: snapshot,
+            restoreEnvelope: WorkspaceRestoreExecutionEnvelope(
+                ok: true,
+                plan: WorkspaceRestorePlan(commands: [], skipped: []),
+                receipt: receipt,
+                executeSupported: true,
+                idempotencyKey: "idem_fake"
+            ),
+            restoreDelayNanoseconds: 100_000_000
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+
+        await viewModel.enterManualMode()
+        await viewModel.returnToEventLoopModeKeepingCurrentLayout()
+
+        let enterAndRestore = Task { @MainActor in
+            await viewModel.enterManualModeAndRestoreSavedWorkspaceIfAvailable()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        XCTAssertEqual(viewModel.mode, .manual)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Restoring manual workspace..."))
+
+        await viewModel.returnToEventLoopModeKeepingCurrentLayout()
+
+        XCTAssertEqual(viewModel.mode, .eventLoop)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .keptCurrentLayout)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Returned to Event Loop. Kept current layout."))
+
+        await enterAndRestore.value
+
+        XCTAssertEqual(viewModel.mode, .eventLoop)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .keptCurrentLayout)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Returned to Event Loop. Kept current layout."))
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [snapshot])
+    }
+
     func testImmediateManualWorkspaceRestoreRepeatReusesRecentReceipt() async {
         let snapshot = WorkspaceSnapshot(
             windows: [
@@ -3593,7 +3648,7 @@ final class QueueViewModelTests: XCTestCase {
         await secondRestore.value
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestoring)
-        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restore already running..."))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Restoring paper: Review with workspace..."))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
 
         await firstRestore.value
