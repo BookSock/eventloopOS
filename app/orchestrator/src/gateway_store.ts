@@ -259,10 +259,22 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
     taskLayouts.get(taskId),
   );
   const contextEntriesForTask = async (taskId: string) => listContextEntries(store, { task_id: taskId, limit: 8 });
+  const enrichPacket = async (packet: ReviewPacket | undefined): Promise<ReviewPacket | undefined> =>
+    await enrichReviewPacketWithTaskWorkspaceSnapshot(packet, snapshotForTask, contextEntriesForTask);
   const enrichItem = async (item: QueueItemWithPacket | undefined): Promise<QueueItemWithPacket | undefined> =>
     await enrichQueueItemWithTaskWorkspaceSnapshot(item, snapshotForTask, contextEntriesForTask);
   const enrichItems = async (items: QueueItemWithPacket[]): Promise<QueueItemWithPacket[]> =>
     Promise.all(items.map(enrichItem)).then((enriched) => enriched.filter((item): item is QueueItemWithPacket => item !== undefined));
+  const enrichAgentRunResult = async (result: AgentRunQueueResult): Promise<AgentRunQueueResult> => {
+    const queueItem = await enrichItem(result.queue_item);
+    const reviewPacket = queueItem?.review_packet ?? await enrichPacket(result.review_packet);
+    if (reviewPacket) store.reviewPackets.set(reviewPacket.id, reviewPacket);
+    return {
+      ...result,
+      review_packet: reviewPacket,
+      queue_item: queueItem,
+    };
+  };
 
   return {
     async listQueue(state, now) {
@@ -298,13 +310,15 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
       return saveTaskWorkspaceSnapshot(store, input);
     },
     async getReviewPacket(id) {
-      return getReviewPacket(store, id);
+      const packet = await enrichPacket(getReviewPacket(store, id));
+      if (packet) store.reviewPackets.set(packet.id, packet);
+      return packet;
     },
     async getAgentRun(id) {
       return getAgentRun(store, id);
     },
     async upsertAgentRun(run, now) {
-      return upsertAgentRun(store, run, now);
+      return enrichAgentRunResult(upsertAgentRun(store, run, now));
     },
     async getEvent(eventId) {
       return getStoredEvent(store, eventId);
@@ -718,10 +732,20 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
     await store.getTaskLayout(taskId),
   );
   const contextEntriesForTask = (taskId: string) => store.listContextEntries({ task_id: taskId, limit: 8 });
+  const enrichPacket = async (packet: ReviewPacket | undefined): Promise<ReviewPacket | undefined> =>
+    await enrichReviewPacketWithTaskWorkspaceSnapshot(packet, snapshotForTask, contextEntriesForTask);
   const enrichItem = async (item: QueueItemWithPacket | undefined): Promise<QueueItemWithPacket | undefined> =>
     await enrichQueueItemWithTaskWorkspaceSnapshot(item, snapshotForTask, contextEntriesForTask);
   const enrichItems = async (items: QueueItemWithPacket[]): Promise<QueueItemWithPacket[]> =>
     Promise.all(items.map(enrichItem)).then((enriched) => enriched.filter((item): item is QueueItemWithPacket => item !== undefined));
+  const enrichAgentRunResult = async (result: AgentRunQueueResult): Promise<AgentRunQueueResult> => {
+    const queueItem = await enrichItem(result.queue_item);
+    return {
+      ...result,
+      review_packet: queueItem?.review_packet ?? await enrichPacket(result.review_packet),
+      queue_item: queueItem,
+    };
+  };
 
   return {
     async listQueue(state, now) {
@@ -758,13 +782,13 @@ export function createPostgresGatewayStore(store: PostgresQueueStore): GatewaySt
       return store.saveTaskWorkspaceSnapshot(input);
     },
     async getReviewPacket(id) {
-      return store.getReviewPacket(id);
+      return enrichPacket(await store.getReviewPacket(id));
     },
     async getAgentRun(id) {
       return store.getAgentRun(id);
     },
     async upsertAgentRun(run, now) {
-      return store.upsertAgentRun(run, now);
+      return enrichAgentRunResult(await store.upsertAgentRun(run, now));
     },
     async getEvent(eventId) {
       return store.getEventResult(eventId);
@@ -989,11 +1013,24 @@ async function enrichQueueItemWithTaskWorkspaceSnapshot(
   snapshotForTask: (taskId: string) => Promise<TaskWorkspaceSnapshotRecord | undefined>,
   contextEntriesForTask?: (taskId: string) => Promise<ContextEntry[]>,
 ): Promise<QueueItemWithPacket | undefined> {
-  if (!item?.task_id) return item;
+  if (!item) return item;
+  const reviewPacket = await enrichReviewPacketWithTaskWorkspaceSnapshot(item.review_packet, snapshotForTask, contextEntriesForTask);
+  return {
+    ...item,
+    review_packet: reviewPacket ?? item.review_packet,
+  };
+}
+
+async function enrichReviewPacketWithTaskWorkspaceSnapshot(
+  packet: ReviewPacket | undefined,
+  snapshotForTask: (taskId: string) => Promise<TaskWorkspaceSnapshotRecord | undefined>,
+  contextEntriesForTask?: (taskId: string) => Promise<ContextEntry[]>,
+): Promise<ReviewPacket | undefined> {
+  if (!packet?.task_id) return packet;
   const additions: ContextResource[] = [];
 
-  if (!packetHasWorkspaceSnapshot(item.review_packet)) {
-    const snapshotRecord = await snapshotForTask(item.task_id);
+  if (!packetHasWorkspaceSnapshot(packet)) {
+    const snapshotRecord = await snapshotForTask(packet.task_id);
     if (snapshotRecord) {
       additions.push({
         id: `ctx_task_workspace_${stableId(snapshotRecord.task_id)}`,
@@ -1013,8 +1050,8 @@ async function enrichQueueItemWithTaskWorkspaceSnapshot(
   }
 
   if (contextEntriesForTask) {
-    const existingContextIds = new Set(item.review_packet.context.map((resource) => resource.id));
-    const browserResources = (await contextEntriesForTask(item.task_id))
+    const existingContextIds = new Set(packet.context.map((resource) => resource.id));
+    const browserResources = (await contextEntriesForTask(packet.task_id))
       .map(taskBrowserResourceFromContextEntry)
       .filter((resource): resource is ContextResource => resource !== undefined)
       .filter((resource) => !existingContextIds.has(resource.id))
@@ -1022,21 +1059,18 @@ async function enrichQueueItemWithTaskWorkspaceSnapshot(
     additions.push(...browserResources);
   }
 
-  if (additions.length === 0) return item;
-  const seen = new Set(item.review_packet.context.map((resource) => resource.id));
+  if (additions.length === 0) return packet;
+  const seen = new Set(packet.context.map((resource) => resource.id));
   const uniqueAdditions = additions.filter((resource) => {
     if (seen.has(resource.id)) return false;
     seen.add(resource.id);
     return true;
   });
-  if (uniqueAdditions.length === 0) return item;
+  if (uniqueAdditions.length === 0) return packet;
 
   return {
-    ...item,
-    review_packet: {
-      ...item.review_packet,
-      context: [...item.review_packet.context, ...uniqueAdditions],
-    },
+    ...packet,
+    context: [...packet.context, ...uniqueAdditions],
   };
 }
 

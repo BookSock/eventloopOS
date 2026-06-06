@@ -3,7 +3,7 @@ import { after, before, describe, it, type TestContext } from "node:test";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import { createInMemoryGatewayStore, createPostgresGatewayStore, type GatewayStore } from "../src/gateway_store.js";
 import { PostgresQueueStore } from "../src/db/postgres_queue_store.js";
-import type { AgentRun, WorkspaceSnapshot } from "../src/contracts.js";
+import type { AgentRun, QueueItemWithPacket, ReviewPacket, WorkspaceSnapshot } from "../src/contracts.js";
 import type { McpEvent } from "../src/integrations/mcp_poll/types.js";
 import type { ContextRestoreRequestRecord, InMemoryStore } from "../src/store.js";
 
@@ -67,6 +67,69 @@ describe("GatewayStore conformance", () => {
       },
     };
   });
+});
+
+it("enriches raw Postgres agent-run packets with task workspace context through GatewayStore", async () => {
+  const workspaceSnapshot: WorkspaceSnapshot = {
+    backend: "aerospace",
+    activeWorkspace: "postgres-agent-workspace",
+    focusedWindowId: 404,
+    windows: [
+      {
+        id: 404,
+        app: "Ghostty",
+        title: "Codex Postgres wrapper",
+        workspace: "postgres-agent-workspace",
+        monitorId: 2,
+        layout: "floating",
+        frame: { x: 320, y: 180, width: 1000, height: 700 },
+      },
+    ],
+  };
+  const run = makeAgentRun({
+    id: "run_postgres_wrapper",
+    task_id: "task_postgres_wrapper",
+    status: "waiting_approval",
+    blocked_reason: "Needs Postgres wrapper proof.",
+  });
+  const rawPacket = makeAgentReviewPacket(run);
+  const rawItem: QueueItemWithPacket = {
+    id: "qit_run_postgres_wrapper_agent_waiting",
+    review_packet_id: rawPacket.id,
+    task_id: run.task_id,
+    state: "ready",
+    priority_score: 800,
+    priority_reasons: ["agent_run_waiting"],
+    created_at: createdAt,
+    updated_at: createdAt,
+    review_packet: rawPacket,
+  };
+  const fakeStore = {
+    getLatestTaskWorkspaceSnapshot: async () => ({
+      task_id: "task_postgres_wrapper",
+      snapshot: workspaceSnapshot,
+      captured_at: "2026-05-06T11:58:00.000Z",
+      updated_at: "2026-05-06T11:58:00.000Z",
+      actor_id: "mac_queue_app",
+    }),
+    getTaskLayout: async () => undefined,
+    listContextEntries: async () => [],
+    upsertAgentRun: async () => ({
+      agent_run: run,
+      review_packet: rawPacket,
+      queue_item: rawItem,
+      queue_item_created: true,
+    }),
+    getReviewPacket: async () => rawPacket,
+  } as unknown as PostgresQueueStore;
+  const gateway = createPostgresGatewayStore(fakeStore);
+
+  const result = await gateway.upsertAgentRun(run, now);
+  const fetchedPacket = await gateway.getReviewPacket(rawPacket.id);
+
+  assert.equal(workspaceSnapshotContext(result.review_packet)?.snapshot?.activeWorkspace, "postgres-agent-workspace");
+  assert.equal(workspaceSnapshotContext(result.queue_item?.review_packet)?.snapshot?.windows[0]?.frame?.width, 1000);
+  assert.equal(workspaceSnapshotContext(fetchedPacket)?.snapshot?.windows[0]?.frame?.x, 320);
 });
 
 function runGatewayStoreContract(
@@ -474,6 +537,29 @@ function runGatewayStoreContract(
       if (!harness) return;
 
       try {
+        const agentWorkspaceSnapshot: WorkspaceSnapshot = {
+          backend: "aerospace",
+          activeWorkspace: "agent-workspace",
+          focusedWindowId: 77,
+          windows: [
+            {
+              id: 77,
+              app: "Ghostty",
+              title: "Codex agent waiting for approval",
+              workspace: "agent-workspace",
+              monitorId: 1,
+              layout: "floating",
+              frame: { x: 80, y: 90, width: 900, height: 640 },
+            },
+          ],
+        };
+        await harness.store.saveTaskWorkspaceSnapshot({
+          taskId: "task_gateway",
+          snapshot: agentWorkspaceSnapshot,
+          capturedAt: new Date("2026-05-06T11:59:00.000Z"),
+          actorId: "mac_queue_app",
+        });
+
         const first = await harness.store.upsertAgentRun(makeAgentRun({
           id: "run_gateway_agent",
           task_id: "task_gateway",
@@ -507,17 +593,24 @@ function runGatewayStoreContract(
         assert.equal(first.agent_run.id, "run_gateway_agent");
         assert.equal(first.queue_item?.id, "qit_run_gateway_agent_agent_waiting");
         assert.equal(first.review_packet?.summary, "Needs approval.");
+        assert.equal(workspaceSnapshotContext(first.review_packet)?.snapshot?.activeWorkspace, "agent-workspace");
+        assert.equal(workspaceSnapshotContext(first.review_packet)?.snapshot?.windows[0]?.frame?.x, 80);
         assert.equal(second.queue_item?.id, first.queue_item?.id);
         assert.equal(second.review_packet?.summary, "Needs updated approval.");
         assert.equal(second.review_packet?.created_at, first.review_packet?.created_at);
+        assert.equal(workspaceSnapshotContext(second.review_packet)?.snapshot?.windows[0]?.layout, "floating");
         assert.equal(fetched?.blocked_reason, "Needs updated approval.");
         assert.deepEqual(queue.map((item) => item.id), ["qit_run_gateway_agent_agent_waiting"]);
+        assert.equal(workspaceSnapshotContext(queue[0]?.review_packet)?.snapshot?.windows[0]?.frame?.width, 900);
+        const persistedPacket = await harness.store.getReviewPacket(first.review_packet?.id ?? "");
+        assert.equal(workspaceSnapshotContext(persistedPacket)?.snapshot?.focusedWindowId, 77);
         assert.equal(running.queue_item, undefined);
         assert.deepEqual(readyAfterRunning.map((item) => item.id), []);
         assert.deepEqual(doneAfterRunning.map((item) => item.id), ["qit_run_gateway_agent_agent_waiting"]);
         assert.equal(reblocked.queue_item?.id, "qit_run_gateway_agent_agent_waiting");
         assert.equal(reblocked.queue_item?.state, "ready");
         assert.equal(reblocked.queue_item?.priority_score, 850);
+        assert.equal(workspaceSnapshotContext(reblocked.review_packet)?.snapshot?.activeWorkspace, "agent-workspace");
         assert.deepEqual(readyAfterReblocked.map((item) => item.id), ["qit_run_gateway_agent_agent_waiting"]);
       } finally {
         await harness.cleanup();
@@ -1510,6 +1603,37 @@ function makeAgentRun(overrides: Partial<AgentRun> = {}): AgentRun {
     ],
     ...overrides,
   };
+}
+
+function makeAgentReviewPacket(run: AgentRun): ReviewPacket {
+  return {
+    id: `pkt_${run.id}_agent_waiting`,
+    task_id: run.task_id,
+    agent_run_id: run.id,
+    title: "Codex needs human input",
+    summary: run.blocked_reason ?? "Codex is waiting approval.",
+    decision_needed: "Approve resume action or send followup instructions.",
+    risk_level: "medium",
+    confidence: "medium",
+    risk_tags: [],
+    evidence: [],
+    context: [],
+    recommended_action: {
+      id: `act_${run.id}_resume`,
+      type: "resume_agent",
+      label: "Resume agent run",
+      requires_confirmation: true,
+      side_effect: "local",
+      payload: { agent_run_id: run.id },
+    },
+    alternate_actions: [],
+    created_at: createdAt,
+    updated_at: createdAt,
+  };
+}
+
+function workspaceSnapshotContext(packet: ReviewPacket | undefined) {
+  return packet?.context.find((resource) => resource.kind === "workspace_snapshot");
 }
 
 function makeContextRestoreRequest(
