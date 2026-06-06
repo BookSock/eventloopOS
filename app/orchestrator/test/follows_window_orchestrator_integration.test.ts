@@ -213,6 +213,7 @@ describe("follows_window_orchestrator integration", () => {
     assert.deepEqual(ranCommands.map((command) => command.args), [
       ["move-node-to-workspace", "--window-id", "300", "ws-b"],
       ["workspace", "ws-a"],
+      ["focus", "--window-id", "100"],
     ]);
     const activities = await observability.listActivity({ limit: 50 });
     assert.ok(activities.some((a) => a.type === "foreign_claimed_window_redirected"));

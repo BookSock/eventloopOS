@@ -207,6 +207,68 @@ function runGatewayStoreContract(
       }
     });
 
+    it("uses newer task layout when task workspace snapshot is stale", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      const staleSnapshot = {
+        backend: "aerospace" as const,
+        activeWorkspace: "blog-workspace",
+        focusedWindowId: 42,
+        windows: [
+          {
+            id: 42,
+            app: "TextEdit",
+            title: "Shared Note",
+            workspace: "blog-workspace",
+            frame: { x: 1060, y: 100, width: 760, height: 440 },
+          },
+        ],
+      };
+      const freshLayout = {
+        ...staleSnapshot,
+        windows: [
+          {
+            ...staleSnapshot.windows[0]!,
+            frame: { x: 820, y: 260, width: 620, height: 430 },
+          },
+        ],
+      };
+
+      try {
+        await harness.store.createTask({
+          taskId: "task_blog",
+          primaryAnchor: { kind: "ghostty_window", id: "win-blog" },
+          capturedLayout: staleSnapshot,
+          aerospaceWorkspaceId: "blog-workspace",
+          now,
+        });
+        await harness.store.saveTaskWorkspaceSnapshot({
+          taskId: "task_blog",
+          snapshot: staleSnapshot,
+          capturedAt: now,
+          actorId: "ambient-workspace-saver",
+        });
+        await harness.store.updateTaskLayout("task_blog", freshLayout, new Date("2026-05-06T12:01:00.000Z"));
+
+        const event = makeEvent("evt_gateway_task_layout_fresh", "idem_gateway_task_layout_fresh", {
+          title: "Fresh task layout should win",
+          task_hint: "blog",
+        });
+        await harness.store.ingestEventAsReviewPacket(event, new Date("2026-05-06T12:01:01.000Z"));
+
+        const item = await harness.store.leaseNextQueueItem("worker_a", new Date("2026-05-06T12:01:02.000Z"), 1_000);
+        const workspaceContext = item?.review_packet.context.find((resource) => resource.kind === "workspace_snapshot");
+
+        assert.equal(item?.task_id, "task_blog");
+        assert.equal(workspaceContext?.source, "task_workspace_memory");
+        assert.equal(workspaceContext?.snapshot?.windows[0]?.frame?.x, 820);
+        assert.equal(workspaceContext?.details?.updated_at, "2026-05-06T12:01:00.000Z");
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     it("deduplicates and completes context restore requests consistently", async (t) => {
       const harness = await createHarness(t);
       if (!harness) return;

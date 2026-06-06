@@ -238,6 +238,7 @@ describe("follows_window_orchestrator", () => {
     assert.deepEqual(ranCommands.map((command) => command.args), [
       ["move-node-to-workspace", "--window-id", "200", "ws-b"],
       ["workspace", "ws-a"],
+      ["focus", "--window-id", "100"],
     ]);
     assert.ok(activities.some((a) => a.type === "foreign_claimed_window_redirected"));
     assert.ok(activities.some((a) => a.type === "foreign_claimed_window_focus_restored"));
@@ -247,6 +248,7 @@ describe("follows_window_orchestrator", () => {
     const contaminatedSnapshot: WorkspaceSnapshot = {
       backend: "aerospace",
       activeWorkspace: "ws-a",
+      focusedWindowId: 200,
       windows: [
         { id: 100, app: "Ghostty", title: "paper A", workspace: "ws-a" },
         { id: 200, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "Paper B Playwright", workspace: "ws-a" },
@@ -262,6 +264,7 @@ describe("follows_window_orchestrator", () => {
     const restoredFocusSnapshot: WorkspaceSnapshot = {
       ...stillOnOwnerSnapshot,
       activeWorkspace: "ws-a",
+      focusedWindowId: 100,
     };
     const { deps, ranCommands, activities } = makeDeps({
       focusedWorkspace: "ws-a",
@@ -288,10 +291,13 @@ describe("follows_window_orchestrator", () => {
     assert.deepEqual(ranCommands.map((command) => command.args), [
       ["move-node-to-workspace", "--window-id", "200", "ws-b"],
       ["workspace", "ws-a"],
+      ["focus", "--window-id", "100"],
       ["workspace", "ws-a"],
+      ["focus", "--window-id", "100"],
     ]);
     const restored = activities.find((activity) => activity.type === "foreign_claimed_window_focus_restored");
     assert.equal(restored?.details?.attempts, 2);
+    assert.equal(restored?.details?.focus_window_id, 100);
   });
 
   it("moves a process-root descendant window away even when focused workspace is unchanged", async () => {
@@ -324,6 +330,7 @@ describe("follows_window_orchestrator", () => {
     assert.deepEqual(ranCommands.map((command) => command.args), [
       ["move-node-to-workspace", "--window-id", "300", "ws-b"],
       ["workspace", "ws-a"],
+      ["focus", "--window-id", "100"],
     ]);
     ranCommands.length = 0;
 
@@ -334,6 +341,7 @@ describe("follows_window_orchestrator", () => {
     assert.deepEqual(ranCommands.map((command) => command.args), [
       ["move-node-to-workspace", "--window-id", "300", "ws-b"],
       ["workspace", "ws-a"],
+      ["focus", "--window-id", "100"],
     ]);
   });
 
@@ -366,6 +374,7 @@ describe("follows_window_orchestrator", () => {
     assert.deepEqual(ranCommands.map((command) => command.args), [
       ["move-node-to-workspace", "--window-id", "302", "ws-b"],
       ["workspace", "ws-a"],
+      ["focus", "--window-id", "100"],
     ]);
     assert.ok(activities.some((activity) => activity.type === "foreign_claimed_window_redirected"));
   });
@@ -404,6 +413,7 @@ describe("follows_window_orchestrator", () => {
     assert.deepEqual(ranCommands.map((command) => command.args), [
       ["move-node-to-workspace", "--window-id", "303", "ws-b"],
       ["workspace", "ws-a"],
+      ["focus", "--window-id", "100"],
     ]);
   });
 
@@ -450,6 +460,7 @@ describe("follows_window_orchestrator", () => {
     assert.deepEqual(ranCommands.map((command) => command.args), [
       ["move-node-to-workspace", "--window-id", "301", "ws-b"],
       ["workspace", "ws-a"],
+      ["focus", "--window-id", "100"],
     ]);
   });
 

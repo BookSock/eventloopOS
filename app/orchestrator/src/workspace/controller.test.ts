@@ -192,6 +192,65 @@ describe("workspace controller", () => {
     ]);
   });
 
+  it("verified restore retries after a transient focus monitor race", async () => {
+    let activeWorkspace = "manual";
+    let focusedWindowId = 55;
+    let windowWorkspace = "manual";
+    let focusAttempts = 0;
+    const executed: string[][] = [];
+    const exec: ExecFunction = async (command, args) => {
+      if (command === "aerospace" && args[0] === "list-workspaces") return { stdout: `${activeWorkspace}\n` };
+      if (command === "aerospace" && args[0] === "list-windows" && args.includes("--focused")) {
+        return { stdout: JSON.stringify([{ "window-id": focusedWindowId, workspace: activeWorkspace }]) };
+      }
+      if (command === "aerospace" && args[0] === "list-windows") {
+        return {
+          stdout: JSON.stringify([
+            { "window-id": 44, "app-name": "TextEdit", "window-title": "Shared Note", workspace: windowWorkspace },
+          ]),
+        };
+      }
+      if (command === "osascript") return { stdout: "" };
+
+      executed.push(args);
+      if (args[0] === "move-node-to-workspace") windowWorkspace = args[3] ?? windowWorkspace;
+      if (args[0] === "workspace") activeWorkspace = args[1] ?? activeWorkspace;
+      if (args[0] === "focus") {
+        focusAttempts += 1;
+        if (focusAttempts === 1) {
+          throw new Error("Command failed: aerospace focus --window-id 44\nWindow 44 doesn't belong to any monitor. And thus can't even define a focused workspace");
+        }
+        focusedWindowId = Number(args[2]);
+      }
+      return { stdout: "", stderr: "" };
+    };
+    const controller = new AerospaceWorkspaceController(exec, {
+      restoreVerifySettleMs: 0,
+      restoreVerifyRetries: 2,
+    });
+
+    const result = await controller.executeRestorePlanVerified(
+      {
+        backend: "aerospace",
+        activeWorkspace: "paper-a",
+        focusedWindowId: 44,
+        windows: [{ id: 44, app: "TextEdit", title: "Shared Note", workspace: "paper-a" }],
+      },
+      [{ id: 44, app: "TextEdit", title: "Shared Note", workspace: "manual" }],
+    );
+
+    assert.equal(result.verified, true);
+    assert.equal(result.attempts, 2);
+    assert.equal(focusAttempts, 2);
+    assert.match(result.receipt.commands.find((command) => command.args[0] === "focus")?.stderr ?? "", /doesn't belong to any monitor/);
+    assert.deepEqual(executed, [
+      ["move-node-to-workspace", "--window-id", "44", "paper-a"],
+      ["workspace", "paper-a"],
+      ["focus", "--window-id", "44"],
+      ["focus", "--window-id", "44"],
+    ]);
+  });
+
   it("verified restore retries stale-window residuals before failing", async () => {
     let captureCount = 0;
     const executed: string[][] = [];

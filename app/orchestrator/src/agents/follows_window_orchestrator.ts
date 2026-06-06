@@ -3,7 +3,7 @@ import { sanitizeActivityDetails } from "../observability/activity_sanitizer.js"
 import type { GatewayStore } from "../gateway_store.js";
 import type { WorkspaceController } from "../workspace/controller.js";
 import type { AerospaceCommand, WorkspaceSnapshot } from "../workspace/aerospace.js";
-import { focusWorkspacePlan, moveToWorkspacePlan } from "../workspace/aerospace.js";
+import { focusWindowPlan, focusWorkspacePlan, moveToWorkspacePlan } from "../workspace/aerospace.js";
 import type { TaskWindowClaimRecord } from "../store.js";
 import { normalizeTitlePrefix } from "../store.js";
 import type { TaskRuntimeSession } from "../task_sessions/types.js";
@@ -11,8 +11,8 @@ import type { TaskRuntimeSession } from "../task_sessions/types.js";
 export const DEFAULT_FOLLOWS_POLL_MS = 500;
 export const DEFAULT_FOLLOWS_TTL_HOURS = 24;
 export const DEFAULT_FOLLOWS_PRUNE_MS = 60 * 60 * 1_000;
-const FOREIGN_FOCUS_RESTORE_RETRIES = 3;
-const FOREIGN_FOCUS_RESTORE_SETTLE_MS = 150;
+const FOREIGN_FOCUS_RESTORE_RETRIES = 8;
+const FOREIGN_FOCUS_RESTORE_SETTLE_MS = 250;
 
 export type FocusedWorkspaceReader = () => Promise<string | undefined>;
 export type AerospaceCommandRunner = (command: AerospaceCommand) => Promise<unknown>;
@@ -430,23 +430,35 @@ async function redirectForeignClaimedWindows(
     }
   }
 
-  if (moved > 0) await restoreFocusAfterForeignRedirect(deps, { focusedWorkspace: input.focusedWorkspace, moved, tickNow: input.tickNow });
+  if (moved > 0) {
+    await restoreFocusAfterForeignRedirect(deps, {
+      focusedWorkspace: input.focusedWorkspace,
+      focusWindowId: restoreFocusWindowId(snapshot, input.focusedWorkspace, movedWindowIds),
+      moved,
+      tickNow: input.tickNow,
+    });
+  }
 
   return { moved, skipped, movedWindowIds };
 }
 
 async function restoreFocusAfterForeignRedirect(
   deps: FollowsWindowOrchestratorDeps,
-  input: { focusedWorkspace: string; moved: number; tickNow: Date },
+  input: { focusedWorkspace: string; focusWindowId?: number; moved: number; tickNow: Date },
 ): Promise<void> {
   let lastActiveWorkspace: string | undefined;
+  let lastFocusedWindowId: number | undefined;
   let lastError: string | undefined;
   for (let attempt = 1; attempt <= FOREIGN_FOCUS_RESTORE_RETRIES; attempt += 1) {
     try {
       await deps.runAerospaceCommand(focusWorkspacePlan(input.focusedWorkspace));
+      if (input.focusWindowId !== undefined) {
+        await deps.runAerospaceCommand(focusWindowPlan(input.focusWindowId));
+      }
       await sleep(FOREIGN_FOCUS_RESTORE_SETTLE_MS);
       const snapshot = await deps.workspace.capture({ captureFrames: false });
       lastActiveWorkspace = snapshot.activeWorkspace;
+      lastFocusedWindowId = snapshot.focusedWindowId;
       if (lastActiveWorkspace === input.focusedWorkspace) {
         await emitForeignRedirectActivity(deps, {
           type: "foreign_claimed_window_focus_restored",
@@ -454,6 +466,8 @@ async function restoreFocusAfterForeignRedirect(
           tickNow: input.tickNow,
           details: {
             workspace: input.focusedWorkspace,
+            focus_window_id: input.focusWindowId,
+            focused_window_id: lastFocusedWindowId,
             moved: input.moved,
             attempts: attempt,
           },
@@ -472,10 +486,28 @@ async function restoreFocusAfterForeignRedirect(
     status: "failed",
     details: {
       workspace: input.focusedWorkspace,
+      focus_window_id: input.focusWindowId,
       active_workspace: lastActiveWorkspace,
+      focused_window_id: lastFocusedWindowId,
       error: lastError,
     },
   });
+}
+
+function restoreFocusWindowId(
+  snapshot: WorkspaceSnapshot,
+  focusedWorkspace: string,
+  movedWindowIds: ReadonlySet<string>,
+): number | undefined {
+  const candidates = snapshot.windows.filter((window) =>
+    window.workspace === focusedWorkspace
+    && !movedWindowIds.has(String(window.id))
+    && !SYSTEM_APPS_BLOCKLIST.has(window.app.toLowerCase())
+  );
+  if (candidates.length === 0) return undefined;
+  const focusedCandidate = candidates.find((window) => window.id === snapshot.focusedWindowId);
+  if (focusedCandidate) return focusedCandidate.id;
+  return candidates.find((window) => window.app !== "eventloopOS Queue")?.id ?? candidates[0]?.id;
 }
 
 async function ownerWorkspaceForTask(

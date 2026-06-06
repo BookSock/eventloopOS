@@ -170,7 +170,16 @@ export class AerospaceWorkspaceAdapter {
       const command = plan.commands[index];
       if (!command) continue;
       assertSafeAerospaceCommand(command);
-      const result = await this.exec(command.command, command.args);
+      let result: ExecResult;
+      try {
+        result = await this.exec(command.command, command.args);
+      } catch (error) {
+        if (!isTransientFocusRace(command, error)) throw error;
+        result = {
+          stdout: "",
+          stderr: error instanceof Error ? error.message : String(error),
+        };
+      }
       commands.push({ ...command, ...result });
       if (this.workspaceFocusSettleMs > 0 && shouldSettleAfterWorkspaceFocus(command, plan.commands.slice(index + 1))) {
         await this.sleep(this.workspaceFocusSettleMs);
@@ -341,6 +350,14 @@ function combineFrameCaptureStatuses(
     return { status: "skipped", timeoutMs, observed };
   }
   return { status: "captured", timeoutMs, observed };
+}
+
+function isTransientFocusRace(command: AerospaceCommand, error: unknown): boolean {
+  if (command.command !== "aerospace") return false;
+  if (command.args[0] !== "focus" || command.args[1] !== "--window-id") return false;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("doesn't belong to any monitor")
+    || message.includes("can't even define a focused workspace");
 }
 
 export function captureWorkspacePlan(): AerospaceCommand {

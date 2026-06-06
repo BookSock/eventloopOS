@@ -254,7 +254,10 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
   store.currentTaskState = currentTaskState;
   store.followsWindowExclusions = followsWindowExclusions;
 
-  const snapshotForTask = async (taskId: string) => getLatestTaskWorkspaceSnapshot(store, taskId);
+  const snapshotForTask = async (taskId: string) => newestTaskWorkspaceSnapshot(
+    getLatestTaskWorkspaceSnapshot(store, taskId),
+    taskLayouts.get(taskId),
+  );
   const contextEntriesForTask = async (taskId: string) => listContextEntries(store, { task_id: taskId, limit: 8 });
   const enrichItem = async (item: QueueItemWithPacket | undefined): Promise<QueueItemWithPacket | undefined> =>
     await enrichQueueItemWithTaskWorkspaceSnapshot(item, snapshotForTask, contextEntriesForTask);
@@ -710,7 +713,10 @@ export function createInMemoryGatewayStore(store: InMemoryStore): GatewayStore {
 }
 
 export function createPostgresGatewayStore(store: PostgresQueueStore): GatewayStore {
-  const snapshotForTask = (taskId: string) => store.getLatestTaskWorkspaceSnapshot(taskId);
+  const snapshotForTask = async (taskId: string) => newestTaskWorkspaceSnapshot(
+    await store.getLatestTaskWorkspaceSnapshot(taskId),
+    await store.getTaskLayout(taskId),
+  );
   const contextEntriesForTask = (taskId: string) => store.listContextEntries({ task_id: taskId, limit: 8 });
   const enrichItem = async (item: QueueItemWithPacket | undefined): Promise<QueueItemWithPacket | undefined> =>
     await enrichQueueItemWithTaskWorkspaceSnapshot(item, snapshotForTask, contextEntriesForTask);
@@ -1063,6 +1069,24 @@ function taskBrowserResourceFromContextEntry(entry: ContextEntry): ContextResour
 
 function packetHasWorkspaceSnapshot(packet: ReviewPacket): boolean {
   return packet.context.some((resource) => resource.kind === "workspace_snapshot" && resource.snapshot);
+}
+
+function newestTaskWorkspaceSnapshot(
+  snapshotRecord: TaskWorkspaceSnapshotRecord | undefined,
+  layoutRecord: TaskLayoutRecord | undefined,
+): TaskWorkspaceSnapshotRecord | undefined {
+  if (!layoutRecord) return snapshotRecord;
+  const layoutAsSnapshot: TaskWorkspaceSnapshotRecord = {
+    task_id: layoutRecord.task_id,
+    snapshot: layoutRecord.layout,
+    captured_at: layoutRecord.updated_at,
+    updated_at: layoutRecord.updated_at,
+    actor_id: "task_layout",
+  };
+  if (!snapshotRecord) return layoutAsSnapshot;
+  return Date.parse(layoutRecord.updated_at) > Date.parse(snapshotRecord.updated_at)
+    ? layoutAsSnapshot
+    : snapshotRecord;
 }
 
 function stableId(input: string): string {
