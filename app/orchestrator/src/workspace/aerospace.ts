@@ -255,12 +255,16 @@ export class AerospaceWorkspaceAdapter {
     const observations: MacOSWindowFrameObservation[] = [];
     const statuses: WorkspaceFrameCaptureStatus[] = [];
     const byWorkspace = groupWindowsByWorkspace(candidates);
+    let currentCaptureWorkspace = restoreTarget.activeWorkspace;
+    let changedFocus = false;
 
     try {
       for (const [workspace, workspaceWindows] of byWorkspace) {
-        if (workspace !== undefined) {
+        if (workspace !== undefined && workspace !== currentCaptureWorkspace) {
           try {
             await this.exec("aerospace", focusWorkspacePlan(workspace).args);
+            currentCaptureWorkspace = workspace;
+            changedFocus = true;
             if (this.workspaceFocusSettleMs > 0) await this.sleep(this.workspaceFocusSettleMs);
           } catch (error) {
             statuses.push({
@@ -278,7 +282,7 @@ export class AerospaceWorkspaceAdapter {
         statuses.push(result.status);
       }
     } finally {
-      if (restoreTarget.restoreFocus) {
+      if (restoreTarget.restoreFocus && changedFocus) {
         await this.restoreFrameCaptureFocus(restoreTarget);
       }
     }

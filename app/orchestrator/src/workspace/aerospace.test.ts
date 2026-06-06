@@ -283,7 +283,53 @@ describe("Aerospace workspace adapter", () => {
     ]);
   });
 
-  it("captures requested frames by workspace and restores prior focus", async () => {
+  it("captures active workspace frames without redundant focus commands", async () => {
+    const events: string[] = [];
+    const adapter = new AerospaceWorkspaceAdapter(async (command, args) => {
+      if (command === "aerospace" && args[0] === "list-windows" && args.includes("--focused")) {
+        return { stdout: JSON.stringify([{ "window-id": 21, workspace: "paper-a" }]) };
+      }
+      if (command === "aerospace" && args[0] === "list-workspaces") {
+        return { stdout: "paper-a\n" };
+      }
+      if (command === "aerospace" && args[0] === "workspace") {
+        events.push(`workspace:${args[1]}`);
+        return { stdout: "ok" };
+      }
+      if (command === "aerospace" && args[0] === "focus") {
+        events.push(`focus:${args[2]}`);
+        return { stdout: "ok" };
+      }
+      if (command === "aerospace") {
+        return {
+          stdout: JSON.stringify([
+            {
+              "window-id": 21,
+              "app-name": "TextEdit",
+              "app-bundle-id": "com.apple.TextEdit",
+              "window-title": "Shared Note",
+              workspace: "paper-a",
+            },
+          ]),
+        };
+      }
+      events.push("osascript");
+      return { stdout: "TextEdit\tcom.apple.TextEdit\tShared Note\t10\t20\t500\t300\n" };
+    }, {
+      workspaceFocusSettleMs: 0,
+    });
+
+    const snapshot = await adapter.capture({
+      frameWindowIds: [21],
+      focusFrameWorkspaces: true,
+      restoreFrameCaptureFocus: true,
+    });
+
+    assert.deepEqual(snapshot.windows[0]?.frame, { x: 10, y: 20, width: 500, height: 300 });
+    assert.deepEqual(events, ["osascript"]);
+  });
+
+  it("captures requested frames by workspace without refocusing the active workspace", async () => {
     const events: string[] = [];
     let currentWorkspace = "paper-a";
     const adapter = new AerospaceWorkspaceAdapter(async (command, args) => {
@@ -348,7 +394,6 @@ describe("Aerospace workspace adapter", () => {
     assert.equal(snapshot.windows[2]?.frame, undefined);
     assert.deepEqual(snapshot.frameCapture, { status: "captured", timeoutMs: 2_500, observed: 2 });
     assert.deepEqual(events, [
-      "workspace:paper-a",
       "osascript:paper-a",
       "workspace:paper-b",
       "osascript:paper-b",
