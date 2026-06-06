@@ -1497,6 +1497,93 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(result.followsWindowExclusion?.titleSubstring, "slack")
     }
 
+    func testSendMasterCommandShowsTriggerFeedback() async {
+        let client = FakeQueueClient(
+            packets: [],
+            masterCommandResult: MasterCommandResult(
+                ok: true,
+                requestId: "req_master_trigger",
+                intent: "define_trigger",
+                triggerTaskId: "task_launch",
+                triggerEventType: "slack.message",
+                triggerBodySubstring: "deploy"
+            )
+        )
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.sendMasterCommand(text: "tell me when Slack mentions deploy")
+
+        XCTAssertEqual(client.sentMasterCommands.count, 1)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Trigger created: slack.message about deploy."))
+        guard case let .routed(result) = viewModel.masterCommandState else {
+            return XCTFail("expected routed state")
+        }
+        XCTAssertEqual(result.intent, "define_trigger")
+        XCTAssertEqual(result.triggerBodySubstring, "deploy")
+    }
+
+    func testSendMasterCommandShowsPriorityFeedback() async {
+        let packet = ReviewPacket(
+            id: "packet-voice",
+            taskId: "task_voice",
+            title: "Review Voice command",
+            summary: "Human feedback needs review.",
+            source: "voice",
+            priority: 1300,
+            recommendedAction: "Work this paper, then Done / Next",
+            recommendedActionType: "mark_done",
+            createdAt: Date(timeIntervalSince1970: 1_778_068_800)
+        )
+        let client = FakeQueueClient(
+            packets: [],
+            masterCommandResult: MasterCommandResult(
+                ok: true,
+                requestId: "req_master_rerank",
+                intent: "rerank",
+                rerankDirection: "up",
+                rerankTarget: "voice",
+                rerankedPacket: packet,
+                priorityScore: 1300
+            )
+        )
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.sendMasterCommand(text: "make voice higher priority")
+
+        XCTAssertEqual(client.sentMasterCommands.count, 1)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Priority updated: Review Voice command (1300)."))
+        guard case let .routed(result) = viewModel.masterCommandState else {
+            return XCTFail("expected routed state")
+        }
+        XCTAssertEqual(result.rerankedPacket?.title, "Review Voice command")
+    }
+
+    func testSendMasterCommandShowsLogicalFailureFeedback() async {
+        let client = FakeQueueClient(
+            packets: [],
+            masterCommandResult: MasterCommandResult(
+                ok: false,
+                requestId: "req_master_no_current_task",
+                errorCode: "no_current_task",
+                message: "Cannot create trigger: no current task is bound. Bind a task first with the advance hotkey.",
+                intent: "define_trigger"
+            )
+        )
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.sendMasterCommand(text: "tell me when Slack mentions deploy")
+
+        XCTAssertEqual(client.sentMasterCommands.count, 1)
+        XCTAssertEqual(
+            viewModel.advanceToast,
+            .actionComplete("Cannot create trigger: no current task is bound. Bind a task first with the advance hotkey.")
+        )
+        XCTAssertEqual(
+            viewModel.masterCommandState,
+            .failed("Cannot create trigger: no current task is bound. Bind a task first with the advance hotkey.")
+        )
+    }
+
     func testMasterCommandFailureToastShowsServerMessageWithoutHTTPPrefix() async {
         let client = FakeQueueClient(
             packets: [],

@@ -443,6 +443,9 @@ private struct MasterCommandStatusView: View {
     }
 
     private func masterCommandRoutedText(_ result: MasterCommandResult) -> String {
+        if result.intent != nil || !result.ok {
+            return result.userFacingStatus
+        }
         if let targetTaskId = result.targetTaskId {
             return "Routed to \(targetTaskId)"
         }

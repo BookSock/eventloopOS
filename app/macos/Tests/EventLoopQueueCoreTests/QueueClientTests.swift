@@ -693,6 +693,132 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(result.followsWindowExclusion?.titleSubstring, "slack")
     }
 
+    func testHTTPQueueClientDecodesMasterCommandTriggerFeedback() async throws {
+        let (client, _) = makeHTTPClient { _ in
+            """
+            {
+              "ok": true,
+              "intent": "define_trigger",
+              "trigger": {
+                "trigger_id": "ptr_slack_deploy",
+                "task_id": "task_launch",
+                "match_event_type": "slack.message",
+                "match_body_substring": "deploy"
+              },
+              "request_id": "req_master_trigger"
+            }
+            """
+        }
+
+        let result = try await client.sendMasterCommand(text: "tell me when Slack mentions deploy")
+
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.requestId, "req_master_trigger")
+        XCTAssertEqual(result.intent, "define_trigger")
+        XCTAssertEqual(result.triggerTaskId, "task_launch")
+        XCTAssertEqual(result.triggerEventType, "slack.message")
+        XCTAssertEqual(result.triggerBodySubstring, "deploy")
+        XCTAssertEqual(result.userFacingStatus, "Trigger created: slack.message about deploy.")
+    }
+
+    func testHTTPQueueClientDecodesMasterCommandDeferFeedback() async throws {
+        let (client, _) = makeHTTPClient { _ in
+            """
+            {
+              "ok": true,
+              "intent": "defer",
+              "selector": "blog",
+              "defer_seconds": 3600,
+              "due_at": "2026-05-06T13:00:00.000Z",
+              "deferred": [
+                {"id": "qit_blog_1", "task_id": "task_blog", "due_at": "2026-05-06T13:00:00.000Z"},
+                {"id": "qit_blog_2", "task_id": "task_blog_followup", "due_at": "2026-05-06T13:00:00.000Z"}
+              ],
+              "request_id": "req_master_defer"
+            }
+            """
+        }
+
+        let result = try await client.sendMasterCommand(text: "defer blog for an hour")
+
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.intent, "defer")
+        XCTAssertEqual(result.deferredCount, 2)
+        XCTAssertEqual(result.deferredUntil, Date(timeIntervalSince1970: 1_778_072_400))
+        XCTAssertEqual(result.userFacingStatus, "Deferred 2 papers.")
+    }
+
+    func testHTTPQueueClientDecodesMasterCommandRerankFeedback() async throws {
+        let (client, _) = makeHTTPClient { _ in
+            """
+            {
+              "ok": true,
+              "intent": "rerank",
+              "direction": "up",
+              "target": "voice",
+              "queue_item_id": "qit_voice",
+              "priority_score": 1300,
+              "item": {
+                "id": "qit_voice",
+                "review_packet_id": "pkt_voice",
+                "task_id": "task_voice",
+                "priority_score": 1300,
+                "priority_reasons": ["voice_rerank"],
+                "created_at": "2026-05-06T12:00:00.000Z",
+                "review_packet": {
+                  "id": "pkt_voice",
+                  "title": "Review Voice command",
+                  "summary": "Human feedback needs review.",
+                  "primary_source": "voice",
+                  "risk_level": "medium",
+                  "confidence": "medium",
+                  "risk_tags": [],
+                  "context": [],
+                  "evidence": [],
+                  "recommended_action": {
+                    "label": "Work this paper, then Done / Next",
+                    "type": "mark_done"
+                  }
+                }
+              },
+              "request_id": "req_master_rerank"
+            }
+            """
+        }
+
+        let result = try await client.sendMasterCommand(text: "make voice higher priority")
+
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.intent, "rerank")
+        XCTAssertEqual(result.rerankDirection, "up")
+        XCTAssertEqual(result.rerankTarget, "voice")
+        XCTAssertEqual(result.priorityScore, 1300)
+        XCTAssertEqual(result.rerankedPacket?.title, "Review Voice command")
+        XCTAssertEqual(result.userFacingStatus, "Priority updated: Review Voice command (1300).")
+    }
+
+    func testHTTPQueueClientDecodesMasterCommandLogicalFailureFeedback() async throws {
+        let (client, _) = makeHTTPClient { _ in
+            """
+            {
+              "ok": false,
+              "intent": "define_trigger",
+              "error": "no_current_task",
+              "message": "Cannot create trigger: no current task is bound. Bind a task first with the advance hotkey.",
+              "request_id": "req_master_no_current_task"
+            }
+            """
+        }
+
+        let result = try await client.sendMasterCommand(text: "tell me when Slack mentions deploy")
+
+        XCTAssertFalse(result.ok)
+        XCTAssertEqual(result.intent, "define_trigger")
+        XCTAssertEqual(result.errorCode, "no_current_task")
+        XCTAssertEqual(result.message, "Cannot create trigger: no current task is bound. Bind a task first with the advance hotkey.")
+        XCTAssertEqual(result.userFacingStatus, "Cannot create trigger: no current task is bound. Bind a task first with the advance hotkey.")
+    }
+
     func testHTTPQueueClientStartsMasterTask() async throws {
         var capturedRequestBody: [String: Any]?
         let (client, recorder) = makeHTTPClient { request in

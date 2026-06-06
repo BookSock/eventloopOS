@@ -121,44 +121,94 @@ public enum TaskBindingState: Equatable, Sendable {
 public struct MasterCommandResult: Decodable, Equatable, Sendable {
     public let ok: Bool
     public let requestId: String?
+    public let errorCode: String?
+    public let message: String?
     public let eventId: String?
     public let routeAction: String?
     public let targetTaskId: String?
     public let targetTaskSessionId: String?
     public let queuedPacket: ReviewPacket?
     public let intent: String?
+    public let target: String?
     public let targetAppOrTitle: String?
     public let followsWindowExclusion: FollowsWindowExclusion?
+    public let triggerTaskId: String?
+    public let triggerEventType: String?
+    public let triggerBodySubstring: String?
+    public let wokeTaskId: String?
+    public let deferredCount: Int?
+    public let deferredUntil: Date?
+    public let rerankDirection: String?
+    public let rerankTarget: String?
+    public let rerankedPacket: ReviewPacket?
+    public let priorityScore: Int?
 
     public init(
         ok: Bool,
         requestId: String? = nil,
+        errorCode: String? = nil,
+        message: String? = nil,
         eventId: String? = nil,
         routeAction: String? = nil,
         targetTaskId: String? = nil,
         targetTaskSessionId: String? = nil,
         queuedPacket: ReviewPacket? = nil,
         intent: String? = nil,
+        target: String? = nil,
         targetAppOrTitle: String? = nil,
-        followsWindowExclusion: FollowsWindowExclusion? = nil
+        followsWindowExclusion: FollowsWindowExclusion? = nil,
+        triggerTaskId: String? = nil,
+        triggerEventType: String? = nil,
+        triggerBodySubstring: String? = nil,
+        wokeTaskId: String? = nil,
+        deferredCount: Int? = nil,
+        deferredUntil: Date? = nil,
+        rerankDirection: String? = nil,
+        rerankTarget: String? = nil,
+        rerankedPacket: ReviewPacket? = nil,
+        priorityScore: Int? = nil
     ) {
         self.ok = ok
         self.requestId = requestId
+        self.errorCode = errorCode
+        self.message = message
         self.eventId = eventId
         self.routeAction = routeAction
         self.targetTaskId = targetTaskId
         self.targetTaskSessionId = targetTaskSessionId
         self.queuedPacket = queuedPacket
         self.intent = intent
+        self.target = target
         self.targetAppOrTitle = targetAppOrTitle
         self.followsWindowExclusion = followsWindowExclusion
+        self.triggerTaskId = triggerTaskId
+        self.triggerEventType = triggerEventType
+        self.triggerBodySubstring = triggerBodySubstring
+        self.wokeTaskId = wokeTaskId
+        self.deferredCount = deferredCount
+        self.deferredUntil = deferredUntil
+        self.rerankDirection = rerankDirection
+        self.rerankTarget = rerankTarget
+        self.rerankedPacket = rerankedPacket
+        self.priorityScore = priorityScore
     }
 
     enum CodingKeys: String, CodingKey {
         case ok
+        case error
+        case message
         case intent
+        case target
         case targetAppOrTitle = "target_app_or_title"
         case exclusion
+        case trigger
+        case task
+        case deferred
+        case dueAt = "due_at"
+        case direction
+        case queueItemId = "queue_item_id"
+        case priorityScore = "priority_score"
+        case item
         case requestId = "request_id"
         case event
         case routeDecision = "route_decision"
@@ -175,10 +225,22 @@ public struct MasterCommandResult: Decodable, Equatable, Sendable {
         case targetTaskSessionId = "target_task_session_id"
     }
 
+    enum TriggerCodingKeys: String, CodingKey {
+        case taskId = "task_id"
+        case matchEventType = "match_event_type"
+        case matchBodySubstring = "match_body_substring"
+    }
+
+    enum TaskCodingKeys: String, CodingKey {
+        case taskId = "task_id"
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.ok = try container.decodeIfPresent(Bool.self, forKey: .ok) ?? true
         self.requestId = try container.decodeIfPresent(String.self, forKey: .requestId)
+        self.errorCode = try container.decodeIfPresent(String.self, forKey: .error)
+        self.message = try container.decodeIfPresent(String.self, forKey: .message)
 
         if let event = try? container.nestedContainer(keyedBy: EventCodingKeys.self, forKey: .event) {
             self.eventId = try event.decodeIfPresent(String.self, forKey: .id)
@@ -198,8 +260,98 @@ public struct MasterCommandResult: Decodable, Equatable, Sendable {
 
         self.queuedPacket = try container.decodeIfPresent(QueueItemDTO.self, forKey: .queueItem)?.packet
         self.intent = try container.decodeIfPresent(String.self, forKey: .intent)
+        self.target = try container.decodeIfPresent(String.self, forKey: .target)
         self.targetAppOrTitle = try container.decodeIfPresent(String.self, forKey: .targetAppOrTitle)
         self.followsWindowExclusion = try container.decodeIfPresent(FollowsWindowExclusion.self, forKey: .exclusion)
+
+        if let trigger = try? container.nestedContainer(keyedBy: TriggerCodingKeys.self, forKey: .trigger) {
+            self.triggerTaskId = try trigger.decodeIfPresent(String.self, forKey: .taskId)
+            self.triggerEventType = try trigger.decodeIfPresent(String.self, forKey: .matchEventType)
+            self.triggerBodySubstring = try trigger.decodeIfPresent(String.self, forKey: .matchBodySubstring)
+        } else {
+            self.triggerTaskId = nil
+            self.triggerEventType = nil
+            self.triggerBodySubstring = nil
+        }
+
+        if let task = try? container.nestedContainer(keyedBy: TaskCodingKeys.self, forKey: .task) {
+            self.wokeTaskId = try task.decodeIfPresent(String.self, forKey: .taskId)
+        } else {
+            self.wokeTaskId = nil
+        }
+
+        if let deferred = try? container.nestedUnkeyedContainer(forKey: .deferred) {
+            self.deferredCount = deferred.count
+        } else {
+            self.deferredCount = nil
+        }
+        self.deferredUntil = try container.decodeIfPresent(Date.self, forKey: .dueAt)
+        self.rerankDirection = try container.decodeIfPresent(String.self, forKey: .direction)
+        self.rerankTarget = try container.decodeIfPresent(String.self, forKey: .target)
+        self.rerankedPacket = try container.decodeIfPresent(QueueItemDTO.self, forKey: .item)?.packet
+        self.priorityScore = try container.decodeIfPresent(Int.self, forKey: .priorityScore)
+    }
+
+    public var userFacingStatus: String {
+        if !ok {
+            if let message, !message.isEmpty {
+                return message.hasSuffix(".") ? message : "\(message)."
+            }
+            if intent == "wake_task", let target {
+                return "No matching task for \(target)."
+            }
+            if let errorCode {
+                return "Master command failed: \(errorCode)."
+            }
+            return "Master command failed."
+        }
+        if intent == "stop_sharing" {
+            let target = targetAppOrTitle
+                ?? followsWindowExclusion?.titleSubstring
+                ?? followsWindowExclusion?.appBundle
+                ?? "window"
+            return "Stopped sharing \(target) across papers."
+        }
+        if intent == "define_trigger" {
+            if let triggerEventType, let triggerBodySubstring {
+                return "Trigger created: \(triggerEventType) about \(triggerBodySubstring)."
+            }
+            return "Trigger created for current task."
+        }
+        if intent == "wake_task" {
+            if let wokeTaskId {
+                return "Woke task \(wokeTaskId)."
+            }
+            if let target {
+                return "Wake command accepted for \(target)."
+            }
+        }
+        if intent == "defer" || intent == "pause" {
+            let count = deferredCount ?? 0
+            return intent == "pause"
+                ? "Paused \(count) paper\(count == 1 ? "" : "s")."
+                : "Deferred \(count) paper\(count == 1 ? "" : "s")."
+        }
+        if intent == "rerank" {
+            let title = rerankedPacket?.title ?? rerankTarget
+            if let title, let priorityScore {
+                return "Priority updated: \(title) (\(priorityScore))."
+            }
+            if let title {
+                return "Priority updated: \(title)."
+            }
+            return "Priority updated."
+        }
+        if let queuedPacket {
+            return "Master command queued: \(queuedPacket.title)"
+        }
+        if let targetTaskId {
+            return "Master command routed to \(targetTaskId)."
+        }
+        if let routeAction {
+            return "Master command routed: \(routeAction)."
+        }
+        return "Master command routed."
     }
 }
 

@@ -1335,6 +1335,12 @@ public final class QueueViewModel: ObservableObject {
                 text: trimmed,
                 taskHint: normalizedTaskHint(taskHint) ?? selectedTaskId
             )
+            if !result.ok {
+                let status = Self.masterCommandRoutedStatus(result)
+                masterCommandState = .failed(status)
+                advanceToast = .actionComplete(status)
+                return
+            }
             masterCommandState = .routed(result)
             advanceToast = .actionComplete(Self.masterCommandRoutedStatus(result))
             await refreshQueue()
@@ -2519,23 +2525,7 @@ public final class QueueViewModel: ObservableObject {
     }
 
     private static func masterCommandRoutedStatus(_ result: MasterCommandResult) -> String {
-        if result.intent == "stop_sharing" {
-            let target = result.targetAppOrTitle
-                ?? result.followsWindowExclusion?.titleSubstring
-                ?? result.followsWindowExclusion?.appBundle
-                ?? "window"
-            return "Stopped sharing \(target) across papers."
-        }
-        if let queuedPacket = result.queuedPacket {
-            return "Master command queued: \(queuedPacket.title)"
-        }
-        if let targetTaskId = result.targetTaskId {
-            return "Master command routed to \(targetTaskId)."
-        }
-        if let routeAction = result.routeAction {
-            return "Master command routed: \(routeAction)."
-        }
-        return "Master command routed."
+        result.userFacingStatus
     }
 }
 
