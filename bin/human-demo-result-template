@@ -156,6 +156,7 @@ if (outputPath) {
 }
 const result = {
   manifest_path: relativeManifestPath,
+  git: manifest.git ?? null,
   screenshot_path: screenshotPath,
   screenshot_ok: screenshotOk,
   readiness_manifest_path: readyManifestPath,

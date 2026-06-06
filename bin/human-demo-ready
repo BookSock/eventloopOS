@@ -165,6 +165,7 @@ const manifest = {
   kind: "eventloopos.human_demo_ready",
   started_at: startedAt,
   finished_at: finishedAt,
+  git: currentGitMetadata(),
   duration_ms: Date.parse(finishedAt) - Date.parse(startedAt),
   artifact_dir: runDir,
   ok: failedChecks.length === 0,
@@ -189,6 +190,7 @@ const manifest = {
   } : undefined,
   latest_human_demo: templateJson ? {
     manifest_path: templateJson.manifest_path,
+    git: templateJson.git ?? null,
     screenshot_path: templateJson.screenshot_path,
     screenshot_image: latestHumanDemoScreenshot,
     suggested_result_path: templateJson.suggested_output_path,
@@ -271,6 +273,7 @@ const output = {
   paper_reminder_feedback_required: manifest.paper_reminder_feedback_required,
   hotkey_latency_required: manifest.hotkey_latency_required,
   manual_mode_feedback_required: manifest.manual_mode_feedback_required,
+  git: manifest.git,
   latest_human_demo: manifest.latest_human_demo,
   screen_sharing_capture: manifest.screen_sharing_capture,
   screenshot_stage: manifest.screenshot_stage,
@@ -329,6 +332,21 @@ function numberOption(flag, defaultValue) {
     process.exit(2);
   }
   return parsed;
+}
+
+function currentGitMetadata() {
+  return {
+    head_sha: gitOutput(["rev-parse", "HEAD"]),
+    branch: gitOutput(["rev-parse", "--abbrev-ref", "HEAD"]),
+  };
+}
+
+function gitOutput(commandArgs) {
+  const result = spawnSync("git", commandArgs, {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  return result.status === 0 ? result.stdout.trim() || null : null;
 }
 
 function runLabDemoScreenshotStageStep(envOverride) {

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
@@ -54,6 +55,7 @@ if (jsonOnly) {
 process.exit(strict && audit.ok !== true ? 1 : 0);
 
 function buildAudit(root, options = {}) {
+  const currentHeadSha = options.currentHeadSha ?? currentGitHead(root);
   const readinessPath = latestReadinessManifestPath(root);
   const readiness = readinessPath ? readJson(path.resolve(root, readinessPath)) : undefined;
   const readinessAt = manifestTimestamp(readiness);
@@ -68,6 +70,8 @@ function buildAudit(root, options = {}) {
     readiness_manifest_present: Boolean(readinessPath),
     readiness_ok: readiness?.ok === true,
     readiness_fresh: readinessFreshness.ok === true,
+    readiness_git_matches_current_head: gitHeadMatches(readiness?.git, currentHeadSha),
+    readiness_latest_demo_git_matches_current_head: gitHeadMatches(readiness?.latest_human_demo?.git, currentHeadSha),
     readiness_screenshot_gate_present: readiness?.checks?.latest_human_demo_screenshot_ok === true
       && readiness?.latest_human_demo?.screenshot_image?.ok === true,
     readiness_queue_briefing_strip_visible: readiness?.checks?.queue_briefing_strip_visible === true,
@@ -105,6 +109,9 @@ function buildAudit(root, options = {}) {
     failed_checks: failedChecks,
     checks,
     readiness_manifest_path: readinessPath,
+    current_head_sha: currentHeadSha ?? null,
+    readiness_git: readiness?.git ?? null,
+    latest_demo_git: readiness?.latest_human_demo?.git ?? null,
     readiness_observed_at: readinessAt ?? null,
     readiness_generated_at: readinessAt ?? null,
     readiness_freshness: readinessFreshness,
@@ -390,6 +397,24 @@ function fileSha256(filePath) {
   return crypto.createHash("sha256").update(fs.readFileSync(filePath)).digest("hex");
 }
 
+function currentGitHead(root) {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function gitHeadMatches(git, headSha) {
+  if (!headSha) return true;
+  const manifestSha = typeof git?.head_sha === "string" ? git.head_sha.trim() : "";
+  return manifestSha === headSha;
+}
+
 function valueAfter(flag) {
   const index = args.indexOf(flag);
   if (index === -1) return undefined;
@@ -420,28 +445,33 @@ function writeJson(filePath, value) {
 function runSelfTest() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "eventloopos-human-demo-completion-audit-"));
   const readinessPath = path.join(root, "artifacts", "lab-runs", "20260605T000000Z-human-demo-ready", "manifest.json");
-  const readyManifest = (timestamp) => ({
-    ok: true,
-    finished_at: timestamp,
-    checks: {
-      latest_human_demo_screenshot_ok: true,
-      queue_briefing_strip_visible: true,
-      paper_reminder_hud_visible: true,
-      paper_reminder_feedback_ok: true,
-      manual_mode_feedback_ok: true,
-      new_window_autosave_proof_ok: true,
-      foreign_window_containment_proof_ok: true,
-      agent_spawn_window_containment_proof_ok: true,
-    },
-    latest_human_demo: {
-      new_window_autosave_ok: true,
-      foreign_window_containment_ok: true,
-      agent_spawn_window_containment_ok: true,
-      agent_spawn_window_containment_app: "Google Chrome",
-      agent_spawn_window_containment_chrome_ok: true,
-      screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
-    },
-  });
+  const readyManifest = (timestamp, git, latestDemoGit) => {
+    const manifest = {
+      ok: true,
+      finished_at: timestamp,
+      checks: {
+        latest_human_demo_screenshot_ok: true,
+        queue_briefing_strip_visible: true,
+        paper_reminder_hud_visible: true,
+        paper_reminder_feedback_ok: true,
+        manual_mode_feedback_ok: true,
+        new_window_autosave_proof_ok: true,
+        foreign_window_containment_proof_ok: true,
+        agent_spawn_window_containment_proof_ok: true,
+      },
+      latest_human_demo: {
+        new_window_autosave_ok: true,
+        foreign_window_containment_ok: true,
+        agent_spawn_window_containment_ok: true,
+        agent_spawn_window_containment_app: "Google Chrome",
+        agent_spawn_window_containment_chrome_ok: true,
+        screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
+      },
+    };
+    if (git) manifest.git = git;
+    if (latestDemoGit) manifest.latest_human_demo.git = latestDemoGit;
+    return manifest;
+  };
   writeJson(readinessPath, readyManifest(new Date().toISOString()));
   const oldResultPath = path.join(root, "artifacts", "human-demo-results", "20260601T000000Z-human-demo-result.md");
   fs.mkdirSync(path.dirname(oldResultPath), { recursive: true });
@@ -504,6 +534,26 @@ ship
   assert.equal(complete.ok, true);
   assert.equal(complete.status, "complete");
   assert.deepEqual(complete.next_actions, []);
+
+  writeJson(readinessPath, readyManifest(new Date().toISOString(), { head_sha: "head-a" }, { head_sha: "head-a" }));
+  const currentHeadComplete = buildAudit(root, {
+    currentHeadSha: "head-a",
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(currentHeadComplete.ok, true);
+  assert.equal(currentHeadComplete.current_head_sha, "head-a");
+  assert.equal(currentHeadComplete.readiness_git.head_sha, "head-a");
+  assert.equal(currentHeadComplete.latest_demo_git.head_sha, "head-a");
+
+  const staleHead = buildAudit(root, {
+    currentHeadSha: "head-b",
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(staleHead.ok, false);
+  assert.ok(staleHead.failed_checks.includes("readiness_git_matches_current_head"));
+  assert.ok(staleHead.failed_checks.includes("readiness_latest_demo_git_matches_current_head"));
 
   writeJson(readinessPath, readyManifest("2000-01-01T00:00:00.000Z"));
   const staleReadiness = buildAudit(root, {

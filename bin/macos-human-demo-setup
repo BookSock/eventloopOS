@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+const repoRoot = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const orchestratorUrl = process.env.EVENTLOOPOS_ORCHESTRATOR_URL ?? "http://127.0.0.1:4480";
 const stamp = new Date().toISOString().replace(/[-:.]/g, "").slice(0, 15);
 const run = process.env.EVENTLOOPOS_HUMAN_DEMO_RUN ?? path.join("artifacts", "lab-runs", `${stamp}-human-demo-setup`);
@@ -155,6 +156,7 @@ const manifest = {
   ok: true,
   kind: "eventloopos.human_demo_setup",
   generated_at: new Date().toISOString(),
+  git: currentGitMetadata(),
   run,
   orchestrator_url: orchestratorUrl,
   demo_dir: demoDir,
@@ -1253,6 +1255,21 @@ function assertDemoInstructions() {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function currentGitMetadata() {
+  return {
+    head_sha: gitOutput(["rev-parse", "HEAD"]),
+    branch: gitOutput(["rev-parse", "--abbrev-ref", "HEAD"]),
+  };
+}
+
+function gitOutput(args) {
+  try {
+    return execFileSync("git", args, { cwd: repoRoot, encoding: "utf8" }).trim() || null;
+  } catch {
+    return null;
+  }
 }
 
 function sleepSync(ms) {
