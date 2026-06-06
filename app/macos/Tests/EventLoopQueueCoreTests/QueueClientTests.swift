@@ -666,6 +666,33 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(result.queuedPacket?.title, "Review master note")
     }
 
+    func testHTTPQueueClientDecodesMasterCommandStopSharing() async throws {
+        let (client, _) = makeHTTPClient { _ in
+            """
+            {
+              "ok": true,
+              "intent": "stop_sharing",
+              "target_app_or_title": "Slack",
+              "exclusion": {
+                "exclusion_id": "fwex_slack",
+                "title_substring": "slack",
+                "created_at": "2026-05-06T12:00:00.000Z"
+              },
+              "request_id": "req_master_stop_sharing"
+            }
+            """
+        }
+
+        let result = try await client.sendMasterCommand(text: "stop sharing Slack")
+
+        XCTAssertTrue(result.ok)
+        XCTAssertEqual(result.requestId, "req_master_stop_sharing")
+        XCTAssertEqual(result.intent, "stop_sharing")
+        XCTAssertEqual(result.targetAppOrTitle, "Slack")
+        XCTAssertEqual(result.followsWindowExclusion?.exclusionId, "fwex_slack")
+        XCTAssertEqual(result.followsWindowExclusion?.titleSubstring, "slack")
+    }
+
     func testHTTPQueueClientStartsMasterTask() async throws {
         var capturedRequestBody: [String: Any]?
         let (client, recorder) = makeHTTPClient { request in

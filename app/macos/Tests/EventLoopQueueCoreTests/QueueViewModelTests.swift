@@ -1469,6 +1469,34 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Master command queued: Review master note"))
     }
 
+    func testSendMasterCommandShowsStopSharingFeedback() async {
+        let client = FakeQueueClient(
+            packets: [],
+            masterCommandResult: MasterCommandResult(
+                ok: true,
+                requestId: "req_master_stop_sharing",
+                intent: "stop_sharing",
+                targetAppOrTitle: "Slack",
+                followsWindowExclusion: FollowsWindowExclusion(
+                    exclusionId: "fwex_slack",
+                    titleSubstring: "slack",
+                    createdAt: Date(timeIntervalSince1970: 1_778_070_000)
+                )
+            )
+        )
+        let viewModel = QueueViewModel(client: client)
+
+        await viewModel.sendMasterCommand(text: "stop sharing Slack")
+
+        XCTAssertEqual(client.sentMasterCommands.count, 1)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Stopped sharing Slack across papers."))
+        guard case let .routed(result) = viewModel.masterCommandState else {
+            return XCTFail("expected routed state")
+        }
+        XCTAssertEqual(result.intent, "stop_sharing")
+        XCTAssertEqual(result.followsWindowExclusion?.titleSubstring, "slack")
+    }
+
     func testMasterCommandFailureToastShowsServerMessageWithoutHTTPPrefix() async {
         let client = FakeQueueClient(
             packets: [],

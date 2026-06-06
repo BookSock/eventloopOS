@@ -2519,6 +2519,13 @@ public final class QueueViewModel: ObservableObject {
     }
 
     private static func masterCommandRoutedStatus(_ result: MasterCommandResult) -> String {
+        if result.intent == "stop_sharing" {
+            let target = result.targetAppOrTitle
+                ?? result.followsWindowExclusion?.titleSubstring
+                ?? result.followsWindowExclusion?.appBundle
+                ?? "window"
+            return "Stopped sharing \(target) across papers."
+        }
         if let queuedPacket = result.queuedPacket {
             return "Master command queued: \(queuedPacket.title)"
         }

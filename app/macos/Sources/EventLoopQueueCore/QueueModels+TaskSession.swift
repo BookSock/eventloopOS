@@ -126,6 +126,9 @@ public struct MasterCommandResult: Decodable, Equatable, Sendable {
     public let targetTaskId: String?
     public let targetTaskSessionId: String?
     public let queuedPacket: ReviewPacket?
+    public let intent: String?
+    public let targetAppOrTitle: String?
+    public let followsWindowExclusion: FollowsWindowExclusion?
 
     public init(
         ok: Bool,
@@ -134,7 +137,10 @@ public struct MasterCommandResult: Decodable, Equatable, Sendable {
         routeAction: String? = nil,
         targetTaskId: String? = nil,
         targetTaskSessionId: String? = nil,
-        queuedPacket: ReviewPacket? = nil
+        queuedPacket: ReviewPacket? = nil,
+        intent: String? = nil,
+        targetAppOrTitle: String? = nil,
+        followsWindowExclusion: FollowsWindowExclusion? = nil
     ) {
         self.ok = ok
         self.requestId = requestId
@@ -143,10 +149,16 @@ public struct MasterCommandResult: Decodable, Equatable, Sendable {
         self.targetTaskId = targetTaskId
         self.targetTaskSessionId = targetTaskSessionId
         self.queuedPacket = queuedPacket
+        self.intent = intent
+        self.targetAppOrTitle = targetAppOrTitle
+        self.followsWindowExclusion = followsWindowExclusion
     }
 
     enum CodingKeys: String, CodingKey {
         case ok
+        case intent
+        case targetAppOrTitle = "target_app_or_title"
+        case exclusion
         case requestId = "request_id"
         case event
         case routeDecision = "route_decision"
@@ -185,6 +197,9 @@ public struct MasterCommandResult: Decodable, Equatable, Sendable {
         }
 
         self.queuedPacket = try container.decodeIfPresent(QueueItemDTO.self, forKey: .queueItem)?.packet
+        self.intent = try container.decodeIfPresent(String.self, forKey: .intent)
+        self.targetAppOrTitle = try container.decodeIfPresent(String.self, forKey: .targetAppOrTitle)
+        self.followsWindowExclusion = try container.decodeIfPresent(FollowsWindowExclusion.self, forKey: .exclusion)
     }
 }
 
