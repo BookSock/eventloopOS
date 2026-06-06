@@ -11,7 +11,7 @@ export const humanDemoPassFailLabels = Object.freeze([
   "Desktop paper reminder HUD is visible",
   "Rectangle hotkeys feel usable",
   "Manual Mode entry/return works",
-  "Queue footer feedback is visible and current",
+  "Queue/HUD hotkey feedback is visible and current",
   "Queue/master latency readiness gate passed",
   "Workspace capture/restore-plan latency readiness gate passed",
   "Hotkey feedback latency readiness gate passed or skipped intentionally",

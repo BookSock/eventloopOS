@@ -59,7 +59,9 @@ mutating the active paper. On macOS it includes a live hotkey-to-first-feedback
 p95 latency gate in the readiness artifact by running the latency probe on the
 Mac Studio. The default restore-hotkey gate waits for immediate
 `Restoring paper:` feedback; screenshot staging still verifies final
-`Showing paper:` feedback after restore. Use `--skip-hotkey-latency` only while
+`Showing paper:` feedback after restore. The top-of-screen reminder HUD also
+briefly echoes hotkey feedback, so keyboard users do not need to hunt for the
+Queue footer after pressing a chord. Use `--skip-hotkey-latency` only while
 bootstrapping permission setup.
 `READY.md` also names the suggested human result file so the final checklist
 does not accidentally reuse an older blank artifact.
@@ -70,15 +72,15 @@ orchestrator is running on the controller Mac; the lab demo default keeps
 
 Latest known-good proof:
 
-- Manifest: `artifacts/lab-runs/20260605-191509-human-demo/manifest.json`
-- Screenshot: `artifacts/lab-runs/20260605-191509-human-demo/screen-sharing.png`
-- Readiness manifest: `artifacts/lab-runs/20260606T022414Z-human-demo-ready/manifest.json`
-- Readiness screenshot: `artifacts/lab-runs/20260606T022414Z-human-demo-ready/captures/human-demo-ready/screen.png`
+- Manifest: `artifacts/lab-runs/20260605-194639-human-demo/manifest.json`
+- Screenshot: `artifacts/lab-runs/20260605-194639-human-demo/screen-sharing.png`
+- Readiness manifest: `artifacts/lab-runs/20260606T025004Z-human-demo-ready/manifest.json`
+- Readiness screenshot: `artifacts/lab-runs/20260606T025004Z-human-demo-ready/captures/human-demo-ready/screen.png`
 - Queue proof: 2 current-run papers.
 - Ambient proof: customer paper context saved the moved shared TextEdit, and the automated scratch window was remembered by the current paper before cleanup.
 - Background containment proof: Metrics Chrome was intentionally pushed into the Customer paper and moved back to the Metrics paper.
 - Agent-spawn containment proof: a Metrics-owned Chrome window was opened while Customer was focused, claimed, moved back to Metrics, and Customer focus was restored.
-- Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture.
+- Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture; readiness also proves live restore-hotkey feedback in 119 ms p95.
 - Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper.
 
 ## Starting State
@@ -112,6 +114,7 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 2. Press `Ctrl-Option-R`.
 3. Confirm Customer Chrome and the shared TextEdit come forward on `demo-customer`.
    Queue should immediately acknowledge `Restoring paper: Review Demo Customer Reply...`, then show green feedback starting with `Showing paper: Review Demo Customer Reply...`.
+   The top-of-screen reminder HUD should briefly echo the restore feedback, then return to the current paper reminder.
 4. Move the shared TextEdit window with `Ctrl-Option-Left`, or drag it manually toward the center/left.
    It starts on the right side, so `Ctrl-Option-Right` may look like nothing happened.
 5. Wait 2 to 3 seconds. Ambient autosave should remember the moved position without pressing Done/Defer/Advance.
@@ -135,8 +138,8 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
     block mouse clicks.
 15. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
 16. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
-    confirm the Queue footer acknowledges `No paper selected.` instead of
-    staying silent.
+    confirm the top HUD and Queue footer acknowledge `No paper selected.`
+    instead of staying silent.
 17. Press `Ctrl-Option-M` to enter Manual Mode.
 18. Open or move a dummy app.
 19. Press `Ctrl-Option-M`.
@@ -150,12 +153,12 @@ Report any of these as product issues:
 - same shared window does not move between paper-specific positions,
 - ambient autosave misses a moved window after waiting 2 to 3 seconds,
 - Queue briefing strip does not make the current decision obvious,
-- top-of-screen paper reminder is missing, stale, grabs focus, or blocks clicks,
+- top-of-screen paper reminder is missing, stale, grabs focus, blocks clicks, or fails to briefly echo hotkey feedback,
 - green `Showing paper: ...` feedback is missing, stale, or too hard to see after restore,
 - Queue is hard to find or blocks work,
 - Rectangle-style hotkeys feel surprising or conflict with another common app,
 - Manual Mode return restores the wrong workspace or loses a user-opened window unexpectedly.
-- Queue footer feedback stays stale or does not acknowledge restore/manual actions.
+- Queue/HUD feedback stays stale or does not acknowledge restore/manual actions.
 - Queue hotkeys do nothing silently when no paper is selected.
 - A 409/manual-mode pause should surface as "Manual Mode active. Press Ctrl-Option-M to return.", not as a raw HTTP error.
 
@@ -202,7 +205,7 @@ Pass/fail:
 - Desktop paper reminder HUD is visible:
 - Rectangle hotkeys feel usable:
 - Manual Mode entry/return works:
-- Queue footer feedback is visible and current:
+- Queue/HUD hotkey feedback is visible and current:
 - Queue/master latency readiness gate passed:
 - Workspace capture/restore-plan latency readiness gate passed:
 - Hotkey feedback latency readiness gate passed or skipped intentionally:
