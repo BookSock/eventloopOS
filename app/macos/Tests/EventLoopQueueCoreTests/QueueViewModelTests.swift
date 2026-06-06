@@ -4244,13 +4244,20 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.requestContextRestore(resource: resource)
         viewModel.startAutomaticContextRestoreRefresh(intervalNanoseconds: 1_000_000, maxRefreshes: 2)
 
-        for _ in 0..<200 where client.checkedContextRestoreIds.count < 2 {
+        for _ in 0..<200 where !contextRestoreStateIsDone(viewModel.contextRestoreState) {
             try? await Task.sleep(nanoseconds: 10_000_000)
         }
         viewModel.stopAutomaticContextRestoreRefresh()
 
         XCTAssertEqual(client.checkedContextRestoreIds, ["ctx_restore_123", "ctx_restore_123"])
         XCTAssertEqual(viewModel.contextRestoreState, .requested(resource, doneRequest))
+    }
+
+    private func contextRestoreStateIsDone(_ state: ContextRestoreState) -> Bool {
+        guard case let .requested(_, request) = state else {
+            return false
+        }
+        return request.status == "done"
     }
 
     func testPrepareContextRestoreSurfacesFailure() async {
