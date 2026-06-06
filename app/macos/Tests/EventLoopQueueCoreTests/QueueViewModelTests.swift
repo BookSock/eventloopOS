@@ -2668,6 +2668,29 @@ final class QueueViewModelTests: XCTestCase {
         await enter.value
     }
 
+    func testManualModeToggleShowsFeedbackBeforeSavingTaskLayout() async {
+        let workspaceClient = FakeWorkspaceClient(captureDelayNanoseconds: 100_000_000)
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+
+        let toggle = Task { @MainActor in
+            await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        XCTAssertEqual(viewModel.mode, .manual)
+        XCTAssertEqual(
+            viewModel.advanceToast,
+            .actionComplete("Manual Mode active. Ctrl-Option-M returns; Ctrl-Option-Shift-M keeps this layout.")
+        )
+
+        await toggle.value
+        XCTAssertGreaterThanOrEqual(workspaceClient.workspaceCaptureCount, 1)
+    }
+
     func testExitManualModePostsActiveFalseToServer() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
@@ -2954,6 +2977,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.mode, .manual)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
         XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Manual workspace restored."))
         XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [snapshot])
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
         XCTAssertTrue(workspaceClient.restoreIdempotencyKeys[0].hasPrefix("mac_manual_workspace_restore_"))
@@ -2996,7 +3020,7 @@ final class QueueViewModelTests: XCTestCase {
         }
         try? await Task.sleep(nanoseconds: 10_000_000)
 
-        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Restoring manual workspace..."))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Restoring manual workspace..."))
 
         let secondRestore = Task { @MainActor in
             await viewModel.confirmManualWorkspaceRestore()
@@ -3005,7 +3029,7 @@ final class QueueViewModelTests: XCTestCase {
         await secondRestore.value
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestoring)
-        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual workspace restore already running..."))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Manual workspace restore already running..."))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
 
         await firstRestore.value
@@ -3013,7 +3037,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.mode, .manual)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
         XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
-        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual workspace restored."))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Manual workspace restored."))
     }
 
     func testImmediateManualWorkspaceRestoreRepeatReusesRecentReceipt() async {
@@ -3052,7 +3076,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.mode, .manual)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
         XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestored(receipt))
-        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual workspace already restored."))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Manual workspace already restored."))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }
 

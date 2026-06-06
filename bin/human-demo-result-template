@@ -39,11 +39,13 @@ if (args.includes("--self-test")) {
         queue_latency_ok: true,
         workspace_latency_ok: true,
         paper_reminder_feedback_ok: true,
+        manual_mode_feedback_ok: true,
         hotkey_feedback_latency_ok: true,
       },
       queue_latency_required: true,
       workspace_latency_required: true,
       paper_reminder_feedback_required: true,
+      manual_mode_feedback_required: true,
       hotkey_latency_required: true,
       queue_latency: {
         manifest_path: "artifacts/lab-runs/20260603T205150Z-human-demo-ready/queue-latency.json",
@@ -53,6 +55,11 @@ if (args.includes("--self-test")) {
       },
       paper_reminder_feedback: {
         manifest_path: "artifacts/lab-runs/20260603T205150Z-human-demo-ready/paper-reminder-feedback.json",
+      },
+      manual_mode_feedback: {
+        enter: {
+          manifest_path: "artifacts/lab-runs/20260603T205150Z-human-demo-ready/manual-mode-enter-feedback.json",
+        },
       },
       hotkey_feedback_latency: {
         manifest_path: "artifacts/lab-runs/20260603T205150Z-human-demo-ready/hotkey-latency.json",
@@ -67,25 +74,29 @@ if (args.includes("--self-test")) {
   assertIncludes(rendered, "Readiness queue latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/queue-latency.json ok=true required=true");
   assertIncludes(rendered, "Readiness workspace latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/workspace-latency.json ok=true required=true");
   assertIncludes(rendered, "Readiness desktop HUD feedback: artifacts/lab-runs/20260603T205150Z-human-demo-ready/paper-reminder-feedback.json ok=true required=true");
+  assertIncludes(rendered, "Readiness manual mode feedback: artifacts/lab-runs/20260603T205150Z-human-demo-ready/manual-mode-enter-feedback.json ok=true required=true");
   assertIncludes(rendered, "Readiness hotkey latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/hotkey-latency.json ok=true required=true");
   assertIncludes(rendered, "Automated proof: ok=true, queue_count=2, ambient_autosave=true, new_window_autosave=true, foreign_window_containment=true, agent_spawn_window_containment=true, agent_spawn_app=Google Chrome");
   assertEqual(defaultOutputPath(manifest), "artifacts/human-demo-results/20260603T202742Z-human-demo-result.md");
   const staleReadiness = readinessSummary({});
   assertEqual(staleReadiness.ok, false);
-  assertEqual(staleReadiness.failed_gates.join(","), "readiness_ok,queue_latency_ok,workspace_latency_ok");
+  assertEqual(staleReadiness.failed_gates.join(","), "readiness_ok,queue_latency_ok,workspace_latency_ok,manual_mode_feedback_ok");
   const failedFreshnessReadiness = readinessSummary({
     ok: false,
     failed_checks: ["latest_human_demo_proof_fresh"],
     checks: {
       queue_latency_ok: true,
       workspace_latency_ok: true,
+      manual_mode_feedback_ok: true,
       hotkey_feedback_latency_ok: true,
     },
     queue_latency_required: true,
     workspace_latency_required: true,
+    manual_mode_feedback_required: true,
     hotkey_latency_required: true,
     queue_latency: { manifest_path: "queue.json" },
     workspace_latency: { manifest_path: "workspace.json" },
+    manual_mode_feedback: { enter: { manifest_path: "manual.json" } },
     hotkey_feedback_latency: { manifest_path: "hotkey.json" },
   });
   assertEqual(failedFreshnessReadiness.ok, false);
@@ -152,10 +163,12 @@ const result = {
   readiness_queue_latency_path: readiness.queue.path,
   readiness_workspace_latency_path: readiness.workspace.path,
   readiness_paper_reminder_feedback_path: readiness.paperReminderFeedback.path,
+  readiness_manual_mode_feedback_path: readiness.manualModeFeedback.path,
   readiness_hotkey_latency_path: readiness.hotkey.path,
   readiness_queue_latency_ok: readiness.queue.ok,
   readiness_workspace_latency_ok: readiness.workspace.ok,
   readiness_paper_reminder_feedback_ok: readiness.paperReminderFeedback.ok,
+  readiness_manual_mode_feedback_ok: readiness.manualModeFeedback.ok,
   readiness_hotkey_latency_ok: readiness.hotkey.ok,
   readiness_ok: readiness.ok,
   readiness_failed_gates: readiness.failed_gates,
@@ -271,6 +284,7 @@ Readiness screenshot: ${readyScreenshotPath ?? ""}
 Readiness queue latency: ${readiness.queue.path} ok=${readiness.queue.ok} required=${readiness.queue.required}
 Readiness workspace latency: ${readiness.workspace.path} ok=${readiness.workspace.ok} required=${readiness.workspace.required}
 Readiness desktop HUD feedback: ${readiness.paperReminderFeedback.path} ok=${readiness.paperReminderFeedback.ok} required=${readiness.paperReminderFeedback.required}
+Readiness manual mode feedback: ${readiness.manualModeFeedback.path} ok=${readiness.manualModeFeedback.ok} required=${readiness.manualModeFeedback.required}
 Readiness hotkey latency: ${readiness.hotkey.path} ok=${readiness.hotkey.ok} required=${readiness.hotkey.required}
 Automated proof: ok=${manifest.ok === true}, queue_count=${queueCount}, ambient_autosave=${ambientOk}, new_window_autosave=${newWindowOk}, foreign_window_containment=${containmentOk}, agent_spawn_window_containment=${agentSpawnContainmentOk}, agent_spawn_app=${agentSpawnApp}
 
@@ -289,6 +303,7 @@ function readinessSummary(ready) {
     queue: readinessGate(ready, "queue_latency", "queue_latency_ok", "queue_latency_required", true),
     workspace: readinessGate(ready, "workspace_latency", "workspace_latency_ok", "workspace_latency_required", true),
     paperReminderFeedback: readinessGate(ready, "paper_reminder_feedback", "paper_reminder_feedback_ok", "paper_reminder_feedback_required", false),
+    manualModeFeedback: readinessGate(ready, "manual_mode_feedback", "manual_mode_feedback_ok", "manual_mode_feedback_required", true),
     hotkey: readinessGate(ready, "hotkey_feedback_latency", "hotkey_feedback_latency_ok", "hotkey_latency_required", false),
   };
   const failedGates = [];
@@ -302,6 +317,7 @@ function readinessSummary(ready) {
   if (!gates.queue.ok) failedGates.push("queue_latency_ok");
   if (!gates.workspace.ok) failedGates.push("workspace_latency_ok");
   if (!gates.paperReminderFeedback.ok) failedGates.push("paper_reminder_feedback_ok");
+  if (!gates.manualModeFeedback.ok) failedGates.push("manual_mode_feedback_ok");
   if (!gates.hotkey.ok) failedGates.push("hotkey_feedback_latency_ok");
   const uniqueFailedGates = [...new Set(failedGates)];
   return {
@@ -315,7 +331,11 @@ function readinessGate(ready, sectionKey, checkKey, requiredKey, defaultRequired
   const section = ready?.[sectionKey];
   const required = typeof ready?.[requiredKey] === "boolean" ? ready[requiredKey] : defaultRequired;
   const skipped = section?.skipped === true;
-  const pathValue = typeof section?.manifest_path === "string" ? section.manifest_path : "";
+  const pathValue = typeof section?.manifest_path === "string"
+    ? section.manifest_path
+    : typeof section?.enter?.manifest_path === "string"
+      ? section.enter.manifest_path
+      : "";
   const pathOrSkipped = skipped ? "skipped" : pathValue;
   const checkOk = ready?.checks?.[checkKey] === true || section?.ok === true;
   return {

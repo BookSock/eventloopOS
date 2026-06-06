@@ -561,13 +561,13 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func enterManualModeAndRestoreSavedWorkspaceIfAvailable() async {
+        await enterManualMode()
+        guard mode == .manual else { return }
         do {
             try await saveSelectedTaskWorkspaceSnapshotIfNeeded()
         } catch {
             state = .failed(error.localizedDescription)
         }
-        await enterManualMode()
-        guard mode == .manual else { return }
         if manualWorkspaceSnapshot != nil {
             await confirmManualWorkspaceRestore()
         }
@@ -2154,7 +2154,7 @@ public final class QueueViewModel: ObservableObject {
         let idempotencyPrefix = "mac_manual_workspace_restore"
         guard !workspaceRestoreInFlight else {
             workspaceRestoreState = .alreadyRestoring
-            advanceToast = .actionComplete("Manual workspace restore already running...")
+            advanceToast = .actionComplete("Manual Mode active. Manual workspace restore already running...")
             return
         }
 
@@ -2165,7 +2165,7 @@ public final class QueueViewModel: ObservableObject {
             mode = .manual
             shouldRestoreWorkspace = false
             workspaceRestoreState = .alreadyRestored(recent.receipt)
-            advanceToast = .actionComplete("Manual workspace already restored.")
+            advanceToast = .actionComplete("Manual Mode active. Manual workspace already restored.")
             return
         }
 
@@ -2175,7 +2175,7 @@ public final class QueueViewModel: ObservableObject {
         }
 
         do {
-            advanceToast = .actionComplete("Restoring manual workspace...")
+            advanceToast = .actionComplete("Manual Mode active. Restoring manual workspace...")
             let response = try await workspaceClient.restore(
                 snapshot: snapshot,
                 currentWindows: nil,
@@ -2190,10 +2190,10 @@ public final class QueueViewModel: ObservableObject {
                 completedAt: Date(),
                 receipt: response.receipt
             )
-            advanceToast = .actionComplete("Manual workspace restored.")
+            advanceToast = .actionComplete("Manual Mode active. Manual workspace restored.")
         } catch {
             workspaceRestoreState = .failed(error.localizedDescription)
-            advanceToast = .actionComplete("Manual workspace restore failed: \(Self.shortStatusMessage(error.localizedDescription))")
+            advanceToast = .actionComplete("Manual Mode active. Manual workspace restore failed: \(Self.shortStatusMessage(error.localizedDescription))")
         }
     }
 

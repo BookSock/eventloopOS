@@ -63,7 +63,10 @@ fresh `feedback_seq` change; the desktop HUD proof waits for immediate
 `Showing paper:` feedback after restore. The top-of-screen reminder HUD also
 briefly echoes hotkey feedback, so keyboard users do not need to hunt for the
 Queue footer after pressing a chord. Use `--skip-hotkey-latency` or
-`--skip-paper-reminder-feedback` only while bootstrapping permission setup.
+`--skip-paper-reminder-feedback` only while bootstrapping permission setup. The
+readiness gate also presses `Ctrl-Option-M` and `Ctrl-Option-Shift-M` to prove
+Manual Mode entry and return produce visible feedback before any slow layout
+save or restore finishes.
 `READY.md` also names the suggested human result file so the final checklist
 does not accidentally reuse an older blank artifact.
 Use `EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_TARGET=local` or
@@ -73,16 +76,17 @@ orchestrator is running on the controller Mac; the lab demo default keeps
 
 Latest known-good proof:
 
-- Manifest: `artifacts/lab-runs/20260605-194639-human-demo/manifest.json`
-- Screenshot: `artifacts/lab-runs/20260605-194639-human-demo/screen-sharing.png`
-- Readiness manifest: `artifacts/lab-runs/20260606T031258Z-human-demo-ready/manifest.json`
-- Readiness screenshot: `artifacts/lab-runs/20260606T031258Z-human-demo-ready/captures/human-demo-ready/screen.png`
+- Manifest: `artifacts/lab-runs/20260605-220414-human-demo/manifest.json`
+- Screenshot: `artifacts/lab-runs/20260605-220414-human-demo/screen-sharing.png`
+- Readiness manifest: `artifacts/lab-runs/20260606T051407Z-human-demo-ready/manifest.json`
+- Readiness screenshot: `artifacts/lab-runs/20260606T051407Z-human-demo-ready/screen-sharing.png`
 - Queue proof: 2 current-run papers.
 - Ambient proof: customer paper context saved the moved shared TextEdit, and the automated scratch window was remembered by the current paper before cleanup.
 - Background containment proof: Metrics Chrome was intentionally pushed into the Customer paper and moved back to the Metrics paper.
 - Agent-spawn containment proof: a Metrics-owned Chrome window was opened while Customer was focused, claimed, moved back to Metrics, and Customer focus was restored.
-- Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture; readiness also proves live Queue feedback in 123 ms p95.
-- Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper and proves restore-hotkey HUD feedback in 155 ms p95.
+- Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture; readiness also proves live Queue feedback in 128 ms p95.
+- Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper and proves restore-hotkey HUD feedback in 110 ms p95.
+- Manual Mode feedback proof: readiness proves `Ctrl-Option-M` enter feedback in 131 ms p95 and `Ctrl-Option-Shift-M` return feedback in 132 ms p95.
 
 ## Starting State
 
@@ -191,6 +195,8 @@ Readiness manifest:
 Readiness screenshot:
 Readiness queue latency:  ok= required=
 Readiness workspace latency:  ok= required=
+Readiness desktop HUD feedback:  ok= required=
+Readiness manual mode feedback:  ok= required=
 Readiness hotkey latency:  ok= required=
 
 Pass/fail:

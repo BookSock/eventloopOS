@@ -151,7 +151,9 @@ function verifyResultText(text) {
   const decision = fieldOrSectionText(lines, "Ship/block decision:", undefined).trim();
   const readinessLatency = {
     queue: fieldOrSectionText(lines, "Readiness queue latency:", "Readiness workspace latency:").trim(),
-    workspace: fieldOrSectionText(lines, "Readiness workspace latency:", "Readiness hotkey latency:").trim(),
+    workspace: fieldOrSectionText(lines, "Readiness workspace latency:", "Readiness desktop HUD feedback:").trim(),
+    paperReminderFeedback: fieldOrSectionText(lines, "Readiness desktop HUD feedback:", "Readiness manual mode feedback:").trim(),
+    manualModeFeedback: fieldOrSectionText(lines, "Readiness manual mode feedback:", "Readiness hotkey latency:").trim(),
     hotkey: fieldOrSectionText(lines, "Readiness hotkey latency:", "Automated proof:").trim(),
   };
   const missingLabels = humanDemoPassFailLabels.filter((label) => !Object.hasOwn(passFail, label));
@@ -170,6 +172,8 @@ function verifyResultText(text) {
     pass_fail_items_passed_or_accepted: blockingLabels.length === 0,
     readiness_queue_latency_ok: latencyLineOk(readinessLatency.queue),
     readiness_workspace_latency_ok: latencyLineOk(readinessLatency.workspace),
+    readiness_desktop_hud_feedback_ok: latencyLineOk(readinessLatency.paperReminderFeedback),
+    readiness_manual_mode_feedback_ok: latencyLineOk(readinessLatency.manualModeFeedback),
     readiness_hotkey_latency_ok: latencyLineOk(readinessLatency.hotkey),
     friction_has_no_blocker: frictionHasNoBlocker(friction),
     ship_block_decision_accepts: decisionAccepts(decision),
@@ -397,6 +401,8 @@ Readiness manifest: artifacts/lab-runs/ready/manifest.json
 Readiness screenshot: artifacts/lab-runs/ready/screen-sharing.png
 Readiness queue latency: artifacts/lab-runs/ready/queue-latency.json ok=true required=true
 Readiness workspace latency: artifacts/lab-runs/ready/workspace-latency.json ok=true required=true
+Readiness desktop HUD feedback: artifacts/lab-runs/ready/paper-reminder-feedback.json ok=true required=true
+Readiness manual mode feedback: artifacts/lab-runs/ready/manual-mode-enter-feedback.json ok=true required=true
 Readiness hotkey latency: artifacts/lab-runs/ready/hotkey-latency.json ok=true required=true
 Automated proof: ok=true, queue_count=2, ambient_autosave=true
 
@@ -412,6 +418,8 @@ Ship/block decision: ship
   assert.equal(ok.failed_checks.length, 0);
   const missingLatency = verifyResultText(filled.replace("Readiness queue latency: artifacts/lab-runs/ready/queue-latency.json ok=true required=true\n", ""));
   assert.ok(missingLatency.failed_checks.includes("readiness_queue_latency_ok"));
+  const missingManualModeFeedback = verifyResultText(filled.replace("Readiness manual mode feedback: artifacts/lab-runs/ready/manual-mode-enter-feedback.json ok=true required=true\n", ""));
+  assert.ok(missingManualModeFeedback.failed_checks.includes("readiness_manual_mode_feedback_ok"));
   const missingScreenshot = verifyResultText(filled.replace("Screenshot: artifacts/lab-runs/demo/screen-sharing.png", "Screenshot: "));
   assert.ok(missingScreenshot.failed_checks.includes("proof_screenshot_ok"));
   const missingReadinessManifest = verifyResultText(filled.replace("Readiness manifest: artifacts/lab-runs/ready/manifest.json", "Readiness manifest: artifacts/lab-runs/ready/missing.json"));
