@@ -1246,7 +1246,7 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func loadTaskSessionsForSelectedPacketIfNeeded() async {
-        guard selectedTaskId != nil, taskSessions.isEmpty else {
+        guard selectedTaskId != nil, taskSessions.isEmpty || selectedTaskSessions.isEmpty else {
             return
         }
 

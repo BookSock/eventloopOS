@@ -1302,6 +1302,32 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedTaskSessions.map(\.id), ["task_session_blog"])
     }
 
+    func testLoadTaskSessionsForSelectedPacketIfNeededRefreshesWhenCacheMissesSelectedTask() async throws {
+        let packet = ReviewPacket(
+            id: "packet-route",
+            taskId: "task_blog_feedback",
+            title: "Route feedback",
+            summary: "Human approved agent handoff.",
+            source: "manual://review",
+            priority: 90,
+            recommendedAction: "Route to task agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+        let otherSession = TaskSession(id: "task_session_other", taskId: "task_other", provider: "fake", status: "idle")
+        let client = FakeQueueClient(packets: [packet], taskSessions: [otherSession])
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+        XCTAssertEqual(viewModel.taskSessions.map(\.id), ["task_session_other"])
+        XCTAssertEqual(viewModel.selectedTaskSessions, [])
+
+        _ = try await client.bindTaskSession(sessionId: "task_session_other", taskId: "task_blog_feedback")
+        await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
+
+        XCTAssertEqual(viewModel.taskBindingState, .loaded)
+        XCTAssertEqual(viewModel.selectedTaskSessions.map(\.id), ["task_session_other"])
+    }
+
     func testLoadTaskSessionsForSelectedPacketIfNeededSkipsPacketsWithoutTaskId() async {
         let packet = ReviewPacket(
             id: "packet-route",
