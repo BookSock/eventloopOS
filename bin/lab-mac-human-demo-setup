@@ -84,6 +84,39 @@ sync_remote_dir() {
     "$remote:$remote_repo/${remote_path%/}/" "$local_path/" >/dev/null
 }
 
+ensure_aerospace_ready() {
+  ssh_remote "bash -lc 'set -euo pipefail
+export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\$PATH\"
+cd \"$remote_repo\"
+for attempt in {1..12}; do
+  if aerospace list-workspaces --focused >/dev/null 2>&1; then
+    aerospace reload-config >/dev/null 2>&1 || true
+    exit 0
+  fi
+  sleep 1
+done
+self_heal_out=\"artifacts/lab-runs/human-demo-aerospace-self-heal.out\"
+self_heal_err=\"artifacts/lab-runs/human-demo-aerospace-self-heal.err\"
+mkdir -p artifacts/lab-runs
+LAB_SELF_HEAL_SKIP_TAILSCALE_UP=1 bin/lab-mac-self-heal run >\"\$self_heal_out\" 2>\"\$self_heal_err\" || true
+for attempt in {1..18}; do
+  if aerospace list-workspaces --focused >/dev/null 2>&1; then
+    aerospace reload-config >/dev/null 2>&1 || true
+    exit 0
+  fi
+  sleep 1
+done
+echo \"AeroSpace server was not reachable after self-heal\" >&2
+printf \"\\n== self-heal stdout ==\\n\" >&2
+tail -n 120 \"\$self_heal_out\" >&2 || true
+printf \"\\n== self-heal stderr ==\\n\" >&2
+tail -n 120 \"\$self_heal_err\" >&2 || true
+printf \"\\n== process list ==\\n\" >&2
+pgrep -fl \"AeroSpace.app/Contents/MacOS/AeroSpace|AeroSpaceApp|run-aerospace\" >&2 || true
+exit 1
+'"
+}
+
 mkdir -p "$run_dir"
 printf "%s\n" "$remote" >"$run_dir/remote.txt"
 printf "%s\n" "$remote_repo" >"$run_dir/remote-repo.txt"
@@ -100,6 +133,9 @@ LAB_DOGFOOD_PROFILE="$profile" LAB_DOGFOOD_URL="$url" bin/lab-mac-dogfood cleanu
 ssh_remote "bash -lc 'set -euo pipefail; cd \"$remote_repo\"; rm -rf -- \".eventloopos/$profile\" \"app/orchestrator/.eventloopos/$profile\"'"
 LAB_DOGFOOD_PROFILE="$profile" LAB_DOGFOOD_URL="$url" LAB_DOGFOOD_AMBIENT_SAVE=1 LAB_DOGFOOD_FOLLOWS_WINDOWS=1 bin/lab-mac-dogfood start
 LAB_DOGFOOD_PROFILE="$profile" LAB_DOGFOOD_URL="$url" bin/lab-mac-dogfood wait-ready
+
+echo "human demo AeroSpace ready"
+ensure_aerospace_ready
 
 remote_run="$run_dir/remote-demo-setup"
 echo "human demo remote setup"
