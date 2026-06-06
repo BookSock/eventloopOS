@@ -180,21 +180,31 @@ private struct FollowsSuggestionRow: View {
                 }
             }
             Spacer()
-            if let appBundle = suggestion.appBundle {
-                Button {
-                    add(appBundle, nil)
-                } label: {
-                    Label("Exclude App", systemImage: "app.badge")
+            VStack(alignment: .trailing, spacing: 6) {
+                if let appBundle = suggestion.appBundle, let title = suggestion.title {
+                    Button {
+                        add(appBundle, title)
+                    } label: {
+                        Label("Exclude Window", systemImage: "rectangle.slash")
+                    }
+                    .accessibilityIdentifier("follows-rules-suggestion-window-\(suggestion.id)")
                 }
-                .accessibilityIdentifier("follows-rules-suggestion-app-\(suggestion.id)")
-            }
-            if let title = suggestion.title {
-                Button {
-                    add(nil, title)
-                } label: {
-                    Label("Exclude Title", systemImage: "text.badge.xmark")
+                if let appBundle = suggestion.appBundle {
+                    Button {
+                        add(appBundle, nil)
+                    } label: {
+                        Label("Exclude App", systemImage: "app.badge")
+                    }
+                    .accessibilityIdentifier("follows-rules-suggestion-app-\(suggestion.id)")
                 }
-                .accessibilityIdentifier("follows-rules-suggestion-title-\(suggestion.id)")
+                if let title = suggestion.title {
+                    Button {
+                        add(nil, title)
+                    } label: {
+                        Label("Exclude Title", systemImage: "text.badge.xmark")
+                    }
+                    .accessibilityIdentifier("follows-rules-suggestion-title-\(suggestion.id)")
+                }
             }
         }
         .padding(.vertical, 4)

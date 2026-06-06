@@ -1803,6 +1803,62 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.followsWindowSuggestions.last?.isCurrentFollowsCandidate, false)
     }
 
+    func testAddFollowsRuleWithAppAndTitleOnlyHidesMatchingWindowSuggestion() async {
+        let client = FakeQueueClient(packets: [])
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(
+                    id: 301,
+                    app: "Google Chrome",
+                    title: "Playwright Report",
+                    workspace: "eventloop-customer",
+                    appBundleId: "com.google.Chrome"
+                ),
+                WorkspaceWindow(
+                    id: 302,
+                    app: "Google Chrome",
+                    title: "Staging Report",
+                    workspace: "eventloop-customer",
+                    appBundleId: "com.google.Chrome"
+                ),
+                WorkspaceWindow(
+                    id: 303,
+                    app: "TextEdit",
+                    title: "Customer Reply",
+                    workspace: "eventloop-customer",
+                    appBundleId: "com.apple.TextEdit"
+                ),
+            ],
+            activeWorkspace: "eventloop-customer"
+        )
+        let workspaceClient = FakeWorkspaceClient(captureSnapshot: snapshot)
+        let viewModel = QueueViewModel(client: client, workspaceClient: workspaceClient)
+
+        await viewModel.refreshFollowsRules()
+
+        XCTAssertEqual(
+            viewModel.followsWindowSuggestions.map { "\($0.appBundle ?? "")|\($0.title ?? "")" },
+            [
+                "com.google.Chrome|Playwright Report",
+                "com.google.Chrome|Staging Report",
+                "com.apple.TextEdit|Customer Reply",
+            ]
+        )
+
+        await viewModel.addFollowsRule(appBundle: " com.google.Chrome ", titleSubstring: " Playwright ")
+
+        XCTAssertEqual(viewModel.followsRulesState, .loaded)
+        XCTAssertEqual(viewModel.followsWindowExclusions.last?.appBundle, "com.google.Chrome")
+        XCTAssertEqual(viewModel.followsWindowExclusions.last?.titleSubstring, "Playwright")
+        XCTAssertEqual(
+            viewModel.followsWindowSuggestions.map { "\($0.appBundle ?? "")|\($0.title ?? "")" },
+            [
+                "com.google.Chrome|Staging Report",
+                "com.apple.TextEdit|Customer Reply",
+            ]
+        )
+    }
+
     func testAddFollowsRuleRequiresMatcher() async {
         let viewModel = QueueViewModel(client: FakeQueueClient(packets: []))
 

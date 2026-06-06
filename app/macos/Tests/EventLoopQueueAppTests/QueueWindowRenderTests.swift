@@ -151,6 +151,45 @@ final class QueueWindowRenderTests: XCTestCase {
         try writePNGArtifact(cgImage, name: "queue-window-task-identity.png")
     }
 
+    func testFollowsRulesSheetRendersExactWindowActionWithoutBlanking() throws {
+        let view = FollowsRulesSheet(
+            exclusions: [
+                FollowsWindowExclusion(
+                    exclusionId: "fwex_chrome_staging",
+                    appBundle: "com.google.Chrome",
+                    titleSubstring: "Staging Report"
+                )
+            ],
+            suggestions: [
+                FollowsWindowSuggestion(
+                    appName: "Google Chrome",
+                    appBundle: "com.google.Chrome",
+                    title: "Playwright Report",
+                    workspace: "eventloop-customer"
+                ),
+                FollowsWindowSuggestion(
+                    appName: "team-eng | slack",
+                    appBundle: "com.tinyspeck.slackmacgap",
+                    title: "team-eng | slack",
+                    workspace: "eventloop-customer, eventloop-ops",
+                    isCurrentFollowsCandidate: true
+                ),
+            ],
+            state: .loaded,
+            refresh: {},
+            add: { _, _ in },
+            delete: { _ in }
+        )
+        .frame(width: 640, height: 520)
+
+        let cgImage = try render(view, width: 640, height: 520)
+
+        XCTAssertEqual(cgImage.width, 640)
+        XCTAssertEqual(cgImage.height, 520)
+        try assertQueueSurfaceRendered(in: cgImage)
+        try writePNGArtifact(cgImage, name: "follows-rules-exact-window-action.png")
+    }
+
     private func render<Content: View>(_ view: Content, width: CGFloat, height: CGFloat) throws -> CGImage {
         let hostingView = NSHostingView(rootView:
             ZStack {
