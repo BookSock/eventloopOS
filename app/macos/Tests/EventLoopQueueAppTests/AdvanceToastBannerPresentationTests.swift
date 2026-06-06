@@ -114,4 +114,30 @@ final class AdvanceToastBannerPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.icon, "doc.text.magnifyingglass")
         XCTAssertEqual(presentation.foregroundRole, .success)
     }
+
+    func testPaperReminderFeedbackMirrorsHotkeyToast() {
+        let dueAt = Date(timeIntervalSince1970: 1_767_040_000)
+        let feedback = PaperReminderFeedbackPresentation(
+            toast: .deferredUntil(dueAt),
+            queueCount: 1,
+            feedbackSequence: 9
+        )
+
+        XCTAssertTrue(feedback.message.contains("Deferred until"))
+        XCTAssertTrue(feedback.message.contains("Next paper ready."))
+        XCTAssertEqual(feedback.icon, "clock.fill")
+        XCTAssertEqual(feedback.foregroundRole, .success)
+    }
+
+    func testPaperReminderFeedbackCoversNoSelectedPaperHotkey() {
+        let feedback = PaperReminderFeedbackPresentation(
+            toast: .actionComplete("No paper selected."),
+            queueCount: 0,
+            feedbackSequence: 10
+        )
+
+        XCTAssertEqual(feedback.message, "No paper selected.")
+        XCTAssertEqual(feedback.icon, "exclamationmark.circle")
+        XCTAssertEqual(feedback.foregroundRole, .muted)
+    }
 }
