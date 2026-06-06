@@ -503,18 +503,10 @@ struct QueueWindowView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            Text(harnessStatusText)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .padding(10)
-                .accessibilityIdentifier("queue-harness-status")
-                .accessibilityLabel(harnessStatusText)
+            QueueHarnessStatusOverlay(
+                statusText: harnessStatusText,
+                showDebug: QueueHarnessStatusVisibility.isDebugVisible()
+            )
         }
         .task {
             QueueHarnessStatusFile.write(harnessStatusText, feedbackSequence: viewModel.feedbackSequence)
@@ -565,7 +557,7 @@ enum QueueHarnessStatusFile {
             let data = try JSONEncoder().encode(record)
             try data.write(to: URL(fileURLWithPath: path), options: .atomic)
         } catch {
-            // Best-effort harness telemetry; visible UI remains source of truth.
+            // Best-effort harness telemetry; live probes can still use accessibility fallback.
         }
     }
 
@@ -585,6 +577,48 @@ enum QueueHarnessStatusFile {
             return nil
         }
         return arguments[valueIndex]
+    }
+}
+
+enum QueueHarnessStatusVisibility {
+    static func isDebugVisible(environment: [String: String] = ProcessInfo.processInfo.environment) -> Bool {
+        let raw = environment["EVENTLOOPOS_SHOW_HARNESS_STATUS"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased() ?? ""
+        return ["1", "true", "yes", "debug"].contains(raw)
+    }
+}
+
+struct QueueHarnessStatusOverlay: View {
+    let statusText: String
+    let showDebug: Bool
+
+    var body: some View {
+        if showDebug {
+            Text(statusText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .padding(10)
+                .accessibilityIdentifier("queue-harness-status")
+                .accessibilityLabel(statusText)
+                .accessibilityValue(statusText)
+        } else {
+            Text("eventloopOS harness status")
+                .font(.caption2)
+                .foregroundStyle(.clear)
+                .frame(width: 1, height: 1)
+                .clipped()
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("queue-harness-status")
+                .accessibilityLabel(statusText)
+                .accessibilityValue(statusText)
+        }
     }
 }
 

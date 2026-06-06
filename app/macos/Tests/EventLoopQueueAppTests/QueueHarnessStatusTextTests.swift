@@ -83,6 +83,14 @@ final class QueueHarnessStatusTextTests: XCTestCase {
         XCTAssertEqual(path, "/tmp/from-arg.json")
     }
 
+    func testHarnessStatusDebugOverlayIsHiddenUnlessExplicitlyEnabled() {
+        XCTAssertFalse(QueueHarnessStatusVisibility.isDebugVisible(environment: [:]))
+        XCTAssertFalse(QueueHarnessStatusVisibility.isDebugVisible(environment: ["EVENTLOOPOS_SHOW_HARNESS_STATUS": "0"]))
+        XCTAssertTrue(QueueHarnessStatusVisibility.isDebugVisible(environment: ["EVENTLOOPOS_SHOW_HARNESS_STATUS": "1"]))
+        XCTAssertTrue(QueueHarnessStatusVisibility.isDebugVisible(environment: ["EVENTLOOPOS_SHOW_HARNESS_STATUS": "true"]))
+        XCTAssertTrue(QueueHarnessStatusVisibility.isDebugVisible(environment: ["EVENTLOOPOS_SHOW_HARNESS_STATUS": "debug"]))
+    }
+
     func testHarnessStatusFileWritesMachineReadableStatus() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("eventloopos-harness-status-\(UUID().uuidString).json")
