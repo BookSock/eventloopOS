@@ -269,6 +269,73 @@ function runGatewayStoreContract(
       }
     });
 
+    it("prefers filtered task layout over newer broad task workspace snapshots", async (t) => {
+      const harness = await createHarness(t);
+      if (!harness) return;
+
+      const filteredLayout = {
+        backend: "aerospace" as const,
+        activeWorkspace: "blog-workspace",
+        focusedWindowId: 42,
+        windows: [
+          {
+            id: 42,
+            app: "TextEdit",
+            title: "Shared Note",
+            workspace: "blog-workspace",
+            frame: { x: 1060, y: 100, width: 760, height: 440 },
+          },
+        ],
+      };
+      const broadSnapshot = {
+        ...filteredLayout,
+        windows: [
+          {
+            id: 7,
+            app: "Terminal",
+            title: "shell",
+            workspace: "1",
+            frame: { x: 0, y: 0, width: 800, height: 600 },
+          },
+          ...filteredLayout.windows,
+        ],
+      };
+
+      try {
+        await harness.store.createTask({
+          taskId: "task_blog",
+          primaryAnchor: { kind: "ghostty_window", id: "win-blog" },
+          capturedLayout: filteredLayout,
+          aerospaceWorkspaceId: "blog-workspace",
+          now,
+        });
+        await harness.store.updateTaskLayout("task_blog", filteredLayout, new Date("2026-05-06T12:00:00.000Z"));
+        await harness.store.saveTaskWorkspaceSnapshot({
+          taskId: "task_blog",
+          snapshot: broadSnapshot,
+          capturedAt: new Date("2026-05-06T12:01:00.000Z"),
+          actorId: "mac_queue_app",
+          sourceQueueItemId: "qit_previous_blog",
+        });
+
+        const event = makeEvent("evt_gateway_task_layout_filters_broad_snapshot", "idem_gateway_task_layout_filters_broad_snapshot", {
+          title: "Filtered task layout should beat broad queue snapshot",
+          task_hint: "blog",
+        });
+        await harness.store.ingestEventAsReviewPacket(event, new Date("2026-05-06T12:01:01.000Z"));
+
+        const item = await harness.store.leaseNextQueueItem("worker_a", new Date("2026-05-06T12:01:02.000Z"), 1_000);
+        const workspaceContext = item?.review_packet.context.find((resource) => resource.kind === "workspace_snapshot");
+
+        assert.equal(item?.task_id, "task_blog");
+        assert.equal(workspaceContext?.source, "task_workspace_memory");
+        assert.deepEqual(workspaceContext?.snapshot?.windows.map((window) => window.id), [42]);
+        assert.equal(workspaceContext?.details?.updated_at, "2026-05-06T12:00:00.000Z");
+      } finally {
+        await harness.cleanup();
+      }
+    });
+
     it("deduplicates and completes context restore requests consistently", async (t) => {
       const harness = await createHarness(t);
       if (!harness) return;

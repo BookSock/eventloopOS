@@ -1075,18 +1075,14 @@ function newestTaskWorkspaceSnapshot(
   snapshotRecord: TaskWorkspaceSnapshotRecord | undefined,
   layoutRecord: TaskLayoutRecord | undefined,
 ): TaskWorkspaceSnapshotRecord | undefined {
-  if (!layoutRecord) return snapshotRecord;
-  const layoutAsSnapshot: TaskWorkspaceSnapshotRecord = {
+  if (layoutRecord) return {
     task_id: layoutRecord.task_id,
     snapshot: layoutRecord.layout,
     captured_at: layoutRecord.updated_at,
     updated_at: layoutRecord.updated_at,
     actor_id: "task_layout",
   };
-  if (!snapshotRecord) return layoutAsSnapshot;
-  return Date.parse(layoutRecord.updated_at) > Date.parse(snapshotRecord.updated_at)
-    ? layoutAsSnapshot
-    : snapshotRecord;
+  return snapshotRecord;
 }
 
 function stableId(input: string): string {
