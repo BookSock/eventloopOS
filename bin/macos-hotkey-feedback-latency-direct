@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'EOF'
-Usage: bin/macos-hotkey-feedback-latency-direct [--process-name NAME] [--hotkey ctrl-option-j] [--runs N] [--budget-ms N] [--manifest PATH]
+Usage: bin/macos-hotkey-feedback-latency-direct [--process-name NAME] [--hotkey ctrl-option-j] [--no-hotkey] [--runs N] [--budget-ms N] [--manifest PATH]
 
 Measures Queue hotkey-to-visible-harness-feedback latency using direct shell
 osascript calls. This path is intended for remote Mac labs where node-launched
@@ -18,6 +18,7 @@ budget_ms="${EVENTLOOPOS_HOTKEY_LATENCY_BUDGET_MS:-1000}"
 manifest="artifacts/macos-hotkey-latency-direct/$(date -u +%Y%m%dT%H%M%SZ)/manifest.json"
 expected_text="${EVENTLOOPOS_HOTKEY_LATENCY_EXPECT:-}"
 harness_status_path="${EVENTLOOPOS_QUEUE_HARNESS_STATUS_PATH:-/tmp/eventloopos-queue-harness-status.json}"
+no_hotkey="${EVENTLOOPOS_HOTKEY_LATENCY_NO_HOTKEY:-0}"
 
 while (($#)); do
   case "$1" in
@@ -28,6 +29,7 @@ while (($#)); do
     --manifest) manifest="${2:-}"; shift 2 ;;
     --expect) expected_text="${2:-}"; shift 2 ;;
     --harness-status-path) harness_status_path="${2:-}"; shift 2 ;;
+    --no-hotkey) no_hotkey="1"; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -190,7 +192,7 @@ for ((run = 1; run <= runs; run += 1)); do
     before_feedback="$(feedback_of "$before_status")"
     before_feedback_seq="$(feedback_seq_of "$before_status")"
     start_ms="$(now_ms)"
-    if press_error="$(press_hotkey 2>&1)"; then
+    if [[ "$no_hotkey" == "1" ]] || press_error="$(press_hotkey 2>&1)"; then
       deadline_ms=$((start_ms + budget_ms * 3))
       while true; do
         current_ms="$(now_ms)"
@@ -203,8 +205,10 @@ for ((run = 1; run <= runs; run += 1)); do
           after_feedback="$(feedback_of "$after_status")"
           after_feedback_seq="$(feedback_seq_of "$after_status")"
           if [[ -n "$expected_text" ]]; then
-            if feedback_changed "$before_feedback" "$before_feedback_seq" "$after_feedback" "$after_feedback_seq" && {
-              [[ "$after_feedback" == *"$expected_text"* || "$after_status" == *"$expected_text"* ]]
+            expected_found=0
+            [[ "$after_feedback" == *"$expected_text"* || "$after_status" == *"$expected_text"* ]] && expected_found=1
+            if ((expected_found == 1)) && {
+              [[ "$no_hotkey" == "1" ]] || feedback_changed "$before_feedback" "$before_feedback_seq" "$after_feedback" "$after_feedback_seq"
             }; then
               latency=$((current_ms - start_ms))
               break
@@ -230,7 +234,7 @@ done
 
 finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 mkdir -p "$(dirname "$manifest")"
-STARTED_AT="$started_at" FINISHED_AT="$finished_at" PROCESS_NAME="$process_name" HOTKEY="$hotkey" RUNS="$runs" BUDGET_MS="$budget_ms" EXPECTED_TEXT="$expected_text" SAMPLES_TSV="$samples_tsv" MANIFEST="$manifest" HARNESS_STATUS_PATH="$harness_status_path" node <<'NODE'
+STARTED_AT="$started_at" FINISHED_AT="$finished_at" PROCESS_NAME="$process_name" HOTKEY="$hotkey" NO_HOTKEY="$no_hotkey" RUNS="$runs" BUDGET_MS="$budget_ms" EXPECTED_TEXT="$expected_text" SAMPLES_TSV="$samples_tsv" MANIFEST="$manifest" HARNESS_STATUS_PATH="$harness_status_path" node <<'NODE'
 const fs = require("fs");
 const rows = fs.readFileSync(process.env.SAMPLES_TSV, "utf8").trim().split(/\n/).filter(Boolean);
 const samples = rows.map((row) => {
@@ -276,6 +280,7 @@ const manifest = {
   finished_at: process.env.FINISHED_AT,
   process_name: process.env.PROCESS_NAME,
   hotkey: process.env.HOTKEY,
+  trigger: process.env.NO_HOTKEY === "1" ? "wait_only" : "hotkey",
   expected_text: process.env.EXPECTED_TEXT || undefined,
   harness_status_path: process.env.HARNESS_STATUS_PATH || undefined,
   runs: Number(process.env.RUNS),

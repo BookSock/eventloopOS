@@ -11,7 +11,7 @@ const args = process.argv.slice(2);
 const DEFAULT_BUDGETS_MS = { hotkey_to_feedback: 1_000 };
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/macos-hotkey-feedback-latency [--self-test] [--process-name NAME] [--hotkey ctrl-option-j] [--expect TEXT] [--runs N] [--budget-ms N] [--manifest PATH]
+  console.log(`Usage: bin/macos-hotkey-feedback-latency [--self-test] [--process-name NAME] [--hotkey ctrl-option-j] [--no-hotkey] [--expect TEXT] [--runs N] [--budget-ms N] [--manifest PATH]
 
 Measures hotkey-to-visible-feedback latency for the macOS queue app harness
 status text. Live mode requires macOS Accessibility permission for the shell
@@ -20,6 +20,7 @@ running this command.
 Defaults:
   process name: EventLoopQueueApp
   hotkey:       ctrl-option-j
+  no-hotkey:    wait for feedback without pressing a key
   expect:       feedback text changes from the pre-hotkey value
   runs:         1
   budget-ms:    1000 p95
@@ -47,6 +48,7 @@ if (process.platform !== "darwin") {
 
 const processName = readArg("--process-name") ?? process.env.EVENTLOOPOS_QUEUE_PROCESS_NAME ?? "EventLoopQueueApp";
 const hotkey = parseHotkey(readArg("--hotkey") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_CHORD ?? "ctrl-option-j");
+const noHotkey = args.includes("--no-hotkey") || process.env.EVENTLOOPOS_HOTKEY_LATENCY_NO_HOTKEY === "1";
 const expectedText = readArg("--expect") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_EXPECT;
 const runs = positiveInteger(readArg("--runs") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_RUNS, 1);
 const budgetMs = positiveInteger(readArg("--budget-ms") ?? process.env.EVENTLOOPOS_HOTKEY_LATENCY_BUDGET_MS, DEFAULT_BUDGETS_MS.hotkey_to_feedback);
@@ -56,6 +58,7 @@ const manifestPath = readArg("--manifest") ?? path.join("artifacts", "macos-hotk
 const manifest = await measureHotkeyFeedbackLatency({
   processName,
   hotkey,
+  noHotkey,
   expectedText,
   runs,
   budgetMs,
@@ -70,7 +73,7 @@ console.log(JSON.stringify({
 }, null, 2));
 process.exit(manifest.ok ? 0 : 1);
 
-async function measureHotkeyFeedbackLatency({ processName, hotkey, expectedText, runs, budgetMs }) {
+async function measureHotkeyFeedbackLatency({ processName, hotkey, noHotkey, expectedText, runs, budgetMs }) {
   const startedAt = new Date().toISOString();
   const samples = [];
   for (let index = 0; index < runs; index += 1) {
@@ -80,13 +83,16 @@ async function measureHotkeyFeedbackLatency({ processName, hotkey, expectedText,
       const beforeFeedback = feedbackValue(before);
       const beforeFeedbackSequence = feedbackSequenceValue(before);
       const start = performance.now();
-      await pressHotkey(hotkey);
+      if (!noHotkey) {
+        await pressHotkey(hotkey);
+      }
       const after = await waitForHarnessFeedback({
         processName,
         beforeFeedback,
         beforeFeedbackSequence,
         expectedText,
         timeoutMs: Math.max(2_500, budgetMs * 3),
+        requireChanged: !noHotkey,
       });
       sample.timings_ms.hotkey_to_feedback = roundMs(performance.now() - start);
       sample.before_feedback = beforeFeedback;
@@ -112,6 +118,7 @@ async function measureHotkeyFeedbackLatency({ processName, hotkey, expectedText,
     finished_at: new Date().toISOString(),
     process_name: processName,
     hotkey: hotkey.raw,
+    trigger: noHotkey ? "wait_only" : "hotkey",
     expected_text: expectedText,
     runs,
     budgets_ms: { hotkey_to_feedback: budgetMs },
@@ -121,7 +128,7 @@ async function measureHotkeyFeedbackLatency({ processName, hotkey, expectedText,
   };
 }
 
-async function waitForHarnessFeedback({ processName, beforeFeedback, beforeFeedbackSequence, expectedText, timeoutMs }) {
+async function waitForHarnessFeedback({ processName, beforeFeedback, beforeFeedbackSequence, expectedText, timeoutMs, requireChanged }) {
   const deadline = performance.now() + timeoutMs;
   let lastStatus = "";
   while (performance.now() < deadline) {
@@ -135,7 +142,7 @@ async function waitForHarnessFeedback({ processName, beforeFeedback, beforeFeedb
       beforeFeedbackSequence,
     });
     if (expectedText) {
-      if (changed && (feedback.includes(expectedText) || lastStatus.includes(expectedText))) return lastStatus;
+      if ((!requireChanged || changed) && (feedback.includes(expectedText) || lastStatus.includes(expectedText))) return lastStatus;
     } else if (feedback && feedback !== beforeFeedback) {
       return lastStatus;
     } else if (changed) {

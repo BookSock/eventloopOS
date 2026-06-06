@@ -64,6 +64,7 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_FEEDBACK=1 forces Manual Mode enter/return feedback proof on
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_FEEDBACK=0 skips Manual Mode enter/return feedback proof
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_FEEDBACK_TARGET=local runs proof on this Mac instead of the lab Mac
+  EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_START_BUDGET_MS default: 1000
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_BUDGET_MS default: 3000
   EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=auto|local|lab default: auto
     auto captures local Screen Sharing window first, then falls back to lab Mac desktop only
@@ -106,7 +107,8 @@ const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
 const paperReminderFeedbackManifestPath = path.join(runDir, "paper-reminder-feedback.json");
 const manualModeResetFeedbackManifestPath = path.join(runDir, "manual-mode-reset-feedback.json");
 const manualModeEnterFeedbackManifestPath = path.join(runDir, "manual-mode-enter-feedback.json");
-const manualModeReturnFeedbackManifestPath = path.join(runDir, "manual-mode-return-feedback.json");
+const manualModeReturnStartFeedbackManifestPath = path.join(runDir, "manual-mode-return-start-feedback.json");
+const manualModeReturnCompleteFeedbackManifestPath = path.join(runDir, "manual-mode-return-complete-feedback.json");
 const queueLatencyManifestPath = path.join(runDir, "queue-latency.json");
 const workspaceLatencyManifestPath = path.join(runDir, "workspace-latency.json");
 const queueLatency = queueLatencyEnabled
@@ -130,7 +132,8 @@ const manualModeFeedback = manualModeFeedbackEnabled && hotkeyProofsCanRun
   ? runManualModeFeedbackStep(
     manualModeResetFeedbackManifestPath,
     manualModeEnterFeedbackManifestPath,
-    manualModeReturnFeedbackManifestPath,
+    manualModeReturnStartFeedbackManifestPath,
+    manualModeReturnCompleteFeedbackManifestPath,
     env,
   )
   : undefined;
@@ -754,7 +757,7 @@ function hotkeyLatencyArgs() {
   return args;
 }
 
-function runManualModeFeedbackStep(resetManifestPath, enterManifestPath, returnManifestPath, envOverride) {
+function runManualModeFeedbackStep(resetManifestPath, enterManifestPath, returnStartManifestPath, returnCompleteManifestPath, envOverride) {
   const reset = runManualModeHotkeyStep(
     "manual mode reset feedback",
     resetManifestPath,
@@ -769,18 +772,26 @@ function runManualModeFeedbackStep(resetManifestPath, enterManifestPath, returnM
     envOverride,
   );
   const enterManifest = readJsonIfPresent(enterManifestPath);
-  const returnResult = runManualModeHotkeyStep(
-    "manual mode return feedback",
-    returnManifestPath,
-    ["--hotkey", "ctrl-option-shift-m", "--expect", "Returned to Event Loop", "--budget-ms", manualModeReturnBudgetMs()],
+  const returnStart = runManualModeHotkeyStep(
+    "manual mode return start feedback",
+    returnStartManifestPath,
+    ["--hotkey", "ctrl-option-shift-m", "--expect", "Returning to Event Loop", "--budget-ms", manualModeReturnStartBudgetMs()],
     envOverride,
   );
-  const returnManifest = readJsonIfPresent(returnManifestPath);
+  const returnStartManifest = readJsonIfPresent(returnStartManifestPath);
+  const returnComplete = runManualModeHotkeyStep(
+    "manual mode return completion feedback",
+    returnCompleteManifestPath,
+    ["--no-hotkey", "--expect", "Returned to Event Loop", "--budget-ms", manualModeReturnBudgetMs()],
+    envOverride,
+  );
+  const returnCompleteManifest = readJsonIfPresent(returnCompleteManifestPath);
   const resetOk = reset.status === 0 && resetManifest?.ok === true;
   const enterOk = enter.status === 0 && enterManifest?.ok === true;
-  const returnOk = returnResult.status === 0 && returnManifest?.ok === true;
+  const returnStartOk = returnStart.status === 0 && returnStartManifest?.ok === true;
+  const returnCompleteOk = returnComplete.status === 0 && returnCompleteManifest?.ok === true;
   return {
-    ok: resetOk && enterOk && returnOk,
+    ok: resetOk && enterOk && returnStartOk && returnCompleteOk,
     manifest_path: enterManifestPath,
     reset: {
       ok: resetOk,
@@ -798,15 +809,33 @@ function runManualModeFeedbackStep(resetManifestPath, enterManifestPath, returnM
       summary: enterManifest?.summary,
       samples: enterManifest?.samples ?? [],
     },
+    return_start: {
+      ok: returnStartOk,
+      manifest_path: returnStartManifestPath,
+      exit_code: returnStart.status,
+      failed_budgets: returnStartManifest?.failed_budgets ?? [],
+      summary: returnStartManifest?.summary,
+      samples: returnStartManifest?.samples ?? [],
+    },
     return: {
-      ok: returnOk,
-      manifest_path: returnManifestPath,
-      exit_code: returnResult.status,
-      failed_budgets: returnManifest?.failed_budgets ?? [],
-      summary: returnManifest?.summary,
-      samples: returnManifest?.samples ?? [],
+      ok: returnCompleteOk,
+      manifest_path: returnCompleteManifestPath,
+      exit_code: returnComplete.status,
+      failed_budgets: returnCompleteManifest?.failed_budgets ?? [],
+      summary: returnCompleteManifest?.summary,
+      samples: returnCompleteManifest?.samples ?? [],
     },
   };
+}
+
+function manualModeReturnStartBudgetMs() {
+  const raw = process.env.EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_START_BUDGET_MS ?? "1000";
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    console.error(`Invalid EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_START_BUDGET_MS: ${String(raw)}`);
+    process.exit(2);
+  }
+  return String(Math.round(parsed));
 }
 
 function manualModeReturnBudgetMs() {
@@ -1212,7 +1241,9 @@ function renderReadyMarkdown(manifest) {
 - Workspace latency: ${workspaceLatency?.manifest_path ?? "skipped"}${manifest.workspace_latency_required ? " (required)" : ""}
 - Desktop HUD feedback: ${paperReminderFeedback?.manifest_path ?? "skipped"}${manifest.paper_reminder_feedback_required ? " (required)" : ""}
 - Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}${manifest.hotkey_latency_required ? " (required)" : ""}
-- Manual Mode feedback: ${manualModeFeedback?.enter?.manifest_path ?? "skipped"}${manifest.manual_mode_feedback_required ? " (required)" : ""}
+- Manual Mode enter feedback: ${manualModeFeedback?.enter?.manifest_path ?? "skipped"}${manifest.manual_mode_feedback_required ? " (required)" : ""}
+- Manual Mode return-start feedback: ${manualModeFeedback?.return_start?.manifest_path ?? "skipped"}${manifest.manual_mode_feedback_required ? " (required)" : ""}
+- Manual Mode return-complete feedback: ${manualModeFeedback?.return?.manifest_path ?? "skipped"}${manifest.manual_mode_feedback_required ? " (required)" : ""}
 - Failed checks: ${manifest.failed_checks.length === 0 ? "none" : manifest.failed_checks.join(", ")}
 
 Next steps:
@@ -1309,11 +1340,17 @@ function runSelfTest() {
     workspace_latency: { manifest_path: "artifacts/lab-runs/ready/workspace-latency.json" },
     paper_reminder_feedback: { manifest_path: "artifacts/lab-runs/ready/paper-reminder-feedback.json" },
     hotkey_feedback_latency: { skipped: true },
-    manual_mode_feedback: { enter: { manifest_path: "artifacts/lab-runs/ready/manual-mode-enter-feedback.json" } },
+    manual_mode_feedback: {
+      enter: { manifest_path: "artifacts/lab-runs/ready/manual-mode-enter-feedback.json" },
+      return_start: { manifest_path: "artifacts/lab-runs/ready/manual-mode-return-start-feedback.json" },
+      return: { manifest_path: "artifacts/lab-runs/ready/manual-mode-return-complete-feedback.json" },
+    },
   });
   assert.ok(readyMarkdown.includes("Suggested result file: artifacts/human-demo-results/demo-human-demo-result.md"));
   assert.ok(readyMarkdown.includes("Desktop HUD feedback: artifacts/lab-runs/ready/paper-reminder-feedback.json"));
-  assert.ok(readyMarkdown.includes("Manual Mode feedback: artifacts/lab-runs/ready/manual-mode-enter-feedback.json"));
+  assert.ok(readyMarkdown.includes("Manual Mode enter feedback: artifacts/lab-runs/ready/manual-mode-enter-feedback.json"));
+  assert.ok(readyMarkdown.includes("Manual Mode return-start feedback: artifacts/lab-runs/ready/manual-mode-return-start-feedback.json"));
+  assert.ok(readyMarkdown.includes("Manual Mode return-complete feedback: artifacts/lab-runs/ready/manual-mode-return-complete-feedback.json"));
   assert.ok(readyMarkdown.includes("Fill `artifacts/human-demo-results/demo-human-demo-result.md` after Jason finishes."));
   assert.ok(readyMarkdown.includes("Verify: `bin/human-demo-result-verify 'artifacts/human-demo-results/demo-human-demo-result.md' --lab-status`"));
   assert.ok(readyMarkdown.includes("Closeout: `bin/human-demo-completion-audit --strict`"));
