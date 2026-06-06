@@ -74,16 +74,16 @@ const demoWalkthrough = Object.freeze([
 ]);
 
 if (dryRun) {
-  assertSnapshotShape(buildSnapshot({
+  const sampleWindows = {
     customerChrome: sampleWindow(100, "Google Chrome", paperCustomer.chromeTitle),
     metricsChrome: sampleWindow(101, "Google Chrome", paperMetrics.chromeTitle),
     sharedText: sampleWindow(102, "TextEdit", paperCustomer.textTitle),
-  }, "customer"));
-  assertSnapshotShape(buildSnapshot({
-    customerChrome: sampleWindow(100, "Google Chrome", paperCustomer.chromeTitle),
-    metricsChrome: sampleWindow(101, "Google Chrome", paperMetrics.chromeTitle),
-    sharedText: sampleWindow(102, "TextEdit", paperCustomer.textTitle),
-  }, "metrics"));
+  };
+  const sampleCustomerSnapshot = buildSnapshot(sampleWindows, "customer");
+  const sampleMetricsSnapshot = buildSnapshot(sampleWindows, "metrics");
+  assertSnapshotShape(sampleCustomerSnapshot);
+  assertSnapshotShape(sampleMetricsSnapshot);
+  assertReadySnapshotShape(buildReadySnapshot(sampleCustomerSnapshot, sampleMetricsSnapshot, sampleWindows));
   assertDemoInstructions();
   console.log(JSON.stringify({ ok: true, self_test: true }));
   process.exit(0);
@@ -566,9 +566,14 @@ function buildReadySnapshot(customerSnapshot, metricsSnapshot, windows) {
     ...customerSnapshot,
     windows: [
       ...customerSnapshot.windows,
-      metricsChrome,
+      stripFrame(metricsChrome),
     ],
   };
+}
+
+function stripFrame(window) {
+  const { frame: _frame, ...rest } = window;
+  return rest;
 }
 
 function assertRestoredSnapshot(actualSnapshot, expectedSnapshot, label) {
@@ -1239,6 +1244,19 @@ function assertSnapshotShape(snapshot) {
     if (typeof window.id !== "number") throw new Error("window id must be number");
     if (!window.frame || typeof window.frame.x !== "number") throw new Error("window frame missing");
     if (window.layout !== "floating") throw new Error("window layout must be floating");
+  }
+}
+
+function assertReadySnapshotShape(snapshot) {
+  assertSnapshotShape({
+    ...snapshot,
+    windows: snapshot.windows.filter((window) => window.workspace === snapshot.activeWorkspace),
+  });
+  const backgroundWindows = snapshot.windows.filter((window) => window.workspace !== snapshot.activeWorkspace);
+  if (backgroundWindows.length === 0) throw new Error("ready snapshot must keep a background paper window");
+  for (const window of backgroundWindows) {
+    if (window.frame !== undefined) throw new Error("ready snapshot background windows must not carry frame requirements");
+    if (window.layout !== "floating") throw new Error("ready snapshot background window layout must be floating");
   }
 }
 

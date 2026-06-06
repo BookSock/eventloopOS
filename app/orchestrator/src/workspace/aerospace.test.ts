@@ -206,6 +206,41 @@ describe("Aerospace workspace adapter", () => {
     assert.deepEqual(snapshot.frameCapture, { status: "captured", timeoutMs: 1_234, observed: 1 });
   });
 
+  it("fails frame capture when the exec adapter never settles", async () => {
+    const adapter = new AerospaceWorkspaceAdapter(async (command, args) => {
+      if (command === "aerospace" && args[0] === "list-windows" && args.includes("--focused")) {
+        return { stdout: JSON.stringify([{ "window-id": 21, workspace: "paper-a" }]) };
+      }
+      if (command === "aerospace" && args[0] === "list-workspaces") {
+        return { stdout: "paper-a\n" };
+      }
+      if (command === "aerospace") {
+        return {
+          stdout: JSON.stringify([
+            {
+              "window-id": 21,
+              "app-name": "TextEdit",
+              "app-bundle-id": "com.apple.TextEdit",
+              "window-title": "Shared Note",
+              workspace: "paper-a",
+              "window-layout": "floating",
+            },
+          ]),
+        };
+      }
+      return await new Promise<never>(() => {});
+    }, { frameCaptureTimeoutMs: 10 });
+
+    const startedAt = Date.now();
+    const snapshot = await adapter.capture();
+
+    assert.equal(snapshot.windows[0]?.frame, undefined);
+    assert.equal(snapshot.frameCapture?.status, "failed");
+    assert.equal(snapshot.frameCapture?.timeoutMs, 10);
+    assert.match(snapshot.frameCapture?.error ?? "", /frame capture timed out/);
+    assert.ok(Date.now() - startedAt < 500);
+  });
+
   it("limits frame capture to requested window ids", async () => {
     const osascripts: string[] = [];
     const adapter = new AerospaceWorkspaceAdapter(async (command, args) => {
@@ -864,6 +899,39 @@ describe("Aerospace workspace adapter", () => {
       { command: "osascript", subcommand: "-e", timeoutMs: 1_789 },
       { command: "aerospace", subcommand: "focus", timeoutMs: undefined },
     ]);
+  });
+
+  it("fails frame restore when the exec adapter never settles", async () => {
+    const adapter = new AerospaceWorkspaceAdapter(
+      async (command) => {
+        if (command === "osascript") {
+          return await new Promise<never>(() => {});
+        }
+        return { stdout: "ok", stderr: "" };
+      },
+      { frameRestoreTimeoutMs: 10, workspaceFocusSettleMs: 0 },
+    );
+    const plan = restoreWorkspacePlan(
+      {
+        backend: "aerospace",
+        activeWorkspace: "dev",
+        focusedWindowId: 11,
+        windows: [
+          {
+            id: 11,
+            app: "TextEdit",
+            appBundleId: "com.apple.TextEdit",
+            title: "Shared Note",
+            workspace: "dev",
+            layout: "floating",
+            frame: { x: 20, y: 30, width: 640, height: 480 },
+          },
+        ],
+      },
+      [{ id: 11, app: "TextEdit", appBundleId: "com.apple.TextEdit", title: "Shared Note", workspace: "dev", layout: "floating" }],
+    );
+
+    await assert.rejects(adapter.executeRestorePlan(plan), /frame restore command timed out/);
   });
 
   it("waits for workspace focus to settle before restoring window frames", async () => {

@@ -34,10 +34,12 @@ function makeDeps(overrides: Partial<{
   ranCommands: AerospaceCommand[];
   activities: RecordedActivity[];
   prunedCalls: Date[];
+  captureOptions: unknown[];
 } {
   const ranCommands: AerospaceCommand[] = [];
   const activities: RecordedActivity[] = [];
   const prunedCalls: Date[] = [];
+  const captureOptions: unknown[] = [];
 
   const focusedWorkspace = overrides.focusedWorkspace ?? "ws-2";
   const snapshot: WorkspaceSnapshot = overrides.snapshot ?? {
@@ -100,7 +102,8 @@ function makeDeps(overrides: Partial<{
       },
     },
     workspace: {
-      async capture() {
+      async capture(options?: unknown) {
+        captureOptions.push(options);
         const captureSnapshots = overrides.captureSnapshots;
         if (!captureSnapshots || captureSnapshots.length === 0) return snapshot;
         const next = captureSnapshots[Math.min(captureCount, captureSnapshots.length - 1)] ?? snapshot;
@@ -140,7 +143,7 @@ function makeDeps(overrides: Partial<{
     now: () => new Date("2026-05-06T12:00:00.000Z"),
   };
 
-  return { deps, ranCommands, activities, prunedCalls };
+  return { deps, ranCommands, activities, prunedCalls, captureOptions };
 }
 
 describe("follows_window_orchestrator", () => {
@@ -162,7 +165,7 @@ describe("follows_window_orchestrator", () => {
   });
 
   it("moves follows windows on the first observed workspace switch", async () => {
-    const { deps, ranCommands, activities } = makeDeps();
+    const { deps, ranCommands, activities, captureOptions } = makeDeps();
     const orch = createFollowsWindowOrchestrator(deps);
     const result = await orch.tick();
     assert.equal(result.decision, "switch_handled");
@@ -172,6 +175,7 @@ describe("follows_window_orchestrator", () => {
     assert.equal(result.alreadyOnTarget, 0);
     assert.equal(ranCommands.length, 1);
     assert.deepEqual(ranCommands[0]?.args, ["move-node-to-workspace", "--window-id", "100", "ws-2"]);
+    assert.deepEqual(captureOptions, [{ captureFrames: false }]);
     assert.ok(activities.some((a) => a.type === "follows_window_moved"));
   });
 

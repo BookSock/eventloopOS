@@ -258,12 +258,14 @@ public struct HTTPWorkspaceClient: WorkspaceClient {
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
+    private let restoreTimeoutInterval: TimeInterval
 
-    public init(baseURL: URL, session: URLSession = .shared) {
+    public init(baseURL: URL, session: URLSession = .shared, restoreTimeoutInterval: TimeInterval = 8) {
         self.baseURL = baseURL
         self.session = session
         self.decoder = QueueCoders.makeDecoder()
         self.encoder = QueueCoders.makeEncoder()
+        self.restoreTimeoutInterval = restoreTimeoutInterval
     }
 
     public func status() async throws -> WorkspaceStatusEnvelope {
@@ -306,6 +308,7 @@ public struct HTTPWorkspaceClient: WorkspaceClient {
         let url = baseURL.appending(path: "workspace/restore")
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        request.timeoutInterval = restoreTimeoutInterval
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
         request.httpBody = try encoder.encode(WorkspaceRestoreRequest(snapshot: snapshot, currentWindows: currentWindows))

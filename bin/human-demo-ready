@@ -72,6 +72,7 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_FEEDBACK=1 forces Manual Mode enter/return feedback proof on
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_FEEDBACK=0 skips Manual Mode enter/return feedback proof
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_FEEDBACK_TARGET=local runs proof on this Mac instead of the lab Mac
+  EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_SETTLE_MS default: 2000
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_START_BUDGET_MS default: 1000
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_BUDGET_MS default: 3000
   EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=auto|local|lab default: auto
@@ -141,6 +142,9 @@ const hotkeyLatency = hotkeyLatencyEnabled && hotkeyProofsCanRun
   ? runHotkeyLatencyStep(hotkeyLatencyManifestPath, env)
   : undefined;
 const hotkeyLatencyManifest = hotkeyLatency ? readJsonIfPresent(hotkeyLatencyManifestPath) : undefined;
+if (manualModeFeedbackEnabled && hotkeyLatency?.status === 0) {
+  runManualModeSettleStep(env);
+}
 const manualModeFeedback = manualModeFeedbackEnabled && hotkeyProofsCanRun
   ? runManualModeFeedbackStep(
     manualModeResetFeedbackManifestPath,
@@ -872,6 +876,25 @@ function runManualModeFeedbackStep(resetManifestPath, enterManifestPath, returnS
       samples: returnCompleteManifest?.samples ?? [],
     },
   };
+}
+
+function runManualModeSettleStep(envOverride) {
+  const settleMs = manualModeSettleMs();
+  if (settleMs <= 0) return undefined;
+  return runStep("manual mode settle after restore hotkey", "node", [
+    "-e",
+    `setTimeout(() => {}, ${settleMs})`,
+  ], envOverride);
+}
+
+function manualModeSettleMs() {
+  const raw = process.env.EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_SETTLE_MS ?? "2000";
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    console.error(`Invalid EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_SETTLE_MS: ${String(raw)}`);
+    process.exit(2);
+  }
+  return Math.round(parsed);
 }
 
 function manualModeReturnStartBudgetMs() {

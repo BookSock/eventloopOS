@@ -152,7 +152,7 @@ export function createFollowsWindowOrchestrator(deps: FollowsWindowOrchestratorD
       }
       lastFocusedWorkspace = focused;
 
-      const snapshot = await deps.workspace.capture();
+      const snapshot = await deps.workspace.capture({ captureFrames: false });
       const foreignClaimed = await redirectForeignClaimedWindows(deps, {
         snapshot,
         currentTaskId: taskState.current_task_id,
@@ -350,7 +350,7 @@ async function redirectForeignClaimedWindows(
     return { moved: 0, skipped: 0, movedWindowIds: new Set() };
   }
 
-  const snapshot = input.snapshot ?? await deps.workspace.capture();
+  const snapshot = input.snapshot ?? await deps.workspace.capture({ captureFrames: false });
   const movedWindowIds = new Set<string>();
   const taskWorkspaceCache = new Map<string, string | undefined>();
   let moved = 0;

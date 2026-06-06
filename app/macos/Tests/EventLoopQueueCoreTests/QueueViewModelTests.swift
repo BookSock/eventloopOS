@@ -3566,6 +3566,10 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.workspaceRestoreState, .failed("Queue request failed with HTTP 422: schema_error: snapshot is required"))
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restore failed: schema_error: snapshot is required"))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+
+        await viewModel.confirmSelectedWorkspaceRestore()
+
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 2)
     }
 
     func testWorkspaceRestoreIdempotencyConflictShowsAlreadyRunningFeedback() async {

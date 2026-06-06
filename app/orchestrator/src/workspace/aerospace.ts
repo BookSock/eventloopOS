@@ -174,7 +174,11 @@ export class AerospaceWorkspaceAdapter {
       assertSafeAerospaceCommand(command);
       let result: ExecResult;
       try {
-        result = await this.exec(command.command, command.args, restoreCommandExecOptions(command, this.frameRestoreTimeoutMs));
+        const execOptions = restoreCommandExecOptions(command, this.frameRestoreTimeoutMs);
+        const execPromise = this.exec(command.command, command.args, execOptions);
+        result = execOptions?.timeoutMs
+          ? await withOperationTimeout(execPromise, execOptions.timeoutMs + 250, "frame restore command")
+          : await execPromise;
       } catch (error) {
         if (!isTransientFocusRace(command, error)) throw error;
         result = {
@@ -218,9 +222,13 @@ export class AerospaceWorkspaceAdapter {
       };
     }
     try {
-      const result = await this.exec("osascript", ["-e", captureWindowFramesAppleScript(candidates)], {
-        timeoutMs: this.frameCaptureTimeoutMs,
-      });
+      const result = await withOperationTimeout(
+        this.exec("osascript", ["-e", captureWindowFramesAppleScript(candidates)], {
+          timeoutMs: this.frameCaptureTimeoutMs,
+        }),
+        this.frameCaptureTimeoutMs + 250,
+        "frame capture",
+      );
       const observations = parseWindowFrameObservations(result.stdout);
       return {
         observations,
@@ -977,6 +985,20 @@ function shouldSettleAfterWorkspaceFocus(command: AerospaceCommand, remaining: A
 
 function restoreCommandExecOptions(command: AerospaceCommand, frameRestoreTimeoutMs: number): { timeoutMs?: number } | undefined {
   return command.command === "osascript" ? { timeoutMs: frameRestoreTimeoutMs } : undefined;
+}
+
+async function withOperationTimeout<T>(operation: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<T>((_, reject) => {
+    timeout = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([operation, timeoutPromise]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function sleep(ms: number): Promise<void> {

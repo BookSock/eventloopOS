@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createAmbientWorkspaceSaverFromRuntime, type AmbientWorkspaceSaver } from "./agents/ambient_workspace_saver.js";
 import { resolveForegroundCodex } from "./agents/codex/foreground_resolver.js";
 import type { RunOsascript } from "./agents/codex/ghostty_window_resolver.js";
@@ -58,9 +58,7 @@ const mcpSources = await createMcpSourceRegistry();
 const workspace = config.value.workspace === "aerospace" ? new AerospaceWorkspaceController(execFilePromise) : undefined;
 const runOsascript = process.platform === "darwin" ? runOsascriptCommand : undefined;
 const terminalSendExecutor: TerminalSendExecutor = (command: TerminalSendCommand) =>
-  new Promise((resolve, reject) => {
-    execFile(command.file, command.args, (error) => (error ? reject(error) : resolve()));
-  });
+  execFilePromise(command.file, command.args).then(() => undefined);
 
 const server = createGatewayServer({
   store: gatewayRuntime.store,
@@ -464,12 +462,68 @@ function createClaudeTaskSessionRuntime(runtimeConfig: OrchestratorConfig): Comp
 
 async function execFilePromise(command: string, args: string[], options: { cwd?: string; timeoutMs?: number } = {}) {
   return await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-    execFile(command, args, { encoding: "utf8", timeout: options.timeoutMs ?? 5_000, cwd: options.cwd }, (error, stdout, stderr) => {
-      if (error) {
+    const timeoutMs = options.timeoutMs ?? 5_000;
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timeout = setTimeout(() => {
+      if (settled) return;
+      child.kill("SIGKILL");
+      const error = new Error(`Command timed out after ${timeoutMs}ms: ${command} ${args.join(" ")}`) as Error & {
+        code?: string;
+        killed?: boolean;
+        signal?: NodeJS.Signals;
+        stdout?: string;
+        stderr?: string;
+      };
+      error.code = "ETIMEDOUT";
+      error.killed = true;
+      error.signal = "SIGKILL";
+      error.stdout = stdout;
+      error.stderr = stderr;
+      settled = true;
+      reject(error);
+    }, timeoutMs);
+
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      if (settled) return;
+      clearTimeout(timeout);
+      settled = true;
+      reject(error);
+    });
+    child.on("close", (code, signal) => {
+      if (settled) return;
+      clearTimeout(timeout);
+      settled = true;
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        const error = new Error(
+          `Command failed: ${command} ${args.join(" ")} (${signal ? `signal ${signal}` : `exit ${code ?? "unknown"}`})`,
+        ) as Error & {
+          code?: number | null;
+          signal?: NodeJS.Signals | null;
+          stdout?: string;
+          stderr?: string;
+        };
+        error.code = code;
+        error.signal = signal;
+        error.stdout = stdout;
+        error.stderr = stderr;
         reject(error);
-        return;
       }
-      resolve({ stdout, stderr });
     });
   });
 }
