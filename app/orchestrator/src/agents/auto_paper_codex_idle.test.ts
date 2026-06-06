@@ -430,6 +430,54 @@ describe("AutoPaperCodexIdleWatcher", () => {
     assert.equal(deps.ingested[0]!.event.raw_ref.uri, "eventloopos://task-sessions/task_session_waiting");
   });
 
+  it("includes session context in waiting papers so the queue reminder is actionable", async () => {
+    const deps = createDeps({
+      tasks: [],
+      taskSessions: [
+        {
+          id: "task_session_checkout",
+          task_id: "task_checkout_polish",
+          provider: "codex",
+          status: "waiting_approval",
+          name: "Checkout toast polish",
+          status_detail: "Approve final copy before the agent resumes.",
+          preview: "Fallback text that should not hide the status detail.",
+          updated_at: "2026-05-09T11:20:00.000Z",
+        },
+      ],
+      inspections: new Map(),
+    });
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+    assert.equal(result.emitted.length, 1);
+    assert.match(deps.ingested[0]!.event.summary, /Checkout toast polish/);
+    assert.match(deps.ingested[0]!.event.summary, /Approve final copy/);
+    assert.doesNotMatch(deps.ingested[0]!.event.summary, /Fallback text/);
+  });
+
+  it("does not spam waiting papers when a session has no timestamp fields", async () => {
+    const deps = createDeps({
+      tasks: [],
+      taskSessions: [
+        {
+          id: "task_session_no_timestamp",
+          task_id: "task_agent_no_timestamp",
+          provider: "fake",
+          status: "waiting_approval",
+        },
+      ],
+      inspections: new Map(),
+    });
+    const watcher = new AutoPaperCodexIdleWatcher(deps);
+    const first = await watcher.tick();
+    deps.setNow(new Date("2026-05-09T12:00:30.000Z"));
+    const second = await watcher.tick();
+    assert.equal(first.emitted.length, 1);
+    assert.equal(second.emitted.length, 0);
+    assert.equal(second.skipped[0]?.reason, "already_emitted_for_window");
+    assert.equal(deps.ingested.length, 1);
+    assert.match(deps.ingested[0]!.event.idempotency_key ?? "", /status:waiting_approval:session:task_session_no_timestamp/);
+  });
+
   it("recognizes common stuck/review/question task-session statuses without treating generic pending as waiting", async () => {
     const deps = createDeps({
       tasks: [],

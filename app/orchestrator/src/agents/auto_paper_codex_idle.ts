@@ -182,9 +182,9 @@ export class AutoPaperCodexIdleWatcher {
 
       const humanAttentionReason = humanAttentionReasonForStatus(candidate.status);
       if (humanAttentionReason) {
-        const anchor = sessionUpdatedAt(candidate.session) ?? now.toISOString();
+        const attention = humanAttentionDetailsForCandidate(candidate, humanAttentionReason, now);
         const state = this.idleState.get(candidate.key) ?? { lastActivityAt: undefined, lastPaperWindowAnchor: undefined };
-        if (state.lastPaperWindowAnchor === anchor) {
+        if (state.lastPaperWindowAnchor === attention.dedupeAnchor) {
           skipped.push({ task_id: task.id, reason: "already_emitted_for_window" });
           continue;
         }
@@ -193,15 +193,16 @@ export class AutoPaperCodexIdleWatcher {
           provider: candidate.provider,
           anchorId: candidate.anchorId,
           reason: humanAttentionReason,
-          occurredAt: anchor,
+          occurredAt: attention.occurredAt,
+          dedupeAnchor: attention.dedupeAnchor,
           now,
-          summary: `${providerLabel(candidate.provider)} session ${humanAttentionReason === "blocked" ? "blocked" : "waiting for human input"} on ${task.id}.`,
+          summary: attention.summary,
           rawUri: `eventloopos://task-sessions/${encodeURIComponent(candidate.anchorId)}`,
           rawMediaType: "application/json",
         });
         const result = await this.deps.ingestor.ingestEventAsReviewPacket(event, now);
-        state.lastActivityAt = anchor;
-        state.lastPaperWindowAnchor = anchor;
+        state.lastActivityAt = attention.dedupeAnchor;
+        state.lastPaperWindowAnchor = attention.dedupeAnchor;
         this.idleState.set(candidate.key, state);
         await this.deps.registry.recordTaskPaperEmitted(task.id, now);
         emitted.push({
@@ -379,14 +380,16 @@ function buildAgentAttentionEvent(input: {
   anchorId: string;
   reason: "idle" | "blocked" | "waiting";
   occurredAt: string;
+  dedupeAnchor?: string;
   now: Date;
   summary: string;
   rawUri: string;
   rawMediaType?: string;
 }): McpEvent {
   const { task, provider, reason, occurredAt, now } = input;
-  const idempotencyKey = `auto_paper_${provider}_${reason}:${task.id}:${occurredAt}`;
-  const eventId = `evt_auto_paper_${stableId(provider)}_${reason}_${stableId(task.id)}_${stableId(occurredAt)}`;
+  const idempotencyAnchor = input.dedupeAnchor ?? occurredAt;
+  const idempotencyKey = `auto_paper_${provider}_${reason}:${task.id}:${idempotencyAnchor}`;
+  const eventId = `evt_auto_paper_${stableId(provider)}_${reason}_${stableId(task.id)}_${stableId(idempotencyAnchor)}`;
   // The ingestion pipeline normalizes task_hint via taskIdForHint("task_<slug>"),
   // which prefixes "task_" again. Strip our leading "task_" so the resulting
   // packet.task_id round-trips back to the original task.id.
@@ -546,8 +549,62 @@ function normalizeStatus(status: string | undefined): string | undefined {
   return normalized ? normalized : undefined;
 }
 
-function sessionUpdatedAt(session: TaskRuntimeSession | undefined): string | undefined {
-  return stringField(session, "updated_at") ?? stringField(session, "last_seen_at") ?? stringField(session, "created_at");
+function humanAttentionDetailsForCandidate(
+  candidate: AutoPaperCandidate,
+  reason: "blocked" | "waiting",
+  now: Date,
+): { occurredAt: string; dedupeAnchor: string; summary: string } {
+  const status = normalizeStatus(candidate.status) ?? reason;
+  const statusTimestamp = sessionStatusTimestamp(candidate.session);
+  const dedupeAnchor = statusTimestamp
+    ? `status:${status}:at:${statusTimestamp}`
+    : `status:${status}:session:${candidate.anchorId}`;
+  return {
+    occurredAt: statusTimestamp ?? now.toISOString(),
+    dedupeAnchor,
+    summary: humanAttentionSummary(candidate, reason),
+  };
+}
+
+function sessionStatusTimestamp(session: TaskRuntimeSession | undefined): string | undefined {
+  return validTimestampField(session, "status_updated_at")
+    ?? validTimestampField(session, "status_changed_at")
+    ?? validTimestampField(session, "updated_at")
+    ?? validTimestampField(session, "last_activity_at")
+    ?? validTimestampField(session, "last_event_at")
+    ?? validTimestampField(session, "created_at");
+}
+
+function validTimestampField(record: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = stringField(record, key);
+  if (!value) return undefined;
+  return Number.isNaN(Date.parse(value)) ? undefined : value;
+}
+
+function humanAttentionSummary(candidate: AutoPaperCandidate, reason: "blocked" | "waiting"): string {
+  const action = reason === "blocked" ? "blocked" : "waiting for human input";
+  const prefix = `${providerLabel(candidate.provider)} session ${action} on ${candidate.task.id}`;
+  const name = stringField(candidate.session, "name");
+  const detail = firstStringField(candidate.session, [
+    "decision_needed",
+    "status_detail",
+    "status_message",
+    "preview",
+    "recent_summary",
+    "summary",
+  ]);
+  if (name && detail && name !== detail) return `${prefix}: ${name} - ${detail}`;
+  if (detail) return `${prefix}: ${detail}`;
+  if (name) return `${prefix}: ${name}`;
+  return `${prefix}.`;
+}
+
+function firstStringField(record: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = stringField(record, key);
+    if (value) return value;
+  }
+  return undefined;
 }
 
 function sessionTerminalRef(session: TaskRuntimeSession | undefined): string | undefined {
