@@ -713,11 +713,15 @@ async function proveAmbientAutosave(paper, baselineSnapshot) {
   await restore(baselineSnapshot, "ambient-autosave-baseline");
   await waitForTaskLayoutFrame(paper.taskId, sharedWindowId, baselineShared.frame, {
     label: "ambient autosave baseline",
+    repairSnapshot: baselineSnapshot,
+    repairWorkspace: paper.workspace,
   });
   await restore(movedSnapshot, "ambient-autosave-move");
   await sleep(1_200);
   const layoutProof = await waitForTaskLayoutFrame(paper.taskId, sharedWindowId, movedFrame, {
     label: "ambient autosave moved frame",
+    repairSnapshot: movedSnapshot,
+    repairWorkspace: paper.workspace,
   });
   const probe = await queueAmbientProbePaper(paper, "moved-window");
   const probeItem = probe.queue_item;
@@ -755,6 +759,8 @@ async function proveNewWindowAutosave(paper, baselineSnapshot) {
   await sleep(1_200);
   const layoutProof = await waitForTaskLayoutFrame(paper.taskId, scratchWindow.id, scratchFrame, {
     label: "new-window ambient autosave",
+    repairSnapshot: snapshotWithScratch,
+    repairWorkspace: paper.workspace,
   });
   const probe = await queueAmbientProbePaper(paper, "new-window");
   const probeItem = probe.queue_item;
@@ -885,6 +891,7 @@ async function waitForTaskLayoutFrame(taskId, windowId, expectedFrame, options =
   const label = options.label ?? "ambient autosave";
   const attempts = options.attempts ?? 45;
   const intervalMs = options.intervalMs ?? 1_000;
+  const repairEveryAttempts = options.repairEveryAttempts ?? 5;
   let last;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const response = await fetch(`${orchestratorUrl}/tasks/${encodeURIComponent(taskId)}`);
@@ -909,9 +916,36 @@ async function waitForTaskLayoutFrame(taskId, windowId, expectedFrame, options =
         frame: window.frame,
       };
     }
+    if (options.repairSnapshot && attempt % repairEveryAttempts === 0) {
+      await maybeRepairLivePaperPlacement({
+        label,
+        attempt,
+        repairSnapshot: options.repairSnapshot,
+        repairWorkspace: options.repairWorkspace,
+        windowId,
+      });
+    }
     await sleep(intervalMs);
   }
   throw new Error(`${label} did not update task layout for ${taskId} window ${windowId}; expected ${JSON.stringify(expectedFrame)}; last ${JSON.stringify(last)}`);
+}
+
+async function maybeRepairLivePaperPlacement(input) {
+  try {
+    const current = await capture({ capture_frames: false });
+    const targetWindow = current.windows?.find((candidate) => candidate.id === input.windowId);
+    const workspaceDrifted = input.repairWorkspace
+      && current.activeWorkspace
+      && current.activeWorkspace !== input.repairWorkspace;
+    const targetWindowDrifted = input.repairWorkspace
+      && targetWindow?.workspace
+      && targetWindow.workspace !== input.repairWorkspace;
+    if (!workspaceDrifted && !targetWindowDrifted) return;
+    await restore(input.repairSnapshot, `${slugForIdempotency(input.label)}-repair-${input.attempt}`);
+  } catch {
+    // AeroSpace can be temporarily unavailable while restarting. The next wait
+    // attempt will either observe recovery or try the repair again.
+  }
 }
 
 function assertQueueItemWorkspaceFrame(item, windowId, expectedFrame) {
@@ -948,6 +982,10 @@ function snapshotWindow(window, workspace, frame) {
     layout: "floating",
     frame,
   };
+}
+
+function slugForIdempotency(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "repair";
 }
 
 async function restore(snapshot, label) {

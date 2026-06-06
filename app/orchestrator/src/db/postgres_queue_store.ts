@@ -78,6 +78,26 @@ import {
 export { eventToRecord, type EventRecord, type NewQueueItem } from "./postgres_queue_rows.js";
 
 const { Pool: PgPool } = pg;
+const FOLLOWS_OBSERVATION_APP_BUNDLE_BLOCKLIST = [
+  "aerospace",
+  "com.apple.controlcenter",
+  "com.apple.dock",
+  "com.apple.loginwindow",
+  "com.apple.notificationcenterui",
+  "com.apple.systemuiserver",
+  "com.eventloopos.queue",
+  "com.nikitavoloboev.aerospace",
+  "controlcenter",
+  "dock",
+  "eventloopos queue",
+  "eventloopqueueapp",
+  "io.tailscale.ipn.macos",
+  "loginwindow",
+  "notificationcenter",
+  "systemuiserver",
+  "tailscale",
+  "windowserver",
+];
 
 export type PostgresQueueStoreOptions = {
   connectionString?: string;
@@ -921,6 +941,9 @@ export class PostgresQueueStore {
           FROM window_workspace_observations
           WHERE is_task_workspace = TRUE
             AND last_seen_at >= $1::timestamptz
+            AND (
+              app_bundle IS NULL OR lower(app_bundle) <> ALL($3::text[])
+            )
             AND NOT EXISTS (
               SELECT 1
               FROM follows_window_exclusions ex
@@ -973,7 +996,7 @@ export class PostgresQueueStore {
         WHERE wg.window_id NOT IN (SELECT window_id FROM slot_emitted)
         ORDER BY window_id ASC
       `,
-      [cutoff, minWorkspaceCount],
+      [cutoff, minWorkspaceCount, FOLLOWS_OBSERVATION_APP_BUNDLE_BLOCKLIST],
     );
     return result.rows.map((row) => {
       const appBundle = row.app_bundle;

@@ -973,14 +973,36 @@ function runGatewayStoreContract(
           isTaskWorkspace: false,
           observedAt: new Date("2026-05-06T12:01:00.000Z"),
         });
+        for (const workspaceId of ["ws-alpha", "ws-beta", "ws-gamma"]) {
+          await harness.store.recordWindowWorkspaceObservation({
+            windowId: `queue-${workspaceId}`,
+            workspaceId,
+            isTaskWorkspace: true,
+            observedAt: new Date("2026-05-06T12:01:45.000Z"),
+            appBundle: "com.eventloopos.queue",
+            titlePrefix: "eventloopos queue",
+          });
+          await harness.store.recordWindowWorkspaceObservation({
+            windowId: `tailscale-${workspaceId}`,
+            workspaceId,
+            isTaskWorkspace: true,
+            observedAt: new Date("2026-05-06T12:01:45.000Z"),
+            appBundle: "Tailscale",
+            titlePrefix: "tailscale",
+          });
+        }
 
         const follows = await harness.store.listFollowsWindows({
-          now: new Date("2026-05-06T12:01:00.000Z"),
+          now: new Date("2026-05-06T12:02:00.000Z"),
           ttlMs: 24 * 60 * 60 * 1_000,
         });
         assert.equal(follows.length, 1);
         assert.equal(follows[0]?.window_id, "win-100");
         assert.deepEqual(follows[0]?.known_workspaces, ["ws-alpha", "ws-beta", "ws-gamma"]);
+        assert.ok(
+          follows.every((follow) => follow.app_bundle !== "com.eventloopos.queue" && follow.app_bundle !== "Tailscale"),
+          "utility windows must not become follows candidates even if old observations were stored",
+        );
 
         const expired = await harness.store.listFollowsWindows({
           now: new Date("2026-05-08T12:00:00.000Z"),

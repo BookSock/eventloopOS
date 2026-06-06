@@ -1100,6 +1100,27 @@ describe("ambient_workspace_saver", () => {
           appBundleId: "com.tinyspeck.slackmacgap",
         },
         { id: 200, app: "Ghostty", title: "codex", workspace: "ws-1" },
+        {
+          id: 300,
+          app: "eventloopOS Queue",
+          title: "eventloopOS Queue",
+          workspace: "ws-2",
+          appBundleId: "com.eventloopos.queue",
+        },
+        {
+          id: 400,
+          app: "Tailscale",
+          title: "Tailscale",
+          workspace: "ws-2",
+          appBundleId: "io.tailscale.ipn.macos",
+        },
+        {
+          id: 500,
+          app: "ControlCenter",
+          title: "Control Center",
+          workspace: "ws-2",
+          appBundleId: "com.apple.controlcenter",
+        },
       ],
     };
     const workspace = makeFakeWorkspace(snapshot);
@@ -1141,6 +1162,11 @@ describe("ambient_workspace_saver", () => {
     assert.equal(ghostty?.isTaskWorkspace, false, "window on a non-active workspace must not be marked is_task_workspace");
     assert.equal(ghostty?.appBundle, "Ghostty", "falls back to display name when bundle id absent");
     assert.equal(ghostty?.titlePrefix, "codex");
+    assert.deepEqual(
+      observations.map((entry) => entry.windowId).sort(),
+      ["100", "200"],
+      "utility/system windows must not feed follows-window observations",
+    );
   });
 
   it("runtime adapter commits both task layout and task workspace snapshot", async () => {

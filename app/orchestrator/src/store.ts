@@ -191,6 +191,26 @@ export type TaskWindowClaimRecord = {
 };
 
 export const FOLLOWS_TITLE_PREFIX_MAX_LEN = 40;
+const FOLLOWS_OBSERVATION_APP_BUNDLE_BLOCKLIST = new Set([
+  "aerospace",
+  "com.apple.controlcenter",
+  "com.apple.dock",
+  "com.apple.loginwindow",
+  "com.apple.notificationcenterui",
+  "com.apple.systemuiserver",
+  "com.eventloopos.queue",
+  "com.nikitavoloboev.aerospace",
+  "controlcenter",
+  "dock",
+  "eventloopos queue",
+  "eventloopqueueapp",
+  "io.tailscale.ipn.macos",
+  "loginwindow",
+  "notificationcenter",
+  "systemuiserver",
+  "tailscale",
+  "windowserver",
+]);
 
 export function normalizeTitlePrefix(title: string | undefined | null): string | undefined {
   if (typeof title !== "string") return undefined;
@@ -681,6 +701,7 @@ export function listFollowsWindows(
     if (!record.is_task_workspace) continue;
     const lastSeenMs = Date.parse(record.last_seen_at);
     if (lastSeenMs < cutoff) continue;
+    if (!isFollowsObservationEligible(record)) continue;
     const wg = windowGroups.get(record.window_id) ?? { workspaces: new Set<string>(), lastSeenMs: 0 };
     wg.workspaces.add(record.workspace_id);
     if (lastSeenMs > wg.lastSeenMs) wg.lastSeenMs = lastSeenMs;
@@ -848,6 +869,11 @@ function isFollowsExcluded(
     const titleMatches = !exclusion.title_substring || titlePrefix?.includes(exclusion.title_substring);
     return appMatches && titleMatches;
   });
+}
+
+function isFollowsObservationEligible(record: WindowWorkspaceObservationRecord): boolean {
+  const appBundle = record.app_bundle?.trim().toLowerCase();
+  return !appBundle || !FOLLOWS_OBSERVATION_APP_BUNDLE_BLOCKLIST.has(appBundle);
 }
 
 function normalizeOptionalText(value: string | undefined): string | undefined {

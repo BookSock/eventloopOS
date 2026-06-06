@@ -21,6 +21,23 @@ const TASK_SNAPSHOT_BUNDLE_BLOCKLIST = new Set([
   "com.nikitavoloboev.aerospace",
   "io.tailscale.ipn.macos",
 ]);
+const WINDOW_OBSERVATION_APP_BLOCKLIST = new Set([
+  ...TASK_SNAPSHOT_APP_BLOCKLIST,
+  "controlcenter",
+  "dock",
+  "loginwindow",
+  "notificationcenter",
+  "systemuiserver",
+  "windowserver",
+]);
+const WINDOW_OBSERVATION_BUNDLE_BLOCKLIST = new Set([
+  ...TASK_SNAPSHOT_BUNDLE_BLOCKLIST,
+  "com.apple.controlcenter",
+  "com.apple.dock",
+  "com.apple.loginwindow",
+  "com.apple.notificationcenterui",
+  "com.apple.systemuiserver",
+]);
 
 export type CurrentTaskState = {
   currentTaskId: string | null;
@@ -452,6 +469,7 @@ async function recordWindowObservations(
   const activeWorkspace = snapshot.activeWorkspace;
   for (const window of snapshot.windows) {
     if (!window.workspace) continue;
+    if (!isWindowWorkspaceObservationEligible(window)) continue;
     const isActiveWorkspace = activeWorkspace !== undefined && window.workspace === activeWorkspace;
     const isTaskWorkspace = isActiveWorkspace && currentTaskId.length > 0;
     const appBundle = readWindowAppBundleCandidate(window);
@@ -470,6 +488,12 @@ async function recordWindowObservations(
       // by Phase 6 storage hiccups; the saver's primary job is layout capture.
     }
   }
+}
+
+function isWindowWorkspaceObservationEligible(window: AerospaceWindow): boolean {
+  const app = window.app.trim().toLowerCase();
+  const bundle = typeof window.appBundleId === "string" ? window.appBundleId.trim().toLowerCase() : "";
+  return !WINDOW_OBSERVATION_APP_BLOCKLIST.has(app) && !WINDOW_OBSERVATION_BUNDLE_BLOCKLIST.has(bundle);
 }
 
 export function snapshotFingerprint(snapshot: WorkspaceSnapshot): string {
