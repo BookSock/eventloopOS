@@ -134,11 +134,17 @@ struct QueueWindowView: View {
                     .disabled(viewModel.paperActionInFlight)
 
                     Button {
-                        workspaceRestoreCandidate = viewModel.selectedWorkspaceSnapshot
+                        if let snapshot = viewModel.selectedWorkspaceSnapshot {
+                            workspaceRestoreCandidate = snapshot
+                        } else {
+                            Task {
+                                await viewModel.confirmSelectedWorkspaceRestore()
+                            }
+                        }
                     } label: {
                         Label("Restore Workspace", systemImage: "rectangle.3.group")
                     }
-                    .disabled(!viewModel.canRestoreSelectedWorkspace)
+                    .disabled(viewModel.paperActionInFlight)
                     .accessibilityIdentifier("queue-restore-workspace-button")
 
                     Button {
