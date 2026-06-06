@@ -65,6 +65,29 @@ final class AdvanceToastBannerPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.foregroundRole, .muted)
     }
 
+    func testRepeatedRequestActionMessagesUseMutedRole() {
+        let alreadyHandling = AdvanceToastBannerPresentation.make(
+            toast: .actionComplete("Already handling that request. Wait a second."),
+            queueCount: 1,
+            feedbackSequence: 1
+        )
+        let stillSwitching = AdvanceToastBannerPresentation.make(
+            toast: .actionComplete("Action saved. Still switching; wait a second."),
+            queueCount: 1,
+            feedbackSequence: 1
+        )
+        let masterStillRunning = AdvanceToastBannerPresentation.make(
+            toast: .actionComplete("Master command still running."),
+            queueCount: 1,
+            feedbackSequence: 1
+        )
+
+        XCTAssertEqual(alreadyHandling.icon, "exclamationmark.circle")
+        XCTAssertEqual(alreadyHandling.foregroundRole, .muted)
+        XCTAssertEqual(stillSwitching.foregroundRole, .muted)
+        XCTAssertEqual(masterStillRunning.foregroundRole, .muted)
+    }
+
     func testDeferredMessageReflectsQueueState() {
         let dueAt = Date(timeIntervalSince1970: 1_767_040_000)
         let empty = AdvanceToastBannerPresentation.make(

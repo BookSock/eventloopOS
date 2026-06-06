@@ -849,7 +849,11 @@ struct AdvanceToastBannerPresentation: Equatable {
             || lowered.contains("no ready paper")
             || lowered.contains("no other paper")
             || lowered.contains("no saved workspace")
-            || lowered.contains("already running") {
+            || lowered.contains("already running")
+            || lowered.contains("already handling")
+            || lowered.contains("already handled")
+            || lowered.contains("still running")
+            || lowered.contains("still switching") {
             return .muted
         }
         return .success

@@ -86,6 +86,23 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Press Ctrl-Option-M to return."))
     }
 
+    func testPullNextPaperShowsAlreadyHandlingFeedbackForIdempotencyConflict() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-blog-feedback")
+        client.setNextLeaseError(QueueClientError.httpStatusMessage(
+            409,
+            "idempotency_conflict: duplicate idempotency key"
+        ))
+
+        await viewModel.pullNextPaper()
+
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Already handling that request. Wait a second."))
+    }
+
     func testRepeatedAdvanceToastAssignmentsIncrementFeedbackSequence() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
@@ -640,6 +657,23 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Action saved. Manual Mode active; no next paper claimed."))
     }
 
+    func testDoneAndNextShowsStillSwitchingFeedbackForIdempotencyLeaseConflict() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+        client.setNextLeaseError(QueueClientError.httpStatusMessage(
+            409,
+            "idempotency_conflict: duplicate idempotency key"
+        ))
+
+        await viewModel.doneAndNext()
+
+        XCTAssertEqual(client.completedPacketIds, ["packet-blog-feedback"])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-ci-failed")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Action saved. Still switching; wait a second."))
+    }
+
     func testDoneAndNextTreatsActionConflictAsRecoverableFeedback() async {
         let client = FakeQueueClient(packets: SeededQueue.packets)
         let viewModel = QueueViewModel(client: client)
@@ -655,6 +689,23 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Queue paused. Try again."))
         XCTAssertGreaterThan(viewModel.feedbackSequence, beforeFeedbackSequence)
+    }
+
+    func testDoneAndNextShowsAlreadyHandlingFeedbackForActionIdempotencyConflict() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        let viewModel = QueueViewModel(client: client)
+        await viewModel.pullNextPaper()
+        client.setQueueActionError(QueueClientError.httpStatusMessage(
+            409,
+            "idempotency_conflict: duplicate idempotency key"
+        ))
+
+        await viewModel.doneAndNext()
+
+        XCTAssertEqual(client.completedPacketIds, [])
+        XCTAssertEqual(viewModel.state, .loaded)
+        XCTAssertEqual(viewModel.selectedPacketID, "packet-blog-feedback")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Already handling that request. Wait a second."))
     }
 
     func testDoneAndNextShowsManualModeFeedbackForActionConflict() async {
@@ -3381,6 +3432,38 @@ final class QueueViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .failed("Queue request failed with HTTP 422: schema_error: snapshot is required"))
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restore failed: schema_error: snapshot is required"))
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+    }
+
+    func testWorkspaceRestoreIdempotencyConflictShowsAlreadyRunningFeedback() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+        let packet = ReviewPacket(
+            id: "packet-with-workspace",
+            title: "Review with workspace",
+            summary: "Needs workspace restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: snapshot
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            restoreError: QueueClientError.httpStatusMessage(409, "idempotency_conflict: duplicate idempotency key")
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: [packet]),
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-with-workspace")
+
+        await viewModel.confirmSelectedWorkspaceRestore()
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestoring)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restore already running."))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }
 

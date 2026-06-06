@@ -150,6 +150,30 @@ final class QueueClientTests: XCTestCase {
         }
     }
 
+    func testQueueClientErrorClassifies409Conflicts() {
+        let manual = QueueClientError.httpStatusMessage(
+            409,
+            "manual_mode_active: queue is paused while manual mode is active"
+        )
+        let duplicate = QueueClientError.httpStatusMessage(
+            409,
+            "idempotency_conflict: duplicate idempotency key"
+        )
+        let generic = QueueClientError.httpStatus(409)
+        let server = QueueClientError.httpStatusMessage(
+            503,
+            "idempotency_conflict: duplicate idempotency key"
+        )
+
+        XCTAssertTrue(manual.isManualModeConflict)
+        XCTAssertFalse(manual.isIdempotencyConflict)
+        XCTAssertTrue(duplicate.isIdempotencyConflict)
+        XCTAssertFalse(duplicate.isManualModeConflict)
+        XCTAssertFalse(generic.isManualModeConflict)
+        XCTAssertFalse(generic.isIdempotencyConflict)
+        XCTAssertFalse(server.isIdempotencyConflict)
+    }
+
     func testHTTPWorkspaceClientIncludesServerErrorMessage() async throws {
         MockURLProtocol.registry.setHandler { request in
             let data = """

@@ -601,15 +601,25 @@ public final class QueueViewModel: ObservableObject {
     }
 
     private func queuePausedToast(for error: Error) -> AdvanceToast {
-        if let queueError = error as? QueueClientError, queueError.isManualModeConflict {
-            return .actionComplete("Manual Mode active. Press Ctrl-Option-M to return.")
+        if let queueError = error as? QueueClientError {
+            if queueError.isManualModeConflict {
+                return .actionComplete("Manual Mode active. Press Ctrl-Option-M to return.")
+            }
+            if queueError.isIdempotencyConflict {
+                return .actionComplete("Already handling that request. Wait a second.")
+            }
         }
         return .actionComplete("Queue paused. Try again.")
     }
 
     private func actionSavedQueuePausedToast(for error: Error) -> AdvanceToast {
-        if let queueError = error as? QueueClientError, queueError.isManualModeConflict {
-            return .actionComplete("Action saved. Manual Mode active; no next paper claimed.")
+        if let queueError = error as? QueueClientError {
+            if queueError.isManualModeConflict {
+                return .actionComplete("Action saved. Manual Mode active; no next paper claimed.")
+            }
+            if queueError.isIdempotencyConflict {
+                return .actionComplete("Action saved. Still switching; wait a second.")
+            }
         }
         return .actionComplete("Action saved. Queue paused; no next paper claimed.")
     }
@@ -2040,6 +2050,11 @@ public final class QueueViewModel: ObservableObject {
             advanceToast = .actionComplete("Workspace restored.")
             return true
         } catch {
+            if let queueError = error as? QueueClientError, queueError.isIdempotencyConflict {
+                workspaceRestoreState = .alreadyRestoring
+                advanceToast = .actionComplete("Workspace restore already running.")
+                return false
+            }
             workspaceRestoreState = .failed(error.localizedDescription)
             advanceToast = .actionComplete("Workspace restore failed: \(Self.shortStatusMessage(error.localizedDescription))")
             return false

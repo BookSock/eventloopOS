@@ -123,6 +123,14 @@ public enum QueueClientError: Error, Equatable, LocalizedError {
     public var isManualModeConflict: Bool {
         statusCode == 409 && responseMessage?.lowercased().contains("manual_mode_active") == true
     }
+
+    public var isIdempotencyConflict: Bool {
+        guard statusCode == 409 else {
+            return false
+        }
+        let lowered = responseMessage?.lowercased() ?? ""
+        return lowered.contains("idempotency_conflict") || lowered.contains("duplicate idempotency key")
+    }
 }
 
 public struct HTTPQueueClient: QueueClient {
