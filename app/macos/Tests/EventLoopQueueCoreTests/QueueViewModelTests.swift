@@ -1871,11 +1871,13 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.followsWindowExclusions.count, 2)
         XCTAssertEqual(viewModel.followsWindowExclusions.last?.titleSubstring, "Playwright")
         XCTAssertNil(viewModel.followsWindowExclusions.last?.appBundle)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Stopped sharing Playwright across papers."))
 
         await viewModel.deleteFollowsRule(id: "fwex_existing")
 
         XCTAssertEqual(viewModel.followsRulesState, .loaded)
         XCTAssertEqual(viewModel.followsWindowExclusions.map(\.exclusionId), ["fwex_fake_2"])
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Follows rule removed for com.tinyspeck.slackmacgap."))
     }
 
     func testFollowsRulesSuggestsActiveDesktopWindowsWorthExcluding() async {
@@ -2026,6 +2028,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.followsRulesState, .loaded)
         XCTAssertEqual(viewModel.followsWindowExclusions.last?.appBundle, "com.google.Chrome")
         XCTAssertEqual(viewModel.followsWindowExclusions.last?.titleSubstring, "Playwright")
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Stopped sharing Playwright across papers."))
         XCTAssertEqual(
             viewModel.followsWindowSuggestions.map { "\($0.appBundle ?? "")|\($0.title ?? "")" },
             [

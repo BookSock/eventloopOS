@@ -1512,6 +1512,8 @@ public final class QueueViewModel: ObservableObject {
                 titleSubstring: normalizedTitleSubstring
             )
             await refreshFollowsRules()
+            let target = Self.followsRuleTarget(appBundle: normalizedAppBundle, titleSubstring: normalizedTitleSubstring)
+            advanceToast = .actionComplete("Stopped sharing \(target) across papers.")
         } catch {
             followsRulesState = .failed(error.localizedDescription)
         }
@@ -1520,10 +1522,15 @@ public final class QueueViewModel: ObservableObject {
     public func deleteFollowsRule(id: String) async {
         followsRulesState = .saving
         do {
-            _ = try await client.deleteFollowsWindowExclusion(id: id)
+            let result = try await client.deleteFollowsWindowExclusion(id: id)
             followsWindowExclusions.removeAll { $0.exclusionId == id }
             followsWindowSuggestions = await captureFollowsRuleSuggestions(exclusions: followsWindowExclusions)
             followsRulesState = .loaded
+            let target = Self.followsRuleTarget(
+                appBundle: result.exclusion.appBundle,
+                titleSubstring: result.exclusion.titleSubstring
+            )
+            advanceToast = .actionComplete("Follows rule removed for \(target).")
         } catch {
             followsRulesState = .failed(error.localizedDescription)
         }
@@ -2538,6 +2545,18 @@ public final class QueueViewModel: ObservableObject {
         }
         let index = normalized.index(normalized.startIndex, offsetBy: maxLength)
         return "\(normalized[..<index])..."
+    }
+
+    private static func followsRuleTarget(appBundle: String?, titleSubstring: String?) -> String {
+        let title = titleSubstring?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let title, !title.isEmpty {
+            return title
+        }
+        let bundle = appBundle?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let bundle, !bundle.isEmpty {
+            return bundle
+        }
+        return "window"
     }
 
     private static func masterCommandRoutedStatus(_ result: MasterCommandResult) -> String {
