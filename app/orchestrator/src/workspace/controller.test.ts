@@ -192,6 +192,53 @@ describe("workspace controller", () => {
     ]);
   });
 
+  it("verified restore retries stale-window residuals before failing", async () => {
+    let captureCount = 0;
+    const executed: string[][] = [];
+    const exec: ExecFunction = async (command, args) => {
+      if (command === "aerospace" && args[0] === "list-workspaces") return { stdout: "paper-a\n" };
+      if (command === "aerospace" && args[0] === "list-windows" && args.includes("--focused")) {
+        return { stdout: JSON.stringify([{ "window-id": 44, workspace: "paper-a" }]) };
+      }
+      if (command === "aerospace" && args[0] === "list-windows") {
+        captureCount += 1;
+        return {
+          stdout: JSON.stringify(captureCount === 1 ? [] : [
+            { "window-id": 44, "app-name": "TextEdit", "window-title": "Shared Note", workspace: "paper-a" },
+          ]),
+        };
+      }
+      if (command === "osascript") return { stdout: "" };
+
+      executed.push(args);
+      return { stdout: "", stderr: "" };
+    };
+    const controller = new AerospaceWorkspaceController(exec, {
+      restoreVerifySettleMs: 0,
+      restoreVerifyRetries: 2,
+    });
+
+    const result = await controller.executeRestorePlanVerified(
+      {
+        backend: "aerospace",
+        activeWorkspace: "paper-a",
+        focusedWindowId: 44,
+        windows: [{ id: 44, app: "TextEdit", title: "Shared Note", workspace: "paper-a" }],
+      },
+      [{ id: 44, app: "TextEdit", title: "Shared Note", workspace: "manual" }],
+    );
+
+    assert.equal(result.verified, true);
+    assert.equal(result.attempts, 1);
+    assert.equal(result.residualPlan, undefined);
+    assert.equal(captureCount, 2);
+    assert.deepEqual(executed, [
+      ["move-node-to-workspace", "--window-id", "44", "paper-a"],
+      ["workspace", "paper-a"],
+      ["focus", "--window-id", "44"],
+    ]);
+  });
+
   it("rejects non-AeroSpace snapshots in the AeroSpace restore planner", async () => {
     const controller = new AerospaceWorkspaceController(async () => {
       throw new Error("exec should not be called when current windows supplied");

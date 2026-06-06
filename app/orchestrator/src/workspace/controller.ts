@@ -66,11 +66,13 @@ export class AerospaceWorkspaceController implements WorkspaceController {
     let attempts = plan.commands.length > 0 ? 1 : 0;
     let residualPlan = await this.verifyRestorePlan(snapshot);
 
-    for (let retry = 0; residualPlan.commands.length > 0 && retry < this.restoreVerifyRetries; retry += 1) {
+    for (let retry = 0; hasRestoreResidual(residualPlan) && retry < this.restoreVerifyRetries; retry += 1) {
       await sleep(this.restoreVerifySettleMs);
-      const retryReceipt = await this.executeRestorePlan(residualPlan);
-      receipt = mergeRestoreReceipts(receipt, retryReceipt);
-      attempts += residualPlan.commands.length > 0 ? 1 : 0;
+      if (residualPlan.commands.length > 0) {
+        const retryReceipt = await this.executeRestorePlan(residualPlan);
+        receipt = mergeRestoreReceipts(receipt, retryReceipt);
+        attempts += 1;
+      }
       residualPlan = await this.verifyRestorePlan(snapshot);
     }
 
@@ -94,6 +96,10 @@ export class AerospaceWorkspaceController implements WorkspaceController {
       restoreFrameCaptureFocus: true,
     }));
   }
+}
+
+function hasRestoreResidual(plan: RestorePlan): boolean {
+  return plan.commands.length > 0 || plan.skipped.length > 0;
 }
 
 function mergeRestoreReceipts(left: RestoreExecutionReceipt, right: RestoreExecutionReceipt): RestoreExecutionReceipt {
