@@ -19,6 +19,9 @@ const workspaceLatencyEnabled = !skipWorkspaceLatency;
 const skipHotkeyLatency = args.includes("--skip-hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "0";
 const hotkeyLatencyRequested = args.includes("--hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "1";
 const hotkeyLatencyEnabled = !skipHotkeyLatency && (hotkeyLatencyRequested || process.platform === "darwin");
+const skipMasterCommandHotkey = args.includes("--skip-master-command-hotkey") || process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY === "0";
+const masterCommandHotkeyRequested = args.includes("--master-command-hotkey") || process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY === "1";
+const masterCommandHotkeyEnabled = !skipMasterCommandHotkey && (masterCommandHotkeyRequested || process.platform === "darwin");
 const skipPaperReminderFeedback = args.includes("--skip-paper-reminder-feedback") || process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK === "0";
 const paperReminderFeedbackRequested = args.includes("--paper-reminder-feedback") || process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK === "1";
 const paperReminderFeedbackEnabled = !skipPaperReminderFeedback && (paperReminderFeedbackRequested || process.platform === "darwin");
@@ -29,7 +32,7 @@ const jsonOnly = args.includes("--json");
 const screenshotTarget = normalizeScreenshotTarget(process.env.EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET ?? "auto");
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-queue-latency] [--skip-workspace-latency] [--skip-hotkey-latency] [--hotkey-latency] [--skip-paper-reminder-feedback] [--paper-reminder-feedback] [--skip-manual-mode-feedback] [--manual-mode-feedback] [--demo-proof-max-age-hours n] [--allow-stale-demo-proof] [--json]
+  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-queue-latency] [--skip-workspace-latency] [--skip-hotkey-latency] [--hotkey-latency] [--skip-master-command-hotkey] [--master-command-hotkey] [--skip-paper-reminder-feedback] [--paper-reminder-feedback] [--skip-manual-mode-feedback] [--manual-mode-feedback] [--demo-proof-max-age-hours n] [--allow-stale-demo-proof] [--json]
 
 Check current Mac Studio human-demo readiness without resetting demo state.
 Includes read-only queue/master and workspace capture/restore-plan latency gates
@@ -56,6 +59,11 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_TARGET=local runs latency on this Mac instead of the lab Mac
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD default: ctrl-option-r
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT optional expected feedback substring
+  EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY=1 forces Master Command hotkey proof on
+  EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY=0 skips Master Command hotkey proof
+  EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY_TARGET=local runs proof on this Mac instead of the lab Mac
+  EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY_CHORD default: ctrl-option-k
+  EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_EXPECT_TASK_HINT default: task_demo_customer
   EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK=1 forces desktop HUD feedback proof on
   EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK=0 skips desktop HUD feedback proof
   EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_TARGET=local runs proof on this Mac instead of the lab Mac
@@ -104,6 +112,7 @@ if (!skipScreenshot) {
   screenshot = runScreenshotStep(path.join(runDir, "screen-sharing.png"), env);
 }
 const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
+const masterCommandHotkeyManifestPath = path.join(runDir, "master-command-hotkey.json");
 const paperReminderFeedbackManifestPath = path.join(runDir, "paper-reminder-feedback.json");
 const manualModeResetFeedbackManifestPath = path.join(runDir, "manual-mode-reset-feedback.json");
 const manualModeEnterFeedbackManifestPath = path.join(runDir, "manual-mode-enter-feedback.json");
@@ -124,6 +133,10 @@ const paperReminderFeedback = paperReminderFeedbackEnabled && hotkeyProofsCanRun
   ? runPaperReminderFeedbackStep(paperReminderFeedbackManifestPath, env)
   : undefined;
 const paperReminderFeedbackManifest = paperReminderFeedback ? readJsonIfPresent(paperReminderFeedbackManifestPath) : undefined;
+const masterCommandHotkey = masterCommandHotkeyEnabled && hotkeyProofsCanRun
+  ? runMasterCommandHotkeyStep(masterCommandHotkeyManifestPath, env)
+  : undefined;
+const masterCommandHotkeyManifest = masterCommandHotkey ? readJsonIfPresent(masterCommandHotkeyManifestPath) : undefined;
 const hotkeyLatency = hotkeyLatencyEnabled && hotkeyProofsCanRun
   ? runHotkeyLatencyStep(hotkeyLatencyManifestPath, env)
   : undefined;
@@ -155,6 +168,7 @@ const checks = {
   queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
   workspace_latency_ok: !workspaceLatencyEnabled || (workspaceLatency?.status === 0 && workspaceLatencyManifest?.ok === true),
   paper_reminder_feedback_ok: !paperReminderFeedbackEnabled || (paperReminderFeedback?.status === 0 && paperReminderFeedbackManifest?.ok === true),
+  master_command_hotkey_ok: !masterCommandHotkeyEnabled || (masterCommandHotkey?.status === 0 && masterCommandHotkeyManifest?.ok === true),
   hotkey_feedback_latency_ok: !hotkeyLatencyEnabled || (hotkeyLatency?.status === 0 && hotkeyLatencyManifest?.ok === true),
   manual_mode_feedback_ok: !manualModeFeedbackEnabled || manualModeFeedback?.ok === true,
 };
@@ -175,6 +189,7 @@ const manifest = {
   queue_latency_required: queueLatencyEnabled,
   workspace_latency_required: workspaceLatencyEnabled,
   paper_reminder_feedback_required: paperReminderFeedbackEnabled,
+  master_command_hotkey_required: masterCommandHotkeyEnabled,
   hotkey_latency_required: hotkeyLatencyEnabled,
   manual_mode_feedback_required: manualModeFeedbackEnabled,
   screenshot_target: screenshotTarget,
@@ -240,6 +255,17 @@ const manifest = {
     skipped: true,
     reason: paperReminderFeedbackEnabled && !hotkeyProofsCanRun ? "demo_stage_failed" : undefined,
   },
+  master_command_hotkey: masterCommandHotkey ? {
+    ok: masterCommandHotkey.status === 0 && masterCommandHotkeyManifest?.ok === true,
+    manifest_path: masterCommandHotkeyManifestPath,
+    exit_code: masterCommandHotkey.status,
+    failed_budgets: masterCommandHotkeyManifest?.failed_budgets ?? [],
+    summary: masterCommandHotkeyManifest?.summary,
+    samples: masterCommandHotkeyManifest?.samples ?? [],
+  } : {
+    skipped: true,
+    reason: masterCommandHotkeyEnabled && !hotkeyProofsCanRun ? "demo_stage_failed" : undefined,
+  },
   hotkey_feedback_latency: hotkeyLatency ? {
     ok: hotkeyLatency.status === 0 && hotkeyLatencyManifest?.ok === true,
     manifest_path: hotkeyLatencyManifestPath,
@@ -271,6 +297,7 @@ const output = {
   queue_latency_required: manifest.queue_latency_required,
   workspace_latency_required: manifest.workspace_latency_required,
   paper_reminder_feedback_required: manifest.paper_reminder_feedback_required,
+  master_command_hotkey_required: manifest.master_command_hotkey_required,
   hotkey_latency_required: manifest.hotkey_latency_required,
   manual_mode_feedback_required: manifest.manual_mode_feedback_required,
   git: manifest.git,
@@ -280,6 +307,7 @@ const output = {
   queue_latency: manifest.queue_latency,
   workspace_latency: manifest.workspace_latency,
   paper_reminder_feedback: manifest.paper_reminder_feedback,
+  master_command_hotkey: manifest.master_command_hotkey,
   hotkey_feedback_latency: manifest.hotkey_feedback_latency,
   manual_mode_feedback: manifest.manual_mode_feedback,
 };
@@ -898,6 +926,33 @@ function runPaperReminderFeedbackStep(manifestPath, envOverride) {
   ], envOverride);
 }
 
+function runMasterCommandHotkeyStep(manifestPath, envOverride) {
+  const proofArgs = masterCommandHotkeyArgs();
+  if (process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY_TARGET === "local") {
+    return runStep("master command hotkey", "bin/macos-master-command-hotkey-proof-direct", [
+      "--manifest",
+      manifestPath,
+      ...proofArgs,
+    ], envOverride);
+  }
+  return runStep("master command hotkey", "bin/lab-mac-master-command-hotkey-proof", [
+    "--manifest",
+    manifestPath,
+    ...proofArgs,
+  ], envOverride);
+}
+
+function masterCommandHotkeyArgs() {
+  const chord = process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY_CHORD ?? "ctrl-option-k";
+  const args = [
+    "--hotkey",
+    chord,
+  ];
+  const expectedTaskHint = process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_EXPECT_TASK_HINT ?? "task_demo_customer";
+  if (expectedTaskHint) args.push("--expect-task-hint", expectedTaskHint);
+  return args;
+}
+
 function paperReminderFeedbackArgs() {
   const chord = process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_HOTKEY ?? "ctrl-option-r";
   const args = [
@@ -1233,6 +1288,7 @@ function renderReadyMarkdown(manifest) {
   const queueLatency = manifest.queue_latency;
   const workspaceLatency = manifest.workspace_latency;
   const paperReminderFeedback = manifest.paper_reminder_feedback;
+  const masterCommandHotkey = manifest.master_command_hotkey;
   const hotkey = manifest.hotkey_feedback_latency;
   const manualModeFeedback = manifest.manual_mode_feedback;
   const freshness = latest?.freshness;
@@ -1258,6 +1314,7 @@ function renderReadyMarkdown(manifest) {
 - Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
 - Workspace latency: ${workspaceLatency?.manifest_path ?? "skipped"}${manifest.workspace_latency_required ? " (required)" : ""}
 - Desktop HUD feedback: ${paperReminderFeedback?.manifest_path ?? "skipped"}${manifest.paper_reminder_feedback_required ? " (required)" : ""}
+- Master Command hotkey: ${masterCommandHotkey?.manifest_path ?? "skipped"}${manifest.master_command_hotkey_required ? " (required)" : ""}
 - Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}${manifest.hotkey_latency_required ? " (required)" : ""}
 - Manual Mode enter feedback: ${manualModeFeedback?.enter?.manifest_path ?? "skipped"}${manifest.manual_mode_feedback_required ? " (required)" : ""}
 - Manual Mode return-start feedback: ${manualModeFeedback?.return_start?.manifest_path ?? "skipped"}${manifest.manual_mode_feedback_required ? " (required)" : ""}
@@ -1340,6 +1397,7 @@ function runSelfTest() {
     failed_checks: [],
     queue_latency_required: true,
     workspace_latency_required: true,
+    master_command_hotkey_required: true,
     hotkey_latency_required: false,
     manual_mode_feedback_required: true,
     latest_human_demo: {
@@ -1357,6 +1415,7 @@ function runSelfTest() {
     queue_latency: { manifest_path: "artifacts/lab-runs/ready/queue-latency.json" },
     workspace_latency: { manifest_path: "artifacts/lab-runs/ready/workspace-latency.json" },
     paper_reminder_feedback: { manifest_path: "artifacts/lab-runs/ready/paper-reminder-feedback.json" },
+    master_command_hotkey: { manifest_path: "artifacts/lab-runs/ready/master-command-hotkey.json" },
     hotkey_feedback_latency: { skipped: true },
     manual_mode_feedback: {
       enter: { manifest_path: "artifacts/lab-runs/ready/manual-mode-enter-feedback.json" },
@@ -1366,6 +1425,7 @@ function runSelfTest() {
   });
   assert.ok(readyMarkdown.includes("Suggested result file: artifacts/human-demo-results/demo-human-demo-result.md"));
   assert.ok(readyMarkdown.includes("Desktop HUD feedback: artifacts/lab-runs/ready/paper-reminder-feedback.json"));
+  assert.ok(readyMarkdown.includes("Master Command hotkey: artifacts/lab-runs/ready/master-command-hotkey.json"));
   assert.ok(readyMarkdown.includes("Manual Mode enter feedback: artifacts/lab-runs/ready/manual-mode-enter-feedback.json"));
   assert.ok(readyMarkdown.includes("Manual Mode return-start feedback: artifacts/lab-runs/ready/manual-mode-return-start-feedback.json"));
   assert.ok(readyMarkdown.includes("Manual Mode return-complete feedback: artifacts/lab-runs/ready/manual-mode-return-complete-feedback.json"));
@@ -1380,6 +1440,13 @@ function runSelfTest() {
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h", "--expect", "No paper selected."]);
   delete process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD;
   delete process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT;
+  assert.deepEqual(masterCommandHotkeyArgs(), ["--hotkey", "ctrl-option-k", "--expect-task-hint", "task_demo_customer"]);
+  process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY_CHORD = "ctrl-option-shift-k";
+  assert.deepEqual(masterCommandHotkeyArgs(), ["--hotkey", "ctrl-option-shift-k", "--expect-task-hint", "task_demo_customer"]);
+  process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_EXPECT_TASK_HINT = "task_demo_metrics";
+  assert.deepEqual(masterCommandHotkeyArgs(), ["--hotkey", "ctrl-option-shift-k", "--expect-task-hint", "task_demo_metrics"]);
+  delete process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY_CHORD;
+  delete process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_EXPECT_TASK_HINT;
   assert.deepEqual(paperReminderFeedbackArgs(), ["--hotkey", "ctrl-option-r", "--expect", "Review Demo Customer Reply"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_HOTKEY = "ctrl-option-h";
   assert.deepEqual(paperReminderFeedbackArgs(), ["--hotkey", "ctrl-option-h"]);

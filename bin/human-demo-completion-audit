@@ -77,6 +77,7 @@ function buildAudit(root, options = {}) {
     readiness_queue_briefing_strip_visible: readiness?.checks?.queue_briefing_strip_visible === true,
     readiness_paper_reminder_hud_visible: readiness?.checks?.paper_reminder_hud_visible === true,
     readiness_paper_reminder_feedback_ok: readiness?.checks?.paper_reminder_feedback_ok === true,
+    readiness_master_command_hotkey_ok: readiness?.checks?.master_command_hotkey_ok === true,
     readiness_manual_mode_feedback_ok: readiness?.checks?.manual_mode_feedback_ok === true,
     readiness_new_window_autosave_proof_ok: readiness?.checks?.new_window_autosave_proof_ok === true
       && readiness?.latest_human_demo?.new_window_autosave_ok === true,
@@ -454,6 +455,7 @@ function runSelfTest() {
         queue_briefing_strip_visible: true,
         paper_reminder_hud_visible: true,
         paper_reminder_feedback_ok: true,
+        master_command_hotkey_ok: true,
         manual_mode_feedback_ok: true,
         new_window_autosave_proof_ok: true,
         foreign_window_containment_proof_ok: true,
@@ -571,6 +573,7 @@ ship
       queue_briefing_strip_visible: true,
       paper_reminder_hud_visible: true,
       paper_reminder_feedback_ok: true,
+      master_command_hotkey_ok: true,
       manual_mode_feedback_ok: true,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
@@ -599,6 +602,7 @@ ship
       queue_briefing_strip_visible: false,
       paper_reminder_hud_visible: true,
       paper_reminder_feedback_ok: true,
+      master_command_hotkey_ok: true,
       manual_mode_feedback_ok: true,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
@@ -628,6 +632,7 @@ ship
       queue_briefing_strip_visible: true,
       paper_reminder_hud_visible: false,
       paper_reminder_feedback_ok: true,
+      master_command_hotkey_ok: true,
       manual_mode_feedback_ok: true,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
@@ -657,6 +662,7 @@ ship
       queue_briefing_strip_visible: true,
       paper_reminder_hud_visible: true,
       paper_reminder_feedback_ok: false,
+      master_command_hotkey_ok: true,
       manual_mode_feedback_ok: true,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
@@ -686,6 +692,37 @@ ship
       queue_briefing_strip_visible: true,
       paper_reminder_hud_visible: true,
       paper_reminder_feedback_ok: true,
+      master_command_hotkey_ok: false,
+      manual_mode_feedback_ok: true,
+      new_window_autosave_proof_ok: true,
+      foreign_window_containment_proof_ok: true,
+      agent_spawn_window_containment_proof_ok: true,
+    },
+    latest_human_demo: {
+      new_window_autosave_ok: true,
+      foreign_window_containment_ok: true,
+      agent_spawn_window_containment_ok: true,
+      agent_spawn_window_containment_app: "Google Chrome",
+      agent_spawn_window_containment_chrome_ok: true,
+      screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
+    },
+  });
+  const missingMasterCommandHotkey = buildAudit(root, {
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(missingMasterCommandHotkey.ok, false);
+  assert.ok(missingMasterCommandHotkey.failed_checks.includes("readiness_master_command_hotkey_ok"));
+
+  writeJson(readinessPath, {
+    ok: true,
+    started_at: new Date().toISOString(),
+    checks: {
+      latest_human_demo_screenshot_ok: true,
+      queue_briefing_strip_visible: true,
+      paper_reminder_hud_visible: true,
+      paper_reminder_feedback_ok: true,
+      master_command_hotkey_ok: true,
       manual_mode_feedback_ok: false,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
@@ -715,6 +752,7 @@ ship
       queue_briefing_strip_visible: true,
       paper_reminder_hud_visible: true,
       paper_reminder_feedback_ok: true,
+      master_command_hotkey_ok: true,
       manual_mode_feedback_ok: true,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,

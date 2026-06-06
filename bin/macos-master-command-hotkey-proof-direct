@@ -1,0 +1,349 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/macos-master-command-hotkey-proof-direct [--process-name NAME] [--hotkey ctrl-option-k] [--expect-task-hint TEXT] [--runs N] [--budget-ms N] [--manifest PATH]
+
+Presses the eventloopOS Master Command global hotkey and proves the Queue app
+opens a visible Master Command sheet with the expected controls.
+EOF
+}
+
+process_name="${EVENTLOOPOS_MASTER_COMMAND_PROCESS_NAME:-eventloopOS Queue}"
+hotkey="${EVENTLOOPOS_MASTER_COMMAND_HOTKEY:-ctrl-option-k}"
+expected_task_hint="${EVENTLOOPOS_MASTER_COMMAND_EXPECT_TASK_HINT:-}"
+runs="${EVENTLOOPOS_MASTER_COMMAND_RUNS:-1}"
+budget_ms="${EVENTLOOPOS_MASTER_COMMAND_BUDGET_MS:-1500}"
+manifest="artifacts/macos-master-command-hotkey/$(date -u +%Y%m%dT%H%M%SZ)/manifest.json"
+
+while (($#)); do
+  case "$1" in
+    --process-name) process_name="${2:-}"; shift 2 ;;
+    --hotkey) hotkey="${2:-}"; shift 2 ;;
+    --expect-task-hint) expected_task_hint="${2:-}"; shift 2 ;;
+    --runs) runs="${2:-}"; shift 2 ;;
+    --budget-ms) budget_ms="${2:-}"; shift 2 ;;
+    --manifest) manifest="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+case "$runs" in (*[!0-9]*|"") echo "--runs must be a positive integer" >&2; exit 2 ;; esac
+case "$budget_ms" in (*[!0-9]*|"") echo "--budget-ms must be a positive integer" >&2; exit 2 ;; esac
+if ((runs <= 0 || budget_ms <= 0)); then
+  echo "--runs and --budget-ms must be positive" >&2
+  exit 2
+fi
+
+key_code_for() {
+  case "$1" in
+    j) echo 38 ;;
+    e) echo 14 ;;
+    r) echo 15 ;;
+    h) echo 4 ;;
+    k) echo 40 ;;
+    m) echo 46 ;;
+    return|enter) echo 36 ;;
+    *) echo "unsupported hotkey key: $1" >&2; return 2 ;;
+  esac
+}
+
+hotkey_key="${hotkey##*[-+]}"
+key_code="$(key_code_for "$hotkey_key")"
+modifier_list=()
+modifier_prefix="${hotkey%[-+]*}"
+if [[ "$modifier_prefix" != "$hotkey" ]]; then
+  IFS='-+' read -r -a modifier_parts <<<"$modifier_prefix"
+  for modifier in "${modifier_parts[@]}"; do
+    case "$modifier" in
+      ctrl|control) modifier_list+=("control down") ;;
+      option|alt) modifier_list+=("option down") ;;
+      shift) modifier_list+=("shift down") ;;
+      cmd|command) modifier_list+=("command down") ;;
+      *) echo "unsupported hotkey modifier: $modifier" >&2; exit 2 ;;
+    esac
+  done
+fi
+modifier_part=""
+if ((${#modifier_list[@]} > 0)); then
+  joined=""
+  for item in "${modifier_list[@]}"; do
+    if [[ -n "$joined" ]]; then joined+=", "; fi
+    joined+="$item"
+  done
+  modifier_part=" using {$joined}"
+fi
+
+now_ms() {
+  node -e 'process.stdout.write(String(Date.now()))'
+}
+
+press_hotkey() {
+  osascript -e "tell application \"System Events\" to key code $key_code$modifier_part"
+}
+
+press_escape() {
+  osascript -e 'tell application "System Events" to key code 53' >/dev/null 2>&1 || true
+}
+
+focus_non_queue_app() {
+  osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
+tell application "System Events"
+  repeat with processName in {"Google Chrome", "TextEdit", "Finder"}
+    set processNameText to processName as string
+    if exists process processNameText then
+      set frontmost of process processNameText to true
+      return
+    end if
+  end repeat
+end tell
+APPLESCRIPT
+}
+
+sanitize_observation() {
+  tr '\n\t' '  ' | node -e '
+const fs = require("fs");
+process.stdout.write(fs.readFileSync(0, "utf8").replace(/\s+/g, " ").trim());
+'
+}
+
+read_master_command_sheet() {
+  osascript - "$process_name" <<'APPLESCRIPT'
+on run argv
+  set targetProcessName to item 1 of argv
+  tell application "System Events"
+    if not (exists process targetProcessName) then return "missing:process"
+    tell process targetProcessName
+      if (count of windows) is 0 then return "missing:window_count_zero"
+      repeat with candidateWindow in windows
+        set windowName to ""
+        try
+          set windowName to name of candidateWindow as string
+        end try
+        if windowName is "eventloopOS Queue" or windowName contains "eventloopOS Queue" then
+          set sheetCount to 0
+          try
+            set sheetCount to count of sheets of candidateWindow
+          end try
+          if sheetCount is 0 then return "missing:sheet|window=" & windowName
+          set commandSheet to sheet 1 of candidateWindow
+          set staticTexts to {}
+          set radioButtons to {}
+          set taskHint to ""
+          try
+            repeat with sheetGroup in groups of commandSheet
+              repeat with candidateElement in UI elements of sheetGroup
+                set roleText to ""
+                set nameText to ""
+                set valueText to ""
+                set descriptionText to ""
+                try
+                  set roleText to role of candidateElement as string
+                end try
+                try
+                  set nameText to name of candidateElement as string
+                end try
+                try
+                  set valueText to value of candidateElement as string
+                end try
+                try
+                  set descriptionText to description of candidateElement as string
+                end try
+                set readableText to my firstNonEmpty({valueText, nameText, descriptionText})
+                if roleText is "AXStaticText" and readableText is not "" then set end of staticTexts to readableText
+                if roleText is "AXTextField" and readableText is not "" then set taskHint to readableText
+                if roleText is "AXRadioGroup" then
+                  repeat with radioElement in UI elements of candidateElement
+                    set radioText to ""
+                    try
+                      set radioText to description of radioElement as string
+                    end try
+                    if radioText is "" then
+                      try
+                        set radioText to name of radioElement as string
+                      end try
+                    end if
+                    if radioText is not "" then set end of radioButtons to radioText
+                  end repeat
+                end if
+              end repeat
+            end repeat
+          on error errorMessage
+            return "error:scan|" & errorMessage
+          end try
+          set AppleScript's text item delimiters to ";"
+          set staticJoined to staticTexts as text
+          set radioJoined to radioButtons as text
+          set AppleScript's text item delimiters to ""
+          return "present|window=" & windowName & "|sheet_count=" & sheetCount & "|static=" & staticJoined & "|radios=" & radioJoined & "|task_hint=" & taskHint
+        end if
+      end repeat
+    end tell
+  end tell
+  return "missing:queue_window"
+end run
+
+on firstNonEmpty(valuesToCheck)
+  repeat with valueToCheck in valuesToCheck
+    set candidate to my trimText(valueToCheck as string)
+    if candidate is not "" and candidate is not "missing value" then return candidate
+  end repeat
+  return ""
+end firstNonEmpty
+
+on trimText(sourceText)
+  set sourceText to sourceText as string
+  repeat while sourceText begins with space or sourceText begins with tab
+    if length of sourceText is 1 then return ""
+    set sourceText to text 2 thru -1 of sourceText
+  end repeat
+  repeat while sourceText ends with space or sourceText ends with tab
+    if length of sourceText is 1 then return ""
+    set sourceText to text 1 thru -2 of sourceText
+  end repeat
+  return sourceText
+end trimText
+APPLESCRIPT
+}
+
+matches_expected_sheet() {
+  local observation="$1"
+  [[ "$observation" == present\|* ]] || return 1
+  [[ "$observation" == *"Master Command"* ]] || return 1
+  [[ "$observation" == *"Route to Master"* ]] || return 1
+  [[ "$observation" == *"Task Hint"* ]] || return 1
+  if [[ -n "$expected_task_hint" && "$observation" != *"task_hint=$expected_task_hint"* ]]; then
+    return 1
+  fi
+  return 0
+}
+
+tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/eventloopos-master-command-hotkey.XXXXXX")"
+samples_tsv="$tmp_dir/samples.tsv"
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+trap 'rm -rf "$tmp_dir"' EXIT
+
+for ((run = 1; run <= runs; run += 1)); do
+  ok=1
+  latency=""
+  observation=""
+  error=""
+  focus_non_queue_app
+  press_escape
+  sleep 0.2
+  start_ms="$(now_ms)"
+  if press_error="$(press_hotkey 2>&1)"; then
+    deadline_ms=$((start_ms + budget_ms * 3))
+    while true; do
+      current_ms="$(now_ms)"
+      if ((current_ms > deadline_ms)); then
+        ok=0
+        error="timed out waiting for Master Command sheet"
+        break
+      fi
+      if raw_observation="$(read_master_command_sheet 2>&1)"; then
+        observation="$(printf '%s' "$raw_observation" | sanitize_observation)"
+        if matches_expected_sheet "$observation"; then
+          latency=$((current_ms - start_ms))
+          break
+        fi
+      else
+        observation="$(printf '%s' "$raw_observation" | sanitize_observation)"
+      fi
+      sleep 0.05
+    done
+  else
+    ok=0
+    error="$press_error"
+  fi
+  press_escape
+  printf '%s\t%s\t%s\t%s\t%s\n' "$run" "$ok" "$latency" "$observation" "$error" >>"$samples_tsv"
+  sleep 0.5
+done
+
+finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+mkdir -p "$(dirname "$manifest")"
+STARTED_AT="$started_at" FINISHED_AT="$finished_at" PROCESS_NAME="$process_name" HOTKEY="$hotkey" RUNS="$runs" BUDGET_MS="$budget_ms" EXPECTED_TASK_HINT="$expected_task_hint" SAMPLES_TSV="$samples_tsv" MANIFEST="$manifest" node <<'NODE'
+const fs = require("fs");
+const rows = fs.readFileSync(process.env.SAMPLES_TSV, "utf8").trim().split(/\n/).filter(Boolean);
+const field = (observation, name) => {
+  const pattern = new RegExp(`(?:^|\\|)${name}=([^|]*)`);
+  return observation.match(pattern)?.[1] ?? "";
+};
+const splitList = (value) => value ? value.split(";").map((item) => item.trim()).filter(Boolean) : [];
+const expectedTaskHint = process.env.EXPECTED_TASK_HINT || "";
+const samples = rows.map((row) => {
+  const [run, ok, latency, observation, error] = row.split("\t");
+  const staticTexts = splitList(field(observation, "static"));
+  const radioButtons = splitList(field(observation, "radios"));
+  const taskHint = field(observation, "task_hint");
+  const missing = [];
+  if (!observation.startsWith("present|")) missing.push("sheet_present");
+  if (!observation.includes("Master Command")) missing.push("master_command_title");
+  if (!observation.includes("Route to Master")) missing.push("route_to_master_mode");
+  if (!observation.includes("Task Hint")) missing.push("task_hint_label");
+  if (expectedTaskHint && taskHint !== expectedTaskHint) missing.push("expected_task_hint");
+  const sample = {
+    run: Number(run),
+    ok: ok === "1" && missing.length === 0,
+    timings_ms: {},
+    observation,
+    window: field(observation, "window") || undefined,
+    sheet_count: Number(field(observation, "sheet_count")) || undefined,
+    static_texts: staticTexts,
+    radio_buttons: radioButtons,
+    task_hint: taskHint || undefined,
+    missing_expectations: missing,
+    errors: [],
+  };
+  if (latency) sample.timings_ms.hotkey_to_master_command_sheet = Number(latency);
+  if (error) sample.errors.push(error);
+  return sample;
+});
+const values = samples
+  .map((sample) => sample.timings_ms.hotkey_to_master_command_sheet)
+  .filter((value) => typeof value === "number" && Number.isFinite(value))
+  .sort((left, right) => left - right);
+const percentile = (p) => values[Math.min(values.length - 1, Math.ceil(values.length * p) - 1)];
+const summary = values.length > 0 ? {
+  hotkey_to_master_command_sheet: {
+    count: values.length,
+    min_ms: values[0],
+    median_ms: percentile(0.5),
+    p95_ms: percentile(0.95),
+    max_ms: values[values.length - 1],
+  },
+} : {};
+const p95 = summary.hotkey_to_master_command_sheet?.p95_ms;
+const budget = Number(process.env.BUDGET_MS);
+const failedBudgets = typeof p95 === "number" && p95 > budget
+  ? [{ name: "hotkey_to_master_command_sheet", p95_ms: p95, budget_ms: budget }]
+  : [];
+const manifest = {
+  ok: samples.every((sample) => sample.ok) && failedBudgets.length === 0,
+  kind: "eventloopos.macos_master_command_hotkey",
+  measurement: "direct_shell_osascript_ax_observed",
+  started_at: process.env.STARTED_AT,
+  finished_at: process.env.FINISHED_AT,
+  process_name: process.env.PROCESS_NAME,
+  hotkey: process.env.HOTKEY,
+  expected_task_hint: expectedTaskHint || undefined,
+  runs: Number(process.env.RUNS),
+  budgets_ms: { hotkey_to_master_command_sheet: budget },
+  expected_controls: ["Master Command", "Route to Master", "Task Hint"],
+  failed_budgets: failedBudgets,
+  summary,
+  samples,
+};
+fs.writeFileSync(process.env.MANIFEST, `${JSON.stringify(manifest, null, 2)}\n`);
+console.log(`macOS Master Command hotkey manifest: ${process.env.MANIFEST}`);
+console.log(JSON.stringify({
+  ok: manifest.ok,
+  runs: manifest.runs,
+  failed_budgets: manifest.failed_budgets,
+  summary: manifest.summary,
+}, null, 2));
+process.exit(manifest.ok ? 0 : 1);
+NODE
