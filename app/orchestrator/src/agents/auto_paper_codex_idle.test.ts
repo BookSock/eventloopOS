@@ -430,6 +430,91 @@ describe("AutoPaperCodexIdleWatcher", () => {
     assert.equal(deps.ingested[0]!.event.raw_ref.uri, "eventloopos://task-sessions/task_session_waiting");
   });
 
+  it("recognizes common stuck/review/question task-session statuses without treating generic pending as waiting", async () => {
+    const deps = createDeps({
+      tasks: [],
+      taskSessions: [
+        {
+          id: "task_session_stuck",
+          task_id: "task_agent_stuck",
+          provider: "codex",
+          status: "stuck",
+          updated_at: "2026-05-09T11:20:00.000Z",
+        },
+        {
+          id: "task_session_review",
+          task_id: "task_agent_review",
+          provider: "claude",
+          status: "Ready For Review",
+          updated_at: "2026-05-09T11:21:00.000Z",
+        },
+        {
+          id: "task_session_pending_approval",
+          task_id: "task_agent_pending_approval",
+          provider: "fake",
+          status: "pending approval",
+          updated_at: "2026-05-09T11:22:00.000Z",
+        },
+        {
+          id: "task_session_question",
+          task_id: "task_agent_question",
+          provider: "codex",
+          status: "question_for_user",
+          updated_at: "2026-05-09T11:23:00.000Z",
+        },
+        {
+          id: "task_session_approval_pending",
+          task_id: "task_agent_approval_pending",
+          provider: "codex",
+          status: "approval pending",
+          updated_at: "2026-05-09T11:24:00.000Z",
+        },
+        {
+          id: "task_session_awaiting_review",
+          task_id: "task_agent_awaiting_review",
+          provider: "claude",
+          status: "awaiting review",
+          updated_at: "2026-05-09T11:25:00.000Z",
+        },
+        {
+          id: "task_session_user_input_required",
+          task_id: "task_agent_user_input_required",
+          provider: "fake",
+          status: "user_input_required",
+          updated_at: "2026-05-09T11:26:00.000Z",
+        },
+        {
+          id: "task_session_pending_generic",
+          task_id: "task_agent_pending_generic",
+          provider: "fake",
+          status: "pending",
+          updated_at: "2026-05-09T11:27:00.000Z",
+        },
+      ],
+      inspections: new Map(),
+    });
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+    assert.equal(result.considered, 7);
+    assert.deepEqual(result.emitted.map((entry) => entry.task_id), [
+      "task_agent_stuck",
+      "task_agent_review",
+      "task_agent_pending_approval",
+      "task_agent_question",
+      "task_agent_approval_pending",
+      "task_agent_awaiting_review",
+      "task_agent_user_input_required",
+    ]);
+    assert.deepEqual(deps.ingested.map((entry) => entry.event.type), [
+      "codex.task_blocked",
+      "claude.task_waiting",
+      "fake.task_waiting",
+      "codex.task_waiting",
+      "codex.task_waiting",
+      "claude.task_waiting",
+      "fake.task_waiting",
+    ]);
+  });
+
   it("does not paper generic unknown task-session statuses without a native anchor", async () => {
     const deps = createDeps({
       tasks: [],

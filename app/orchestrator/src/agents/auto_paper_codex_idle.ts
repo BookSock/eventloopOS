@@ -433,7 +433,7 @@ function sessionStatus(session: TaskRuntimeSession): string | undefined {
 function humanAttentionReasonForStatus(status: string | undefined): "blocked" | "waiting" | undefined {
   const normalized = normalizeStatus(status);
   if (!normalized) return undefined;
-  if (normalized.includes("blocked")) return "blocked";
+  if (normalized.includes("blocked") || HUMAN_BLOCKED_STATUSES.has(normalized)) return "blocked";
   if (HUMAN_WAITING_STATUSES.has(normalized)) return "waiting";
   if (
     normalized.includes("waiting")
@@ -442,37 +442,93 @@ function humanAttentionReasonForStatus(status: string | undefined): "blocked" | 
     return "waiting";
   }
   if (
+    normalized.includes("waiting")
+    && (normalized.includes("review") || normalized.includes("question") || normalized.includes("answer"))
+  ) {
+    return "waiting";
+  }
+  if (
     normalized.includes("awaiting")
-    && (normalized.includes("approval") || normalized.includes("input") || normalized.includes("human") || normalized.includes("user"))
+    && (
+      normalized.includes("approval")
+      || normalized.includes("input")
+      || normalized.includes("human")
+      || normalized.includes("review")
+      || normalized.includes("user")
+    )
+  ) {
+    return "waiting";
+  }
+  if (
+    normalized.includes("pending")
+    && (normalized.includes("approval") || normalized.includes("human") || normalized.includes("user") || normalized.includes("review"))
+  ) {
+    return "waiting";
+  }
+  if (
+    normalized.includes("question")
+    && (normalized.includes("human") || normalized.includes("user") || normalized.includes("agent"))
   ) {
     return "waiting";
   }
   return undefined;
 }
 
+const HUMAN_BLOCKED_STATUSES = new Set([
+  "stuck",
+  "agent_stuck",
+  "human_blocked",
+  "needs_unblock",
+  "needs_unblocking",
+  "requires_unblock",
+]);
+
 const HUMAN_WAITING_STATUSES = new Set([
   "action_required",
+  "approval_pending",
   "approval_required",
   "awaiting_approval",
+  "awaiting_answer",
   "awaiting_human",
   "awaiting_human_input",
   "awaiting_input",
+  "awaiting_review",
   "awaiting_user",
   "awaiting_user_input",
+  "human_review",
   "human_input_required",
+  "human_review_required",
+  "human_question",
   "input_required",
+  "needs_answer",
+  "needs_action",
   "needs_approval",
   "needs_human",
   "needs_human_input",
   "needs_input",
+  "needs_review",
   "needs_user",
   "needs_user_input",
   "paused_for_input",
+  "pending_approval",
+  "pending_human",
+  "pending_human_input",
+  "pending_review",
+  "question_for_human",
+  "question_for_user",
+  "ready_for_review",
   "requires_approval",
+  "requires_action",
   "requires_human",
   "requires_human_input",
   "requires_input",
+  "requires_review",
   "requires_user_input",
+  "review_requested",
+  "review_needed",
+  "review_required",
+  "user_input_required",
+  "user_question",
   "waiting_approval",
   "waiting_for_approval",
   "waiting_for_human",
@@ -481,6 +537,8 @@ const HUMAN_WAITING_STATUSES = new Set([
   "waiting_for_user",
   "waiting_for_user_input",
   "waiting_input",
+  "waiting_on_human",
+  "waiting_on_user",
 ]);
 
 function normalizeStatus(status: string | undefined): string | undefined {
