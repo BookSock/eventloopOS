@@ -95,14 +95,16 @@ export class AerospaceWorkspaceAdapter {
   readonly backend = "aerospace" as const;
 
   private readonly frameCaptureTimeoutMs: number;
+  private readonly frameRestoreTimeoutMs: number;
   private readonly workspaceFocusSettleMs: number;
   private readonly sleep: SleepFunction;
 
   constructor(
     private readonly exec: ExecFunction,
-    options: { frameCaptureTimeoutMs?: number; workspaceFocusSettleMs?: number; sleep?: SleepFunction } = {},
+    options: { frameCaptureTimeoutMs?: number; frameRestoreTimeoutMs?: number; workspaceFocusSettleMs?: number; sleep?: SleepFunction } = {},
   ) {
     this.frameCaptureTimeoutMs = options.frameCaptureTimeoutMs ?? readFrameCaptureTimeoutMs();
+    this.frameRestoreTimeoutMs = options.frameRestoreTimeoutMs ?? readFrameRestoreTimeoutMs();
     this.workspaceFocusSettleMs = options.workspaceFocusSettleMs ?? readWorkspaceFocusSettleMs();
     this.sleep = options.sleep ?? sleep;
   }
@@ -172,7 +174,7 @@ export class AerospaceWorkspaceAdapter {
       assertSafeAerospaceCommand(command);
       let result: ExecResult;
       try {
-        result = await this.exec(command.command, command.args);
+        result = await this.exec(command.command, command.args, restoreCommandExecOptions(command, this.frameRestoreTimeoutMs));
       } catch (error) {
         if (!isTransientFocusRace(command, error)) throw error;
         result = {
@@ -937,6 +939,14 @@ function readFrameCaptureTimeoutMs(): number {
   return parsed;
 }
 
+function readFrameRestoreTimeoutMs(): number {
+  const raw = process.env.EVENTLOOPOS_FRAME_RESTORE_TIMEOUT_MS;
+  if (!raw) return 2_500;
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 15_000) return 2_500;
+  return parsed;
+}
+
 function readWorkspaceFocusSettleMs(): number {
   const raw = process.env.EVENTLOOPOS_WORKSPACE_FOCUS_SETTLE_MS;
   if (!raw) return 350;
@@ -963,6 +973,10 @@ function shouldSettleAfterWorkspaceFocus(command: AerospaceCommand, remaining: A
   return command.command === "aerospace" &&
     command.args[0] === "workspace" &&
     remaining.some((candidate) => candidate.command === "osascript");
+}
+
+function restoreCommandExecOptions(command: AerospaceCommand, frameRestoreTimeoutMs: number): { timeoutMs?: number } | undefined {
+  return command.command === "osascript" ? { timeoutMs: frameRestoreTimeoutMs } : undefined;
 }
 
 function sleep(ms: number): Promise<void> {

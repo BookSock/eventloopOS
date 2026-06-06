@@ -828,6 +828,44 @@ describe("Aerospace workspace adapter", () => {
     assert.equal(receipt.commands[0]?.stdout, "ok");
   });
 
+  it("uses a bounded timeout for System Events frame restore", async () => {
+    const calls: Array<{ command: string; args: string[]; timeoutMs?: number }> = [];
+    const adapter = new AerospaceWorkspaceAdapter(
+      async (command, args, options) => {
+        calls.push({ command, args, timeoutMs: options?.timeoutMs });
+        return { stdout: "ok", stderr: "" };
+      },
+      { frameRestoreTimeoutMs: 1_789, workspaceFocusSettleMs: 0 },
+    );
+    const plan = restoreWorkspacePlan(
+      {
+        backend: "aerospace",
+        activeWorkspace: "dev",
+        focusedWindowId: 11,
+        windows: [
+          {
+            id: 11,
+            app: "TextEdit",
+            appBundleId: "com.apple.TextEdit",
+            title: "Shared Note",
+            workspace: "dev",
+            layout: "floating",
+            frame: { x: 20, y: 30, width: 640, height: 480 },
+          },
+        ],
+      },
+      [{ id: 11, app: "TextEdit", appBundleId: "com.apple.TextEdit", title: "Shared Note", workspace: "dev", layout: "floating" }],
+    );
+
+    await adapter.executeRestorePlan(plan);
+
+    assert.deepEqual(calls.map((call) => ({ command: call.command, subcommand: call.args[0], timeoutMs: call.timeoutMs })), [
+      { command: "aerospace", subcommand: "workspace", timeoutMs: undefined },
+      { command: "osascript", subcommand: "-e", timeoutMs: 1_789 },
+      { command: "aerospace", subcommand: "focus", timeoutMs: undefined },
+    ]);
+  });
+
   it("waits for workspace focus to settle before restoring window frames", async () => {
     const events: string[] = [];
     const adapter = new AerospaceWorkspaceAdapter(
