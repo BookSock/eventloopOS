@@ -3,7 +3,7 @@
 //
 //   - Spawns a sacrificial Ghostty window A1 with title `[task:p6_5-test]`.
 //   - Moves A1 across two task workspaces to seed (app_bundle, title_prefix)
-//     observations on both.
+//     observations under this smoke's explicit two-workspace threshold.
 //   - Closes A1, spawns a fresh Ghostty window A2 with the same title.
 //   - Asserts listFollowsWindows now reports A2 as the slot's current id.
 //   - Switches workspace, asserts the orchestrator moves A2 (not A1) along.
@@ -61,6 +61,7 @@ const workspace = new AerospaceWorkspaceController(async (cmd, args) => {
 
 const SACRIFICIAL_WS_A = process.env.EVENTLOOPOS_FOLLOWS_SMOKE_WS_A || "9";
 const SACRIFICIAL_WS_B = process.env.EVENTLOOPOS_FOLLOWS_SMOKE_WS_B || "8";
+const SMOKE_MIN_WORKSPACE_COUNT = 2;
 const SMOKE_TITLE = `[task:p6_5-test-${process.pid}]`;
 const titlePrefix = normalizeTitlePrefix(SMOKE_TITLE);
 
@@ -141,9 +142,13 @@ try {
   await execFileAsync("aerospace", ["move-node-to-workspace", "--window-id", firstWindowId, SACRIFICIAL_WS_B], { timeout: 5_000 });
   await recordObservation(firstWindowId, bundleId, SACRIFICIAL_WS_B);
 
-  let follows = await store.listFollowsWindows({ now: new Date(), ttlMs: 24 * 60 * 60 * 1_000 });
+  let follows = await store.listFollowsWindows({
+    now: new Date(),
+    ttlMs: 24 * 60 * 60 * 1_000,
+    minWorkspaceCount: SMOKE_MIN_WORKSPACE_COUNT,
+  });
   let slot = follows.find((f) => f.title_prefix === titlePrefix);
-  if (!slot) throw new Error("phase A: slot not marked follows after 2-workspace seed");
+  if (!slot) throw new Error(`phase A: slot not marked follows after ${SMOKE_MIN_WORKSPACE_COUNT}-workspace seed`);
   if (slot.window_id !== firstWindowId) {
     throw new Error(`phase A: expected slot current id=${firstWindowId}, got ${slot.window_id}`);
   }
@@ -174,7 +179,11 @@ try {
   await execFileAsync("aerospace", ["move-node-to-workspace", "--window-id", secondWindowId, SACRIFICIAL_WS_A], { timeout: 5_000 });
   await recordObservation(secondWindowId, bundleId, SACRIFICIAL_WS_A);
 
-  follows = await store.listFollowsWindows({ now: new Date(), ttlMs: 24 * 60 * 60 * 1_000 });
+  follows = await store.listFollowsWindows({
+    now: new Date(),
+    ttlMs: 24 * 60 * 60 * 1_000,
+    minWorkspaceCount: SMOKE_MIN_WORKSPACE_COUNT,
+  });
   slot = follows.find((f) => f.title_prefix === titlePrefix);
   if (!slot) {
     throw new Error("phase B: slot dropped out of follows after restart — restart-survival regression");
@@ -211,6 +220,7 @@ try {
     pollIntervalMs: 1_000,
     ttlMs: 24 * 60 * 60 * 1_000,
     pruneIntervalMs: 60 * 60 * 1_000,
+    minWorkspaceCount: SMOKE_MIN_WORKSPACE_COUNT,
     now: () => new Date(),
   });
 

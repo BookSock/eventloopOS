@@ -2,7 +2,8 @@
 // Phase 6 — live proof that the follows-window orchestrator end-to-ends:
 //   - Boots the gateway in-process with a real AeroSpaceWorkspaceController.
 //   - Spawns a sacrificial Ghostty window, moves it across two task workspaces
-//     to seed observations, asserts it becomes a `follows` window.
+//     to seed observations, asserts it becomes a `follows` window under this
+//     smoke's explicit two-workspace threshold.
 //   - Switches workspaces and asserts the orchestrator issues a
 //     move-node-to-workspace for the follows window.
 //   - Cleans up the spawned window.
@@ -59,6 +60,7 @@ const workspace = new AerospaceWorkspaceController(async (cmd, args) => {
 
 const SACRIFICIAL_WS_A = process.env.EVENTLOOPOS_FOLLOWS_SMOKE_WS_A || "9";
 const SACRIFICIAL_WS_B = process.env.EVENTLOOPOS_FOLLOWS_SMOKE_WS_B || "8";
+const SMOKE_MIN_WORKSPACE_COUNT = 2;
 const SMOKE_TITLE = `eventloopos-p6-smoke-${process.pid}`;
 
 let spawnedWindowId;
@@ -121,9 +123,15 @@ try {
     observedAt: new Date(),
   });
 
-  const follows = await store.listFollowsWindows({ now: new Date(), ttlMs: 24 * 60 * 60 * 1_000 });
+  const follows = await store.listFollowsWindows({
+    now: new Date(),
+    ttlMs: 24 * 60 * 60 * 1_000,
+    minWorkspaceCount: SMOKE_MIN_WORKSPACE_COUNT,
+  });
   if (!follows.find((f) => f.window_id === spawnedWindowId)) {
-    throw new Error(`phase B: window ${spawnedWindowId} not marked follows after 2-workspace observation`);
+    throw new Error(
+      `phase B: window ${spawnedWindowId} not marked follows after ${SMOKE_MIN_WORKSPACE_COUNT}-workspace observation`,
+    );
   }
   console.log(`  PASS observation pipeline marked window ${spawnedWindowId} as follows`);
 
@@ -149,6 +157,7 @@ try {
     pollIntervalMs: 1_000,
     ttlMs: 24 * 60 * 60 * 1_000,
     pruneIntervalMs: 60 * 60 * 1_000,
+    minWorkspaceCount: SMOKE_MIN_WORKSPACE_COUNT,
     now: () => new Date(),
   });
 

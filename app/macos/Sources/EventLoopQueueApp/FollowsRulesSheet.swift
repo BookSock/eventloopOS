@@ -157,7 +157,7 @@ private struct FollowsSuggestionRow: View {
                         .font(.callout.weight(.medium))
                         .lineLimit(1)
                     if suggestion.isCurrentFollowsCandidate {
-                        Text("Currently follows")
+                        Text("Seen on multiple spaces")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.blue)
                             .padding(.horizontal, 6)
