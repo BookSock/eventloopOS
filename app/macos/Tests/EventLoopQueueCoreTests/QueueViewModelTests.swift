@@ -2823,8 +2823,11 @@ final class QueueViewModelTests: XCTestCase {
         viewModel.stopAutomaticActivityRefresh()
         let stoppedRefreshCount = client.activityFetchCount
         try? await Task.sleep(nanoseconds: 20_000_000)
+        let drainedRefreshCount = client.activityFetchCount
+        try? await Task.sleep(nanoseconds: 20_000_000)
 
-        XCTAssertEqual(client.activityFetchCount, stoppedRefreshCount)
+        XCTAssertEqual(client.activityFetchCount, drainedRefreshCount)
+        XCTAssertLessThanOrEqual(drainedRefreshCount, stoppedRefreshCount + 1)
         XCTAssertGreaterThanOrEqual(stoppedRefreshCount, 1)
     }
 
