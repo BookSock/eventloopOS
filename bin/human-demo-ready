@@ -1189,6 +1189,10 @@ function renderReadyMarkdown(manifest) {
   const hotkey = manifest.hotkey_feedback_latency;
   const manualModeFeedback = manifest.manual_mode_feedback;
   const freshness = latest?.freshness;
+  const suggestedResult = latest?.suggested_result_path ?? "";
+  const verifyCommand = suggestedResult
+    ? `bin/human-demo-result-verify ${shellQuote(suggestedResult)} --lab-status`
+    : "bin/human-demo-result-verify artifacts/human-demo-results/<result>.md --lab-status";
   return `# eventloopOS Human Demo Ready
 
 - Ready: ${manifest.ok ? "yes" : "no"}
@@ -1196,7 +1200,7 @@ function renderReadyMarkdown(manifest) {
 - URL: ${manifest.url}
 - Latest proof: ${latest?.manifest_path ?? ""}
 - Latest proof screenshot: ${latest?.screenshot_path ?? ""}
-- Suggested result file: ${latest?.suggested_result_path ?? ""}
+- Suggested result file: ${suggestedResult}
 - Latest proof freshness: ${freshness ? `${freshness.ok ? "ok" : "stale"} age=${freshness.age_hours ?? ""}h max=${freshness.max_age_hours}h${freshness.allowed_stale ? " allowed" : ""}` : ""}
 - Opened-window autosave proof: ${latest?.new_window_autosave_ok === true ? "ok" : "missing"}
 - Foreign-window containment proof: ${latest?.foreign_window_containment_ok === true ? "ok" : "missing"}
@@ -1211,8 +1215,16 @@ function renderReadyMarkdown(manifest) {
 - Manual Mode feedback: ${manualModeFeedback?.enter?.manifest_path ?? "skipped"}${manifest.manual_mode_feedback_required ? " (required)" : ""}
 - Failed checks: ${manifest.failed_checks.length === 0 ? "none" : manifest.failed_checks.join(", ")}
 
-Next: use \`docs/human-demo-walkthrough.md\`, then run \`bin/human-demo-result-template --write\` and fill the generated result after Jason finishes hands-on pass.
+Next steps:
+1. Use \`docs/human-demo-walkthrough.md\` for the hands-on pass.
+2. Fill \`${suggestedResult || "artifacts/human-demo-results/<result>.md"}\` after Jason finishes.
+3. Verify: \`${verifyCommand}\`
+4. Closeout: \`bin/human-demo-completion-audit --strict\`
 `;
+}
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", "'\\''")}'`;
 }
 
 function utcStamp() {
@@ -1302,6 +1314,10 @@ function runSelfTest() {
   assert.ok(readyMarkdown.includes("Suggested result file: artifacts/human-demo-results/demo-human-demo-result.md"));
   assert.ok(readyMarkdown.includes("Desktop HUD feedback: artifacts/lab-runs/ready/paper-reminder-feedback.json"));
   assert.ok(readyMarkdown.includes("Manual Mode feedback: artifacts/lab-runs/ready/manual-mode-enter-feedback.json"));
+  assert.ok(readyMarkdown.includes("Fill `artifacts/human-demo-results/demo-human-demo-result.md` after Jason finishes."));
+  assert.ok(readyMarkdown.includes("Verify: `bin/human-demo-result-verify 'artifacts/human-demo-results/demo-human-demo-result.md' --lab-status`"));
+  assert.ok(readyMarkdown.includes("Closeout: `bin/human-demo-completion-audit --strict`"));
+  assert.equal(shellQuote("a'b"), "'a'\\''b'");
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-r"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD = "ctrl-option-h";
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h"]);
