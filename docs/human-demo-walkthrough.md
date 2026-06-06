@@ -50,8 +50,9 @@ captures the remote lab Mac desktop over SSH. Use
 `EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=local` to require only the local
 Screen Sharing window, or `EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=auto` to
 try local Screen Sharing first and fall back to the lab Mac desktop. Local
-Screen Sharing capture does not raise/focus the window unless
-`SCREEN_SHARING_RAISE=1` is set.
+Screen Sharing capture uses CoreGraphics by default so it does not raise/focus
+the window unless `SCREEN_SHARING_RAISE=1` or
+`SCREEN_SHARING_CAPTURE_ENGINE=screencapture` is set.
 Run `bin/human-demo-ready` after the queue app has Accessibility permission. By
 default the latest proof must be no older than 24 hours; use
 `EVENTLOOPOS_HUMAN_DEMO_PROOF_MAX_AGE_HOURS` or

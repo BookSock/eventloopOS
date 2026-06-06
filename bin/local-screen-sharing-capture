@@ -11,6 +11,7 @@ Environment:
   SCREEN_SHARING_OWNER   default: Screen Sharing
   SCREEN_SHARING_TITLE   optional title substring, e.g. Zeus
   SCREEN_SHARING_RAISE   default: 0; set 1 to raise/focus before capture
+  SCREEN_SHARING_CAPTURE_ENGINE default: coregraphics; set screencapture only if explicitly wanted
 EOF
 }
 
@@ -24,8 +25,17 @@ esac
 owner="${SCREEN_SHARING_OWNER:-Screen Sharing}"
 title="${SCREEN_SHARING_TITLE:-}"
 raise_requested="${SCREEN_SHARING_RAISE:-${EVENTLOOPOS_SCREEN_SHARING_RAISE:-0}}"
+capture_engine="${SCREEN_SHARING_CAPTURE_ENGINE:-coregraphics}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 output="${1:-artifacts/screen-sharing-captures/$stamp-screen-sharing.png}"
+capture_tmpdir=""
+
+cleanup_capture_tmpdir() {
+  if [[ -n "$capture_tmpdir" ]]; then
+    rm -rf "$capture_tmpdir"
+  fi
+}
+trap cleanup_capture_tmpdir EXIT
 
 case "$raise_requested" in
   1|true|TRUE|yes|YES|on|ON)
@@ -36,6 +46,15 @@ case "$raise_requested" in
     ;;
   *)
     echo "invalid SCREEN_SHARING_RAISE: $raise_requested (use 0 or 1)" >&2
+    exit 2
+    ;;
+esac
+
+case "$capture_engine" in
+  coregraphics|screencapture)
+    ;;
+  *)
+    echo "invalid SCREEN_SHARING_CAPTURE_ENGINE: $capture_engine (use coregraphics or screencapture)" >&2
     exit 2
     ;;
 esac
@@ -115,12 +134,98 @@ if [[ "$lookup_exit" -ne 0 || -z "$window_id" ]]; then
 fi
 
 mkdir -p "$(dirname "$output")"
-screencapture -x -l "$window_id" "$output"
+if [[ "$capture_engine" == "coregraphics" ]]; then
+  capture_tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/eventloopos-window-capture.XXXXXX")"
+  capture_src="$capture_tmpdir/capture.c"
+  capture_bin="$capture_tmpdir/capture"
+  cat >"$capture_src" <<'C'
+#include <CoreFoundation/CoreFoundation.h>
+#include <CoreGraphics/CoreGraphics.h>
+#include <ImageIO/ImageIO.h>
+#include <dlfcn.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+typedef CGImageRef (*CGWindowListCreateImageFn)(
+  CGRect,
+  CGWindowListOption,
+  CGWindowID,
+  CGWindowImageOption
+);
+
+int main(int argc, char **argv) {
+  if (argc < 3) {
+    fprintf(stderr, "usage: capture <window_id> <output.png>\n");
+    return 2;
+  }
+
+  CGWindowListCreateImageFn createImage =
+    (CGWindowListCreateImageFn)dlsym(RTLD_DEFAULT, "CGWindowListCreateImage");
+  if (!createImage) {
+    fprintf(stderr, "CGWindowListCreateImage symbol unavailable\n");
+    return 1;
+  }
+
+  CGWindowID windowID = (CGWindowID)strtoul(argv[1], NULL, 10);
+  CGImageRef image = createImage(
+    CGRectNull,
+    kCGWindowListOptionIncludingWindow,
+    windowID,
+    kCGWindowImageBoundsIgnoreFraming | kCGWindowImageBestResolution
+  );
+  if (!image) {
+    fprintf(stderr, "CoreGraphics window capture returned no image for window %u\n", windowID);
+    return 1;
+  }
+
+  CFStringRef path = CFStringCreateWithCString(NULL, argv[2], kCFStringEncodingUTF8);
+  if (!path) {
+    fprintf(stderr, "failed to create output path string\n");
+    CGImageRelease(image);
+    return 1;
+  }
+
+  CFURLRef url = CFURLCreateWithFileSystemPath(NULL, path, kCFURLPOSIXPathStyle, false);
+  if (!url) {
+    fprintf(stderr, "failed to create output URL\n");
+    CFRelease(path);
+    CGImageRelease(image);
+    return 1;
+  }
+
+  CGImageDestinationRef destination = CGImageDestinationCreateWithURL(url, CFSTR("public.png"), 1, NULL);
+  if (!destination) {
+    fprintf(stderr, "failed to create PNG destination\n");
+    CFRelease(url);
+    CFRelease(path);
+    CGImageRelease(image);
+    return 1;
+  }
+
+  CGImageDestinationAddImage(destination, image, NULL);
+  bool ok = CGImageDestinationFinalize(destination);
+
+  CFRelease(destination);
+  CFRelease(url);
+  CFRelease(path);
+  CGImageRelease(image);
+  return ok ? 0 : 1;
+}
+C
+  clang "$capture_src" -framework CoreGraphics -framework ImageIO -framework CoreFoundation -o "$capture_bin"
+  "$capture_bin" "$window_id" "$output"
+  rm -rf "$capture_tmpdir"
+  capture_tmpdir=""
+else
+  screencapture -x -l "$window_id" "$output"
+fi
 
 manifest="${output%.png}.json"
 cat >"$manifest" <<EOF
 {
   "capture_mode": "local_screen_sharing_window",
+  "capture_engine": "$capture_engine",
   "window_id": "$window_id",
   "owner_filter": "$owner",
   "title_filter": "$title",

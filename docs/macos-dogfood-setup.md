@@ -77,9 +77,11 @@ SCREEN_SHARING_TITLE=Zeus bin/local-screen-sharing-capture
 ```
 
 The helper writes `artifacts/screen-sharing-captures/<timestamp>-screen-sharing.png`
-and a sibling JSON manifest with the CGWindow id used by `screencapture -l`.
+and a sibling JSON manifest with the CGWindow id and capture engine.
 Set `SCREEN_SHARING_RAISE=1` only when you explicitly want the helper to raise
-and focus Screen Sharing before capture.
+and focus Screen Sharing before capture. The default capture engine is
+CoreGraphics; set `SCREEN_SHARING_CAPTURE_ENGINE=screencapture` only when you
+explicitly want the old system `screencapture -l` behavior.
 
 This answers only "are SSH and VNC reachable?" and skips sync, baseline,
 screenshots, and Codex. Use it while the Mac is rebooting or probably offline.
