@@ -1012,7 +1012,7 @@ public final class QueueViewModel: ObservableObject {
     }
 
     private func restorePaperWorkspaceForSwitch(snapshot: WorkspaceSnapshot, packetId: String) async throws {
-        let idempotencyPrefix = "mac_advance_restore_\(packetId)"
+        let idempotencyPrefix = Self.paperWorkspaceRestorePrefix(packetId: packetId)
         if let recent = lastWorkspaceRestore,
            recent.idempotencyPrefix == idempotencyPrefix,
            recent.snapshot == snapshot,
@@ -2046,7 +2046,10 @@ public final class QueueViewModel: ObservableObject {
             let response = try await workspaceClient.restorePlan(snapshot: snapshot, currentWindows: nil)
             workspaceRestoreState = .planned(response.plan)
             if response.executeSupported && !response.plan.commands.isEmpty {
-                let restored = await executeWorkspaceRestore(snapshot: snapshot, idempotencyPrefix: "mac_workspace_restore")
+                let restored = await executeWorkspaceRestore(
+                    snapshot: snapshot,
+                    idempotencyPrefix: workspaceRestoreIdempotencyPrefix(snapshot: snapshot)
+                )
                 if restored {
                     await syncSelectedCurrentTaskIfPossible()
                     showSelectedPaperBriefingIfMatching(snapshot: snapshot)
@@ -2075,7 +2078,7 @@ public final class QueueViewModel: ObservableObject {
 
         let restored = await executeWorkspaceRestore(
             snapshot: snapshot,
-            idempotencyPrefix: "mac_workspace_restore",
+            idempotencyPrefix: workspaceRestoreIdempotencyPrefix(snapshot: snapshot),
             startToast: workspaceRestoreStartToast(snapshot: snapshot)
         )
         if restored {
@@ -2246,6 +2249,18 @@ public final class QueueViewModel: ObservableObject {
         }
 
         return .actionComplete("Restoring paper: \(paperTitleForFeedback(packetId: packetId))...")
+    }
+
+    private func workspaceRestoreIdempotencyPrefix(snapshot: WorkspaceSnapshot) -> String {
+        guard selectedWorkspaceSnapshot == snapshot,
+              let packetId = selectedPacketID else {
+            return "mac_workspace_restore"
+        }
+        return Self.paperWorkspaceRestorePrefix(packetId: packetId)
+    }
+
+    private static func paperWorkspaceRestorePrefix(packetId: String) -> String {
+        "mac_paper_restore_\(packetId)"
     }
 
     public func confirmSelectedWorkspaceRestore() async {

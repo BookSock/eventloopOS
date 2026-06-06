@@ -350,7 +350,7 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         XCTAssertEqual(viewModel.currentTask?.taskId, "task_b")
         XCTAssertEqual(aero.switchedWorkspaces, [])
         XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [paperWorkspace])
-        XCTAssertTrue(workspaceClient.restoreIdempotencyKeys.first?.hasPrefix("mac_advance_restore_pkt_b_") ?? false)
+        XCTAssertTrue(workspaceClient.restoreIdempotencyKeys.first?.hasPrefix("mac_paper_restore_pkt_b_") ?? false)
         XCTAssertEqual(viewModel.selectedPacketID, "pkt_b")
         if case let .switchedToPaper(packetId, title, decision) = viewModel.advanceToast {
             XCTAssertEqual(packetId, "pkt_b")
@@ -382,7 +382,7 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         let client = FakeQueueClient(packets: [paperForB])
         let workspaceClient = FakeWorkspaceClient(
             captureSnapshot: WorkspaceSnapshot(windows: [], activeWorkspace: "ws_a"),
-            restoreDelayNanoseconds: 100_000_000
+            restoreDelayNanoseconds: 1_000_000_000
         )
         let aero = FakeAeroSpaceWorkspaceClient(focused: "ws_a")
         let resolver = FakeCodexForegroundResolver(.none)
@@ -417,7 +417,9 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         let switchTask = Task { @MainActor in
             await viewModel.advance()
         }
-        try? await Task.sleep(nanoseconds: 20_000_000)
+        for _ in 0..<100 where workspaceClient.workspaceRestoreSnapshots.isEmpty {
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
 
         XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [paperWorkspace])
         XCTAssertEqual(viewModel.workspaceRestoreState, .restoring)
@@ -440,6 +442,67 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         } else {
             XCTFail("expected switchedToPaper toast, got \(String(describing: viewModel.advanceToast))")
         }
+    }
+
+    func testRestoreHotkeyAfterAdvancePaperSwitchReusesRecentRestore() async {
+        let paperWorkspace = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 101, app: "Ghostty", title: "codex email", workspace: "ws_b")],
+            activeWorkspace: "ws_b",
+            focusedWindowId: 101
+        )
+        let paperForB = ReviewPacket(
+            id: "pkt_b",
+            reviewPacketId: "rpkt_b",
+            taskId: "task_b",
+            title: "B paper",
+            summary: "switch me",
+            source: "manual",
+            priority: 500,
+            recommendedAction: "review",
+            createdAt: Date(timeIntervalSince1970: 1),
+            workspaceSnapshot: paperWorkspace
+        )
+        let client = FakeQueueClient(packets: [paperForB])
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: WorkspaceSnapshot(windows: [], activeWorkspace: "ws_a")
+        )
+        let aero = FakeAeroSpaceWorkspaceClient(focused: "ws_a")
+        let resolver = FakeCodexForegroundResolver(.none)
+        let viewModel = QueueViewModel(
+            client: client,
+            workspaceClient: workspaceClient,
+            aeroSpaceClient: aero,
+            codexForegroundResolver: resolver,
+            limboWorkspaceId: "limbo"
+        )
+
+        let taskA = TaskRecord(
+            taskId: "task_a",
+            primaryAnchorKind: .codexThread,
+            primaryAnchorId: "thr_a",
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+        let taskB = TaskRecord(
+            taskId: "task_b",
+            primaryAnchorKind: .codexThread,
+            primaryAnchorId: "thr_b",
+            createdAt: Date(timeIntervalSince1970: 0),
+            updatedAt: Date(timeIntervalSince1970: 0)
+        )
+        client.setFakeTasks([taskA, taskB])
+        client.setFakeCurrentTask("task_a")
+        client.setFakeTaskLayout(taskId: "task_a", layout: WorkspaceSnapshot(windows: [], activeWorkspace: "ws_a"))
+        client.setFakeTaskLayout(taskId: "task_b", layout: paperWorkspace)
+        await viewModel.loadQueue()
+
+        await viewModel.advance()
+        await viewModel.confirmSelectedWorkspaceRestore()
+
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [paperWorkspace])
+        XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestored(WorkspaceRestoreReceipt(commands: [], skipped: [])))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Paper already restored: B paper."))
+        XCTAssertTrue(workspaceClient.restoreIdempotencyKeys.first?.hasPrefix("mac_paper_restore_pkt_b_") ?? false)
     }
 
     func testAdvanceFromLimboWithoutForegroundCodexShowsToast() async {
