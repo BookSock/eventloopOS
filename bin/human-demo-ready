@@ -19,15 +19,19 @@ const workspaceLatencyEnabled = !skipWorkspaceLatency;
 const skipHotkeyLatency = args.includes("--skip-hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "0";
 const hotkeyLatencyRequested = args.includes("--hotkey-latency") || process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY === "1";
 const hotkeyLatencyEnabled = !skipHotkeyLatency && (hotkeyLatencyRequested || process.platform === "darwin");
+const skipPaperReminderFeedback = args.includes("--skip-paper-reminder-feedback") || process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK === "0";
+const paperReminderFeedbackRequested = args.includes("--paper-reminder-feedback") || process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK === "1";
+const paperReminderFeedbackEnabled = !skipPaperReminderFeedback && (paperReminderFeedbackRequested || process.platform === "darwin");
 const jsonOnly = args.includes("--json");
 const screenshotTarget = normalizeScreenshotTarget(process.env.EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET ?? "auto");
 
 if (args.includes("-h") || args.includes("--help")) {
-  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-queue-latency] [--skip-workspace-latency] [--skip-hotkey-latency] [--hotkey-latency] [--demo-proof-max-age-hours n] [--allow-stale-demo-proof] [--json]
+  console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-queue-latency] [--skip-workspace-latency] [--skip-hotkey-latency] [--hotkey-latency] [--skip-paper-reminder-feedback] [--paper-reminder-feedback] [--demo-proof-max-age-hours n] [--allow-stale-demo-proof] [--json]
 
 Check current Mac Studio human-demo readiness without resetting demo state.
 Includes read-only queue/master and workspace capture/restore-plan latency gates
-by default. On macOS, also includes a live queue-app hotkey feedback p95 gate by default.
+by default. On macOS, also includes live queue-app hotkey feedback and desktop
+paper reminder HUD feedback gates by default.
 Use skip flags only while bootstrapping remote host/Accessibility permission.
 
 Environment:
@@ -48,7 +52,12 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=0 skips hotkey latency
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_TARGET=local runs latency on this Mac instead of the lab Mac
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD default: ctrl-option-r
-  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT optional expected feedback substring (default for ctrl-option-r: Restoring paper:)
+  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT optional expected feedback substring
+  EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK=1 forces desktop HUD feedback proof on
+  EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK=0 skips desktop HUD feedback proof
+  EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_TARGET=local runs proof on this Mac instead of the lab Mac
+  EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_HOTKEY default: ctrl-option-r
+  EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_EXPECT optional expected HUD feedback substring (default for ctrl-option-r: Restoring paper:)
   EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=auto|local|lab default: auto
     auto captures local Screen Sharing window first, then falls back to lab Mac desktop only
 `);
@@ -87,6 +96,7 @@ if (!skipScreenshot) {
   screenshot = runScreenshotStep(path.join(runDir, "screen-sharing.png"), env);
 }
 const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
+const paperReminderFeedbackManifestPath = path.join(runDir, "paper-reminder-feedback.json");
 const queueLatencyManifestPath = path.join(runDir, "queue-latency.json");
 const workspaceLatencyManifestPath = path.join(runDir, "workspace-latency.json");
 const queueLatency = queueLatencyEnabled
@@ -97,6 +107,10 @@ const workspaceLatency = workspaceLatencyEnabled
   ? runWorkspaceLatencyStep(workspaceLatencyManifestPath, env)
   : undefined;
 const workspaceLatencyManifest = workspaceLatency ? readJsonIfPresent(workspaceLatencyManifestPath) : undefined;
+const paperReminderFeedback = paperReminderFeedbackEnabled
+  ? runPaperReminderFeedbackStep(paperReminderFeedbackManifestPath, env)
+  : undefined;
+const paperReminderFeedbackManifest = paperReminderFeedback ? readJsonIfPresent(paperReminderFeedbackManifestPath) : undefined;
 const hotkeyLatency = hotkeyLatencyEnabled
   ? runHotkeyLatencyStep(hotkeyLatencyManifestPath, env)
   : undefined;
@@ -118,6 +132,7 @@ const checks = {
     || screenshot?.lab_capture_summary?.queue_app?.paper_reminder_hud_present === true,
   queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
   workspace_latency_ok: !workspaceLatencyEnabled || (workspaceLatency?.status === 0 && workspaceLatencyManifest?.ok === true),
+  paper_reminder_feedback_ok: !paperReminderFeedbackEnabled || (paperReminderFeedback?.status === 0 && paperReminderFeedbackManifest?.ok === true),
   hotkey_feedback_latency_ok: !hotkeyLatencyEnabled || (hotkeyLatency?.status === 0 && hotkeyLatencyManifest?.ok === true),
 };
 const failedChecks = Object.entries(checks).filter(([, ok]) => ok !== true).map(([key]) => key);
@@ -135,6 +150,7 @@ const manifest = {
   url: env.LAB_DOGFOOD_URL,
   queue_latency_required: queueLatencyEnabled,
   workspace_latency_required: workspaceLatencyEnabled,
+  paper_reminder_feedback_required: paperReminderFeedbackEnabled,
   hotkey_latency_required: hotkeyLatencyEnabled,
   screenshot_target: screenshotTarget,
   demo_proof_max_age_hours: demoProofMaxAgeHours,
@@ -187,6 +203,16 @@ const manifest = {
   } : {
     skipped: true,
   },
+  paper_reminder_feedback: paperReminderFeedback ? {
+    ok: paperReminderFeedback.status === 0 && paperReminderFeedbackManifest?.ok === true,
+    manifest_path: paperReminderFeedbackManifestPath,
+    exit_code: paperReminderFeedback.status,
+    failed_budgets: paperReminderFeedbackManifest?.failed_budgets ?? [],
+    summary: paperReminderFeedbackManifest?.summary,
+    samples: paperReminderFeedbackManifest?.samples ?? [],
+  } : {
+    skipped: true,
+  },
   hotkey_feedback_latency: hotkeyLatency ? {
     ok: hotkeyLatency.status === 0 && hotkeyLatencyManifest?.ok === true,
     manifest_path: hotkeyLatencyManifestPath,
@@ -212,12 +238,14 @@ const output = {
   checks: manifest.checks,
   queue_latency_required: manifest.queue_latency_required,
   workspace_latency_required: manifest.workspace_latency_required,
+  paper_reminder_feedback_required: manifest.paper_reminder_feedback_required,
   hotkey_latency_required: manifest.hotkey_latency_required,
   latest_human_demo: manifest.latest_human_demo,
   screen_sharing_capture: manifest.screen_sharing_capture,
   screenshot_stage: manifest.screenshot_stage,
   queue_latency: manifest.queue_latency,
   workspace_latency: manifest.workspace_latency,
+  paper_reminder_feedback: manifest.paper_reminder_feedback,
   hotkey_feedback_latency: manifest.hotkey_feedback_latency,
 };
 
@@ -482,30 +510,38 @@ function queueBriefingStripStatus(expected) {
     "    set briefingTitle to \\"\\"",
     "    set briefingDecision to \\"\\"",
     "    set briefingContext to \\"\\"",
-    "    set flattenedElements to entire contents of window 1",
-    "    set elementCount to count of flattenedElements",
-    "    if elementCount is greater than 240 then set elementCount to 240",
-    "    repeat with elementIndex from 1 to elementCount",
-    "      set candidateElement to item elementIndex of flattenedElements",
-    "      set identifierText to \\"\\"",
-    "      set nameText to \\"\\"",
-    "      set valueText to \\"\\"",
+    "    repeat with candidateWindow in windows",
+    "      set windowName to \\"\\"",
     "      try",
-    "        set identifierText to (value of attribute \\"AXIdentifier\\" of candidateElement) as string",
+    "        set windowName to name of candidateWindow as string",
     "      end try",
-    "      try",
-    "        set nameText to name of candidateElement as string",
-    "      end try",
-    "      try",
-    "        set valueText to value of candidateElement as string",
-    "      end try",
-    "      set end of allLines to identifierText & \\" \\" & nameText & \\" \\" & valueText",
-    "      set readableText to nameText",
-    "      if readableText is \\"\\" then set readableText to valueText",
-    "      if identifierText is \\"queue-paper-briefing-strip\\" then set stripName to readableText",
-    "      if identifierText is \\"queue-paper-briefing-title\\" then set briefingTitle to readableText",
-    "      if identifierText is \\"queue-paper-briefing-decision\\" then set briefingDecision to readableText",
-    "      if identifierText is \\"queue-paper-briefing-context\\" then set briefingContext to readableText",
+    "      if windowName is not \\"eventloopOS Paper Reminder\\" then",
+    "        set flattenedElements to entire contents of candidateWindow",
+    "        set elementCount to count of flattenedElements",
+    "        if elementCount is greater than 240 then set elementCount to 240",
+    "        repeat with elementIndex from 1 to elementCount",
+    "          set candidateElement to item elementIndex of flattenedElements",
+    "          set identifierText to \\"\\"",
+    "          set nameText to \\"\\"",
+    "          set valueText to \\"\\"",
+    "          try",
+    "            set identifierText to (value of attribute \\"AXIdentifier\\" of candidateElement) as string",
+    "          end try",
+    "          try",
+    "            set nameText to name of candidateElement as string",
+    "          end try",
+    "          try",
+    "            set valueText to value of candidateElement as string",
+    "          end try",
+    "          set end of allLines to identifierText & \\" \\" & nameText & \\" \\" & valueText",
+    "          set readableText to nameText",
+    "          if readableText is \\"\\" then set readableText to valueText",
+    "          if identifierText is \\"queue-paper-briefing-strip\\" then set stripName to readableText",
+    "          if identifierText is \\"queue-paper-briefing-title\\" then set briefingTitle to readableText",
+    "          if identifierText is \\"queue-paper-briefing-decision\\" then set briefingDecision to readableText",
+    "          if identifierText is \\"queue-paper-briefing-context\\" then set briefingContext to readableText",
+    "        end repeat",
+    "      end if",
     "    end repeat",
     "    if briefingTitle is not \\"\\" and briefingDecision is not \\"\\" and briefingContext is not \\"\\" then return \\"present:parts:\\" & briefingTitle & \\" | \\" & briefingDecision & \\" | \\" & briefingContext",
     "    if stripName is not \\"\\" then return \\"present:identifier:\\" & stripName",
@@ -684,7 +720,34 @@ function hotkeyLatencyArgs() {
     "--hotkey",
     chord,
   ];
-  const expected = process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT
+  const expected = process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT;
+  if (expected) args.push("--expect", expected);
+  return args;
+}
+
+function runPaperReminderFeedbackStep(manifestPath, envOverride) {
+  const proofArgs = paperReminderFeedbackArgs();
+  if (process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_TARGET === "local") {
+    return runStep("paper reminder feedback", "bin/macos-paper-reminder-feedback-proof-direct", [
+      "--manifest",
+      manifestPath,
+      ...proofArgs,
+    ], envOverride);
+  }
+  return runStep("paper reminder feedback", "bin/lab-mac-paper-reminder-feedback-proof", [
+    "--manifest",
+    manifestPath,
+    ...proofArgs,
+  ], envOverride);
+}
+
+function paperReminderFeedbackArgs() {
+  const chord = process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_HOTKEY ?? "ctrl-option-r";
+  const args = [
+    "--hotkey",
+    chord,
+  ];
+  const expected = process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_EXPECT
     ?? (normalizeHotkeyText(chord) === "ctrl-option-r" ? "Restoring paper:" : undefined);
   if (expected) args.push("--expect", expected);
   return args;
@@ -1012,6 +1075,7 @@ function renderReadyMarkdown(manifest) {
   const screenshot = manifest.screen_sharing_capture;
   const queueLatency = manifest.queue_latency;
   const workspaceLatency = manifest.workspace_latency;
+  const paperReminderFeedback = manifest.paper_reminder_feedback;
   const hotkey = manifest.hotkey_feedback_latency;
   const freshness = latest?.freshness;
   return `# eventloopOS Human Demo Ready
@@ -1031,6 +1095,7 @@ function renderReadyMarkdown(manifest) {
 - Desktop paper reminder HUD: ${manifest.checks?.paper_reminder_hud_visible === true ? "visible" : "missing"}
 - Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
 - Workspace latency: ${workspaceLatency?.manifest_path ?? "skipped"}${manifest.workspace_latency_required ? " (required)" : ""}
+- Desktop HUD feedback: ${paperReminderFeedback?.manifest_path ?? "skipped"}${manifest.paper_reminder_feedback_required ? " (required)" : ""}
 - Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}${manifest.hotkey_latency_required ? " (required)" : ""}
 - Failed checks: ${manifest.failed_checks.length === 0 ? "none" : manifest.failed_checks.join(", ")}
 
@@ -1117,22 +1182,32 @@ function runSelfTest() {
     screen_sharing_capture: { output: "artifacts/lab-runs/ready/screen-sharing.png" },
     queue_latency: { manifest_path: "artifacts/lab-runs/ready/queue-latency.json" },
     workspace_latency: { manifest_path: "artifacts/lab-runs/ready/workspace-latency.json" },
+    paper_reminder_feedback: { manifest_path: "artifacts/lab-runs/ready/paper-reminder-feedback.json" },
     hotkey_feedback_latency: { skipped: true },
   });
   assert.ok(readyMarkdown.includes("Suggested result file: artifacts/human-demo-results/demo-human-demo-result.md"));
-  assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-r", "--expect", "Restoring paper:"]);
+  assert.ok(readyMarkdown.includes("Desktop HUD feedback: artifacts/lab-runs/ready/paper-reminder-feedback.json"));
+  assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-r"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD = "ctrl-option-h";
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT = "No paper selected.";
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h", "--expect", "No paper selected."]);
   delete process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD;
   delete process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT;
+  assert.deepEqual(paperReminderFeedbackArgs(), ["--hotkey", "ctrl-option-r", "--expect", "Restoring paper:"]);
+  process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_HOTKEY = "ctrl-option-h";
+  assert.deepEqual(paperReminderFeedbackArgs(), ["--hotkey", "ctrl-option-h"]);
+  process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_EXPECT = "No paper selected.";
+  assert.deepEqual(paperReminderFeedbackArgs(), ["--hotkey", "ctrl-option-h", "--expect", "No paper selected."]);
+  delete process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_HOTKEY;
+  delete process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_EXPECT;
   assert.ok(labDemoScreenshotStageScript().includes("task_demo_customer"));
   assert.ok(labDemoScreenshotStageScript().includes("latestDemoProofSnapshot"));
   assert.ok(labDemoScreenshotStageScript().includes("raiseDemoApps"));
   assert.ok(labDemoScreenshotStageScript().includes("queueBriefingStripStatus"));
   assert.ok(labDemoScreenshotStageScript().includes("paperReminderHudStatus"));
   assert.ok(labDemoScreenshotStageScript().includes("eventloopOS Paper Reminder"));
+  assert.ok(labDemoScreenshotStageScript().includes('windowName is not \\"eventloopOS Paper Reminder\\"'));
   assert.ok(labDemoScreenshotStageScript().includes("matchingBriefingLine"));
   assert.ok(labDemoScreenshotStageScript().includes("queue-paper-briefing-strip"));
   assert.ok(labDemoScreenshotStageScript().includes("queue-paper-briefing-title"));

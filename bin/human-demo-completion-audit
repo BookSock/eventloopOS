@@ -72,6 +72,7 @@ function buildAudit(root, options = {}) {
       && readiness?.latest_human_demo?.screenshot_image?.ok === true,
     readiness_queue_briefing_strip_visible: readiness?.checks?.queue_briefing_strip_visible === true,
     readiness_paper_reminder_hud_visible: readiness?.checks?.paper_reminder_hud_visible === true,
+    readiness_paper_reminder_feedback_ok: readiness?.checks?.paper_reminder_feedback_ok === true,
     readiness_new_window_autosave_proof_ok: readiness?.checks?.new_window_autosave_proof_ok === true
       && readiness?.latest_human_demo?.new_window_autosave_ok === true,
     readiness_foreign_window_containment_proof_ok: readiness?.checks?.foreign_window_containment_proof_ok === true
@@ -430,6 +431,7 @@ function runSelfTest() {
       latest_human_demo_screenshot_ok: true,
       queue_briefing_strip_visible: true,
       paper_reminder_hud_visible: true,
+      paper_reminder_feedback_ok: true,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
@@ -521,6 +523,7 @@ ship
       latest_human_demo_screenshot_ok: true,
       queue_briefing_strip_visible: true,
       paper_reminder_hud_visible: true,
+      paper_reminder_feedback_ok: true,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
@@ -547,6 +550,7 @@ ship
       latest_human_demo_screenshot_ok: true,
       queue_briefing_strip_visible: false,
       paper_reminder_hud_visible: true,
+      paper_reminder_feedback_ok: true,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
@@ -601,6 +605,35 @@ ship
       latest_human_demo_screenshot_ok: true,
       queue_briefing_strip_visible: true,
       paper_reminder_hud_visible: true,
+      paper_reminder_feedback_ok: false,
+      new_window_autosave_proof_ok: true,
+      foreign_window_containment_proof_ok: true,
+      agent_spawn_window_containment_proof_ok: true,
+    },
+    latest_human_demo: {
+      new_window_autosave_ok: true,
+      foreign_window_containment_ok: true,
+      agent_spawn_window_containment_ok: true,
+      agent_spawn_window_containment_app: "Google Chrome",
+      agent_spawn_window_containment_chrome_ok: true,
+      screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
+    },
+  });
+  const missingPaperReminderFeedback = buildAudit(root, {
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(missingPaperReminderFeedback.ok, false);
+  assert.ok(missingPaperReminderFeedback.failed_checks.includes("readiness_paper_reminder_feedback_ok"));
+
+  writeJson(readinessPath, {
+    ok: true,
+    started_at: new Date().toISOString(),
+    checks: {
+      latest_human_demo_screenshot_ok: true,
+      queue_briefing_strip_visible: true,
+      paper_reminder_hud_visible: true,
+      paper_reminder_feedback_ok: true,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,

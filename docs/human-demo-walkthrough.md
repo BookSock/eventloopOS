@@ -56,13 +56,14 @@ default the latest proof must be no older than 24 hours; use
 queue/master latency and workspace capture/restore-plan latency manifests, so
 demo readiness proves the Queue path and workspace path are responsive without
 mutating the active paper. On macOS it includes a live hotkey-to-first-feedback
-p95 latency gate in the readiness artifact by running the latency probe on the
-Mac Studio. The default restore-hotkey gate waits for immediate
-`Restoring paper:` feedback; screenshot staging still verifies final
+p95 latency gate and a separate top-HUD feedback proof in the readiness artifact
+by running the probes on the Mac Studio. The Queue feedback gate requires a
+fresh `feedback_seq` change; the desktop HUD proof waits for immediate
+`Restoring paper:` feedback. Screenshot staging still verifies final
 `Showing paper:` feedback after restore. The top-of-screen reminder HUD also
 briefly echoes hotkey feedback, so keyboard users do not need to hunt for the
-Queue footer after pressing a chord. Use `--skip-hotkey-latency` only while
-bootstrapping permission setup.
+Queue footer after pressing a chord. Use `--skip-hotkey-latency` or
+`--skip-paper-reminder-feedback` only while bootstrapping permission setup.
 `READY.md` also names the suggested human result file so the final checklist
 does not accidentally reuse an older blank artifact.
 Use `EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_TARGET=local` or
@@ -74,14 +75,14 @@ Latest known-good proof:
 
 - Manifest: `artifacts/lab-runs/20260605-194639-human-demo/manifest.json`
 - Screenshot: `artifacts/lab-runs/20260605-194639-human-demo/screen-sharing.png`
-- Readiness manifest: `artifacts/lab-runs/20260606T025004Z-human-demo-ready/manifest.json`
-- Readiness screenshot: `artifacts/lab-runs/20260606T025004Z-human-demo-ready/captures/human-demo-ready/screen.png`
+- Readiness manifest: `artifacts/lab-runs/20260606T031258Z-human-demo-ready/manifest.json`
+- Readiness screenshot: `artifacts/lab-runs/20260606T031258Z-human-demo-ready/captures/human-demo-ready/screen.png`
 - Queue proof: 2 current-run papers.
 - Ambient proof: customer paper context saved the moved shared TextEdit, and the automated scratch window was remembered by the current paper before cleanup.
 - Background containment proof: Metrics Chrome was intentionally pushed into the Customer paper and moved back to the Metrics paper.
 - Agent-spawn containment proof: a Metrics-owned Chrome window was opened while Customer was focused, claimed, moved back to Metrics, and Customer focus was restored.
-- Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture; readiness also proves live restore-hotkey feedback in 119 ms p95.
-- Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper.
+- Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture; readiness also proves live Queue feedback in 123 ms p95.
+- Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper and proves restore-hotkey HUD feedback in 155 ms p95.
 
 ## Starting State
 
