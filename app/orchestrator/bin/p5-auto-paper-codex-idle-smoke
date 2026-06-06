@@ -25,6 +25,8 @@ const staleThreadId = "thread_p5_smoke_stale";
 const idleTaskId = "task_p5_smoke";
 const currentTaskId = "task_p5_current";
 const staleTaskId = "task_p5_stale";
+const waitingTaskId = "task_p5_waiting";
+const waitingSessionId = "task_session_p5_waiting";
 
 let server;
 let passed = false;
@@ -91,6 +93,17 @@ try {
     activeTask: {
       getCurrentTaskState: async () => ({ current_task_id: currentTaskId }),
     },
+    taskSessions: {
+      listSessions: () => [
+        {
+          id: waitingSessionId,
+          task_id: waitingTaskId,
+          provider: "codex",
+          status: "waiting_approval",
+          updated_at: "2026-05-10T13:55:00.000Z",
+        },
+      ],
+    },
     codexHome,
     now: () => NOW,
   });
@@ -100,21 +113,23 @@ try {
 
   const result = await watcher.tick();
   assertEqual(result.paused, false, "not paused");
-  assertEqual(result.considered, 3, "considered 3 tasks");
-  assertEqual(result.emitted.length, 1, "emitted 1 paper");
+  assertEqual(result.considered, 4, "considered 3 tasks plus waiting session");
+  assertEqual(result.emitted.length, 2, "emitted 2 papers");
   assertEqual(result.emitted[0].task_id, idleTaskId, "emitted correct task_id");
-  assertEqual(emitted.length, 1, "registry record called once");
+  assertEqual(result.emitted[1].task_id, waitingTaskId, "emitted waiting task_id");
+  assertEqual(emitted.length, 2, "registry record called twice");
   assertEqual(emitted[0].id, idleTaskId, "registry record task id");
+  assertEqual(emitted[1].id, waitingTaskId, "registry record waiting task id");
   assertEqual(dormant.length, 1, "registry dormant called once");
   assertEqual(dormant[0].id, staleTaskId, "dormant task id");
   assertSkipped(result, currentTaskId, "task_currently_active");
   assertSkipped(result, staleTaskId, "marked_dormant");
 
   const queueAfter = await fetch(`${baseUrl}/queue`).then((r) => r.json());
-  assertEqual(queueAfter.items.length, beforeCount + 1, "queue grew by 1");
+  assertEqual(queueAfter.items.length, beforeCount + 2, "queue grew by 2");
   const item = queueAfter.items.find((i) => i.task_id === idleTaskId);
   if (!item) throw new Error("expected queue item with task_id present");
-  if (!/Codex thread idle/i.test(item.review_packet.title)) {
+  if (!/Codex session idle/i.test(item.review_packet.title)) {
     throw new Error(`expected paper title to mention idle, got: ${item.review_packet.title}`);
   }
   if (!/needs user decision/i.test(item.review_packet.summary ?? "")) {
@@ -123,12 +138,21 @@ try {
   if (queueAfter.items.some((i) => i.task_id === currentTaskId || i.task_id === staleTaskId)) {
     throw new Error("expected no queue items for current focused task or stale dormant task");
   }
+  const waitingItem = queueAfter.items.find((i) => i.task_id === waitingTaskId);
+  if (!waitingItem) throw new Error("expected waiting session queue item with task_id present");
+  if (!/Codex session waiting/i.test(waitingItem.review_packet.title)) {
+    throw new Error(`expected waiting paper title to mention waiting, got: ${waitingItem.review_packet.title}`);
+  }
+  if (!/waiting for human input/i.test(waitingItem.review_packet.summary ?? "")) {
+    throw new Error(`expected waiting paper summary to mention human input, got: ${waitingItem.review_packet.summary}`);
+  }
 
   // Second tick: same idle window remains throttled, current task stays suppressed,
   // stale thread remains recoverable through the dormant marker rather than queue spam.
   const second = await watcher.tick();
   assertEqual(second.emitted.length, 0, "second tick emits nothing");
   assertSkipped(second, idleTaskId, "already_emitted_for_window");
+  assertSkipped(second, waitingTaskId, "already_emitted_for_window");
   assertSkipped(second, currentTaskId, "task_currently_active");
   assertSkipped(second, staleTaskId, "marked_dormant");
 
@@ -139,12 +163,16 @@ try {
   console.log(`  currentRolloutPath:${currentRolloutPath}`);
   console.log(`  staleRolloutPath:  ${staleRolloutPath}`);
   console.log(`  emitted task_id:   ${result.emitted[0].task_id}`);
+  console.log(`  waiting task_id:   ${result.emitted[1].task_id}`);
   console.log(`  idle_seconds:      ${result.emitted[0].idle_seconds}`);
   console.log(`  suppressed task:   ${currentTaskId}`);
   console.log(`  dormant task:      ${staleTaskId}`);
   console.log(`  queue item id:     ${item.id}`);
+  console.log(`  waiting item id:   ${waitingItem.id}`);
   console.log(`  paper title:       ${item.review_packet.title}`);
+  console.log(`  waiting title:     ${waitingItem.review_packet.title}`);
   console.log(`  paper summary:     ${item.review_packet.summary}`);
+  console.log(`  waiting summary:   ${waitingItem.review_packet.summary}`);
 } catch (error) {
   passed = false;
   console.error("FAIL p5 auto-paper codex idle smoke");

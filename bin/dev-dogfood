@@ -57,6 +57,10 @@ try {
     ORCHESTRATOR_SEED_FIXTURE: process.env.ORCHESTRATOR_SEED_FIXTURE ?? (usePostgres ? undefined : emptySeedFixture),
     ORCHESTRATOR_WORKSPACE: process.env.ORCHESTRATOR_WORKSPACE ?? "aerospace",
     ORCHESTRATOR_WORKSPACE_EXECUTE: process.env.ORCHESTRATOR_WORKSPACE_EXECUTE ?? "disabled",
+    EVENTLOOPOS_AUTO_PAPER_ENABLED: process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED ?? "1",
+    EVENTLOOPOS_AUTO_PAPER_TICK_MS: process.env.EVENTLOOPOS_AUTO_PAPER_TICK_MS,
+    EVENTLOOPOS_AUTO_PAPER_IDLE_SECONDS: process.env.EVENTLOOPOS_AUTO_PAPER_IDLE_SECONDS,
+    EVENTLOOPOS_AUTO_DORMANT_HOURS: process.env.EVENTLOOPOS_AUTO_DORMANT_HOURS,
     EVENTLOOPOS_POSTGRES_MIGRATIONS_DIR: process.env.EVENTLOOPOS_POSTGRES_MIGRATIONS_DIR,
   });
   await waitForHealth(orchestratorUrl, 15_000);
@@ -78,6 +82,7 @@ try {
     process.stdout.write(`Shared Codex app-server: ${codexAppServerUrl}\n`);
     process.stdout.write("Open visible Codex threads with: codex --remote <url> resume <thread-id>\n");
   }
+  process.stdout.write(`Auto-paper watcher: ${process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED ?? "1"}\n`);
   if (launchQueueApp) {
     process.stdout.write("Queue app is running. Ctrl-C here stops app, orchestrator, poll loop, and dev Postgres.\n");
   } else {
@@ -464,6 +469,7 @@ function runSelfTest() {
     defaultMcpSourcesPath() === undefined || path.isAbsolute(defaultMcpSourcesPath()),
     "mcp sources path should be absolute when present",
   );
+  assertSelf(process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED === undefined || process.env.EVENTLOOPOS_AUTO_PAPER_ENABLED.length > 0, "auto-paper override should be nonempty when set");
   console.log("dev-dogfood self-test passed");
 }
 

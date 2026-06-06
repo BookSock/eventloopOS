@@ -28,6 +28,10 @@ Environment:
   LAB_DOGFOOD_AMBIENT_SAVE default: 1
   LAB_DOGFOOD_FOLLOWS_WINDOWS default: 1
   LAB_DOGFOOD_FOLLOWS_THRESHOLD default: 2
+  LAB_DOGFOOD_AUTO_PAPER default: 1
+  LAB_DOGFOOD_AUTO_PAPER_TICK_MS default: 30000
+  LAB_DOGFOOD_AUTO_PAPER_IDLE_SECONDS default: 60
+  LAB_DOGFOOD_AUTO_DORMANT_HOURS default: orchestrator default
   LAB_DOGFOOD_READY_TIMEOUT_SECONDS default: 90
   LAB_DOGFOOD_READY_POLL_SECONDS    default: 5
   LAB_MAC_VNC_USER          default: LAB_MAC_USER
@@ -66,6 +70,10 @@ workspace_execute="${LAB_DOGFOOD_WORKSPACE_EXECUTE:-enabled}"
 ambient_save="${LAB_DOGFOOD_AMBIENT_SAVE:-1}"
 follows_windows="${LAB_DOGFOOD_FOLLOWS_WINDOWS:-1}"
 follows_threshold="${LAB_DOGFOOD_FOLLOWS_THRESHOLD:-2}"
+auto_paper="${LAB_DOGFOOD_AUTO_PAPER:-1}"
+auto_paper_tick_ms="${LAB_DOGFOOD_AUTO_PAPER_TICK_MS:-30000}"
+auto_paper_idle_seconds="${LAB_DOGFOOD_AUTO_PAPER_IDLE_SECONDS:-60}"
+auto_dormant_hours="${LAB_DOGFOOD_AUTO_DORMANT_HOURS:-}"
 ready_timeout_seconds="${LAB_DOGFOOD_READY_TIMEOUT_SECONDS:-90}"
 ready_poll_seconds="${LAB_DOGFOOD_READY_POLL_SECONDS:-5}"
 vnc_user="${LAB_MAC_VNC_USER:-$lab_user}"
@@ -99,7 +107,15 @@ export EVENTLOOPOS_AMBIENT_SAVE_DEBOUNCE_MS="${EVENTLOOPOS_AMBIENT_SAVE_DEBOUNCE
 export EVENTLOOPOS_FOLLOWS_WINDOWS="$follows_windows"
 export EVENTLOOPOS_FOLLOWS_THRESHOLD="$follows_threshold"
 export EVENTLOOPOS_FOLLOWS_POLL_MS="${EVENTLOOPOS_FOLLOWS_POLL_MS:-250}"
+export EVENTLOOPOS_AUTO_PAPER_ENABLED="$auto_paper"
+export EVENTLOOPOS_AUTO_PAPER_TICK_MS="$auto_paper_tick_ms"
+export EVENTLOOPOS_AUTO_PAPER_IDLE_SECONDS="$auto_paper_idle_seconds"
 EOF
+  if [[ -n "$auto_dormant_hours" ]]; then
+    cat <<EOF
+export EVENTLOOPOS_AUTO_DORMANT_HOURS="$auto_dormant_hours"
+EOF
+  fi
   if [[ -n "$database_url" ]]; then
     cat <<EOF
 export DATABASE_URL="$database_url"

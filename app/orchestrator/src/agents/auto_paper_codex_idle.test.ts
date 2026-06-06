@@ -394,6 +394,62 @@ describe("AutoPaperCodexIdleWatcher", () => {
     assert.equal(deps.ingested.length, 2);
   });
 
+  it("emits a waiting session paper for approval/input statuses without needing a native thread anchor", async () => {
+    const deps = createDeps({
+      tasks: [],
+      taskSessions: [
+        {
+          id: "task_session_waiting",
+          task_id: "task_agent_waiting",
+          provider: "codex",
+          status: "waiting_approval",
+          updated_at: "2026-05-09T11:20:00.000Z",
+        },
+        {
+          id: "task_session_needs_input",
+          task_id: "task_agent_input",
+          provider: "claude",
+          status: "Needs User Input",
+          updated_at: "2026-05-09T11:25:00.000Z",
+        },
+      ],
+      inspections: new Map(),
+    });
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+    assert.equal(result.considered, 2);
+    assert.deepEqual(result.emitted.map((entry) => entry.task_id), [
+      "task_agent_waiting",
+      "task_agent_input",
+    ]);
+    assert.deepEqual(deps.ingested.map((entry) => entry.event.type), [
+      "codex.task_waiting",
+      "claude.task_waiting",
+    ]);
+    assert.match(deps.ingested[0]!.event.title, /Codex session waiting/);
+    assert.match(deps.ingested[0]!.event.summary, /waiting for human input/);
+    assert.equal(deps.ingested[0]!.event.raw_ref.uri, "eventloopos://task-sessions/task_session_waiting");
+  });
+
+  it("does not paper generic unknown task-session statuses without a native anchor", async () => {
+    const deps = createDeps({
+      tasks: [],
+      taskSessions: [
+        {
+          id: "task_session_pending",
+          task_id: "task_agent_pending",
+          provider: "fake",
+          status: "pending",
+          updated_at: "2026-05-09T11:20:00.000Z",
+        },
+      ],
+      inspections: new Map(),
+    });
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+    assert.equal(result.considered, 0);
+    assert.equal(result.emitted.length, 0);
+    assert.equal(deps.ingested.length, 0);
+  });
+
   it("does not double-consider a Codex task when both task primary anchor and task session point at it", async () => {
     const deps = createDeps({
       tasks: [

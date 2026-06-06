@@ -180,7 +180,8 @@ export class AutoPaperCodexIdleWatcher {
         continue;
       }
 
-      if (candidate.status === "blocked") {
+      const humanAttentionReason = humanAttentionReasonForStatus(candidate.status);
+      if (humanAttentionReason) {
         const anchor = sessionUpdatedAt(candidate.session) ?? now.toISOString();
         const state = this.idleState.get(candidate.key) ?? { lastActivityAt: undefined, lastPaperWindowAnchor: undefined };
         if (state.lastPaperWindowAnchor === anchor) {
@@ -191,10 +192,10 @@ export class AutoPaperCodexIdleWatcher {
           task,
           provider: candidate.provider,
           anchorId: candidate.anchorId,
-          reason: "blocked",
+          reason: humanAttentionReason,
           occurredAt: anchor,
           now,
-          summary: `${providerLabel(candidate.provider)} session blocked on ${task.id}.`,
+          summary: `${providerLabel(candidate.provider)} session ${humanAttentionReason === "blocked" ? "blocked" : "waiting for human input"} on ${task.id}.`,
           rawUri: `eventloopos://task-sessions/${encodeURIComponent(candidate.anchorId)}`,
           rawMediaType: "application/json",
         });
@@ -351,7 +352,7 @@ export class AutoPaperCodexIdleWatcher {
       const status = sessionStatus(session);
       const anchor = sessionAnchor(session, provider);
       if (provider === "codex" && anchor && primaryCodexAnchorsByTaskId.get(taskId) === anchor) continue;
-      if (!anchor && status !== "blocked") continue;
+      if (!anchor && !humanAttentionReasonForStatus(status)) continue;
       const task = tasksById.get(taskId) ?? {
         id: taskId,
         primary_anchor_kind: "task_session",
@@ -376,7 +377,7 @@ function buildAgentAttentionEvent(input: {
   task: AutoPaperTaskRecord;
   provider: string;
   anchorId: string;
-  reason: "idle" | "blocked";
+  reason: "idle" | "blocked" | "waiting";
   occurredAt: string;
   now: Date;
   summary: string;
@@ -400,8 +401,8 @@ function buildAgentAttentionEvent(input: {
     received_at: now.toISOString(),
     actor: { id: "auto_paper_agent_attention", type: "system", name: "Auto-paper watcher" },
     task_hint: taskHint,
-    type: `${provider}.${reason === "blocked" ? "task_blocked" : "task_idle"}`,
-    title: `${label} ${reason === "blocked" ? "session blocked" : "session idle"} on ${task.id}`,
+    type: `${provider}.${eventKindForReason(reason)}`,
+    title: `${label} ${eventTitleForReason(reason)} on ${task.id}`,
     summary: input.summary,
     raw_ref: {
       id: `raw_${eventId}`,
@@ -429,6 +430,64 @@ function sessionStatus(session: TaskRuntimeSession): string | undefined {
   return stringField(session, "status");
 }
 
+function humanAttentionReasonForStatus(status: string | undefined): "blocked" | "waiting" | undefined {
+  const normalized = normalizeStatus(status);
+  if (!normalized) return undefined;
+  if (normalized.includes("blocked")) return "blocked";
+  if (HUMAN_WAITING_STATUSES.has(normalized)) return "waiting";
+  if (
+    normalized.includes("waiting")
+    && (normalized.includes("approval") || normalized.includes("input") || normalized.includes("human") || normalized.includes("user"))
+  ) {
+    return "waiting";
+  }
+  if (
+    normalized.includes("awaiting")
+    && (normalized.includes("approval") || normalized.includes("input") || normalized.includes("human") || normalized.includes("user"))
+  ) {
+    return "waiting";
+  }
+  return undefined;
+}
+
+const HUMAN_WAITING_STATUSES = new Set([
+  "action_required",
+  "approval_required",
+  "awaiting_approval",
+  "awaiting_human",
+  "awaiting_human_input",
+  "awaiting_input",
+  "awaiting_user",
+  "awaiting_user_input",
+  "human_input_required",
+  "input_required",
+  "needs_approval",
+  "needs_human",
+  "needs_human_input",
+  "needs_input",
+  "needs_user",
+  "needs_user_input",
+  "paused_for_input",
+  "requires_approval",
+  "requires_human",
+  "requires_human_input",
+  "requires_input",
+  "requires_user_input",
+  "waiting_approval",
+  "waiting_for_approval",
+  "waiting_for_human",
+  "waiting_for_human_input",
+  "waiting_for_input",
+  "waiting_for_user",
+  "waiting_for_user_input",
+  "waiting_input",
+]);
+
+function normalizeStatus(status: string | undefined): string | undefined {
+  const normalized = status?.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  return normalized ? normalized : undefined;
+}
+
 function sessionUpdatedAt(session: TaskRuntimeSession | undefined): string | undefined {
   return stringField(session, "updated_at") ?? stringField(session, "last_seen_at") ?? stringField(session, "created_at");
 }
@@ -452,6 +511,18 @@ function providerLabel(provider: string): string {
   if (provider === "codex") return "Codex";
   if (provider === "claude") return "Claude";
   return "Agent";
+}
+
+function eventKindForReason(reason: "idle" | "blocked" | "waiting"): string {
+  if (reason === "idle") return "task_idle";
+  if (reason === "blocked") return "task_blocked";
+  return "task_waiting";
+}
+
+function eventTitleForReason(reason: "idle" | "blocked" | "waiting"): string {
+  if (reason === "idle") return "session idle";
+  if (reason === "blocked") return "session blocked";
+  return "session waiting";
 }
 
 function stableId(input: string): string {
