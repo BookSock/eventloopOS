@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
+import { readdir } from "node:fs/promises";
 import type { Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { after, before, beforeEach, describe, it } from "node:test";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+import { defaultMigrationsDir } from "../src/db/migrations.js";
 import { PostgresQueueStore, type EventRecord, type NewQueueItem } from "../src/db/postgres_queue_store.js";
 import type { ReviewPacket } from "../src/contracts.js";
 import { createPostgresGatewayStore } from "../src/gateway_store.js";
@@ -58,29 +60,11 @@ describe("PostgresQueueStore", () => {
     }
 
     const result = await store.pool.query("SELECT id FROM schema_migrations ORDER BY id");
-    assert.deepEqual(result.rows, [
-      { id: "0001_core_queue.sql" },
-      { id: "0002_context_restore_requests.sql" },
-      { id: "0003_observability.sql" },
-      { id: "0004_context_restore_failures.sql" },
-      { id: "0005_mcp_poll_states.sql" },
-      { id: "0006_task_messages.sql" },
-      { id: "0007_agent_runs.sql" },
-      { id: "0008_task_workspace_snapshots.sql" },
-      { id: "0009_queue_action_attempts.sql" },
-      { id: "0010_task_session_terminal_refs.sql" },
-      { id: "0011_onboarding_rejections.sql" },
-      { id: "0012_manual_mode_state.sql" },
-      { id: "0013_tasks.sql" },
-      { id: "0014_tasks_aerospace_workspace.sql" },
-      { id: "0015_window_workspace_observations.sql" },
-      { id: "0016_paper_triggers.sql" },
-      { id: "0017_window_identity_keys.sql" },
-      { id: "0018_tasks_dormant_at.sql" },
-      { id: "0019_follows_window_exclusions.sql" },
-      { id: "0020_task_window_claims.sql" },
-      { id: "0021_task_window_claim_process_root_pid.sql" },
-    ]);
+    const expectedMigrationRows = (await readdir(await defaultMigrationsDir()))
+      .filter((file) => file.endsWith(".sql"))
+      .sort()
+      .map((id) => ({ id }));
+    assert.deepEqual(result.rows, expectedMigrationRows);
 
     const column = await store.pool.query(
       `SELECT data_type, is_nullable
