@@ -6,9 +6,10 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 
 ## Current Evidence
 
-- Latest automated human demo: `artifacts/lab-runs/20260605-220414-human-demo/manifest.json`
-- Latest readiness screenshot: `artifacts/lab-runs/20260606T051407Z-human-demo-ready/screen-sharing.png`
-- Latest readiness manifest: `artifacts/lab-runs/20260606T051407Z-human-demo-ready/manifest.json`
+- Latest automated human demo and readiness artifacts are run-specific. Use
+  `bin/human-demo-ready`, then read the generated
+  `artifacts/lab-runs/*-human-demo-ready/READY.md` for the current proof
+  manifest, screenshots, latency manifests, and suggested human result file.
 - Current result template/artifact writer: `bin/human-demo-result-template --write`
 - Current result verifier: `bin/human-demo-result-verify --lab-status`
 - Current closeout auditor: `bin/human-demo-completion-audit --strict` (JSON output includes `next_actions` with the exact result-template, verification, and closeout commands while pending)
@@ -35,8 +36,8 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 | Desktop paper reminder remains visible outside the queue window | The macOS app opens a non-activating floating `eventloopOS Paper Reminder` HUD with the selected paper title/decision/context and transient hotkey feedback; `QueuePaperReminderPresentation`, `PaperReminderHUDController`, and `PaperReminderFeedbackPresentation` tests cover presentation/window behavior; `bin/human-demo-ready` and completion audit require `checks.paper_reminder_hud_visible=true` and `checks.paper_reminder_feedback_ok=true` | Proven by automation |
 | Screenshot capture for demo inspection | `bin/local-screen-sharing-capture` uses `capture_mode=local_screen_sharing_window`; `bin/lab-mac-human-demo-setup` and `bin/human-demo-ready` fall back to `bin/lab-mac-desktop-capture` with `capture_mode=lab_desktop`; `bin/human-demo-ready` requires a valid latest proof screenshot plus a fresh readiness screenshot with readable image dimensions; `bin/human-demo-result-verify` rejects missing proof/readiness screenshots | Proven by guards; rerun setup for any older no-screenshot demo artifact |
 | Repeatable human demo setup | `bin/lab-mac-human-demo-setup`; latest manifest `ok=true`, queue count 2 | Proven |
-| Manual Mode feedback is immediate | `QueueViewModelTests/testManualModeToggleShowsFeedbackBeforeSavingTaskLayout`; `bin/human-demo-ready` requires `checks.manual_mode_feedback_ok=true`; latest readiness proves Manual Mode enter feedback in 131 ms p95 and return feedback in 132 ms p95 | Proven by automation |
-| Visible feedback during demo | Queue footer `feedback=...`; top HUD transient hotkey feedback; `QueueHarnessStatusTextTests`; `AdvanceToastBannerPresentationTests`; `QueueViewModelTests` post-action lease-conflict coverage proves Done/Defer/Send show saved-action feedback instead of surfacing 409 noise; latest screenshot shows `feedback=Showing paper...`; latest readiness proves Queue feedback in 128 ms p95, top HUD restore feedback in 110 ms p95, and Manual Mode feedback in 131/132 ms p95 | Proven |
+| Manual Mode feedback is immediate | `QueueViewModelTests/testManualModeToggleShowsFeedbackBeforeSavingTaskLayout`; `bin/human-demo-ready` requires `checks.manual_mode_feedback_ok=true`; latest `READY.md` names the current Manual Mode feedback manifest and timings | Proven by automation |
+| Visible feedback during demo | Queue footer `feedback=...`; top HUD transient hotkey feedback; `QueueHarnessStatusTextTests`; `AdvanceToastBannerPresentationTests`; `QueueViewModelTests` post-action lease-conflict coverage proves Done/Defer/Send show saved-action feedback instead of surfacing 409 noise; latest readiness screenshot and `READY.md` name the current Queue, desktop HUD, hotkey, and Manual Mode feedback proof artifacts | Proven |
 | Stale readiness cannot be reused silently | `bin/human-demo-ready` requires latest proof freshness by default; `bin/human-demo-result-template --write` refuses any failed readiness check; `bin/human-demo-completion-audit --strict` requires the latest readiness manifest timestamp to be within the freshness window | Proven |
 | Stale result artifacts cannot be reused silently | `bin/human-demo-completion-audit` targets the current demo's expected result path from latest readiness/demo proof before falling back to older result files, so stale blank artifacts do not mask a missing current walkthrough result | Proven |
 | Stale result verification cannot be reused silently | `bin/human-demo-completion-audit` only auto-selects verification manifests whose `result_path` matches the current expected result; `bin/human-demo-result-verify` records `result_sha256`; the audit compares it to the current result file and fails `verification_matches_current_result_content` after any edit | Proven |

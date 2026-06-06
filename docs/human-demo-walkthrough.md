@@ -39,7 +39,9 @@ stack, verifies the latest human-demo proof artifact, stages the live lab Mac
 back to the Customer demo paper, captures the local Screen Sharing window first,
 falls back to a lab Mac desktop capture if that local window is unavailable,
 runs queue/workspace latency probes on the lab Mac by default, and writes
-`artifacts/lab-runs/*-human-demo-ready/READY.md`.
+`artifacts/lab-runs/*-human-demo-ready/READY.md`. Treat that `READY.md` as the
+source of truth for the current proof paths, screenshots, timings, and suggested
+human result file.
 The screenshot capture gate verifies the chosen artifact exists and has
 readable PNG/JPEG dimensions, and the lab staging gate must pass, so readiness
 cannot pass from an empty, invalid, or wrong-workspace screenshot file. The
@@ -58,15 +60,16 @@ demo readiness proves the Queue path and workspace path are responsive without
 mutating the active paper. On macOS it includes a live hotkey-to-first-feedback
 p95 latency gate and a separate top-HUD feedback proof in the readiness artifact
 by running the probes on the Mac Studio. The Queue feedback gate requires a
-fresh `feedback_seq` change; the desktop HUD proof waits for immediate
-`Restoring paper:` feedback. Screenshot staging still verifies final
+fresh `feedback_seq` change. Screenshot staging still verifies final
 `Showing paper:` feedback after restore. The top-of-screen reminder HUD also
 briefly echoes hotkey feedback, so keyboard users do not need to hunt for the
-Queue footer after pressing a chord. Use `--skip-hotkey-latency` or
-`--skip-paper-reminder-feedback` only while bootstrapping permission setup. The
-readiness gate also presses `Ctrl-Option-M` and `Ctrl-Option-Shift-M` to prove
-Manual Mode entry and return produce visible feedback before any slow layout
-save or restore finishes.
+Queue footer after pressing a chord. The desktop HUD proof accepts stable
+current-paper reminder feedback after restore, so it does not depend on catching
+only the first transient `Restoring paper:` frame. Use `--skip-hotkey-latency`
+or `--skip-paper-reminder-feedback` only while bootstrapping permission setup.
+The readiness gate also presses `Ctrl-Option-M` and `Ctrl-Option-Shift-M` to
+prove Manual Mode entry and return produce visible feedback before any slow
+layout save or restore finishes.
 `READY.md` also names the suggested human result file so the final checklist
 does not accidentally reuse an older blank artifact.
 Use `EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_TARGET=local` or
@@ -76,17 +79,16 @@ orchestrator is running on the controller Mac; the lab demo default keeps
 
 Latest known-good proof:
 
-- Manifest: `artifacts/lab-runs/20260605-220414-human-demo/manifest.json`
-- Screenshot: `artifacts/lab-runs/20260605-220414-human-demo/screen-sharing.png`
-- Readiness manifest: `artifacts/lab-runs/20260606T051407Z-human-demo-ready/manifest.json`
-- Readiness screenshot: `artifacts/lab-runs/20260606T051407Z-human-demo-ready/screen-sharing.png`
+- Run `bin/human-demo-ready`.
+- Open the generated `artifacts/lab-runs/*-human-demo-ready/READY.md`.
+- Use the paths and timings in that file as the current proof of record.
 - Queue proof: 2 current-run papers.
 - Ambient proof: customer paper context saved the moved shared TextEdit, and the automated scratch window was remembered by the current paper before cleanup.
 - Background containment proof: Metrics Chrome was intentionally pushed into the Customer paper and moved back to the Metrics paper.
 - Agent-spawn containment proof: a Metrics-owned Chrome window was opened while Customer was focused, claimed, moved back to Metrics, and Customer focus was restored.
-- Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture; readiness also proves live Queue feedback in 128 ms p95.
-- Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper and proves restore-hotkey HUD feedback in 110 ms p95.
-- Manual Mode feedback proof: readiness proves `Ctrl-Option-M` enter feedback in 131 ms p95 and `Ctrl-Option-Shift-M` return feedback in 132 ms p95.
+- Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture; readiness also proves live Queue feedback within the configured budget.
+- Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper and proves restore-hotkey HUD feedback within the configured budget.
+- Manual Mode feedback proof: readiness proves `Ctrl-Option-M` enter feedback and `Ctrl-Option-Shift-M` return feedback within the configured budget.
 
 ## Starting State
 
