@@ -1,5 +1,6 @@
 import type { TaskSessionController } from "./types.js";
 import { normalizeTaskSessionPidFields } from "./pid_fields.js";
+import { normalizeAgentRunStatus } from "../contracts.js";
 
 export type CodexNativeThread = {
   id: string;
@@ -53,7 +54,7 @@ export type CodexTaskSession = {
   name?: string;
   preview?: string;
   cwd?: string;
-  status: "idle" | "running" | "blocked" | "stopped" | "lost";
+  status: "idle" | "running" | "blocked" | "stopped" | "lost" | string;
   supports: {
     steer: boolean;
     followup: boolean;
@@ -424,18 +425,16 @@ export function nativeThreadIdFromTaskSessionId(taskSessionId: string): string |
 }
 
 function taskSessionStatusForCodexThread(status: string | undefined): CodexTaskSession["status"] {
-  switch (status) {
-    case "running":
-    case "idle":
-    case "blocked":
-      return status;
-    case "closed":
-    case "archived":
-    case "stopped":
-      return "stopped";
-    default:
-      return "idle";
+  const normalized = status?.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!normalized) return "idle";
+  if (normalized === "running" || normalized === "idle" || normalized === "blocked" || normalized === "stopped" || normalized === "lost") {
+    return normalized;
   }
+  if (normalized === "closed" || normalized === "archived") return "stopped";
+  if (normalized.includes("lost")) return "lost";
+  const agentStatus = normalizeAgentRunStatus(normalized);
+  if (agentStatus === "blocked" || agentStatus === "waiting_approval") return agentStatus;
+  return "idle";
 }
 
 function timestampFromThread(iso: string | undefined, unixSeconds: number | undefined): string {

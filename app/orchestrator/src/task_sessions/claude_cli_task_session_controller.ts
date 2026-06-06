@@ -1,5 +1,6 @@
 import type { TaskSessionController } from "./types.js";
 import { normalizeTaskSessionPidFields } from "./pid_fields.js";
+import { normalizeAgentRunStatus } from "../contracts.js";
 
 export type ClaudeCliSessionConfig = {
   session_id: string;
@@ -26,7 +27,7 @@ export type ClaudeCliTaskSession = {
   native_session_id: string;
   name?: string;
   cwd?: string;
-  status: "idle" | "running" | "blocked" | "stopped" | "lost";
+  status: "idle" | "running" | "blocked" | "stopped" | "lost" | string;
   supports: {
     steer: boolean;
     followup: boolean;
@@ -280,9 +281,16 @@ function parseClaudeResultSessionId(stdout: string): string | undefined {
 }
 
 function parseStatus(value: unknown): ClaudeCliTaskSession["status"] | undefined {
-  return value === "idle" || value === "running" || value === "blocked" || value === "stopped" || value === "lost"
-    ? value
-    : undefined;
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!normalized) return undefined;
+  if (normalized === "idle" || normalized === "running" || normalized === "blocked" || normalized === "stopped" || normalized === "lost") {
+    return normalized;
+  }
+  if (normalized.includes("lost")) return "lost";
+  const agentStatus = normalizeAgentRunStatus(normalized);
+  if (agentStatus === "blocked" || agentStatus === "waiting_approval") return agentStatus;
+  return undefined;
 }
 
 function optionalString(value: unknown): string | undefined {

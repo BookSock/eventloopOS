@@ -108,6 +108,35 @@ describe("CodexAppServerThreadClient", () => {
     assert.equal((await client.listThreads())[0]?.task_id, "task_blog_feedback");
   });
 
+  it("preserves app-server human-attention statuses for auto-paper routing", async () => {
+    const client = new CodexAppServerThreadClient(
+      async () => ({
+        data: [
+          {
+            id: "thread_waiting",
+            name: "[task:checkout] Checkout",
+            status: { type: "waiting-for-user-input" },
+          },
+          {
+            id: "thread_review",
+            name: "[task:review] Review",
+            status: "ready_for_review",
+          },
+          {
+            id: "thread_lost",
+            name: "[task:lost] Lost",
+            status: { type: "native-thread-lost" },
+          },
+        ],
+        nextCursor: null,
+      }),
+    );
+
+    const statuses = (await client.listThreads()).map((thread) => thread.status);
+
+    assert.deepEqual(statuses, ["waiting_approval", "waiting_approval", "lost"]);
+  });
+
   it("supports async task id lookup before static maps and name tags", async () => {
     const client = new CodexAppServerThreadClient(
       async () => ({

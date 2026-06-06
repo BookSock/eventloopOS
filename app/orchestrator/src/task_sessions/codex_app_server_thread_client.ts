@@ -1,5 +1,6 @@
 import type { CodexNativeThread, CodexNativeThreadClient, CodexNativeTurn } from "./codex_native_thread_controller.js";
 import { normalizeTaskSessionPidFields } from "./pid_fields.js";
+import { normalizeAgentRunStatus } from "../contracts.js";
 
 export type CodexAppServerRequest = (request: {
   method: "initialize" | "thread/start" | "thread/list" | "thread/read" | "turn/start";
@@ -183,8 +184,20 @@ function codexStatusToNative(status: string | undefined): CodexNativeThread["sta
     case "archived":
       return "stopped";
     default:
-      return "idle";
+      return normalizeHumanAttentionStatus(status) ?? "idle";
   }
+}
+
+function normalizeHumanAttentionStatus(status: string | undefined): CodexNativeThread["status"] | undefined {
+  const normalized = status?.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+  if (!normalized) return undefined;
+  if (normalized === "running" || normalized === "idle" || normalized === "blocked" || normalized === "stopped" || normalized === "lost") {
+    return normalized;
+  }
+  if (normalized.includes("lost")) return "lost";
+  const agentStatus = normalizeAgentRunStatus(normalized);
+  if (agentStatus === "blocked" || agentStatus === "waiting_approval") return agentStatus;
+  return undefined;
 }
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {

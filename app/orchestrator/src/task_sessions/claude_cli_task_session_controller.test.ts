@@ -188,6 +188,10 @@ describe("parseClaudeSessionConfigs", () => {
         terminal_pid: 509,
         pids: [510, 511],
       },
+      "session-c": {
+        task_id: "task_checkout",
+        status: "Needs User Input",
+      },
     })), [
       {
         session_id: "session-a",
@@ -209,6 +213,18 @@ describe("parseClaudeSessionConfigs", () => {
         terminal_pid: 509,
         root_pid: 509,
         pids: [509, 510, 511],
+      },
+      {
+        session_id: "session-c",
+        task_id: "task_checkout",
+        name: undefined,
+        cwd: undefined,
+        model: undefined,
+        tools: undefined,
+        max_budget_usd: undefined,
+        status: "waiting_approval",
+        created_at: undefined,
+        updated_at: undefined,
       },
     ]);
   });

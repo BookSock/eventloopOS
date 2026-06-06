@@ -104,6 +104,29 @@ describe("CodexNativeThreadController", () => {
     ]);
   });
 
+  it("keeps native human-attention statuses visible to auto-paper routing", async () => {
+    const controller = new CodexNativeThreadController(fakeClient({
+      threads: [
+        {
+          id: "thread_waiting",
+          task_id: "task_checkout",
+          status: "needs-user-input",
+          updated_at: "2026-05-06T18:00:00.000Z",
+        },
+        {
+          id: "thread_review",
+          task_id: "task_review",
+          status: "ready_for_review",
+          updated_at: "2026-05-06T18:01:00.000Z",
+        },
+      ],
+    }));
+
+    const sessions = await controller.listSessions();
+
+    assert.deepEqual(sessions.map((session) => session.status), ["waiting_approval", "waiting_approval"]);
+  });
+
   it("decodes task session ids back to native thread ids", () => {
     assert.equal(nativeThreadIdFromTaskSessionId(taskSessionIdForNativeThread("thread_blog_123")), "thread_blog_123");
     assert.equal(nativeThreadIdFromTaskSessionId("terminal_session_123"), undefined);
