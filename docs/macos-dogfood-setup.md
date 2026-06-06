@@ -85,6 +85,11 @@ Set `SCREEN_SHARING_RAISE=1` only when you explicitly want the helper to raise
 and focus Screen Sharing before capture. The default capture engine is
 CoreGraphics; set `SCREEN_SHARING_CAPTURE_ENGINE=screencapture` only when you
 explicitly want the old system `screencapture -l` behavior.
+Treat the direct local helper as manual debugging only: no-raise capture records
+and fails focus changes, but it can still briefly change focus on some macOS
+states. Demo setup/readiness wrappers skip local Screen Sharing capture unless
+`EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1` is set, and otherwise use lab
+desktop capture over SSH.
 
 This answers only "are SSH and VNC reachable?" and skips sync, baseline,
 screenshots, and Codex. Use it while the Mac is rebooting or probably offline.

@@ -30,6 +30,7 @@ const manualModeFeedbackRequested = args.includes("--manual-mode-feedback") || p
 const manualModeFeedbackEnabled = !skipManualModeFeedback && (manualModeFeedbackRequested || process.platform === "darwin");
 const jsonOnly = args.includes("--json");
 const screenshotTarget = normalizeScreenshotTarget(process.env.EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET ?? "lab");
+const localScreenSharingCaptureAllowed = process.env.EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE === "1";
 
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-queue-latency] [--skip-workspace-latency] [--skip-hotkey-latency] [--hotkey-latency] [--skip-master-command-hotkey] [--master-command-hotkey] [--skip-paper-reminder-feedback] [--paper-reminder-feedback] [--skip-manual-mode-feedback] [--manual-mode-feedback] [--demo-proof-max-age-hours n] [--allow-stale-demo-proof] [--json]
@@ -78,8 +79,8 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_BUDGET_MS default: 3000
   EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=lab|auto|local default: lab
     lab captures the Mac Studio desktop over SSH and never focuses local Screen Sharing
-    local captures the local Screen Sharing window without raising it unless SCREEN_SHARING_RAISE=1
-    auto tries local first, then falls back to lab
+    local requires EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1
+    auto uses lab unless EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1 is set
 `);
   process.exit(0);
 }
@@ -220,6 +221,7 @@ const manifest = {
   hotkey_latency_required: hotkeyLatencyEnabled,
   manual_mode_feedback_required: manualModeFeedbackEnabled,
   screenshot_target: screenshotTarget,
+  local_screen_sharing_capture_allowed: localScreenSharingCaptureAllowed,
   demo_proof_max_age_hours: demoProofMaxAgeHours,
   allow_stale_demo_proof: allowStaleDemoProof,
   checks,
@@ -1159,12 +1161,16 @@ function runWorkspaceLatencyStep(manifestPath, envOverride) {
 
 function runScreenshotStep(localOutputPath, envOverride, label) {
   if (screenshotTarget === "local") {
+    if (!localScreenSharingCaptureAllowed) return localScreenSharingCaptureNotAllowed(localOutputPath);
     return runLocalScreenSharingCapture(localOutputPath, envOverride, label);
   }
   if (screenshotTarget === "lab") {
     return runLabDesktopCapture(envOverride, "requested", label);
   }
 
+  if (!localScreenSharingCaptureAllowed) {
+    return runLabDesktopCapture(envOverride, "local_screen_sharing_capture_not_opted_in", label);
+  }
   const local = runLocalScreenSharingCapture(localOutputPath, envOverride, label);
   if (local.ok) return local;
 
@@ -1178,9 +1184,27 @@ function runScreenshotStep(localOutputPath, envOverride, label) {
   };
 }
 
+function localScreenSharingCaptureNotAllowed(localOutputPath) {
+  return {
+    ok: false,
+    capture_mode: "local_screen_sharing_window",
+    target: "local",
+    output: localOutputPath,
+    skipped: true,
+    reason: "local_screen_sharing_capture_requires_EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1",
+    image: {
+      ok: false,
+      path: localOutputPath,
+      reason: "local_screen_sharing_capture_not_opted_in",
+    },
+  };
+}
+
 function runLocalScreenSharingCapture(localOutputPath, envOverride, label = "screen-sharing") {
-  const step = runStep(`${label} local screen sharing capture`, "bin/local-screen-sharing-capture", [localOutputPath], envOverride);
+  const captureEnv = localScreenSharingNoFocusEnv(envOverride);
+  const step = runStep(`${label} local screen sharing capture`, "bin/local-screen-sharing-capture", [localOutputPath], captureEnv);
   const image = imageArtifactSummary(localOutputPath);
+  const captureManifest = readJsonIfPresent(localOutputPath.replace(/\.png$/i, ".json"));
   return {
     ok: step.status === 0 && image.ok === true,
     capture_mode: "local_screen_sharing_window",
@@ -1188,8 +1212,28 @@ function runLocalScreenSharingCapture(localOutputPath, envOverride, label = "scr
     output: localOutputPath,
     exit_code: step.status,
     image,
+    local_capture_manifest: captureManifest ? {
+      capture_engine: captureManifest.capture_engine,
+      raise_requested: captureManifest.raise_requested,
+      assert_no_focus: captureManifest.assert_no_focus,
+      frontmost_before: captureManifest.frontmost_before,
+      frontmost_after: captureManifest.frontmost_after,
+      focus_changed: captureManifest.focus_changed,
+      focus_assertion_failed: captureManifest.focus_assertion_failed,
+    } : undefined,
     stdout_path: step.stdout_path,
     stderr_path: step.stderr_path,
+  };
+}
+
+function localScreenSharingNoFocusEnv(envOverride) {
+  return {
+    ...envOverride,
+    SCREEN_SHARING_TITLE: envOverride.SCREEN_SHARING_TITLE ?? "Zeus",
+    SCREEN_SHARING_RAISE: "0",
+    EVENTLOOPOS_SCREEN_SHARING_RAISE: "0",
+    SCREEN_SHARING_CAPTURE_ENGINE: "coregraphics",
+    SCREEN_SHARING_ASSERT_NO_FOCUS: "1",
   };
 }
 
@@ -1614,6 +1658,23 @@ function runSelfTest() {
   assert.equal(shellQuote("a'b"), "'a'\\''b'");
   assert.equal(safeCaptureLabel("human demo final"), "human-demo-final");
   assert.equal(safeCaptureLabel(""), "human-demo-ready");
+  const noFocusCaptureEnv = localScreenSharingNoFocusEnv({
+    SCREEN_SHARING_TITLE: "Mac Studio",
+    SCREEN_SHARING_RAISE: "1",
+    EVENTLOOPOS_SCREEN_SHARING_RAISE: "1",
+    SCREEN_SHARING_CAPTURE_ENGINE: "screencapture",
+    SCREEN_SHARING_ASSERT_NO_FOCUS: "0",
+  });
+  assert.equal(noFocusCaptureEnv.SCREEN_SHARING_TITLE, "Mac Studio");
+  assert.equal(noFocusCaptureEnv.SCREEN_SHARING_RAISE, "0");
+  assert.equal(noFocusCaptureEnv.EVENTLOOPOS_SCREEN_SHARING_RAISE, "0");
+  assert.equal(noFocusCaptureEnv.SCREEN_SHARING_CAPTURE_ENGINE, "coregraphics");
+  assert.equal(noFocusCaptureEnv.SCREEN_SHARING_ASSERT_NO_FOCUS, "1");
+  const notAllowedCapture = localScreenSharingCaptureNotAllowed("artifacts/lab-runs/ready/screen-sharing.png");
+  assert.equal(notAllowedCapture.ok, false);
+  assert.equal(notAllowedCapture.skipped, true);
+  assert.equal(notAllowedCapture.reason, "local_screen_sharing_capture_requires_EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1");
+  assert.equal(notAllowedCapture.image.reason, "local_screen_sharing_capture_not_opted_in");
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-r", "--expect", "Review Demo Customer Reply", "--runs", "5"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD = "ctrl-option-h";
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h"]);

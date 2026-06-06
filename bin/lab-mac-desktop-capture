@@ -358,7 +358,7 @@ const processes = read("processes-interesting.txt");
 const queueMenu = read("queue-menu-items.txt");
 const axSummary = read("queue-ax-summary.txt");
 const axTree = read("queue-ax-tree.txt");
-const accessibilityError = [
+const accessibilityProbeError = [
   read("windows-system-events.err"),
   read("frontmost-app.err"),
   read("queue-menu-items.err"),
@@ -379,6 +379,17 @@ const queueWindowCount = Array.isArray(windows)
 const systemEventQueueWindowCount = Array.isArray(systemEventWindows)
   ? systemEventWindows.filter((window) => /eventloop|queue/i.test(String(window["app-name"] ?? ""))).length
   : 0;
+const axSummaryPresent = /process=(EventLoopQueueApp|eventloopOS Queue)/.test(axSummary);
+const axTreePresent = axTree.includes("AXWindow") || axTree.includes("window");
+const harnessStatusLine = axTree.split(/\r?\n/).find((line) => /queue-harness-status|eventloopOS harness status/.test(line)) ?? "";
+const harnessStatusPresent = harnessStatusLine !== "";
+const menuItemsPresent = queueMenu.includes("Pull Next Paper") && queueMenu.includes("Master Command");
+const queueInspectionSucceeded = systemEventQueueWindowCount > 0
+  || axSummaryPresent
+  || axTreePresent
+  || harnessStatusPresent
+  || menuItemsPresent;
+const accessibilityError = queueInspectionSucceeded ? "" : accessibilityProbeError;
 const ioreg = read("ioreg-root.txt");
 const consoleSession = ioreg.match(/\{[^}]*"kCGSSessionOnConsoleKey"=Yes[^}]*\}/)?.[0] ?? "";
 const consoleUser = consoleSession.match(/"kCGSession(?:Long)?UserNameKey"="([^"]+)"/)?.[1] ?? read("console-user.txt");
@@ -415,13 +426,14 @@ const summary = {
     ax_window_title_present: /eventloopOS Queue/i.test(axWindowTitles),
     paper_reminder_hud_present: paperReminderHudWindowCount > 0 || axWindowTitles.includes("eventloopOS Paper Reminder"),
     paper_reminder_hud_window_count: paperReminderHudWindowCount,
-    menu_items_present: queueMenu.includes("Pull Next Paper") && queueMenu.includes("Master Command"),
-    ax_summary_present: /process=(EventLoopQueueApp|eventloopOS Queue)/.test(axSummary),
-    ax_tree_present: axTree.includes("AXWindow") || axTree.includes("window"),
+    menu_items_present: menuItemsPresent,
+    ax_summary_present: axSummaryPresent,
+    ax_tree_present: axTreePresent,
     ax_tree_bytes: Buffer.byteLength(axTree),
-    harness_status_present: /queue-harness-status|eventloopOS harness status/.test(axTree),
-    harness_status_line: axTree.split(/\r?\n/).find((line) => /queue-harness-status|eventloopOS harness status/.test(line)) ?? "",
+    harness_status_present: harnessStatusPresent,
+    harness_status_line: harnessStatusLine,
     accessibility_error: accessibilityError,
+    accessibility_probe_error: accessibilityProbeError,
     accessibility_failure_hint: accessibilityFailureHint(accessibilityError, tccRows),
     tcc_terminal_accessibility: terminalAccessibilityTcc(tccRows),
   },
@@ -796,33 +808,50 @@ const axWindowTitles = axSummary.match(/(?:^|\n)window_titles=(.*)$/)?.[1] ?? ""
 const paperReminderHudWindowCount = Array.isArray(windows)
   ? windows.filter((window) => String(window["window-title"] ?? "") === "eventloopOS Paper Reminder").length
   : 0;
+const systemEventQueueWindowCount = Array.isArray(systemEventWindows)
+  ? systemEventWindows.filter((window) => /eventloop|queue/i.test(String(window["app-name"] ?? ""))).length
+  : 0;
+const axSummaryPresent = /process=(EventLoopQueueApp|eventloopOS Queue)/.test(axSummary);
+const axTreePresent = axTree.includes("AXWindow") || axTree.includes("window");
+const harnessStatusLine = axTree.split(/\r?\n/).find((line) => /queue-harness-status|eventloopOS harness status/.test(line)) ?? "";
+const harnessStatusPresent = harnessStatusLine !== "";
+const menuItemsPresent = queueMenu.includes("Pull Next Paper") && queueMenu.includes("Master Command");
+const accessibilityProbeError = [
+  read("windows-system-events.err"),
+  read("frontmost-app.err"),
+  read("queue-menu-items.err"),
+  read("queue-ax-summary.err"),
+  read("queue-ax-tree.err"),
+].filter(Boolean).join("\n");
+const queueInspectionSucceeded = systemEventQueueWindowCount > 0
+  || axSummaryPresent
+  || axTreePresent
+  || harnessStatusPresent
+  || menuItemsPresent;
+const accessibilityError = queueInspectionSucceeded ? "" : accessibilityProbeError;
 summary.queue_app = {
   ...summary.queue_app,
   process_present: /EventLoopQueueApp|eventloopOS Queue/.test(processes),
   aerospace_window_count: Array.isArray(windows)
     ? windows.filter((window) => /eventloop|queue/i.test(String(window["app-name"] ?? ""))).length
     : 0,
-  system_events_window_count: Array.isArray(systemEventWindows)
-    ? systemEventWindows.filter((window) => /eventloop|queue/i.test(String(window["app-name"] ?? ""))).length
-    : 0,
+  system_events_window_count: systemEventQueueWindowCount,
   ax_window_count: axWindowCount,
   ax_window_titles: axWindowTitles,
   ax_window_title_present: /eventloopOS Queue/i.test(axWindowTitles),
   paper_reminder_hud_present: paperReminderHudWindowCount > 0 || axWindowTitles.includes("eventloopOS Paper Reminder"),
   paper_reminder_hud_window_count: paperReminderHudWindowCount,
-  menu_items_present: queueMenu.includes("Pull Next Paper") && queueMenu.includes("Master Command"),
-  ax_summary_present: /process=(EventLoopQueueApp|eventloopOS Queue)/.test(axSummary),
-  ax_tree_present: axTree.includes("AXWindow") || axTree.includes("window"),
+  menu_items_present: menuItemsPresent,
+  ax_summary_present: axSummaryPresent,
+  ax_tree_present: axTreePresent,
   ax_tree_bytes: Buffer.byteLength(axTree),
-  harness_status_present: /queue-harness-status|eventloopOS harness status/.test(axTree),
-  harness_status_line: axTree.split(/\r?\n/).find((line) => /queue-harness-status|eventloopOS harness status/.test(line)) ?? "",
-  accessibility_error: [
-    read("windows-system-events.err"),
-    read("frontmost-app.err"),
-    read("queue-menu-items.err"),
-    read("queue-ax-summary.err"),
-    read("queue-ax-tree.err"),
-  ].filter(Boolean).join("\n"),
+  harness_status_present: harnessStatusPresent,
+  harness_status_line: harnessStatusLine,
+  accessibility_error: accessibilityError,
+  accessibility_probe_error: accessibilityProbeError,
+  accessibility_failure_hint: queueInspectionSucceeded
+    ? ""
+    : (summary.queue_app?.accessibility_failure_hint ?? ""),
 };
 summary.gui_fallback = {
   used: true,

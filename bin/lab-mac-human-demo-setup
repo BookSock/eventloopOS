@@ -16,7 +16,7 @@ Environment:
   LAB_DOGFOOD_URL        default: http://127.0.0.1:4480
   SCREEN_SHARING_TITLE   default: Zeus
   EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET default: lab (lab|auto|local)
-  SCREEN_SHARING_RAISE   default: 0; set 1 only when local capture should raise/focus
+  EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE default: 0; set 1 before any local Screen Sharing capture.
 EOF
 }
 
@@ -48,6 +48,7 @@ eventloop_path="${LAB_MAC_EVENTLOOP_PATH:-~/dev/2026/eventloopOS}"
 profile="${LAB_DOGFOOD_PROFILE:-lab-human-demo}"
 url="${LAB_DOGFOOD_URL:-http://127.0.0.1:4480}"
 screenshot_target="${EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET:-lab}"
+allow_local_screen_sharing_capture="${EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE:-0}"
 remote="${lab_user}@${lab_host}"
 run_dir="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-human-demo"
 manifest="$run_dir/manifest.json"
@@ -130,9 +131,19 @@ exit 1
 }
 
 capture_local_screen_sharing() {
+  if [[ "$allow_local_screen_sharing_capture" != "1" ]]; then
+    echo "local Screen Sharing capture skipped: set EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1 to opt in" >&2
+    printf "%s\n" "skipped_not_opted_in" >"$run_dir/screen-sharing.exit"
+    return 1
+  fi
   echo "human demo local Screen Sharing capture"
   set +e
-  SCREEN_SHARING_TITLE="${SCREEN_SHARING_TITLE:-Zeus}" bin/local-screen-sharing-capture "$run_dir/screen-sharing.png" >"$run_dir/screen-sharing.out" 2>"$run_dir/screen-sharing.err"
+  SCREEN_SHARING_TITLE="${SCREEN_SHARING_TITLE:-Zeus}" \
+    SCREEN_SHARING_RAISE=0 \
+    EVENTLOOPOS_SCREEN_SHARING_RAISE=0 \
+    SCREEN_SHARING_CAPTURE_ENGINE=coregraphics \
+    SCREEN_SHARING_ASSERT_NO_FOCUS=1 \
+    bin/local-screen-sharing-capture "$run_dir/screen-sharing.png" >"$run_dir/screen-sharing.out" 2>"$run_dir/screen-sharing.err"
   screenshot_exit=$?
   set -e
   printf "%s\n" "$screenshot_exit" >"$run_dir/screen-sharing.exit"
@@ -197,7 +208,11 @@ if [[ "$skip_screenshot" == "0" ]]; then
       capture_local_screen_sharing || true
       ;;
     auto)
-      capture_local_screen_sharing || capture_lab_desktop || true
+      if [[ "$allow_local_screen_sharing_capture" == "1" ]]; then
+        capture_local_screen_sharing || capture_lab_desktop || true
+      else
+        capture_lab_desktop || true
+      fi
       ;;
   esac
 fi
