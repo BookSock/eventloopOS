@@ -21,6 +21,8 @@ const paperCustomer = {
   textTitle: "eventloopOS Human Demo Shared Notes.txt",
   scratchTitle: "eventloopOS Human Demo Scratch Pad.txt",
   scratchFile: path.join(demoDir, "eventloopOS Human Demo Scratch Pad.txt"),
+  decisionNeeded: "Decide what to tell the customer about Mac dogfood readiness and note any UX friction.",
+  recommendedActionLabel: "Send customer reply guidance",
   priority: 1500,
 };
 const paperMetrics = {
@@ -32,6 +34,8 @@ const paperMetrics = {
   agentSpawnTitle: "eventloopOS Human Demo Agent Spawned Chrome",
   agentSpawnFile: path.join(demoDir, "eventloopOS Human Demo Agent Spawned Chrome.html"),
   textTitle: "eventloopOS Human Demo Shared Notes.txt",
+  decisionNeeded: "Review whether shared-window restore and ambient autosave behaved correctly across papers.",
+  recommendedActionLabel: "Send metrics review guidance",
   priority: 1450,
 };
 
@@ -1085,6 +1089,9 @@ async function queuePaper(paper, summary) {
           details: {
             task_id: paper.taskId,
             workspace: paper.workspace,
+            paper_decision_needed: paper.decisionNeeded,
+            paper_recommended_action_label: paper.recommendedActionLabel,
+            paper_alternate_action_label: "Mark demo paper handled",
           },
         }],
       },
@@ -1293,6 +1300,14 @@ function assertDemoInstructions() {
   const agentSpawnLine = demoWalkthrough.find((line) => line.includes("Agent-spawn containment proof"));
   if (!agentSpawnLine?.includes("Chrome")) {
     throw new Error(`agent-spawn walkthrough must demonstrate Chrome contamination, got: ${agentSpawnLine ?? "missing"}`);
+  }
+  for (const paper of [paperCustomer, paperMetrics]) {
+    if (!paper.decisionNeeded?.includes(" ")) {
+      throw new Error(`demo paper ${paper.taskId} is missing decision reminder text`);
+    }
+    if (!paper.recommendedActionLabel?.includes("guidance")) {
+      throw new Error(`demo paper ${paper.taskId} is missing action label`);
+    }
   }
 }
 

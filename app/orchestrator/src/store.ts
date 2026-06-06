@@ -1025,6 +1025,7 @@ function createReviewPacketFromEvent(
   const taskId = taskIdForHint(event.task_hint);
   const isOnboardingWorkbenchPaper = event.source === "onboarding" && event.type === "manual.review_requested";
   const agentAttentionReason = autoPaperAgentAttentionReason(event);
+  const paperMetadata = trustedPaperMetadataFromEvent(event);
   const recommendedAction: Action = {
     id: `act_${stableEventId}_review`,
     type: isOnboardingWorkbenchPaper ? "mark_done" : "resume_agent",
@@ -1032,7 +1033,7 @@ function createReviewPacketFromEvent(
       ? "Work this paper, then Done / Next"
       : agentAttentionReason
         ? autoPaperRecommendedActionLabel(agentAttentionReason)
-        : "Route to task agent",
+        : paperMetadata.recommendedActionLabel ?? "Route to task agent",
     requires_confirmation: !isOnboardingWorkbenchPaper,
     side_effect: isOnboardingWorkbenchPaper ? "none" : "local",
     payload: {
@@ -1048,9 +1049,10 @@ function createReviewPacketFromEvent(
     task_id: taskId,
     title: `Review ${event.title}`,
     summary: event.summary || event.title,
-    decision_needed: agentAttentionReason
-      ? autoPaperDecisionNeeded(agentAttentionReason)
-      : decisionNeededForRoute(routeDecision),
+    decision_needed: paperMetadata.decisionNeeded
+      ?? (agentAttentionReason
+        ? autoPaperDecisionNeeded(agentAttentionReason)
+        : decisionNeededForRoute(routeDecision)),
     risk_level: agentAttentionReason === "idle" ? "low" : "medium",
     confidence: isOnboardingWorkbenchPaper ? "high" : routeDecision.confidence,
     risk_tags: isOnboardingWorkbenchPaper ? ["onboarding_workbench"] : agentAttentionReason ? [] : ["external_send"],
@@ -1061,7 +1063,7 @@ function createReviewPacketFromEvent(
       {
         id: `act_${stableEventId}_done`,
         type: "mark_done",
-        label: agentAttentionReason ? "Mark handled" : "Ignore for now",
+        label: paperMetadata.alternateActionLabel ?? (agentAttentionReason ? "Mark handled" : "Ignore for now"),
         requires_confirmation: false,
         side_effect: "none",
         payload: {
@@ -1277,6 +1279,44 @@ function decisionNeededForRoute(routeDecision: RouteDecision): string {
     return "No confident task match. Decide whether this event needs a task, can be ignored, or should wait.";
   }
   return "Decide whether to route this new event into a task agent now.";
+}
+
+type TrustedPaperMetadata = {
+  decisionNeeded?: string;
+  recommendedActionLabel?: string;
+  alternateActionLabel?: string;
+};
+
+const trustedPaperMetadataSources = new Set([
+  "human_demo",
+  "human_demo_probe",
+  "manual",
+  "onboarding",
+]);
+
+function trustedPaperMetadataFromEvent(event: McpEvent): TrustedPaperMetadata {
+  if (!trustedPaperMetadataSources.has(event.source)) return {};
+
+  for (const resource of event.resources) {
+    if (!isRecord(resource)) continue;
+    const details = isRecord(resource.details) ? resource.details : resource;
+    const decisionNeeded = nonEmptyMetadataString(details.paper_decision_needed);
+    const recommendedActionLabel = nonEmptyMetadataString(details.paper_recommended_action_label);
+    const alternateActionLabel = nonEmptyMetadataString(details.paper_alternate_action_label);
+    if (decisionNeeded || recommendedActionLabel || alternateActionLabel) {
+      return {
+        decisionNeeded,
+        recommendedActionLabel,
+        alternateActionLabel,
+      };
+    }
+  }
+
+  return {};
+}
+
+function nonEmptyMetadataString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 type AutoPaperAgentAttentionReason = "idle" | "waiting" | "blocked" | "lost";
