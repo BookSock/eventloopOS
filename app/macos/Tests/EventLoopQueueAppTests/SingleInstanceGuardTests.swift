@@ -39,4 +39,43 @@ final class SingleInstanceGuardTests: XCTestCase {
 
         XCTAssertEqual(decision, .proceed)
     }
+
+    func testForegroundsExistingWhenBundleIdentifierIsMissingButExecutableMatches() {
+        let decision = decideSingleInstance(
+            currentProcessIdentifier: 1234,
+            targetBundleIdentifier: nil,
+            targetExecutablePath: "/tmp/eventloopOS/.build/debug/EventLoopQueueApp",
+            runningApplications: [
+                RunningInstance(
+                    processIdentifier: 4242,
+                    bundleIdentifier: nil,
+                    executablePath: "/tmp/eventloopOS/.build/debug/EventLoopQueueApp"
+                ),
+                RunningInstance(
+                    processIdentifier: 1234,
+                    bundleIdentifier: nil,
+                    executablePath: "/tmp/eventloopOS/.build/debug/EventLoopQueueApp"
+                ),
+            ]
+        )
+
+        XCTAssertEqual(decision, .foregroundExisting(processIdentifier: 4242))
+    }
+
+    func testProceedsWhenBundleIdentifierIsMissingAndExecutableDiffers() {
+        let decision = decideSingleInstance(
+            currentProcessIdentifier: 1234,
+            targetBundleIdentifier: nil,
+            targetExecutablePath: "/tmp/eventloopOS/.build/debug/EventLoopQueueApp",
+            runningApplications: [
+                RunningInstance(
+                    processIdentifier: 4242,
+                    bundleIdentifier: nil,
+                    executablePath: "/tmp/other-eventloopOS/.build/debug/EventLoopQueueApp"
+                ),
+            ]
+        )
+
+        XCTAssertEqual(decision, .proceed)
+    }
 }
