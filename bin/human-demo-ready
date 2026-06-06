@@ -110,7 +110,7 @@ let screenshot;
 let screenshotStage;
 if (!skipScreenshot) {
   screenshotStage = runLabDemoScreenshotStageStep(env);
-  screenshot = runScreenshotStep(path.join(runDir, "screen-sharing.png"), env);
+  screenshot = runScreenshotStep(path.join(runDir, "screen-sharing.png"), env, "human-demo-ready");
 }
 const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
 const masterCommandHotkeyManifestPath = path.join(runDir, "master-command-hotkey.json");
@@ -155,6 +155,17 @@ const manualModeFeedback = manualModeFeedbackEnabled && hotkeyProofsCanRun
   )
   : undefined;
 
+let finalHandoffStage;
+let finalHandoffScreenshot;
+if (!skipScreenshot) {
+  finalHandoffStage = runLabDemoScreenshotStageStep(env, "final lab demo handoff stage");
+  finalHandoffScreenshot = runScreenshotStep(path.join(runDir, "screen-sharing-final.png"), env, "human-demo-final");
+}
+const finalHandoffFeedback = String(
+  finalHandoffStage?.result?.queue_harness_feedback
+    ?? finalHandoffStage?.result?.queue_harness_status
+    ?? "",
+);
 const checks = {
   dogfood_status_ok: dogfood.status === 0 && dogfoodManifest?.ok === true,
   latest_human_demo_proof_ok: template.status === 0 && templateJson?.ok === true,
@@ -175,6 +186,12 @@ const checks = {
   master_command_hotkey_ok: !masterCommandHotkeyEnabled || (masterCommandHotkey?.status === 0 && masterCommandHotkeyManifest?.ok === true),
   hotkey_feedback_latency_ok: !hotkeyLatencyEnabled || (hotkeyLatency?.status === 0 && hotkeyLatencyManifest?.ok === true),
   manual_mode_feedback_ok: !manualModeFeedbackEnabled || manualModeFeedback?.ok === true,
+  final_handoff_stage_ok: skipScreenshot || finalHandoffStage?.ok === true,
+  final_handoff_screen_sharing_capture_ok: skipScreenshot || finalHandoffScreenshot?.ok === true,
+  final_handoff_queue_briefing_strip_visible: skipScreenshot || finalHandoffStage?.result?.queue_briefing_strip_present === true,
+  final_handoff_paper_reminder_hud_visible: skipScreenshot || finalHandoffStage?.result?.paper_reminder_hud_present === true,
+  final_handoff_feedback_refresh_ok: skipScreenshot || finalHandoffStage?.result?.paper_feedback_refresh?.ok === true,
+  final_handoff_current_feedback_ok: skipScreenshot || /Showing paper: Review Demo Customer Reply/i.test(finalHandoffFeedback),
 };
 const failedChecks = Object.entries(checks).filter(([, ok]) => ok !== true).map(([key]) => key);
 const finishedAt = new Date().toISOString();
@@ -228,6 +245,12 @@ const manifest = {
     skipped: true,
   },
   screenshot_stage: screenshotStage ? screenshotStage : {
+    skipped: true,
+  },
+  final_handoff_screen_sharing_capture: finalHandoffScreenshot ? finalHandoffScreenshot : {
+    skipped: true,
+  },
+  final_handoff_stage: finalHandoffStage ? finalHandoffStage : {
     skipped: true,
   },
   queue_latency: queueLatency ? {
@@ -308,6 +331,8 @@ const output = {
   latest_human_demo: manifest.latest_human_demo,
   screen_sharing_capture: manifest.screen_sharing_capture,
   screenshot_stage: manifest.screenshot_stage,
+  final_handoff_screen_sharing_capture: manifest.final_handoff_screen_sharing_capture,
+  final_handoff_stage: manifest.final_handoff_stage,
   queue_latency: manifest.queue_latency,
   workspace_latency: manifest.workspace_latency,
   paper_reminder_feedback: manifest.paper_reminder_feedback,
@@ -381,13 +406,13 @@ function gitOutput(commandArgs) {
   return result.status === 0 ? result.stdout.trim() || null : null;
 }
 
-function runLabDemoScreenshotStageStep(envOverride) {
+function runLabDemoScreenshotStageStep(envOverride, name = "stage lab demo screenshot") {
   const labHost = envOverride.LAB_MAC_HOST ?? "100.71.111.25";
   const labUser = envOverride.LAB_MAC_USER ?? "claw";
   const labKey = envOverride.LAB_MAC_KEY ?? path.join(osHome(), ".ssh", "eventloop_lab_mac");
   const remoteRepo = remoteRepoFromEnv(envOverride);
   const remote = `${labUser}@${labHost}`;
-  const step = runStep("stage lab demo screenshot", "ssh", [
+  const step = runStep(name, "ssh", [
     "-i",
     labKey,
     "-o",
@@ -470,6 +495,10 @@ const briefingStrip = queueBriefingStripStatus({
   priority: customer.priority_score,
 });
 const paperReminderHud = paperReminderHudStatus();
+const expectedFeedbackTitle = String(customer.review_packet?.title ?? customer.title ?? "Review Demo Customer Reply");
+const paperFeedbackRefresh = await refreshSelectedPaperFeedback(expectedFeedbackTitle);
+const harnessStatus = readHarnessStatus();
+const harnessFeedback = extractHarnessFeedback(harnessStatus);
 
 console.log(JSON.stringify({
   ok: true,
@@ -486,6 +515,10 @@ console.log(JSON.stringify({
   paper_reminder_hud_source: paperReminderHud.source,
   paper_reminder_hud_title: paperReminderHud.title,
   paper_reminder_hud_error: paperReminderHud.error,
+  paper_feedback_refresh: paperFeedbackRefresh,
+  queue_harness_status: harnessStatus?.status ?? harnessStatus ?? null,
+  queue_harness_feedback: harnessFeedback,
+  queue_harness_feedback_sequence: harnessStatus?.feedback_sequence ?? harnessStatus?.feedbackSequence ?? [],
 }));
 
 function latestDemoProofSnapshot(taskId) {
@@ -756,6 +789,81 @@ function paperReminderHudStatus() {
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function readHarnessStatus() {
+  try {
+    return JSON.parse(fs.readFileSync("/tmp/eventloopos-queue-harness-status.json", "utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+async function refreshSelectedPaperFeedback(expectedText) {
+  const before = readHarnessStatus();
+  const beforeSequence = feedbackSequenceValue(before);
+  try {
+    execFileSync("osascript", [
+      "-e",
+      'tell application "System Events" to key code 15 using {control down, option down}',
+    ], { stdio: "ignore" });
+    const status = await waitForPaperFeedback({
+      expectedText,
+      beforeSequence,
+      timeoutMs: 6_500,
+    });
+    return {
+      ok: true,
+      feedback: extractHarnessFeedback(status),
+      feedback_sequence: feedbackSequenceValue(status),
+      status: status?.status ?? status ?? null,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+      before_status: before?.status ?? before ?? null,
+    };
+  }
+}
+
+async function waitForPaperFeedback({ expectedText, beforeSequence, timeoutMs }) {
+  const deadline = Date.now() + timeoutMs;
+  let lastStatus;
+  while (Date.now() < deadline) {
+    lastStatus = readHarnessStatus();
+    const feedback = extractHarnessFeedback(lastStatus);
+    const feedbackSequence = feedbackSequenceValue(lastStatus);
+    const sequenceAdvanced = beforeSequence === undefined
+      || feedbackSequence === undefined
+      || feedbackSequence > beforeSequence;
+    const matchesPaper = feedback.includes(expectedText) || String(lastStatus?.status ?? lastStatus ?? "").includes(expectedText);
+    if (sequenceAdvanced && matchesPaper && feedback.startsWith("Showing paper:")) {
+      return lastStatus;
+    }
+    await delay(100);
+  }
+  throw new Error(\`timed out waiting for selected paper feedback; last=\${JSON.stringify(lastStatus ?? null)}\`);
+}
+
+function extractHarnessFeedback(status) {
+  if (typeof status?.feedback === "string" && status.feedback.trim()) return status.feedback.trim();
+  const text = typeof status === "string"
+    ? status
+    : typeof status?.status === "string"
+      ? status.status
+      : typeof status?.line === "string"
+        ? status.line
+        : JSON.stringify(status ?? {});
+  const match = String(text).match(/(?:^|\\|)\\s*feedback=([^|]+)/);
+  return match ? match[1].trim() : "";
+}
+
+function feedbackSequenceValue(status) {
+  if (typeof status?.feedbackSequence === "number") return status.feedbackSequence;
+  if (typeof status?.feedback_sequence === "number") return status.feedback_sequence;
+  const match = String(status?.status ?? status ?? "").match(/feedback_seq=(\\d+)/);
+  return match ? Number(match[1]) : undefined;
 }
 
 async function getJson(pathname) {
@@ -1035,18 +1143,18 @@ function runWorkspaceLatencyStep(manifestPath, envOverride) {
   ], envOverride);
 }
 
-function runScreenshotStep(localOutputPath, envOverride) {
+function runScreenshotStep(localOutputPath, envOverride, label) {
   if (screenshotTarget === "local") {
-    return runLocalScreenSharingCapture(localOutputPath, envOverride);
+    return runLocalScreenSharingCapture(localOutputPath, envOverride, label);
   }
   if (screenshotTarget === "lab") {
-    return runLabDesktopCapture(envOverride, "requested");
+    return runLabDesktopCapture(envOverride, "requested", label);
   }
 
-  const local = runLocalScreenSharingCapture(localOutputPath, envOverride);
+  const local = runLocalScreenSharingCapture(localOutputPath, envOverride, label);
   if (local.ok) return local;
 
-  const lab = runLabDesktopCapture(envOverride, "local_screen_sharing_unavailable");
+  const lab = runLabDesktopCapture(envOverride, "local_screen_sharing_unavailable", label);
   return {
     ...lab,
     fallback_reason: lab.ok
@@ -1056,8 +1164,8 @@ function runScreenshotStep(localOutputPath, envOverride) {
   };
 }
 
-function runLocalScreenSharingCapture(localOutputPath, envOverride) {
-  const step = runStep("local screen sharing capture", "bin/local-screen-sharing-capture", [localOutputPath], envOverride);
+function runLocalScreenSharingCapture(localOutputPath, envOverride, label = "screen-sharing") {
+  const step = runStep(`${label} local screen sharing capture`, "bin/local-screen-sharing-capture", [localOutputPath], envOverride);
   const image = imageArtifactSummary(localOutputPath);
   return {
     ok: step.status === 0 && image.ok === true,
@@ -1071,13 +1179,13 @@ function runLocalScreenSharingCapture(localOutputPath, envOverride) {
   };
 }
 
-function runLabDesktopCapture(envOverride, fallbackReason) {
-  const label = "human-demo-ready";
+function runLabDesktopCapture(envOverride, fallbackReason, label = "human-demo-ready") {
+  const captureLabel = label.replace(/[^a-z0-9-]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "human-demo-ready";
   const captureEnv = {
     ...envOverride,
     LAB_MAC_CAPTURE_WORKSPACE: screenshotStage?.result?.workspace ?? envOverride.LAB_MAC_CAPTURE_WORKSPACE ?? "",
   };
-  const step = runStep("lab desktop capture", "bin/lab-mac-desktop-capture", [runDir, label], captureEnv);
+  const step = runStep(`${captureLabel} lab desktop capture`, "bin/lab-mac-desktop-capture", [runDir, captureLabel], captureEnv);
   const remoteCapturePath = lastNonEmptyLine(step.stdout);
   const localCaptureDir = remoteCapturePath && !remoteCapturePath.startsWith("/")
     ? remoteCapturePath
@@ -1140,12 +1248,12 @@ function syncLabCapture(remoteCapturePath, localCaptureDir, envOverride) {
     encoding: "utf8",
     shell: false,
   });
-  const stdoutPath = path.join(runDir, "steps", "lab-desktop-capture-sync.stdout");
-  const stderrPath = path.join(runDir, "steps", "lab-desktop-capture-sync.stderr");
+  const stdoutPath = path.join(runDir, "steps", `${captureLabel}-lab-desktop-capture-sync.stdout`);
+  const stderrPath = path.join(runDir, "steps", `${captureLabel}-lab-desktop-capture-sync.stderr`);
   writeFileSync(path.join(repoRoot, stdoutPath), result.stdout ?? "", "utf8");
   writeFileSync(path.join(repoRoot, stderrPath), result.stderr ?? "", "utf8");
   steps.push({
-    name: "lab desktop capture sync",
+    name: `${captureLabel} lab desktop capture sync`,
     command: ["rsync", "-az", "-e", sshCommand, `${remote}:${remoteRepo}/${remoteCapturePath}/`, `${localCaptureDir}/`],
     status: result.status ?? 1,
     signal: result.signal,
@@ -1308,6 +1416,8 @@ function isJpegStartOfFrame(marker) {
 function renderReadyMarkdown(manifest) {
   const latest = manifest.latest_human_demo;
   const screenshot = manifest.screen_sharing_capture;
+  const finalHandoff = manifest.final_handoff_stage;
+  const finalScreenshot = manifest.final_handoff_screen_sharing_capture;
   const queueLatency = manifest.queue_latency;
   const workspaceLatency = manifest.workspace_latency;
   const paperReminderFeedback = manifest.paper_reminder_feedback;
@@ -1334,6 +1444,9 @@ function renderReadyMarkdown(manifest) {
 - Fresh screenshot capture: ${screenshot?.output ?? "skipped"}${screenshot?.capture_mode ? ` mode=${screenshot.capture_mode}` : ""}${screenshot?.image?.dimensions ? ` (${screenshot.image.dimensions}, ${screenshot.image.bytes} bytes)` : ""}
 - Queue briefing strip: ${manifest.checks?.queue_briefing_strip_visible === true ? "visible" : "missing"}
 - Desktop paper reminder HUD: ${manifest.checks?.paper_reminder_hud_visible === true ? "visible" : "missing"}
+- Final handoff stage: ${finalHandoff?.ok === true ? "ok" : finalHandoff?.skipped ? "skipped" : "failed"}
+- Final handoff feedback: ${finalHandoff?.result?.queue_harness_feedback ?? ""}
+- Final handoff screenshot: ${finalScreenshot?.output ?? "skipped"}${finalScreenshot?.capture_mode ? ` mode=${finalScreenshot.capture_mode}` : ""}${finalScreenshot?.image?.dimensions ? ` (${finalScreenshot.image.dimensions}, ${finalScreenshot.image.bytes} bytes)` : ""}
 - Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
 - Workspace latency: ${workspaceLatency?.manifest_path ?? "skipped"}${manifest.workspace_latency_required ? " (required)" : ""}
 - Desktop HUD feedback: ${paperReminderFeedback?.manifest_path ?? "skipped"}${manifest.paper_reminder_feedback_required ? " (required)" : ""}
@@ -1416,7 +1529,11 @@ function runSelfTest() {
     ok: true,
     profile: "lab-human-demo",
     url: "http://127.0.0.1:4480",
-    checks: { queue_briefing_strip_visible: true, paper_reminder_hud_visible: true },
+    checks: {
+      queue_briefing_strip_visible: true,
+      paper_reminder_hud_visible: true,
+      final_handoff_current_feedback_ok: true,
+    },
     failed_checks: [],
     queue_latency_required: true,
     workspace_latency_required: true,
@@ -1435,6 +1552,18 @@ function runSelfTest() {
       freshness: { ok: true, age_hours: 1, max_age_hours: 24 },
     },
     screen_sharing_capture: { output: "artifacts/lab-runs/ready/screen-sharing.png" },
+    final_handoff_stage: {
+      ok: true,
+      result: {
+        paper_feedback_refresh: { ok: true },
+        queue_harness_feedback: "Showing paper: Review Demo Customer Reply.",
+      },
+    },
+    final_handoff_screen_sharing_capture: {
+      output: "artifacts/lab-runs/ready/screen-sharing-final.png",
+      capture_mode: "local_screen_sharing_window",
+      image: { dimensions: "1280x720", bytes: 4096 },
+    },
     queue_latency: { manifest_path: "artifacts/lab-runs/ready/queue-latency.json" },
     workspace_latency: { manifest_path: "artifacts/lab-runs/ready/workspace-latency.json" },
     paper_reminder_feedback: { manifest_path: "artifacts/lab-runs/ready/paper-reminder-feedback.json" },
@@ -1449,6 +1578,9 @@ function runSelfTest() {
   assert.ok(readyMarkdown.includes("Suggested result file: artifacts/human-demo-results/demo-human-demo-result.md"));
   assert.ok(readyMarkdown.includes("Desktop HUD feedback: artifacts/lab-runs/ready/paper-reminder-feedback.json"));
   assert.ok(readyMarkdown.includes("Master Command hotkey: artifacts/lab-runs/ready/master-command-hotkey.json"));
+  assert.ok(readyMarkdown.includes("Final handoff stage: ok"));
+  assert.ok(readyMarkdown.includes("Final handoff feedback: Showing paper: Review Demo Customer Reply."));
+  assert.ok(readyMarkdown.includes("Final handoff screenshot: artifacts/lab-runs/ready/screen-sharing-final.png mode=local_screen_sharing_window (1280x720, 4096 bytes)"));
   assert.ok(readyMarkdown.includes("Manual Mode enter feedback: artifacts/lab-runs/ready/manual-mode-enter-feedback.json"));
   assert.ok(readyMarkdown.includes("Manual Mode return-start feedback: artifacts/lab-runs/ready/manual-mode-return-start-feedback.json"));
   assert.ok(readyMarkdown.includes("Manual Mode return-complete feedback: artifacts/lab-runs/ready/manual-mode-return-complete-feedback.json"));
@@ -1482,6 +1614,10 @@ function runSelfTest() {
   assert.ok(labDemoScreenshotStageScript().includes("raiseDemoApps"));
   assert.ok(labDemoScreenshotStageScript().includes("queueBriefingStripStatus"));
   assert.ok(labDemoScreenshotStageScript().includes("paperReminderHudStatus"));
+  assert.ok(labDemoScreenshotStageScript().includes("readHarnessStatus"));
+  assert.ok(labDemoScreenshotStageScript().includes("refreshSelectedPaperFeedback"));
+  assert.ok(labDemoScreenshotStageScript().includes("paper_feedback_refresh"));
+  assert.ok(labDemoScreenshotStageScript().includes("queue_harness_feedback"));
   assert.ok(labDemoScreenshotStageScript().includes("eventloopOS Paper Reminder"));
   assert.ok(labDemoScreenshotStageScript().includes('windowName is not \\"eventloopOS Paper Reminder\\"'));
   assert.ok(labDemoScreenshotStageScript().includes("matchingBriefingLine"));
@@ -1534,6 +1670,18 @@ function runSelfTest() {
       capture_mode: "local_screen_sharing_window",
       image: { dimensions: "1280x720", bytes: 2048 },
     },
+    final_handoff_stage: {
+      ok: true,
+      result: {
+        paper_feedback_refresh: { ok: true },
+        queue_harness_feedback: "Showing paper: Review Demo Customer Reply.",
+      },
+    },
+    final_handoff_screen_sharing_capture: {
+      output: "artifacts/lab-runs/ready/screen-sharing-final.png",
+      capture_mode: "local_screen_sharing_window",
+      image: { dimensions: "1280x720", bytes: 4096 },
+    },
     queue_latency: { manifest_path: "artifacts/lab-runs/ready/queue-latency.json" },
     queue_latency_required: true,
     workspace_latency: { manifest_path: "artifacts/lab-runs/ready/workspace-latency.json" },
@@ -1549,6 +1697,9 @@ function runSelfTest() {
   assert.match(markdown, /Agent-spawn Chrome containment proof: ok app=Google Chrome/);
   assert.match(markdown, /Queue briefing strip: visible/);
   assert.match(markdown, /Desktop paper reminder HUD: visible/);
+  assert.match(markdown, /Final handoff stage: ok/);
+  assert.match(markdown, /Final handoff feedback: Showing paper: Review Demo Customer Reply\./);
+  assert.match(markdown, /Final handoff screenshot: artifacts\/lab-runs\/ready\/screen-sharing-final\.png mode=local_screen_sharing_window \(1280x720, 4096 bytes\)/);
   assert.match(markdown, /Hotkey feedback latency: skipped/);
   assert.match(markdown, /Queue latency: artifacts\/lab-runs\/ready\/queue-latency\.json/);
   assert.match(markdown, /Workspace latency: artifacts\/lab-runs\/ready\/workspace-latency\.json/);
