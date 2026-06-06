@@ -13,7 +13,7 @@ if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: bin/ci-workflows-audit [--self-test]
 
 Checks GitHub Actions workflows for eventloopOS cost/noise guardrails:
-stale-run cancellation, docs/artifacts path ignores, Linux-only main CI,
+stale-run cancellation, Markdown/artifacts path ignores, Linux-only main CI,
 path-scoped macOS app CI, broad secret scanning, opt-in AI review, and the
 Linux CI command's primitive/SDK proof coverage.
 `);
@@ -60,9 +60,9 @@ export async function auditWorkflows(root) {
   requireIncludes(texts.ci, "runs-on: ubuntu-latest", "ci.yml must run on ubuntu-latest, not macOS", errors);
   rejectIncludes(texts.ci, "runs-on: macos-latest", "ci.yml must not run standard CI on macOS runners", errors);
   requireIncludes(texts.ci, "EVENTLOOPOS_SKIP_BROWSER_E2E=1 pnpm run ci", "ci.yml must skip browser/live mac work in Linux CI", errors);
-  requireIncludes(texts.ci, "paths-ignore:", "ci.yml must ignore docs/artifacts-only changes", errors);
+  requireIncludes(texts.ci, "paths-ignore:", "ci.yml must ignore Markdown/artifacts-only changes", errors);
   requireIncludes(texts.ci, '"*.md"', "ci.yml must ignore root markdown-only changes", errors);
-  requireIncludes(texts.ci, '"docs/**/*.md"', "ci.yml must ignore docs markdown-only changes", errors);
+  requireIncludes(texts.ci, '"**/*.md"', "ci.yml must ignore nested markdown-only changes", errors);
   requireIncludes(texts.ci, '"artifacts/**"', "ci.yml must ignore artifact-only changes", errors);
   requireIncludes(texts.ci, "timeout-minutes: 20", "ci.yml must keep bounded runtime", errors);
 
@@ -71,6 +71,7 @@ export async function auditWorkflows(root) {
   requireIncludes(texts.macos, "runs-on: macos-latest", "macos-app.yml must use GitHub macOS runner", errors);
   requireIncludes(texts.macos, "paths:", "macos-app.yml must be path scoped", errors);
   requireIncludes(texts.macos, '"app/macos/**"', "macos-app.yml must only auto-run for macOS app paths", errors);
+  requireIncludes(texts.macos, '"!app/macos/**/*.md"', "macos-app.yml must skip app/macos markdown-only edits", errors);
   requireIncludes(texts.macos, "swift test --package-path app/macos", "macos-app.yml must run Swift package tests", errors);
   requireIncludes(texts.macos, "timeout-minutes: 20", "macos-app.yml must keep bounded runtime", errors);
 
@@ -141,11 +142,13 @@ on:
     branches: [main]
     paths-ignore:
       - "*.md"
+      - "**/*.md"
       - "docs/**/*.md"
       - "artifacts/**"
   pull_request:
     paths-ignore:
       - "*.md"
+      - "**/*.md"
       - "docs/**/*.md"
       - "artifacts/**"
   workflow_dispatch:
@@ -169,10 +172,12 @@ on:
     paths:
       - ".github/workflows/macos-app.yml"
       - "app/macos/**"
+      - "!app/macos/**/*.md"
   pull_request:
     paths:
       - ".github/workflows/macos-app.yml"
       - "app/macos/**"
+      - "!app/macos/**/*.md"
   workflow_dispatch:
 concurrency:
   group: macos-app-\${{ github.workflow }}-\${{ github.ref }}

@@ -6,10 +6,12 @@ on:
     paths:
       - ".github/workflows/macos-app.yml"
       - "app/macos/**"
+      - "!app/macos/**/*.md"
   pull_request:
     paths:
       - ".github/workflows/macos-app.yml"
       - "app/macos/**"
+      - "!app/macos/**/*.md"
   workflow_dispatch:
 
 concurrency:

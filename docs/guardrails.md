@@ -33,8 +33,8 @@ runs the pre-commit hook once so the failure is visible immediately.
 
 GitHub Actions in `.github/workflows/`:
 
-- [`ci.yml`](../.github/workflows/ci.yml) — runs `pnpm run ci` through [`bin/ci-linux`](../bin/ci-linux) on Ubuntu. This is the Linux-safe lane: contracts, lint, cataloged primitive self-tests, shared-SDK package audit, package typechecks, package tests, and non-macOS e2e smoke. It skips browser-download/live-mac work with `EVENTLOOPOS_SKIP_BROWSER_E2E=1`, ignores docs/artifacts-only pushes and PRs, cancels stale runs on newer pushes, uses read-only repo permissions, and has a 20-minute timeout.
-- [`macos-app.yml`](../.github/workflows/macos-app.yml) — runs `swift test --package-path app/macos` on GitHub's macOS runner. It triggers only when the macOS package or this workflow changes, can be launched manually, cancels stale runs, uses read-only repo permissions, and has a 20-minute timeout.
+- [`ci.yml`](../.github/workflows/ci.yml) — runs `pnpm run ci` through [`bin/ci-linux`](../bin/ci-linux) on Ubuntu. This is the Linux-safe lane: contracts, lint, cataloged primitive self-tests, shared-SDK package audit, package typechecks, package tests, and non-macOS e2e smoke. It skips browser-download/live-mac work with `EVENTLOOPOS_SKIP_BROWSER_E2E=1`, ignores Markdown/artifacts-only pushes and PRs, cancels stale runs on newer pushes, uses read-only repo permissions, and has a 20-minute timeout.
+- [`macos-app.yml`](../.github/workflows/macos-app.yml) — runs `swift test --package-path app/macos` on GitHub's macOS runner. It triggers only when the macOS package or this workflow changes, excludes macOS Markdown-only edits, can be launched manually, cancels stale runs, uses read-only repo permissions, and has a 20-minute timeout.
 - [`secret-scan.yml`](../.github/workflows/secret-scan.yml) — runs `gitleaks/gitleaks-action@v2` on every push to `main` and on every PR. Uses [`.gitleaks.toml`](../.gitleaks.toml) for allow-listing. It cancels stale scans on newer pushes, uses read-only repo permissions, and has a 10-minute timeout. History scan on initial install came back clean (no leaks across 250 commits).
 - [`ai-review-template.yml`](../.github/workflows/ai-review-template.yml) — **opt-in** PR commenter. Triggers only when a PR is labeled `needs-ai-review`. Posts or updates one templated review checklist that reflects the categories in `ai-engineering-principles.md` (architecture, complexity inflation, reuse, security, etc.). It is *not* a paid AI pass; it is a structured reminder so reviewers approach the diff with the right lens.
 
@@ -42,7 +42,8 @@ Cost/noise notes:
 
 - The repo is public (`BookSock/eventloopOS`). Public repositories using standard GitHub-hosted runners are not billed for GitHub Actions minutes; see GitHub's billing docs: <https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions>.
 - Normal CI is Ubuntu-only and skips live browser/download/macOS dogfood work with `EVENTLOOPOS_SKIP_BROWSER_E2E=1`.
-- macOS CI is path-scoped to `app/macos/**` and manual runs, so ordinary orchestrator/shared/docs commits do not launch a macOS runner.
+- Linux CI ignores Markdown-only and artifacts-only changes, so documentation edits do not trigger the full package/e2e lane.
+- macOS CI is path-scoped to `app/macos/**` and manual runs, and it excludes app/macos Markdown-only edits, so ordinary orchestrator/shared/docs commits do not launch a macOS runner.
 - CI and secret-scan both cancel stale in-progress runs for the same branch/ref. If several commits are pushed quickly, only the newest run should finish and email.
 - Secret scan intentionally stays broad. Docs, notes, and fixtures are common places for pasted tokens, so docs-only pushes still get gitleaks coverage.
 - [`bin/ci-workflows-audit`](../bin/ci-workflows-audit) is part of `pnpm typecheck` and fails if these CI cost/noise controls drift.
@@ -52,7 +53,7 @@ Cost/noise notes:
 
 - `.gitattributes` enforces LF endings + binary-file marking; `guard-newline-eof.mjs` enforces it at commit time.
 - `.gitignore` excludes `artifacts/`, `dist/`, local config — and `guard-file-size.mjs` catches accidental large-file commits anyway.
-- Status badges in [`README.md`](../README.md) for CI + secret-scan workflows.
+- Status badges in [`README.md`](../README.md) for CI, macOS App, and secret-scan workflows.
 
 ### SQL Migrations
 

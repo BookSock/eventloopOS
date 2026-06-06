@@ -5,11 +5,13 @@ on:
     branches: [main]
     paths-ignore:
       - "*.md"
+      - "**/*.md"
       - "docs/**/*.md"
       - "artifacts/**"
   pull_request:
     paths-ignore:
       - "*.md"
+      - "**/*.md"
       - "docs/**/*.md"
       - "artifacts/**"
   workflow_dispatch:
