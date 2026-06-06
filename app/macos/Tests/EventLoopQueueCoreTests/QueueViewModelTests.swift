@@ -3207,6 +3207,34 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }
 
+    func testManualWorkspaceRestoreTimeoutSuppressesImmediateRetry() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "manual-workspace")
+            ],
+            activeWorkspace: "manual-workspace"
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: snapshot,
+            restoreError: URLError(.timedOut)
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+
+        await viewModel.enterManualModeAndCaptureWorkspace()
+        await viewModel.confirmManualWorkspaceRestore()
+        await viewModel.confirmManualWorkspaceRestore()
+
+        XCTAssertEqual(viewModel.mode, .manual)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestoring)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Manual Mode active. Manual workspace restore still running..."))
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [snapshot])
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+    }
+
     func testReturnToEventLoopKeepingCurrentLayoutDoesNotRestoreWorkspace() async {
         let manualSnapshot = WorkspaceSnapshot(
             windows: [
@@ -3653,6 +3681,75 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestoring)
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Paper restore still running: Review with workspace."))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+    }
+
+    func testSelectedWorkspaceRestoreTimeoutSuppressesImmediateRetry() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+        let packet = ReviewPacket(
+            id: "packet-with-workspace",
+            title: "Review with workspace",
+            summary: "Needs workspace restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: snapshot
+        )
+        let workspaceClient = FakeWorkspaceClient(restoreError: URLError(.timedOut))
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: [packet]),
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-with-workspace")
+
+        await viewModel.confirmSelectedWorkspaceRestore()
+        await viewModel.confirmSelectedWorkspaceRestore()
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestoring)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Paper restore still running: Review with workspace."))
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [snapshot])
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+    }
+
+    func testPaperActionDuringTimedOutWorkspaceRestoreDoesNotCompletePacket() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+        let packet = ReviewPacket(
+            id: "packet-with-workspace",
+            title: "Review with workspace",
+            summary: "Needs workspace restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: snapshot
+        )
+        let client = FakeQueueClient(packets: [packet])
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: WorkspaceSnapshot(windows: [], activeWorkspace: "eventloop-blog"),
+            restoreError: URLError(.timedOut)
+        )
+        let viewModel = QueueViewModel(
+            client: client,
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-with-workspace")
+
+        await viewModel.confirmSelectedWorkspaceRestore()
+        await viewModel.doneAndNext()
+
+        XCTAssertEqual(client.completedPacketIds, [])
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [snapshot])
+        XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestoring)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restore still running. Wait a second."))
     }
 
     func testWorkspaceRestoreIdempotencyConflictShowsAlreadyRunningFeedback() async {

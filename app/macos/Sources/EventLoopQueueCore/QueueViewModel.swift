@@ -167,7 +167,9 @@ public final class QueueViewModel: ObservableObject {
     private var autoRestoredContextPacketIds = Set<String>()
     private var workspaceRestoreInFlight = false
     private var lastWorkspaceRestore: RecentWorkspaceRestore?
+    private var timedOutWorkspaceRestore: TimedOutWorkspaceRestore?
     private let workspaceRestoreRepeatWindow: TimeInterval = 2.0
+    private let workspaceRestoreTimeoutGraceWindow: TimeInterval = 12.0
 
     public init(
         client: any QueueClient,
@@ -580,6 +582,11 @@ public final class QueueViewModel: ObservableObject {
             return false
         }
         guard !workspaceRestoreInFlight else {
+            workspaceRestoreState = .alreadyRestoring
+            advanceToast = .actionComplete("Workspace restore still running. Wait a second.")
+            return false
+        }
+        guard !hasActiveTimedOutWorkspaceRestore() else {
             workspaceRestoreState = .alreadyRestoring
             advanceToast = .actionComplete("Workspace restore still running. Wait a second.")
             return false
@@ -1013,6 +1020,11 @@ public final class QueueViewModel: ObservableObject {
             workspaceRestoreState = .alreadyRestored(recent.receipt)
             return
         }
+        if hasActiveTimedOutWorkspaceRestore(idempotencyPrefix: idempotencyPrefix, snapshot: snapshot) {
+            workspaceRestoreState = .alreadyRestoring
+            advanceToast = .actionComplete("Workspace restore still running. Wait a second.")
+            return
+        }
 
         guard !workspaceRestoreInFlight else {
             workspaceRestoreState = .alreadyRestoring
@@ -1039,12 +1051,20 @@ public final class QueueViewModel: ObservableObject {
                 completedAt: Date(),
                 receipt: response.receipt
             )
+            clearTimedOutWorkspaceRestore(idempotencyPrefix: idempotencyPrefix, snapshot: snapshot)
         } catch {
             if let queueError = error as? QueueClientError, queueError.isIdempotencyConflict {
                 workspaceRestoreState = .alreadyRestoring
                 advanceToast = .actionComplete("Workspace restore already running.")
                 return
             }
+            if Self.isClientRestoreTimeout(error) {
+                rememberTimedOutWorkspaceRestore(idempotencyPrefix: idempotencyPrefix, snapshot: snapshot)
+                workspaceRestoreState = .alreadyRestoring
+                advanceToast = .actionComplete("Workspace restore still running. Wait a second.")
+                return
+            }
+            clearTimedOutWorkspaceRestore(idempotencyPrefix: idempotencyPrefix, snapshot: snapshot)
             throw error
         }
     }
@@ -2084,6 +2104,11 @@ public final class QueueViewModel: ObservableObject {
             advanceToast = Self.workspaceAlreadyRestoredToast(startToast: startToast)
             return false
         }
+        if hasActiveTimedOutWorkspaceRestore(idempotencyPrefix: idempotencyPrefix, snapshot: snapshot) {
+            workspaceRestoreState = .alreadyRestoring
+            advanceToast = Self.workspaceRestoreTimedOutToast(startToast: startToast)
+            return false
+        }
 
         workspaceRestoreInFlight = true
         workspaceRestoreState = .restoring
@@ -2106,6 +2131,7 @@ public final class QueueViewModel: ObservableObject {
                 completedAt: Date(),
                 receipt: response.receipt
             )
+            clearTimedOutWorkspaceRestore(idempotencyPrefix: idempotencyPrefix, snapshot: snapshot)
             advanceToast = .actionComplete("Workspace restored.")
             return true
         } catch {
@@ -2115,10 +2141,12 @@ public final class QueueViewModel: ObservableObject {
                 return false
             }
             if Self.isClientRestoreTimeout(error) {
+                rememberTimedOutWorkspaceRestore(idempotencyPrefix: idempotencyPrefix, snapshot: snapshot)
                 workspaceRestoreState = .alreadyRestoring
                 advanceToast = Self.workspaceRestoreTimedOutToast(startToast: startToast)
                 return false
             }
+            clearTimedOutWorkspaceRestore(idempotencyPrefix: idempotencyPrefix, snapshot: snapshot)
             workspaceRestoreState = .failed(error.localizedDescription)
             advanceToast = .actionComplete("Workspace restore failed: \(Self.shortStatusMessage(error.localizedDescription))")
             return false
@@ -2172,6 +2200,43 @@ public final class QueueViewModel: ObservableObject {
         }
         let nsError = error as NSError
         return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorTimedOut
+    }
+
+    private func rememberTimedOutWorkspaceRestore(idempotencyPrefix: String, snapshot: WorkspaceSnapshot) {
+        timedOutWorkspaceRestore = TimedOutWorkspaceRestore(
+            idempotencyPrefix: idempotencyPrefix,
+            snapshot: snapshot,
+            timedOutAt: Date()
+        )
+    }
+
+    private func clearTimedOutWorkspaceRestore(idempotencyPrefix: String, snapshot: WorkspaceSnapshot) {
+        guard timedOutWorkspaceRestore?.idempotencyPrefix == idempotencyPrefix,
+              timedOutWorkspaceRestore?.snapshot == snapshot else {
+            return
+        }
+        timedOutWorkspaceRestore = nil
+    }
+
+    private func hasActiveTimedOutWorkspaceRestore(
+        idempotencyPrefix: String? = nil,
+        snapshot: WorkspaceSnapshot? = nil
+    ) -> Bool {
+        guard let pending = timedOutWorkspaceRestore else {
+            return false
+        }
+        let elapsed = Date().timeIntervalSince(pending.timedOutAt)
+        guard elapsed >= 0, elapsed < workspaceRestoreTimeoutGraceWindow else {
+            timedOutWorkspaceRestore = nil
+            return false
+        }
+        if let idempotencyPrefix, pending.idempotencyPrefix != idempotencyPrefix {
+            return false
+        }
+        if let snapshot, pending.snapshot != snapshot {
+            return false
+        }
+        return true
     }
 
     private func workspaceRestoreStartToast(snapshot: WorkspaceSnapshot) -> AdvanceToast {
@@ -2275,6 +2340,11 @@ public final class QueueViewModel: ObservableObject {
             advanceToast = .actionComplete("Manual Mode active. Manual workspace already restored.")
             return
         }
+        if hasActiveTimedOutWorkspaceRestore(idempotencyPrefix: idempotencyPrefix, snapshot: snapshot) {
+            workspaceRestoreState = .alreadyRestoring
+            advanceToast = .actionComplete("Manual Mode active. Manual workspace restore still running...")
+            return
+        }
 
         workspaceRestoreInFlight = true
         defer {
@@ -2294,6 +2364,7 @@ public final class QueueViewModel: ObservableObject {
                 completedAt: Date(),
                 receipt: response.receipt
             )
+            clearTimedOutWorkspaceRestore(idempotencyPrefix: idempotencyPrefix, snapshot: snapshot)
             guard !startedInManualMode || (mode == .manual && !shouldRestoreWorkspace) else {
                 return
             }
@@ -2306,10 +2377,12 @@ public final class QueueViewModel: ObservableObject {
                 return
             }
             if Self.isClientRestoreTimeout(error) {
+                rememberTimedOutWorkspaceRestore(idempotencyPrefix: idempotencyPrefix, snapshot: snapshot)
                 workspaceRestoreState = .alreadyRestoring
                 advanceToast = .actionComplete("Manual Mode active. Manual workspace restore still running...")
                 return
             }
+            clearTimedOutWorkspaceRestore(idempotencyPrefix: idempotencyPrefix, snapshot: snapshot)
             workspaceRestoreState = .failed(error.localizedDescription)
             advanceToast = .actionComplete("Manual Mode active. Manual workspace restore failed: \(Self.shortStatusMessage(error.localizedDescription))")
         }
@@ -2454,4 +2527,10 @@ private struct RecentWorkspaceRestore {
     let snapshot: WorkspaceSnapshot
     let completedAt: Date
     let receipt: WorkspaceRestoreReceipt
+}
+
+private struct TimedOutWorkspaceRestore {
+    let idempotencyPrefix: String
+    let snapshot: WorkspaceSnapshot
+    let timedOutAt: Date
 }
