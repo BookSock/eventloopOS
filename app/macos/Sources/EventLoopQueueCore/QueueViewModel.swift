@@ -396,13 +396,16 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func enterManualMode() async {
+        let wasManual = mode == .manual
+        applyLocalEnterManualMode()
         do {
             _ = try await client.setManualMode(active: true, reason: "user_hotkey")
         } catch {
+            if !wasManual {
+                applyLocalReturnToEventLoopMode()
+            }
             state = .failed("Manual mode failed to engage on server: \(error.localizedDescription)")
-            return
         }
-        applyLocalEnterManualMode()
     }
 
     public func exitManualMode() async {
@@ -418,6 +421,7 @@ public final class QueueViewModel: ObservableObject {
         mode = .manual
         shouldRestoreWorkspace = false
         workspaceRestoreState = .skippedManualMode
+        advanceToast = .actionComplete("Manual Mode active. Ctrl-Option-M returns; Ctrl-Option-Shift-M keeps this layout.")
         if manualWorkspaceSnapshot == nil {
             manualWorkspaceCaptureState = .idle
         }
@@ -499,14 +503,19 @@ public final class QueueViewModel: ObservableObject {
     private func applyLocalReturnToEventLoopMode() {
         mode = .eventLoop
         shouldRestoreWorkspace = true
+        advanceToast = .actionComplete("Returned to Event Loop.")
     }
 
     public func returnToEventLoopModeAndPrepareWorkspaceRestore() async {
         let wasManual = mode == .manual
         if wasManual {
+            advanceToast = .actionComplete("Returning to Event Loop...")
             await captureManualWorkspaceSnapshot()
         }
         applyLocalReturnToEventLoopMode()
+        if selectedWorkspaceSnapshot != nil {
+            advanceToast = .actionComplete("Returned to Event Loop. Restoring selected paper...")
+        }
         await prepareSelectedWorkspaceRestore()
         if wasManual {
             do {
@@ -520,10 +529,12 @@ public final class QueueViewModel: ObservableObject {
     public func returnToEventLoopModeKeepingCurrentLayout() async {
         let wasManual = mode == .manual
         if wasManual {
+            advanceToast = .actionComplete("Returning to Event Loop...")
             await captureManualWorkspaceSnapshot()
         }
         applyLocalReturnToEventLoopMode()
         workspaceRestoreState = .keptCurrentLayout
+        advanceToast = .actionComplete("Returned to Event Loop. Kept current layout.")
         if wasManual {
             do {
                 _ = try await client.setManualMode(active: false, reason: nil)

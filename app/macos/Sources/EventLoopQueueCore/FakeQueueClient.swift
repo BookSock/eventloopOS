@@ -40,6 +40,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     private var manualModeFakeError: Error?
     private var manualModeSetCalls: [(active: Bool, reason: String?)] = []
     private var manualModeGetCallCount: Int = 0
+    private var manualModeSetDelayNanoseconds: UInt64 = 0
     private var readDelayNanoseconds: UInt64 = 0
     private var queueActionDelayNanoseconds: UInt64 = 0
     private var masterActionDelayNanoseconds: UInt64 = 0
@@ -230,6 +231,10 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
         lock.withLock { manualModeFakeError = error }
     }
 
+    public func setManualModeSetDelayNanoseconds(_ delay: UInt64) {
+        lock.withLock { manualModeSetDelayNanoseconds = delay }
+    }
+
     public func setReadDelayNanoseconds(_ delay: UInt64) {
         lock.withLock { readDelayNanoseconds = delay }
     }
@@ -346,7 +351,7 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func renewLease(packetId: String) async throws -> QueueActionResult {
-        try lock.withLock {
+        return try lock.withLock {
             guard packets.contains(where: { $0.id == packetId }) else {
                 throw QueueClientError.packetNotFound(packetId)
             }
@@ -669,7 +674,11 @@ public final class FakeQueueClient: QueueClient, @unchecked Sendable {
     }
 
     public func setManualMode(active: Bool, reason: String?) async throws -> ManualModeState {
-        try lock.withLock {
+        let delay = lock.withLock { manualModeSetDelayNanoseconds }
+        if delay > 0 {
+            try? await Task.sleep(nanoseconds: delay)
+        }
+        return try lock.withLock {
             manualModeSetCalls.append((active: active, reason: reason))
             if let manualModeFakeError {
                 throw manualModeFakeError

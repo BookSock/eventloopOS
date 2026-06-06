@@ -2642,6 +2642,30 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(client.manualModeSetRequests.first?.active, true)
         XCTAssertEqual(viewModel.mode, .manual)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
+        XCTAssertEqual(
+            viewModel.advanceToast,
+            .actionComplete("Manual Mode active. Ctrl-Option-M returns; Ctrl-Option-Shift-M keeps this layout.")
+        )
+    }
+
+    func testEnterManualModeShowsFeedbackBeforeServerFinishes() async {
+        let client = FakeQueueClient(packets: SeededQueue.packets)
+        client.setManualModeSetDelayNanoseconds(100_000_000)
+        let viewModel = QueueViewModel(client: client)
+
+        let enter = Task { @MainActor in
+            await viewModel.enterManualMode()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        XCTAssertEqual(viewModel.mode, .manual)
+        XCTAssertEqual(viewModel.shouldRestoreWorkspace, false)
+        XCTAssertEqual(
+            viewModel.advanceToast,
+            .actionComplete("Manual Mode active. Ctrl-Option-M returns; Ctrl-Option-Shift-M keeps this layout.")
+        )
+
+        await enter.value
     }
 
     func testExitManualModePostsActiveFalseToServer() async {
@@ -2654,6 +2678,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(client.manualModeSetRequests.map(\.active), [true, false])
         XCTAssertEqual(viewModel.mode, .eventLoop)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Returned to Event Loop."))
     }
 
     func testBootstrapReadsManualModeStateFromServer() async {
@@ -2816,6 +2841,7 @@ final class QueueViewModelTests: XCTestCase {
 
         XCTAssertEqual(viewModel.mode, .eventLoop)
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Returned to Event Loop."))
     }
 
     func testToggleEnteringManualModeDoesNotCaptureUntilReturn() async {
@@ -3065,9 +3091,30 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.manualWorkspaceSnapshot, manualSnapshot)
         XCTAssertEqual(viewModel.manualWorkspaceCaptureState, .captured(manualSnapshot))
         XCTAssertEqual(viewModel.workspaceRestoreState, .keptCurrentLayout)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Returned to Event Loop. Kept current layout."))
         XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
         XCTAssertEqual(workspaceClient.restorePlanSnapshots, [])
         XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [])
+    }
+
+    func testReturnToEventLoopKeepingCurrentLayoutShowsFeedbackBeforeCaptureFinishes() async {
+        let workspaceClient = FakeWorkspaceClient(captureDelayNanoseconds: 100_000_000)
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient
+        )
+        await viewModel.enterManualMode()
+
+        let returning = Task { @MainActor in
+            await viewModel.returnToEventLoopModeKeepingCurrentLayout()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Returning to Event Loop..."))
+
+        await returning.value
+        XCTAssertEqual(viewModel.mode, .eventLoop)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .keptCurrentLayout)
     }
 
     func testReturningToEventLoopModePlansSelectedWorkspaceRestore() async {
@@ -3106,6 +3153,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.shouldRestoreWorkspace, true)
         XCTAssertEqual(workspaceClient.workspaceCaptureCount, 1)
         XCTAssertEqual(viewModel.workspaceRestoreState, .planned(plan))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Returned to Event Loop. Restoring selected paper..."))
         XCTAssertEqual(workspaceClient.restorePlanSnapshots, [snapshot])
     }
 
