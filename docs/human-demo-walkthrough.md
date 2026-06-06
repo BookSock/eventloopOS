@@ -48,8 +48,8 @@ cannot pass from an empty, invalid, or wrong-workspace screenshot file. The
 default `lab` mode never captures or focuses the controller Mac desktop: it
 captures the remote lab Mac desktop over SSH. Use
 `EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=local` to require only the local
-Screen Sharing window, or `EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=auto` to
-use the lab Mac desktop unless local Screen Sharing is explicitly opted in.
+Screen Sharing window. `EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=auto` uses
+the lab Mac desktop capture path.
 Local Screen Sharing capture inside demo setup/readiness is skipped unless
 `EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1` is set. Use that only for
 manual debugging, because even no-raise CoreGraphics window capture can change

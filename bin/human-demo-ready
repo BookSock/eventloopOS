@@ -77,10 +77,11 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_SETTLE_MS default: 2000
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_START_BUDGET_MS default: 1000
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_BUDGET_MS default: 3000
+  EVENTLOOPOS_HUMAN_DEMO_FINAL_HANDOFF_SETTLE_MS default: 4500
   EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=lab|auto|local default: lab
     lab captures the Mac Studio desktop over SSH and never focuses local Screen Sharing
     local requires EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1
-    auto uses lab unless EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1 is set
+    auto uses the lab Mac desktop capture path
 `);
   process.exit(0);
 }
@@ -161,7 +162,9 @@ const manualModeFeedback = manualModeFeedbackEnabled && hotkeyProofsCanRun
 
 let finalHandoffStage;
 let finalHandoffScreenshot;
+let finalHandoffSettle;
 if (!skipScreenshot) {
+  finalHandoffSettle = runFinalHandoffSettleStep(env);
   finalHandoffStage = runLabDemoScreenshotStageStep(env, "final lab demo handoff stage");
   finalHandoffScreenshot = runScreenshotStep(path.join(runDir, "screen-sharing-final.png"), env, "human-demo-final");
 }
@@ -187,6 +190,7 @@ const checks = {
   queue_briefing_strip_visible: skipScreenshot || screenshotStage?.result?.queue_briefing_strip_present === true,
   paper_reminder_hud_visible: skipScreenshot || screenshotStage?.result?.paper_reminder_hud_present === true
     || screenshot?.lab_capture_summary?.queue_app?.paper_reminder_hud_present === true,
+  stale_workspace_status_hidden: skipScreenshot || screenshotStage?.result?.stale_workspace_status_banner_present === false,
   queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
   workspace_latency_ok: !workspaceLatencyEnabled || (workspaceLatency?.status === 0 && workspaceLatencyManifest?.ok === true),
   paper_reminder_feedback_ok: !paperReminderFeedbackEnabled || (paperReminderFeedback?.status === 0 && paperReminderFeedbackManifest?.ok === true),
@@ -197,6 +201,7 @@ const checks = {
   final_handoff_screen_sharing_capture_ok: skipScreenshot || finalHandoffScreenshot?.ok === true,
   final_handoff_queue_briefing_strip_visible: skipScreenshot || finalHandoffStage?.result?.queue_briefing_strip_present === true,
   final_handoff_paper_reminder_hud_visible: skipScreenshot || finalHandoffStage?.result?.paper_reminder_hud_present === true,
+  final_handoff_stale_workspace_status_hidden: skipScreenshot || finalHandoffStage?.result?.stale_workspace_status_banner_present === false,
   final_handoff_feedback_refresh_ok: skipScreenshot || finalHandoffStage?.result?.paper_feedback_refresh?.ok === true,
   final_handoff_current_feedback_ok: skipScreenshot || /Showing paper: Review Demo Customer Reply/i.test(finalHandoffFeedback),
 };
@@ -262,6 +267,13 @@ const manifest = {
     skipped: true,
   },
   final_handoff_stage: finalHandoffStage ? finalHandoffStage : {
+    skipped: true,
+  },
+  final_handoff_settle: finalHandoffSettle ? {
+    ok: finalHandoffSettle.status === 0,
+    exit_code: finalHandoffSettle.status,
+    duration_ms: finalHandoffSettle.duration_ms,
+  } : {
     skipped: true,
   },
   queue_latency: queueLatency ? {
@@ -506,6 +518,7 @@ const briefingStrip = queueBriefingStripStatus({
   priority: customer.priority_score,
 });
 const paperReminderHud = paperReminderHudStatus();
+const staleWorkspaceStatusBanner = staleWorkspaceStatusBannerStatus();
 const expectedFeedbackTitle = String(customer.review_packet?.title ?? customer.title ?? "Review Demo Customer Reply");
 const paperFeedbackRefresh = await refreshSelectedPaperFeedback(expectedFeedbackTitle);
 const harnessStatus = readHarnessStatus();
@@ -526,6 +539,9 @@ console.log(JSON.stringify({
   paper_reminder_hud_source: paperReminderHud.source,
   paper_reminder_hud_title: paperReminderHud.title,
   paper_reminder_hud_error: paperReminderHud.error,
+  stale_workspace_status_banner_present: staleWorkspaceStatusBanner.present,
+  stale_workspace_status_banner_line: staleWorkspaceStatusBanner.line,
+  stale_workspace_status_banner_error: staleWorkspaceStatusBanner.error,
   paper_feedback_refresh: paperFeedbackRefresh,
   queue_harness_status: harnessStatus?.status ?? harnessStatus ?? null,
   queue_harness_feedback: harnessFeedback,
@@ -802,6 +818,64 @@ function paperReminderHudStatus() {
   }
 }
 
+function staleWorkspaceStatusBannerStatus() {
+  const script = [
+    "set staleNeedles to {\\"Manual workspace saved:\\", \\"Workspace restored:\\", \\"Workspace already restored:\\", \\"Task layout saved:\\", \\"Returned without moving windows\\"}",
+    "tell application \\"System Events\\"",
+    "  if not (exists process \\"eventloopOS Queue\\") then return \\"missing:process\\"",
+    "  tell process \\"eventloopOS Queue\\"",
+    "    if (count of windows) is 0 then return \\"missing:window\\"",
+    "    repeat with candidateWindow in windows",
+    "      set windowName to \\"\\"",
+    "      try",
+    "        set windowName to name of candidateWindow as string",
+    "      end try",
+    "      if windowName is not \\"eventloopOS Paper Reminder\\" then",
+    "        set flattenedElements to entire contents of candidateWindow",
+    "        set elementCount to count of flattenedElements",
+    "        if elementCount is greater than 260 then set elementCount to 260",
+    "        repeat with elementIndex from 1 to elementCount",
+    "          set candidateElement to item elementIndex of flattenedElements",
+    "          set nameText to \\"\\"",
+    "          set valueText to \\"\\"",
+    "          try",
+    "            set nameText to name of candidateElement as string",
+    "          end try",
+    "          try",
+    "            set valueText to value of candidateElement as string",
+    "          end try",
+    "          set readableText to nameText & \\" \\" & valueText",
+    "          repeat with staleNeedle in staleNeedles",
+    "            if readableText contains (staleNeedle as string) then return \\"present:\\" & staleNeedle & \\"|\\" & readableText",
+    "          end repeat",
+    "        end repeat",
+    "      end if",
+    "    end repeat",
+    "  end tell",
+    "end tell",
+    "return \\"absent\\"",
+  ].join("\\n");
+  try {
+    const output = execFileSync("osascript", [], { input: script, encoding: "utf8" }).trim();
+    if (output.startsWith("present:")) {
+      return {
+        present: true,
+        line: output.slice("present:".length),
+      };
+    }
+    return {
+      present: false,
+      line: output,
+    };
+  } catch (error) {
+    return {
+      present: true,
+      line: "",
+      error: String(error?.message ?? error),
+    };
+  }
+}
+
 function readHarnessStatus() {
   try {
     return JSON.parse(fs.readFileSync("/tmp/eventloopos-queue-harness-status.json", "utf8"));
@@ -1011,11 +1085,30 @@ function runManualModeSettleStep(envOverride) {
   ], envOverride);
 }
 
+function runFinalHandoffSettleStep(envOverride) {
+  const settleMs = finalHandoffSettleMs();
+  if (settleMs <= 0) return undefined;
+  return runStep("final handoff settle before screenshot", "node", [
+    "-e",
+    `setTimeout(() => {}, ${settleMs})`,
+  ], envOverride);
+}
+
 function manualModeSettleMs() {
   const raw = process.env.EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_SETTLE_MS ?? "2000";
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0) {
     console.error(`Invalid EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_SETTLE_MS: ${String(raw)}`);
+    process.exit(2);
+  }
+  return Math.round(parsed);
+}
+
+function finalHandoffSettleMs() {
+  const raw = process.env.EVENTLOOPOS_HUMAN_DEMO_FINAL_HANDOFF_SETTLE_MS ?? "4500";
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    console.error(`Invalid EVENTLOOPOS_HUMAN_DEMO_FINAL_HANDOFF_SETTLE_MS: ${String(raw)}`);
     process.exit(2);
   }
   return Math.round(parsed);
@@ -1168,20 +1261,7 @@ function runScreenshotStep(localOutputPath, envOverride, label) {
     return runLabDesktopCapture(envOverride, "requested", label);
   }
 
-  if (!localScreenSharingCaptureAllowed) {
-    return runLabDesktopCapture(envOverride, "local_screen_sharing_capture_not_opted_in", label);
-  }
-  const local = runLocalScreenSharingCapture(localOutputPath, envOverride, label);
-  if (local.ok) return local;
-
-  const lab = runLabDesktopCapture(envOverride, "local_screen_sharing_unavailable", label);
-  return {
-    ...lab,
-    fallback_reason: lab.ok
-      ? "local_screen_sharing_unavailable"
-      : "local_screen_sharing_and_lab_capture_failed",
-    local_attempt: local,
-  };
+  return runLabDesktopCapture(envOverride, "auto_uses_lab_desktop_capture", label);
 }
 
 function localScreenSharingCaptureNotAllowed(localOutputPath) {
@@ -1510,6 +1590,7 @@ function renderReadyMarkdown(manifest) {
 - Fresh screenshot capture: ${screenshot?.output ?? "skipped"}${screenshot?.capture_mode ? ` mode=${screenshot.capture_mode}` : ""}${screenshot?.image?.dimensions ? ` (${screenshot.image.dimensions}, ${screenshot.image.bytes} bytes)` : ""}
 - Queue briefing strip: ${manifest.checks?.queue_briefing_strip_visible === true ? "visible" : "missing"}
 - Desktop paper reminder HUD: ${manifest.checks?.paper_reminder_hud_visible === true ? "visible" : "missing"}
+- Stale workspace status banners: ${manifest.checks?.stale_workspace_status_hidden === true && manifest.checks?.final_handoff_stale_workspace_status_hidden === true ? "absent" : "present"}
 - Final handoff stage: ${finalHandoff?.ok === true ? "ok" : finalHandoff?.skipped ? "skipped" : "failed"}
 - Final handoff feedback: ${finalHandoff?.result?.queue_harness_feedback ?? ""}
 - Final handoff screenshot: ${finalScreenshot?.output ?? "skipped"}${finalScreenshot?.capture_mode ? ` mode=${finalScreenshot.capture_mode}` : ""}${finalScreenshot?.image?.dimensions ? ` (${finalScreenshot.image.dimensions}, ${finalScreenshot.image.bytes} bytes)` : ""}
@@ -1599,6 +1680,8 @@ function runSelfTest() {
     checks: {
       queue_briefing_strip_visible: true,
       paper_reminder_hud_visible: true,
+      stale_workspace_status_hidden: true,
+      final_handoff_stale_workspace_status_hidden: true,
       final_handoff_current_feedback_ok: true,
     },
     failed_checks: [],
@@ -1649,6 +1732,7 @@ function runSelfTest() {
   assert.ok(readyMarkdown.includes("Waiting-agent paper proof: ok"));
   assert.ok(readyMarkdown.includes("Final handoff stage: ok"));
   assert.ok(readyMarkdown.includes("Final handoff feedback: Showing paper: Review Demo Customer Reply."));
+  assert.ok(readyMarkdown.includes("Stale workspace status banners: absent"));
   assert.ok(readyMarkdown.includes("Final handoff screenshot: artifacts/lab-runs/ready/screen-sharing-final.png mode=lab_desktop (1280x720, 4096 bytes)"));
   assert.ok(readyMarkdown.includes("Manual Mode enter feedback: artifacts/lab-runs/ready/manual-mode-enter-feedback.json"));
   assert.ok(readyMarkdown.includes("Manual Mode return-start feedback: artifacts/lab-runs/ready/manual-mode-return-start-feedback.json"));
@@ -1706,6 +1790,9 @@ function runSelfTest() {
   assert.ok(labDemoScreenshotStageScript().includes("raiseDemoApps"));
   assert.ok(labDemoScreenshotStageScript().includes("queueBriefingStripStatus"));
   assert.ok(labDemoScreenshotStageScript().includes("paperReminderHudStatus"));
+  assert.ok(labDemoScreenshotStageScript().includes("staleWorkspaceStatusBannerStatus"));
+  assert.ok(labDemoScreenshotStageScript().includes("Manual workspace saved:"));
+  assert.ok(labDemoScreenshotStageScript().includes("stale_workspace_status_banner_present"));
   assert.ok(labDemoScreenshotStageScript().includes("readHarnessStatus"));
   assert.ok(labDemoScreenshotStageScript().includes("refreshSelectedPaperFeedback"));
   assert.ok(labDemoScreenshotStageScript().includes("paper_feedback_refresh"));
@@ -1745,7 +1832,12 @@ function runSelfTest() {
     ok: true,
     profile: "lab-human-demo",
     url: "http://127.0.0.1:4480",
-    checks: { queue_briefing_strip_visible: true, paper_reminder_hud_visible: true },
+    checks: {
+      queue_briefing_strip_visible: true,
+      paper_reminder_hud_visible: true,
+      stale_workspace_status_hidden: true,
+      final_handoff_stale_workspace_status_hidden: true,
+    },
     failed_checks: [],
     latest_human_demo: {
       manifest_path: "artifacts/lab-runs/demo/manifest.json",
@@ -1791,6 +1883,7 @@ function runSelfTest() {
   assert.match(markdown, /Waiting-agent paper proof: ok/);
   assert.match(markdown, /Queue briefing strip: visible/);
   assert.match(markdown, /Desktop paper reminder HUD: visible/);
+  assert.match(markdown, /Stale workspace status banners: absent/);
   assert.match(markdown, /Final handoff stage: ok/);
   assert.match(markdown, /Final handoff feedback: Showing paper: Review Demo Customer Reply\./);
   assert.match(markdown, /Final handoff screenshot: artifacts\/lab-runs\/ready\/screen-sharing-final\.png mode=lab_desktop \(1280x720, 4096 bytes\)/);

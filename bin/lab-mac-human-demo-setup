@@ -17,6 +17,7 @@ Environment:
   SCREEN_SHARING_TITLE   default: Zeus
   EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET default: lab (lab|auto|local)
   EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE default: 0; set 1 before any local Screen Sharing capture.
+  auto uses the lab desktop capture path; use local explicitly for local Screen Sharing window capture.
 EOF
 }
 
@@ -209,11 +210,7 @@ if [[ "$skip_screenshot" == "0" ]]; then
       capture_local_screen_sharing || true
       ;;
     auto)
-      if [[ "$allow_local_screen_sharing_capture" == "1" ]]; then
-        capture_local_screen_sharing || capture_lab_desktop || true
-      else
-        capture_lab_desktop || true
-      fi
+      capture_lab_desktop || true
       ;;
   esac
 fi
