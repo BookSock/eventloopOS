@@ -40,7 +40,7 @@ GitHub Actions in `.github/workflows/`:
 
 Cost/noise notes:
 
-- The repo is public (`BookSock/eventloopOS`). Public repositories using standard GitHub-hosted runners are not billed for GitHub Actions minutes; see GitHub's billing docs: <https://docs.github.com/en/billing/managing-billing-for-your-products/managing-billing-for-github-actions/about-billing-for-github-actions>.
+- The repo is public (`BookSock/eventloopOS`). Public repositories using standard GitHub-hosted runners are not billed for GitHub Actions minutes; see GitHub's billing docs: <https://docs.github.com/en/billing/managing-billing-for-github-actions/about-billing-for-github-actions>.
 - Normal CI is Ubuntu-only and skips live browser/download/macOS dogfood work with `EVENTLOOPOS_SKIP_BROWSER_E2E=1`.
 - macOS CI is path-scoped to `app/macos/**` and manual runs, so ordinary orchestrator/shared/docs commits do not launch a macOS runner.
 - CI and secret-scan both cancel stale in-progress runs for the same branch/ref. If several commits are pushed quickly, only the newest run should finish and email.

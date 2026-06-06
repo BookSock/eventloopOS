@@ -8,7 +8,7 @@ import { performance } from "node:perf_hooks";
 
 const execFileAsync = promisify(execFile);
 const args = process.argv.slice(2);
-const DEFAULT_BUDGETS_MS = { hotkey_to_feedback: 10_000 };
+const DEFAULT_BUDGETS_MS = { hotkey_to_feedback: 1_000 };
 
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: bin/macos-hotkey-feedback-latency [--self-test] [--process-name NAME] [--hotkey ctrl-option-j] [--expect TEXT] [--runs N] [--budget-ms N] [--manifest PATH]
@@ -22,7 +22,7 @@ Defaults:
   hotkey:       ctrl-option-j
   expect:       feedback text changes from the pre-hotkey value
   runs:         1
-  budget-ms:    10000 p95
+  budget-ms:    1000 p95
 `);
   process.exit(0);
 }

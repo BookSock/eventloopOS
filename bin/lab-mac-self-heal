@@ -17,6 +17,7 @@ Environment:
   LAB_SELF_HEAL_NO_LAUNCHCTL   default: 0; write plist without loading it
   LAB_SELF_HEAL_SKIP_OPEN      default: 0; do not open Tailscale/AeroSpace
   LAB_SELF_HEAL_AEROSPACE_MODE default: auto; auto|launchservices|custom|skip
+  LAB_SELF_HEAL_AEROSPACE_CLI_TIMEOUT_SECONDS default: 5
   LAB_SELF_HEAL_SKIP_CAFFEINATE default: 0; do not start caffeinate
   LAB_SELF_HEAL_SKIP_TAILSCALE_UP default: 0; do not run tailscale up when disconnected
   LAB_SELF_HEAL_PROOF_LOCK_TTL_SECONDS default: 7200; proof lock age treated active
@@ -60,6 +61,10 @@ start_interval="${LAB_SELF_HEAL_START_INTERVAL:-20}"
 controller_tailnet_ip="${LAB_CONTROLLER_TAILSCALE_IP:-}"
 aerospace_mode="${LAB_SELF_HEAL_AEROSPACE_MODE:-auto}"
 custom_aerospace_runner="$HOME/.eventloop-lab/bin/run-aerospace.command"
+aerospace_cli_timeout_seconds="${LAB_SELF_HEAL_AEROSPACE_CLI_TIMEOUT_SECONDS:-5}"
+if ! [[ "$aerospace_cli_timeout_seconds" =~ ^[0-9]+$ ]] || [[ "$aerospace_cli_timeout_seconds" == "0" ]]; then
+  aerospace_cli_timeout_seconds=5
+fi
 
 plist_escape() {
   sed \
@@ -68,6 +73,52 @@ plist_escape() {
     -e 's/>/\&gt;/g' \
     -e 's/"/\&quot;/g' \
     -e "s/'/\&apos;/g"
+}
+
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  "$@" &
+  local command_pid=$!
+  (
+    sleep "$seconds"
+    kill "$command_pid" >/dev/null 2>&1 || true
+  ) &
+  local killer_pid=$!
+  local command_code=0
+  wait "$command_pid" || command_code=$?
+  kill "$killer_pid" >/dev/null 2>&1 || true
+  wait "$killer_pid" 2>/dev/null || true
+  return "$command_code"
+}
+
+aerospace_cli_reachable() {
+  command -v aerospace >/dev/null 2>&1 || return 1
+  run_with_timeout "$aerospace_cli_timeout_seconds" aerospace list-workspaces --focused >/dev/null 2>&1
+}
+
+restart_custom_aerospace_agent() {
+  if [[ ! -x "$HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp" ]]; then
+    echo "custom AeroSpace debug app missing; cannot restart: $HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp"
+    return 1
+  fi
+  if [[ ! -f "$aerospace_plist" ]]; then
+    echo "custom AeroSpace LaunchAgent plist missing; installing first: $aerospace_plist"
+    install_custom_aerospace_agent
+    return
+  fi
+  launchctl bootout "gui/$(id -u)" "$terminal_aerospace_plist" >/dev/null 2>&1 || true
+  launchctl bootout "gui/$(id -u)" "$aerospace_plist" >/dev/null 2>&1 || true
+  rm -f "$terminal_aerospace_plist"
+  pkill -TERM -f "$HOME/.eventloop-lab/bin/run-aerospace.command" >/dev/null 2>&1 || true
+  pkill -TERM -f "$HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp" >/dev/null 2>&1 || true
+  sleep 2
+  pkill -KILL -f "$HOME/.eventloop-lab/bin/run-aerospace.command" >/dev/null 2>&1 || true
+  pkill -KILL -f "$HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp" >/dev/null 2>&1 || true
+  rm -f "/tmp/bobko.aerospace.debug-$(whoami).sock" "/tmp/bobko.aerospace-$(whoami).sock"
+  launchctl bootstrap "gui/$(id -u)" "$aerospace_plist"
+  launchctl kickstart -k "gui/$(id -u)/$aerospace_label" >/dev/null 2>&1 || true
+  echo "custom AeroSpace direct LaunchAgent restarted: $aerospace_plist"
 }
 
 write_manifest() {
@@ -138,6 +189,19 @@ write_heartbeat() {
       echo "tailscale_missing=1"
     fi
     echo
+    echo "== aerospace =="
+    if command -v aerospace >/dev/null 2>&1; then
+      echo "aerospace_path=$(command -v aerospace)"
+      if aerospace_cli_reachable; then
+        echo "aerospace_cli_reachable=1"
+      else
+        echo "aerospace_cli_reachable=0"
+      fi
+      run_with_timeout "$aerospace_cli_timeout_seconds" aerospace --version 2>&1 | head -6 || true
+    else
+      echo "aerospace_cli_missing=1"
+    fi
+    echo
     echo "== listeners =="
     lsof -nP -iTCP:22 -sTCP:LISTEN 2>/dev/null || true
     lsof -nP -iTCP:5900 -sTCP:LISTEN 2>/dev/null || true
@@ -168,6 +232,8 @@ const checks = {
   vnc_listener_visible: /TCP.*:5900 .*LISTEN/i.test(out) || /vnc_tailnet_reachable=1/.test(out),
   tailscale_process_visible: /Tailscale/i.test(out),
   aerospace_process_visible: /AeroSpace/i.test(out),
+  aerospace_cli_present: /aerospace_path=/.test(out),
+  aerospace_cli_reachable: /aerospace_cli_reachable=1/.test(out),
   controller_ping_ok: /pong from|pong in|via DERP|direct=true/i.test(out),
 };
 const fixes = [];
@@ -175,6 +241,7 @@ if (!checks.tailscale_ip_visible) fixes.push("Open Tailscale and confirm this la
 if (!checks.ssh_listener_visible) fixes.push("Enable Remote Login for administrators in System Settings > General > Sharing.");
 if (!checks.vnc_listener_visible) fixes.push("Enable Screen Sharing or Remote Management and allow administrators to control the screen.");
 if (!checks.aerospace_process_visible) fixes.push("Open AeroSpace and approve Accessibility if macOS prompts.");
+if (checks.aerospace_cli_present && !checks.aerospace_cli_reachable) fixes.push("Restart the eventloopOS AeroSpace debug LaunchAgent; process is visible but the socket is not answering.");
 const timestamp = out.match(/^timestamp=(.+)$/m)?.[1];
 console.log(JSON.stringify({
   schema_version: 1,
@@ -373,17 +440,7 @@ install_custom_aerospace_agent() {
 </dict>
 </plist>
 EOF
-  launchctl bootout "gui/$(id -u)" "$terminal_aerospace_plist" >/dev/null 2>&1 || true
-  launchctl bootout "gui/$(id -u)" "$aerospace_plist" >/dev/null 2>&1 || true
-  rm -f "$terminal_aerospace_plist"
-  pkill -TERM -f "$HOME/.eventloop-lab/bin/run-aerospace.command" >/dev/null 2>&1 || true
-  sleep 1
-  pkill -KILL -f "$HOME/.eventloop-lab/bin/run-aerospace.command" >/dev/null 2>&1 || true
-  pkill -TERM -f "$HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp" >/dev/null 2>&1 || true
-  sleep 1
-  pkill -KILL -f "$HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp" >/dev/null 2>&1 || true
-  launchctl bootstrap "gui/$(id -u)" "$aerospace_plist"
-  launchctl kickstart -k "gui/$(id -u)/$aerospace_label" >/dev/null 2>&1 || true
+  restart_custom_aerospace_agent
   echo "custom AeroSpace direct LaunchAgent installed: $aerospace_plist"
   if [[ -f "$terminal_aerospace_plist" ]]; then
     echo "old Terminal AeroSpace launcher unloaded: $terminal_aerospace_plist"
@@ -487,6 +544,20 @@ run_once() {
         fi
       fi
       sleep 3
+      if [[ "$aerospace_mode" == "custom" || ( "$aerospace_mode" == "auto" && -x "$HOME/dev/2026/AeroSpace/.debug/AeroSpaceApp" ) ]]; then
+        if aerospace_cli_reachable; then
+          echo "custom AeroSpace CLI reachable"
+        else
+          echo "custom AeroSpace CLI unhealthy; restarting debug LaunchAgent"
+          restart_custom_aerospace_agent
+          sleep 5
+          if aerospace_cli_reachable; then
+            echo "custom AeroSpace CLI recovered"
+          else
+            echo "custom AeroSpace CLI still unreachable after restart"
+          fi
+        fi
+      fi
     fi
     echo
     echo "== tailscale autoconnect =="
@@ -511,6 +582,10 @@ run_once() {
   } >"$run/self-heal.stdout.log" 2>"$run/self-heal.stderr.log"
   code=$?
   set -e
+  if [[ "$code" == "0" ]] && jq -e '.checks.aerospace_cli_present == true and .checks.aerospace_cli_reachable == false' "$run/heartbeat.json" >/dev/null 2>&1; then
+    code=1
+    echo "aerospace_cli_unreachable_after_self_heal=1" >>"$run/self-heal.stderr.log"
+  fi
   local recovery_run
   recovery_run="$(grep -E "^artifacts/lab-runs/.+-local-recovery-check$" "$run/self-heal.stdout.log" | tail -1 || true)"
   if [[ -n "$recovery_run" ]]; then

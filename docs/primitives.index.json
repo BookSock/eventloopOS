@@ -1999,7 +1999,7 @@
           "primitiveCategory": "os_control",
           "primitiveSummary": "Swift macOS queue UI, hotkeys, manual mode, restore, voice capture, and master command shell.",
           "name": "hotkey_to_feedback",
-          "p95Ms": 10000,
+          "p95Ms": 1000,
           "proof": "bin/macos-hotkey-feedback-latency",
           "scope": "macos_queue_app_safe_restore_feedback",
           "hotkey": "Ctrl-Option-R"

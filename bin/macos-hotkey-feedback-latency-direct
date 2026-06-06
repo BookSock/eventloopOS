@@ -14,7 +14,7 @@ EOF
 process_name="${EVENTLOOPOS_QUEUE_PROCESS_NAME:-EventLoopQueueApp}"
 hotkey="${EVENTLOOPOS_HOTKEY_LATENCY_CHORD:-ctrl-option-j}"
 runs="${EVENTLOOPOS_HOTKEY_LATENCY_RUNS:-1}"
-budget_ms="${EVENTLOOPOS_HOTKEY_LATENCY_BUDGET_MS:-10000}"
+budget_ms="${EVENTLOOPOS_HOTKEY_LATENCY_BUDGET_MS:-1000}"
 manifest="artifacts/macos-hotkey-latency-direct/$(date -u +%Y%m%dT%H%M%SZ)/manifest.json"
 expected_text="${EVENTLOOPOS_HOTKEY_LATENCY_EXPECT:-}"
 harness_status_path="${EVENTLOOPOS_QUEUE_HARNESS_STATUS_PATH:-/tmp/eventloopos-queue-harness-status.json}"

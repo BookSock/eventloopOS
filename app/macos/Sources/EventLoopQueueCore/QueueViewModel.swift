@@ -1985,7 +1985,11 @@ public final class QueueViewModel: ObservableObject {
             return
         }
 
-        let restored = await executeWorkspaceRestore(snapshot: snapshot, idempotencyPrefix: "mac_workspace_restore")
+        let restored = await executeWorkspaceRestore(
+            snapshot: snapshot,
+            idempotencyPrefix: "mac_workspace_restore",
+            startToast: workspaceRestoreStartToast(snapshot: snapshot)
+        )
         if restored {
             await syncSelectedCurrentTaskIfPossible()
             showSelectedPaperBriefingIfMatching(snapshot: snapshot)
@@ -1993,7 +1997,11 @@ public final class QueueViewModel: ObservableObject {
     }
 
     @discardableResult
-    private func executeWorkspaceRestore(snapshot: WorkspaceSnapshot, idempotencyPrefix: String) async -> Bool {
+    private func executeWorkspaceRestore(
+        snapshot: WorkspaceSnapshot,
+        idempotencyPrefix: String,
+        startToast: AdvanceToast = .actionComplete("Restoring workspace...")
+    ) async -> Bool {
         guard !workspaceRestoreInFlight else {
             workspaceRestoreState = .alreadyRestoring
             advanceToast = .actionComplete("Workspace restore already running...")
@@ -2011,7 +2019,7 @@ public final class QueueViewModel: ObservableObject {
 
         workspaceRestoreInFlight = true
         workspaceRestoreState = .restoring
-        advanceToast = .actionComplete("Restoring workspace...")
+        advanceToast = startToast
         defer {
             workspaceRestoreInFlight = false
         }
@@ -2038,6 +2046,15 @@ public final class QueueViewModel: ObservableObject {
         }
     }
 
+    private func workspaceRestoreStartToast(snapshot: WorkspaceSnapshot) -> AdvanceToast {
+        guard selectedWorkspaceSnapshot == snapshot,
+              let packetId = selectedPacketID else {
+            return .actionComplete("Restoring workspace...")
+        }
+
+        return .actionComplete("Restoring paper: \(paperTitleForFeedback(packetId: packetId))...")
+    }
+
     public func confirmSelectedWorkspaceRestore() async {
         guard let snapshot = selectedWorkspaceSnapshot else {
             workspaceRestoreState = .failed("Selected packet has no workspace snapshot")
@@ -2061,6 +2078,17 @@ public final class QueueViewModel: ObservableObject {
             selectedTaskSessions: packet.id == selectedPacketID ? selectedTaskSessions : []
         )
         return .switchedToPaper(packetId: packetId, title: briefing.title, decision: briefing.decision)
+    }
+
+    private func paperTitleForFeedback(packetId: String) -> String {
+        guard let packet = packets.first(where: { $0.id == packetId }) else {
+            return packetId
+        }
+        let title = QueuePaperBriefingPresentation(
+            packet: packet,
+            selectedTaskSessions: packet.id == selectedPacketID ? selectedTaskSessions : []
+        ).title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return title.isEmpty ? packetId : title
     }
 
     private func showSelectedPaperBriefingIfMatching(snapshot: WorkspaceSnapshot) {

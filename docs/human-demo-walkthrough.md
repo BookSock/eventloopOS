@@ -53,9 +53,12 @@ default the latest proof must be no older than 24 hours; use
 `--demo-proof-max-age-hours` to change that window. It also writes read-only
 queue/master latency and workspace capture/restore-plan latency manifests, so
 demo readiness proves the Queue path and workspace path are responsive without
-mutating the active paper. On macOS it includes a live hotkey-to-feedback p95
-latency gate in the readiness artifact by running the latency probe on the Mac
-Studio. Use `--skip-hotkey-latency` only while bootstrapping permission setup.
+mutating the active paper. On macOS it includes a live hotkey-to-first-feedback
+p95 latency gate in the readiness artifact by running the latency probe on the
+Mac Studio. The default restore-hotkey gate waits for immediate
+`Restoring paper:` feedback; screenshot staging still verifies final
+`Showing paper:` feedback after restore. Use `--skip-hotkey-latency` only while
+bootstrapping permission setup.
 `READY.md` also names the suggested human result file so the final checklist
 does not accidentally reuse an older blank artifact.
 Use `EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_TARGET=local` or
@@ -104,7 +107,7 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 1. Click `Review Demo Customer Reply` in Queue.
 2. Press `Ctrl-Option-R`.
 3. Confirm Customer Chrome and the shared TextEdit come forward on `demo-customer`.
-   Queue should show green feedback starting with `Showing paper: Review Demo Customer Reply...`.
+   Queue should immediately acknowledge `Restoring paper: Review Demo Customer Reply...`, then show green feedback starting with `Showing paper: Review Demo Customer Reply...`.
 4. Move the shared TextEdit window with `Ctrl-Option-Left`, or drag it manually toward the center/left.
    It starts on the right side, so `Ctrl-Option-Right` may look like nothing happened.
 5. Wait 2 to 3 seconds. Ambient autosave should remember the moved position without pressing Done/Defer/Advance.

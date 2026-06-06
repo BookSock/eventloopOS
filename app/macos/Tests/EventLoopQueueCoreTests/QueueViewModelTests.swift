@@ -3426,7 +3426,7 @@ final class QueueViewModelTests: XCTestCase {
         try? await Task.sleep(nanoseconds: 10_000_000)
 
         XCTAssertEqual(viewModel.workspaceRestoreState, .restoring)
-        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Restoring workspace..."))
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Restoring paper: Review with workspace..."))
 
         let secondRestore = Task { @MainActor in
             await viewModel.confirmSelectedWorkspaceRestore()
@@ -3526,6 +3526,27 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restored."))
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
         XCTAssertTrue(workspaceClient.restoreIdempotencyKeys[0].hasPrefix("mac_workspace_restore_"))
+    }
+
+    func testGenericWorkspaceRestoreKeepsGenericStartFeedback() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")]
+        )
+        let workspaceClient = FakeWorkspaceClient(restoreDelayNanoseconds: 100_000_000)
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: []),
+            workspaceClient: workspaceClient
+        )
+
+        let restore = Task { @MainActor in
+            await viewModel.confirmWorkspaceRestore(snapshot: snapshot)
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        XCTAssertEqual(viewModel.workspaceRestoreState, .restoring)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Restoring workspace..."))
+
+        await restore.value
     }
 
     func testManualModeSkipsConfirmedWorkspaceRestore() async {

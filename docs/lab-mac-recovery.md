@@ -40,9 +40,11 @@ pnpm lab:self-heal -- status
 ```
 
 The self-heal agent runs as the lab user. It opens Tailscale and AeroSpace,
-keeps the Mac awake with `caffeinate`, writes a heartbeat with Tailscale, SSH,
-VNC, controller ping, and process checks, runs `pnpm lab:local-recovery`, and
-writes artifacts under:
+keeps the Mac awake with `caffeinate`, verifies the AeroSpace CLI socket is
+answering, restarts the eventloopOS AeroSpace debug LaunchAgent if the process
+is visible but the socket is stale, writes a heartbeat with Tailscale, SSH, VNC,
+controller ping, AeroSpace process/socket checks, runs `pnpm lab:local-recovery`,
+and writes artifacts under:
 
 ```sh
 artifacts/lab-runs/<timestamp>-self-heal/manifest.json

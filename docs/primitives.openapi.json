@@ -133,7 +133,7 @@
       "x-eventloopos-latency-budgets": [
         {
           "name": "hotkey_to_feedback",
-          "p95_ms": 10000,
+          "p95_ms": 1000,
           "scope": "macos_queue_app_safe_restore_feedback",
           "hotkey": "Ctrl-Option-R",
           "proof": "bin/macos-hotkey-feedback-latency"
