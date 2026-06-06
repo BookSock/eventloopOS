@@ -36,6 +36,7 @@ Environment:
   LAB_DOGFOOD_AUTO_DORMANT_HOURS default: orchestrator default
   LAB_DOGFOOD_READY_TIMEOUT_SECONDS default: 90
   LAB_DOGFOOD_READY_POLL_SECONDS    default: 5
+  LAB_DOGFOOD_CLEANUP_WORKSPACE     default: 1; set empty to skip focus reset
   LAB_MAC_VNC_USER          default: LAB_MAC_USER
   LAB_MAC_VNC_PASSWORD      required for snapshot-vnc
   LAB_MAC_LOGIN_PASSWORD    optional; snapshot-vnc types it before capture
@@ -78,9 +79,19 @@ auto_paper_idle_seconds="${LAB_DOGFOOD_AUTO_PAPER_IDLE_SECONDS:-60}"
 auto_dormant_hours="${LAB_DOGFOOD_AUTO_DORMANT_HOURS:-}"
 ready_timeout_seconds="${LAB_DOGFOOD_READY_TIMEOUT_SECONDS:-90}"
 ready_poll_seconds="${LAB_DOGFOOD_READY_POLL_SECONDS:-5}"
+cleanup_workspace="${LAB_DOGFOOD_CLEANUP_WORKSPACE:-1}"
 vnc_user="${LAB_MAC_VNC_USER:-$lab_user}"
 vnc_password="${LAB_MAC_VNC_PASSWORD:-}"
 login_password="${LAB_MAC_LOGIN_PASSWORD:-}"
+
+if [[ "$action" == "cleanup" && -n "$cleanup_workspace" ]]; then
+  case "$cleanup_workspace" in
+    *[!A-Za-z0-9_.-]*)
+      echo "unsafe LAB_DOGFOOD_CLEANUP_WORKSPACE: $cleanup_workspace" >&2
+      exit 2
+      ;;
+  esac
+fi
 remote="${lab_user}@${lab_host}"
 remote_bin="/Users/$lab_user/.eventloop-lab/bin"
 remote_repo="/Users/$lab_user/dev/2026/eventloopOS"
@@ -431,7 +442,16 @@ fi
 pkill -TERM -f \"/Users/$lab_user/dev/2026/eventloopOS/bin/ghostty-codex-remote\" >/dev/null 2>&1 || true
 sleep 1
 pkill -KILL -f \"/Users/$lab_user/dev/2026/eventloopOS/bin/ghostty-codex-remote\" >/dev/null 2>&1 || true
+focused_before_reset=\$(aerospace list-workspaces --focused 2>/dev/null || true)
+cleanup_workspace=\"$cleanup_workspace\"
+if [[ -n \"\$cleanup_workspace\" ]]; then
+  aerospace workspace \"\$cleanup_workspace\" >/tmp/eventloopos-lab-cleanup-workspace.out 2>/tmp/eventloopos-lab-cleanup-workspace.err || true
+fi
+focused_after_reset=\$(aerospace list-workspaces --focused 2>/dev/null || true)
 echo \"cleanup_note=cleanup only quits Terminal when every Terminal window is a stale non-busy lab runner; busy Terminal windows are left alone to avoid macOS termination prompts.\"
+echo \"cleanup_focused_workspace_before_reset=\$focused_before_reset\"
+echo \"cleanup_target_workspace=\$cleanup_workspace\"
+echo \"cleanup_focused_workspace_after_reset=\$focused_after_reset\"
 aerospace list-windows --all --json --format \"%{window-id}%{app-name}%{window-title}%{workspace}\" 2>/dev/null | jq \"{count: length, apps: ([.[].\\\"app-name\\\"] | group_by(.) | map({app: .[0], count: length}))}\" 2>/dev/null || true
 '"
     ;;

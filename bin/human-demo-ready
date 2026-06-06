@@ -1229,6 +1229,7 @@ function runLocalScreenSharingCapture(localOutputPath, envOverride, label = "scr
 function localScreenSharingNoFocusEnv(envOverride) {
   return {
     ...envOverride,
+    EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE: "1",
     SCREEN_SHARING_TITLE: envOverride.SCREEN_SHARING_TITLE ?? "Zeus",
     SCREEN_SHARING_RAISE: "0",
     EVENTLOOPOS_SCREEN_SHARING_RAISE: "0",
@@ -1666,6 +1667,7 @@ function runSelfTest() {
     SCREEN_SHARING_ASSERT_NO_FOCUS: "0",
   });
   assert.equal(noFocusCaptureEnv.SCREEN_SHARING_TITLE, "Mac Studio");
+  assert.equal(noFocusCaptureEnv.EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE, "1");
   assert.equal(noFocusCaptureEnv.SCREEN_SHARING_RAISE, "0");
   assert.equal(noFocusCaptureEnv.EVENTLOOPOS_SCREEN_SHARING_RAISE, "0");
   assert.equal(noFocusCaptureEnv.SCREEN_SHARING_CAPTURE_ENGINE, "coregraphics");

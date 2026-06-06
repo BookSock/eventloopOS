@@ -8,6 +8,7 @@ Usage: bin/local-screen-sharing-capture [output.png]
 Capture only the local macOS Screen Sharing window, not the whole desktop.
 
 Environment:
+  EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE default: 0; must be 1 to run
   SCREEN_SHARING_OWNER   default: Screen Sharing
   SCREEN_SHARING_TITLE   optional title substring, e.g. Zeus
   SCREEN_SHARING_RAISE   default: 0; set 1 to raise/focus before capture
@@ -25,6 +26,7 @@ esac
 
 owner="${SCREEN_SHARING_OWNER:-Screen Sharing}"
 title="${SCREEN_SHARING_TITLE:-}"
+allow_requested="${EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE:-0}"
 raise_requested="${SCREEN_SHARING_RAISE:-${EVENTLOOPOS_SCREEN_SHARING_RAISE:-0}}"
 capture_engine="${SCREEN_SHARING_CAPTURE_ENGINE:-coregraphics}"
 assert_no_focus_requested="${SCREEN_SHARING_ASSERT_NO_FOCUS:-1}"
@@ -38,6 +40,19 @@ cleanup_capture_tmpdir() {
   fi
 }
 trap cleanup_capture_tmpdir EXIT
+
+case "$allow_requested" in
+  1|true|TRUE|yes|YES|on|ON)
+    ;;
+  0|false|FALSE|no|NO|off|OFF|"")
+    echo "local Screen Sharing capture disabled: set EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1 to opt in" >&2
+    exit 2
+    ;;
+  *)
+    echo "invalid EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE: $allow_requested (use 0 or 1)" >&2
+    exit 2
+    ;;
+esac
 
 case "$raise_requested" in
   1|true|TRUE|yes|YES|on|ON)

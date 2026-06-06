@@ -139,6 +139,7 @@ capture_local_screen_sharing() {
   echo "human demo local Screen Sharing capture"
   set +e
   SCREEN_SHARING_TITLE="${SCREEN_SHARING_TITLE:-Zeus}" \
+    EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1 \
     SCREEN_SHARING_RAISE=0 \
     EVENTLOOPOS_SCREEN_SHARING_RAISE=0 \
     SCREEN_SHARING_CAPTURE_ENGINE=coregraphics \

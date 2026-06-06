@@ -73,7 +73,9 @@ the local helper can capture only the Screen Sharing window without exposing the
 rest of the controller desktop and without raising/focusing it by default:
 
 ```sh
-SCREEN_SHARING_TITLE=Zeus bin/local-screen-sharing-capture
+EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1 \
+SCREEN_SHARING_TITLE=Zeus \
+bin/local-screen-sharing-capture
 ```
 
 The helper writes `artifacts/screen-sharing-captures/<timestamp>-screen-sharing.png`
@@ -87,9 +89,10 @@ CoreGraphics; set `SCREEN_SHARING_CAPTURE_ENGINE=screencapture` only when you
 explicitly want the old system `screencapture -l` behavior.
 Treat the direct local helper as manual debugging only: no-raise capture records
 and fails focus changes, but it can still briefly change focus on some macOS
-states. Demo setup/readiness wrappers skip local Screen Sharing capture unless
-`EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1` is set, and otherwise use lab
-desktop capture over SSH.
+states. The helper itself refuses to run unless
+`EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1` is set. Demo
+setup/readiness wrappers skip local Screen Sharing capture unless that same
+opt-in is set, and otherwise use lab desktop capture over SSH.
 
 This answers only "are SSH and VNC reachable?" and skips sync, baseline,
 screenshots, and Codex. Use it while the Mac is rebooting or probably offline.

@@ -53,9 +53,9 @@ use the lab Mac desktop unless local Screen Sharing is explicitly opted in.
 Local Screen Sharing capture inside demo setup/readiness is skipped unless
 `EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1` is set. Use that only for
 manual debugging, because even no-raise CoreGraphics window capture can change
-the controller Mac's frontmost app on some macOS states. The local helper
-records frontmost app before/after capture and fails no-raise captures that
-change it.
+the controller Mac's frontmost app on some macOS states. The direct local
+helper refuses to run without that same opt-in, records frontmost app
+before/after capture, and fails no-raise captures that change it.
 Run `bin/human-demo-ready` after the queue app has Accessibility permission. By
 default the latest proof must be no older than 24 hours; use
 `EVENTLOOPOS_HUMAN_DEMO_PROOF_MAX_AGE_HOURS` or
