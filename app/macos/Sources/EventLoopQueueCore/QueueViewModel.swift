@@ -2092,6 +2092,10 @@ public final class QueueViewModel: ObservableObject {
     }
 
     public func confirmSelectedWorkspaceRestore() async {
+        guard selectedPacketID != nil else {
+            showNoSelectedPaperFeedback()
+            return
+        }
         guard let snapshot = selectedWorkspaceSnapshot else {
             workspaceRestoreState = .failed("Selected packet has no workspace snapshot")
             advanceToast = .actionComplete("Selected paper has no saved workspace.")

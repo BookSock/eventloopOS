@@ -33,6 +33,9 @@ final class QueueViewModelTests: XCTestCase {
         await viewModel.executeRecommendedActionAndNext()
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("No paper selected."))
 
+        await viewModel.confirmSelectedWorkspaceRestore()
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("No paper selected."))
+
         await viewModel.moveToNext()
         XCTAssertEqual(viewModel.advanceToast, .actionComplete("No paper selected."))
 
