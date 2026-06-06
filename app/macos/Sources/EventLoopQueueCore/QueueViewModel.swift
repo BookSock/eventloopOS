@@ -579,6 +579,11 @@ public final class QueueViewModel: ObservableObject {
             advanceToast = .actionComplete("\(currentStatus) Still running.")
             return false
         }
+        guard !workspaceRestoreInFlight else {
+            workspaceRestoreState = .alreadyRestoring
+            advanceToast = .actionComplete("Workspace restore still running. Wait a second.")
+            return false
+        }
         paperActionInFlight = true
         paperActionInFlightStatus = status
         advanceToast = .actionComplete(status)
@@ -992,16 +997,56 @@ public final class QueueViewModel: ObservableObject {
     private func restorePaperWorkspaceOrSwitch(packetId: String?, fallbackWorkspaceId: String) async throws {
         if let packetId,
            let snapshot = packets.first(where: { $0.id == packetId })?.workspaceSnapshot {
-            let response = try await workspaceClient.restore(
-                snapshot: snapshot,
-                currentWindows: nil,
-                idempotencyKey: "mac_advance_restore_\(packetId)_\(UUID().uuidString)"
-            )
-            workspaceRestoreState = .executed(response.receipt)
+            try await restorePaperWorkspaceForSwitch(snapshot: snapshot, packetId: packetId)
             return
         }
 
         try await aeroSpaceClient.switchTo(workspace: fallbackWorkspaceId)
+    }
+
+    private func restorePaperWorkspaceForSwitch(snapshot: WorkspaceSnapshot, packetId: String) async throws {
+        let idempotencyPrefix = "mac_advance_restore_\(packetId)"
+        if let recent = lastWorkspaceRestore,
+           recent.idempotencyPrefix == idempotencyPrefix,
+           recent.snapshot == snapshot,
+           Date().timeIntervalSince(recent.completedAt) < workspaceRestoreRepeatWindow {
+            workspaceRestoreState = .alreadyRestored(recent.receipt)
+            return
+        }
+
+        guard !workspaceRestoreInFlight else {
+            workspaceRestoreState = .alreadyRestoring
+            advanceToast = .actionComplete("Workspace restore still running. Wait a second.")
+            return
+        }
+
+        workspaceRestoreInFlight = true
+        workspaceRestoreState = .restoring
+        defer {
+            workspaceRestoreInFlight = false
+        }
+
+        do {
+            let response = try await workspaceClient.restore(
+                snapshot: snapshot,
+                currentWindows: nil,
+                idempotencyKey: "\(idempotencyPrefix)_\(UUID().uuidString)"
+            )
+            workspaceRestoreState = .executed(response.receipt)
+            lastWorkspaceRestore = RecentWorkspaceRestore(
+                idempotencyPrefix: idempotencyPrefix,
+                snapshot: snapshot,
+                completedAt: Date(),
+                receipt: response.receipt
+            )
+        } catch {
+            if let queueError = error as? QueueClientError, queueError.isIdempotencyConflict {
+                workspaceRestoreState = .alreadyRestoring
+                advanceToast = .actionComplete("Workspace restore already running.")
+                return
+            }
+            throw error
+        }
     }
 
     public func doneAndNext() async {

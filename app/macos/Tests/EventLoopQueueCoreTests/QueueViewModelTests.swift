@@ -3663,6 +3663,52 @@ final class QueueViewModelTests: XCTestCase {
         )
     }
 
+    func testPaperActionDuringWorkspaceRestoreDoesNotCompletePacket() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+        let packet = ReviewPacket(
+            id: "packet-with-workspace",
+            title: "Review with workspace",
+            summary: "Needs workspace restore",
+            source: "slack://thread/blog-feedback",
+            priority: 90,
+            recommendedAction: "Review",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: snapshot
+        )
+        let client = FakeQueueClient(packets: [packet])
+        let workspaceClient = FakeWorkspaceClient(
+            captureSnapshot: WorkspaceSnapshot(windows: [], activeWorkspace: "eventloop-blog"),
+            restoreDelayNanoseconds: 100_000_000
+        )
+        let viewModel = QueueViewModel(
+            client: client,
+            workspaceClient: workspaceClient
+        )
+        await viewModel.loadQueue()
+        viewModel.select(packetId: "packet-with-workspace")
+
+        let restoreTask = Task { @MainActor in
+            await viewModel.confirmSelectedWorkspaceRestore()
+        }
+        try? await Task.sleep(nanoseconds: 10_000_000)
+
+        await viewModel.doneAndNext()
+
+        XCTAssertEqual(client.completedPacketIds, [])
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [snapshot])
+        XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestoring)
+        XCTAssertEqual(viewModel.advanceToast, .actionComplete("Workspace restore still running. Wait a second."))
+
+        await restoreTask.value
+
+        XCTAssertEqual(client.completedPacketIds, [])
+        XCTAssertEqual(workspaceClient.workspaceRestoreSnapshots, [snapshot])
+        XCTAssertEqual(viewModel.workspaceRestoreState, .executed(WorkspaceRestoreReceipt(commands: [], skipped: [])))
+    }
+
     func testImmediateSelectedWorkspaceRestoreRepeatReusesRecentReceipt() async {
         let snapshot = WorkspaceSnapshot(
             windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
