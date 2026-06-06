@@ -482,6 +482,50 @@ describe("AutoPaperCodexIdleWatcher", () => {
     assert.doesNotMatch(deps.ingested[0]!.event.summary, /Fallback text/);
   });
 
+  it("emits current focused same-anchor Codex waiting papers without also emitting idle duplicates", async () => {
+    const deps = createDeps({
+      tasks: [
+        { id: "task_checkout_review", primary_anchor_kind: "codex_thread", primary_anchor_id: "thread_checkout_review" },
+      ],
+      activeTaskId: "task_checkout_review",
+      focusedCodex: {
+        task_id: "task_checkout_review",
+        codex_thread_id: "thread_checkout_review",
+        terminal_ref: "ghostty:checkout-review",
+      },
+      taskSessions: [
+        {
+          id: "task_session_checkout_review",
+          task_id: "task_checkout_review",
+          provider: "codex",
+          native_thread_id: "thread_checkout_review",
+          terminal_ref: "ghostty:checkout-review",
+          status: "waiting_approval",
+          status_detail: "Approve deploy command before Codex continues.",
+          updated_at: "2026-05-09T11:20:00.000Z",
+        },
+      ],
+      inspections: new Map([
+        ["thread_checkout_review", {
+          thread_id: "thread_checkout_review",
+          exists: true,
+          last_event_at: "2026-05-09T10:00:00.000Z",
+          idle_seconds: 7200,
+          event_count: 1,
+        }],
+      ]),
+    });
+
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+
+    assert.equal(result.considered, 1);
+    assert.equal(result.emitted.length, 1);
+    assert.equal(result.skipped.length, 0);
+    assert.equal(deps.ingested.length, 1);
+    assert.equal(deps.ingested[0]!.event.type, "codex.task_waiting");
+    assert.match(deps.ingested[0]!.event.summary, /Approve deploy command/);
+  });
+
   it("emits one lost session paper with actionable context", async () => {
     const sessions: TaskRuntimeSession[] = [
       {

@@ -166,24 +166,24 @@ export class AutoPaperCodexIdleWatcher {
         skipped.push({ task_id: task.id, reason: "task_dormant" });
         continue;
       }
-      if (currentTaskId === task.id) {
+      const humanAttentionReason = humanAttentionReasonForStatus(candidate.status);
+      if (!humanAttentionReason && currentTaskId === task.id) {
         skipped.push({ task_id: task.id, reason: "task_currently_active" });
         continue;
       }
-      if (focusedCodex?.task_id === task.id) {
+      if (!humanAttentionReason && focusedCodex?.task_id === task.id) {
         skipped.push({ task_id: task.id, reason: "task_focused_by_terminal" });
         continue;
       }
-      if (candidate.anchorKind === "codex_thread" && focusedCodex?.codex_thread_id === candidate.anchorId) {
+      if (!humanAttentionReason && candidate.anchorKind === "codex_thread" && focusedCodex?.codex_thread_id === candidate.anchorId) {
         skipped.push({ task_id: task.id, reason: "codex_thread_focused" });
         continue;
       }
-      if (sessionTerminalRef(candidate.session) && focusedCodex?.terminal_ref === sessionTerminalRef(candidate.session)) {
+      if (!humanAttentionReason && sessionTerminalRef(candidate.session) && focusedCodex?.terminal_ref === sessionTerminalRef(candidate.session)) {
         skipped.push({ task_id: task.id, reason: "task_focused_by_terminal" });
         continue;
       }
 
-      const humanAttentionReason = humanAttentionReasonForStatus(candidate.status);
       if (humanAttentionReason) {
         const attention = humanAttentionDetailsForCandidate(candidate, humanAttentionReason, now);
         const state = this.idleState.get(candidate.key) ?? { lastActivityAt: undefined, lastPaperWindowAnchor: undefined };
@@ -331,9 +331,29 @@ export class AutoPaperCodexIdleWatcher {
     const candidates: AutoPaperCandidate[] = [];
     const tasksById = new Map(tasks.map((task) => [task.id, task]));
     const primaryCodexAnchorsByTaskId = new Map<string, string>();
+    const sessions = this.deps.taskSessions?.listSessions
+      ? await Promise.resolve(this.deps.taskSessions.listSessions()).catch(() => [] as TaskRuntimeSession[])
+      : [];
+    const humanAttentionCodexAnchorsByTaskId = new Map<string, Set<string>>();
+
+    for (const session of sessions) {
+      const taskId = sessionTaskId(session);
+      if (!taskId) continue;
+      const provider = sessionProvider(session);
+      if (provider !== "codex") continue;
+      const anchor = sessionAnchor(session, provider);
+      if (!anchor || !humanAttentionReasonForStatus(sessionStatus(session))) continue;
+      const anchors = humanAttentionCodexAnchorsByTaskId.get(taskId) ?? new Set<string>();
+      anchors.add(anchor);
+      humanAttentionCodexAnchorsByTaskId.set(taskId, anchors);
+    }
 
     for (const task of tasks) {
       if (task.primary_anchor_kind !== "codex_thread" || !task.primary_anchor_id) continue;
+      if (humanAttentionCodexAnchorsByTaskId.get(task.id)?.has(task.primary_anchor_id)) {
+        primaryCodexAnchorsByTaskId.set(task.id, task.primary_anchor_id);
+        continue;
+      }
       candidates.push({
         key: `task:${task.id}:codex:${task.primary_anchor_id}`,
         task,
@@ -344,19 +364,16 @@ export class AutoPaperCodexIdleWatcher {
       primaryCodexAnchorsByTaskId.set(task.id, task.primary_anchor_id);
     }
 
-    const sessions = this.deps.taskSessions?.listSessions
-      ? await Promise.resolve(this.deps.taskSessions.listSessions()).catch(() => [] as TaskRuntimeSession[])
-      : [];
-
     for (const session of sessions) {
       const taskId = sessionTaskId(session);
       const sessionId = sessionIdForCandidate(session);
       if (!taskId || !sessionId) continue;
       const provider = sessionProvider(session);
       const status = sessionStatus(session);
+      const humanAttentionReason = humanAttentionReasonForStatus(status);
       const anchor = sessionAnchor(session, provider);
-      if (provider === "codex" && anchor && primaryCodexAnchorsByTaskId.get(taskId) === anchor) continue;
-      if (!anchor && !humanAttentionReasonForStatus(status)) continue;
+      if (provider === "codex" && anchor && primaryCodexAnchorsByTaskId.get(taskId) === anchor && !humanAttentionReason) continue;
+      if (!anchor && !humanAttentionReason) continue;
       const task = tasksById.get(taskId) ?? {
         id: taskId,
         primary_anchor_kind: "task_session",
