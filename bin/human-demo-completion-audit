@@ -86,6 +86,8 @@ function buildAudit(root, options = {}) {
     readiness_agent_spawn_window_containment_proof_ok: readiness?.checks?.agent_spawn_window_containment_proof_ok === true
       && readiness?.latest_human_demo?.agent_spawn_window_containment_ok === true
       && readiness?.latest_human_demo?.agent_spawn_window_containment_chrome_ok === true,
+    readiness_agent_waiting_paper_proof_ok: readiness?.checks?.agent_waiting_paper_proof_ok === true
+      && readiness?.latest_human_demo?.agent_waiting_paper_ok === true,
     human_result_recorded: Boolean(resultPath && fs.existsSync(path.resolve(root, resultPath))),
     human_result_filled: resultAudit.filled === true,
     verification_manifest_present: Boolean(verificationPath),
@@ -460,6 +462,7 @@ function runSelfTest() {
         new_window_autosave_proof_ok: true,
         foreign_window_containment_proof_ok: true,
         agent_spawn_window_containment_proof_ok: true,
+        agent_waiting_paper_proof_ok: true,
       },
       latest_human_demo: {
         new_window_autosave_ok: true,
@@ -467,6 +470,7 @@ function runSelfTest() {
         agent_spawn_window_containment_ok: true,
         agent_spawn_window_containment_app: "Google Chrome",
         agent_spawn_window_containment_chrome_ok: true,
+        agent_waiting_paper_ok: true,
         screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
       },
     };
@@ -578,6 +582,7 @@ ship
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
+      agent_waiting_paper_proof_ok: true,
     },
     latest_human_demo: {
       new_window_autosave_ok: true,
@@ -585,6 +590,7 @@ ship
       agent_spawn_window_containment_ok: true,
       agent_spawn_window_containment_app: "Google Chrome",
       agent_spawn_window_containment_chrome_ok: true,
+      agent_waiting_paper_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });
@@ -607,6 +613,7 @@ ship
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
+      agent_waiting_paper_proof_ok: true,
     },
     latest_human_demo: {
       new_window_autosave_ok: true,
@@ -614,6 +621,7 @@ ship
       agent_spawn_window_containment_ok: true,
       agent_spawn_window_containment_app: "Google Chrome",
       agent_spawn_window_containment_chrome_ok: true,
+      agent_waiting_paper_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });
@@ -637,6 +645,7 @@ ship
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
+      agent_waiting_paper_proof_ok: true,
     },
     latest_human_demo: {
       new_window_autosave_ok: true,
@@ -644,6 +653,7 @@ ship
       agent_spawn_window_containment_ok: true,
       agent_spawn_window_containment_app: "Google Chrome",
       agent_spawn_window_containment_chrome_ok: true,
+      agent_waiting_paper_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });
@@ -667,6 +677,7 @@ ship
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
+      agent_waiting_paper_proof_ok: true,
     },
     latest_human_demo: {
       new_window_autosave_ok: true,
@@ -674,6 +685,7 @@ ship
       agent_spawn_window_containment_ok: true,
       agent_spawn_window_containment_app: "Google Chrome",
       agent_spawn_window_containment_chrome_ok: true,
+      agent_waiting_paper_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });
@@ -697,6 +709,7 @@ ship
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
+      agent_waiting_paper_proof_ok: true,
     },
     latest_human_demo: {
       new_window_autosave_ok: true,
@@ -704,6 +717,7 @@ ship
       agent_spawn_window_containment_ok: true,
       agent_spawn_window_containment_app: "Google Chrome",
       agent_spawn_window_containment_chrome_ok: true,
+      agent_waiting_paper_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });
@@ -727,6 +741,7 @@ ship
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
+      agent_waiting_paper_proof_ok: true,
     },
     latest_human_demo: {
       new_window_autosave_ok: true,
@@ -734,6 +749,7 @@ ship
       agent_spawn_window_containment_ok: true,
       agent_spawn_window_containment_app: "Google Chrome",
       agent_spawn_window_containment_chrome_ok: true,
+      agent_waiting_paper_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });
@@ -757,6 +773,7 @@ ship
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
+      agent_waiting_paper_proof_ok: true,
     },
     latest_human_demo: {
       new_window_autosave_ok: true,
@@ -764,6 +781,7 @@ ship
       agent_spawn_window_containment_ok: true,
       agent_spawn_window_containment_app: "TextEdit",
       agent_spawn_window_containment_chrome_ok: false,
+      agent_waiting_paper_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });

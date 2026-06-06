@@ -422,7 +422,7 @@ Readiness desktop HUD feedback: artifacts/lab-runs/ready/paper-reminder-feedback
 Readiness master command hotkey: artifacts/lab-runs/ready/master-command-hotkey.json ok=true required=true
 Readiness manual mode feedback: artifacts/lab-runs/ready/manual-mode-enter-feedback.json ok=true required=true
 Readiness hotkey latency: artifacts/lab-runs/ready/hotkey-latency.json ok=true required=true
-Automated proof: ok=true, queue_count=2, ambient_autosave=true
+Automated proof: ok=true, queue_count=3, ambient_autosave=true, agent_waiting_paper=true
 
 Pass/fail:
 ${renderFilledHumanDemoPassFail("pass")}

@@ -7,6 +7,7 @@ export const humanDemoPassFailLabels = Object.freeze([
   "Customer paper brings same TextEdit back to customer position",
   "Background window containment proof passed",
   "Agent-spawned window containment proof passed",
+  "Waiting agent paper appears in queue",
   "Paper briefing strip shows current decision",
   "Desktop paper reminder HUD is visible",
   "Rectangle hotkeys feel usable",

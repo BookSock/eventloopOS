@@ -1,6 +1,6 @@
 # eventloopOS Human Demo Walkthrough
 
-Use this for the Mac Studio hands-on dogfood walkthrough. The demo is intentionally local/fake work: two papers, two Chrome windows, and one shared TextEdit window that belongs to both papers with different saved positions.
+Use this for the Mac Studio hands-on dogfood walkthrough. The demo is intentionally local/fake work: two workspace papers, one waiting-agent paper, two Chrome windows, and one shared TextEdit window that belongs to both workspace papers with different saved positions.
 
 ## Setup
 
@@ -17,7 +17,7 @@ The setup script:
 - restarts the lab dogfood stack with ambient autosave and follows-windows enabled,
 - clears the human-demo profile store,
 - opens the demo Chrome/TextEdit windows,
-- queues exactly two papers,
+- queues two workspace papers plus one waiting-agent paper,
 - proves the shared TextEdit window restores to different positions per paper,
 - proves ambient autosave updates future queue context after the shared window moves,
 - proves a newly opened scratch TextEdit window on the current paper is saved
@@ -26,6 +26,7 @@ The setup script:
 - proves a background/foreign paper window is moved back to its owning paper,
 - proves a real agent-spawned Chrome window opened while Customer is focused
   is claimed for Metrics, moved back to Metrics, and leaves Customer focused,
+- proves a Codex waiting-for-approval agent run creates a human-needed queue paper,
 - captures a local Screen Sharing window-only screenshot, or falls back to a lab Mac desktop capture when Screen Sharing is unavailable.
 
 Before handing the keyboard to Jason, run a non-destructive readiness check:
@@ -85,10 +86,11 @@ Latest known-good proof:
 - Run `bin/human-demo-ready`.
 - Open the generated `artifacts/lab-runs/*-human-demo-ready/READY.md`.
 - Use the paths and timings in that file as the current proof of record.
-- Queue proof: 2 current-run papers.
+- Queue proof: 3 current-run papers: Customer, Metrics, and one Codex waiting-for-approval paper.
 - Ambient proof: customer paper context saved the moved shared TextEdit, and the automated scratch window was remembered by the current paper before cleanup.
 - Background containment proof: Metrics Chrome was intentionally pushed into the Customer paper and moved back to the Metrics paper.
 - Agent-spawn containment proof: a Metrics-owned Chrome window was opened while Customer was focused, claimed, moved back to Metrics, and Customer focus was restored.
+- Waiting-agent proof: a Codex `waiting_approval` run produced a `Codex needs human input` paper through `/agent-runs`.
 - Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture; readiness also proves live Queue feedback within the configured budget.
 - Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper and proves restore-hotkey HUD feedback within the configured budget.
 - Master Command proof: readiness presses `Ctrl-Option-K` from another app and proves the Queue window opens a Master Command sheet with `Route to Master`, `Start Task`, `Rerank`, `Broadcast`, and the current task hint.
@@ -102,9 +104,10 @@ Expected visible windows:
 
 - Chrome: `eventloopOS Human Demo Customer Thread`
 - TextEdit: `eventloopOS Human Demo Shared Notes.txt`
-- eventloopOS Queue floating near lower right with two papers:
+- eventloopOS Queue floating near lower right with three demo papers:
   - `Review Demo Customer Reply`
   - `Review Demo Metrics Review`
+  - `Codex needs human input`
 
 If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or press `Ctrl-Option-K` to summon the master command. The harness Queue window is configured as floating for this demo.
 
@@ -141,24 +144,28 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 12. Confirm the setup proof reports background window containment passed:
     Metrics Chrome was intentionally moved into the Customer paper and
     eventloopOS moved it back to the Metrics paper.
-13. Confirm the Queue detail starts with a compact briefing strip that repeats
+13. Confirm the Queue contains `Codex needs human input`.
+    Click it once if you want to inspect it: the detail should say the Codex
+    session needs human approval and the recommended action should be resume
+    agent. Then click `Review Demo Customer Reply` again before continuing.
+14. Confirm the Queue detail starts with a compact briefing strip that repeats
     the current paper title, exact decision needed, task id, priority, and
     session/binding state.
-14. Confirm the top-of-screen paper reminder HUD shows the current paper title
+15. Confirm the top-of-screen paper reminder HUD shows the current paper title
     and decision while you work in Chrome/TextEdit. It should not take focus or
     block mouse clicks.
-15. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
-16. Press `Ctrl-Option-K`.
-17. Confirm the Master Command sheet opens on the Queue window with `Route to Master`, `Start Task`, `Rerank`, and `Broadcast`.
+16. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
+17. Press `Ctrl-Option-K`.
+18. Confirm the Master Command sheet opens on the Queue window with `Route to Master`, `Start Task`, `Rerank`, and `Broadcast`.
     The Task Hint field should default to the current paper's task, such as `task_demo_customer`.
-    Close the sheet with `Escape`, the `Close` button, or the top-right `x` so the two-paper demo stays clean.
-18. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
+    Close the sheet with `Escape`, the `Close` button, or the top-right `x` so the hands-on demo stays clean.
+19. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
     confirm the top HUD and Queue footer acknowledge `No paper selected.`
     instead of staying silent.
-19. Press `Ctrl-Option-M` to enter Manual Mode.
-20. Open or move a dummy app.
-21. Press `Ctrl-Option-M`.
-22. Confirm eventloopOS restores the saved paper context and Queue remains usable.
+20. Press `Ctrl-Option-M` to enter Manual Mode.
+21. Open or move a dummy app.
+22. Press `Ctrl-Option-M`.
+23. Confirm eventloopOS restores the saved paper context and Queue remains usable.
 
 ## What To Report
 
@@ -169,6 +176,7 @@ Report any of these as product issues:
 - ambient autosave misses a moved window after waiting 2 to 3 seconds,
 - Queue briefing strip does not make the current decision obvious,
 - top-of-screen paper reminder is missing, stale, grabs focus, blocks clicks, or fails to briefly echo hotkey feedback,
+- `Codex needs human input` is missing or does not explain why approval is needed,
 - green `Showing paper: ...` feedback is missing, stale, or too hard to see after restore,
 - Queue is hard to find or blocks work,
 - Rectangle-style hotkeys feel surprising or conflict with another common app,
@@ -219,6 +227,7 @@ Pass/fail:
 - Customer paper brings same TextEdit back to customer position:
 - Background window containment proof passed:
 - Agent-spawned window containment proof passed:
+- Waiting agent paper appears in queue:
 - Paper briefing strip shows current decision:
 - Desktop paper reminder HUD is visible:
 - Rectangle hotkeys feel usable:

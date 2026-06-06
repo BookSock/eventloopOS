@@ -38,6 +38,14 @@ const paperMetrics = {
   recommendedActionLabel: "Send metrics review guidance",
   priority: 1450,
 };
+const demoWaitingAgent = {
+  taskId: paperCustomer.taskId,
+  priority: 1325,
+  provider: "codex",
+  status: "waiting_approval",
+  title: "Demo Codex Waiting For Review",
+  blockedReason: "Demo Codex session finished drafting the customer reply and needs human approval before it continues.",
+};
 
 const demoHotkeys = Object.freeze({
   eventloopos_restore_paper: "Ctrl-Option-R",
@@ -66,6 +74,7 @@ const demoWalkthrough = Object.freeze([
   "Move shared TextEdit with Ctrl-Option-Left or drag it toward center/left. It starts on the right side, so right-half can look unchanged. Wait 2-3 seconds for ambient autosave.",
   "Select Demo Metrics Review in queue and press Ctrl-Option-R. Same TextEdit window should move to metrics position with Metrics Chrome.",
   "Select Demo Customer Reply and press Ctrl-Option-R. Same TextEdit window should return to customer position.",
+  "Confirm Codex needs human input appears in the queue; it proves a waiting agent creates a human-needed paper.",
   "Containment proof already ran during setup: Metrics Chrome was pushed into Customer paper and eventloopOS moved it back to Metrics.",
   "Agent-spawn containment proof also ran during setup: a background Metrics-owned Chrome window was opened while Customer was focused, then moved back to Metrics and Customer focus was restored.",
   "Try Rectangle-style hotkeys on shared TextEdit: Ctrl-Option-Left/Right/Up/Down/C and Ctrl-Option-Shift-Return.",
@@ -86,6 +95,8 @@ if (dryRun) {
   assertReadySnapshotShape(buildReadySnapshot(sampleCustomerSnapshot, sampleMetricsSnapshot, sampleWindows));
   assertDemoFrames();
   assertDemoInstructions();
+  const queueProof = assertDemoQueueItems(sampleDemoQueueItems(sampleCustomerSnapshot, sampleMetricsSnapshot));
+  assertAgentWaitingPaper(queueProof.agent_waiting_paper);
   console.log(JSON.stringify({ ok: true, self_test: true }));
   process.exit(0);
 }
@@ -129,15 +140,19 @@ await putTaskLayout(paperMetrics.taskId, metricsSnapshot);
 await saveTaskWorkspaceSnapshot(paperMetrics.taskId, metricsSnapshot);
 const metricsTaskSession = await startDemoTaskSession(paperMetrics, metricsSnapshot);
 await queuePaper(paperMetrics, "Review ambient save and shared-window position behavior across papers.");
+const waitingAgentPaper = await queueWaitingAgentPaper(demoWaitingAgent);
 
 const initialQueue = await listQueue();
 for (const item of demoQueueItems(initialQueue.items)) {
-  const score = item.task_id === paperCustomer.taskId ? paperCustomer.priority : paperMetrics.priority;
+  const score = item.id === waitingAgentPaper.queue_item?.id
+    ? demoWaitingAgent.priority
+    : item.task_id === paperCustomer.taskId ? paperCustomer.priority : paperMetrics.priority;
   await setQueuePriority(item.id, score);
 }
 const queue = await listQueue();
 const demoItems = demoQueueItems(queue.items);
 const queueProof = assertDemoQueueItems(demoItems);
+const agentWaitingPaperProof = assertAgentWaitingPaper(queueProof.agent_waiting_paper);
 
 await setCurrentTask(paperCustomer.taskId);
 const foreignWindowContainmentProof = await proveForeignWindowContainment(windows);
@@ -194,6 +209,7 @@ const manifest = {
     new_window_autosave: newWindowAutosaveProof,
     foreign_window_containment: foreignWindowContainmentProof,
     agent_spawn_window_containment: agentSpawnContainmentProof,
+    agent_waiting_paper: agentWaitingPaperProof,
     final_ready_customer_restore: finalReadyCustomerProof,
     demo_queue: queueProof,
     queue_window: {
@@ -656,39 +672,89 @@ function assertNearFrame(actual, expected, label) {
 }
 
 function assertDemoQueueItems(items) {
-  if (items.length !== 2) throw new Error(`demo queue expected exactly 2 current-run items, got ${items.length}`);
-  const taskIds = new Set(items.map((item) => item.task_id));
+  if (items.length !== 3) throw new Error(`demo queue expected exactly 3 current-run items, got ${items.length}`);
+  const workspaceItems = items.filter((item) => !item.review_packet?.agent_run_id);
+  const agentWaitingItems = items.filter((item) => item.review_packet?.agent_run_id);
+  if (workspaceItems.length !== 2) throw new Error(`demo queue expected 2 workspace papers, got ${workspaceItems.length}`);
+  if (agentWaitingItems.length !== 1) throw new Error(`demo queue expected 1 waiting-agent paper, got ${agentWaitingItems.length}`);
+  const taskIds = new Set(workspaceItems.map((item) => item.task_id));
   for (const taskId of [paperCustomer.taskId, paperMetrics.taskId]) {
     if (!taskIds.has(taskId)) throw new Error(`demo queue missing ${taskId}`);
   }
+  const workspaceProofItems = workspaceItems.map((item) => {
+    const workspaceResource = item.review_packet?.context?.find((entry) => entry.kind === "workspace_snapshot" && entry.snapshot);
+    if (!workspaceResource) throw new Error(`demo queue ${item.task_id} missing workspace_snapshot context`);
+    const expectedWorkspace = item.task_id === paperCustomer.taskId ? paperCustomer.workspace : paperMetrics.workspace;
+    if (workspaceResource.snapshot.activeWorkspace !== expectedWorkspace) {
+      throw new Error(`demo queue ${item.task_id} expected workspace ${expectedWorkspace}, got ${workspaceResource.snapshot.activeWorkspace}`);
+    }
+    const windowIds = workspaceResource.snapshot.windows?.map((window) => window.id) ?? [];
+    if (windowIds.length !== 2) {
+      throw new Error(`demo queue ${item.task_id} workspace snapshot expected 2 windows, got ${windowIds.length}`);
+    }
+    const sharedWindowId = workspaceResource.snapshot.focusedWindowId;
+    if (typeof sharedWindowId !== "number" || !windowIds.includes(sharedWindowId)) {
+      throw new Error(`demo queue ${item.task_id} workspace snapshot missing focused shared window`);
+    }
+    return {
+      id: item.id,
+      task_id: item.task_id,
+      title: item.review_packet?.title,
+      priority_score: item.priority_score,
+      workspace_active: workspaceResource.snapshot.activeWorkspace,
+      workspace_window_ids: windowIds,
+      shared_window_id: sharedWindowId,
+    };
+  });
   return {
     ok: true,
     count: items.length,
-    items: items.map((item) => {
-      const workspaceResource = item.review_packet?.context?.find((entry) => entry.kind === "workspace_snapshot" && entry.snapshot);
-      if (!workspaceResource) throw new Error(`demo queue ${item.task_id} missing workspace_snapshot context`);
-      const expectedWorkspace = item.task_id === paperCustomer.taskId ? paperCustomer.workspace : paperMetrics.workspace;
-      if (workspaceResource.snapshot.activeWorkspace !== expectedWorkspace) {
-        throw new Error(`demo queue ${item.task_id} expected workspace ${expectedWorkspace}, got ${workspaceResource.snapshot.activeWorkspace}`);
-      }
-      const windowIds = workspaceResource.snapshot.windows?.map((window) => window.id) ?? [];
-      if (windowIds.length !== 2) {
-        throw new Error(`demo queue ${item.task_id} workspace snapshot expected 2 windows, got ${windowIds.length}`);
-      }
-      const sharedWindowId = workspaceResource.snapshot.focusedWindowId;
-      if (typeof sharedWindowId !== "number" || !windowIds.includes(sharedWindowId)) {
-        throw new Error(`demo queue ${item.task_id} workspace snapshot missing focused shared window`);
-      }
-      return {
-        id: item.id,
-        task_id: item.task_id,
-        title: item.review_packet?.title,
-        priority_score: item.priority_score,
-        workspace_active: workspaceResource.snapshot.activeWorkspace,
-        workspace_window_ids: windowIds,
-        shared_window_id: sharedWindowId,
-      };
-    }),
+    workspace_items: workspaceProofItems,
+    agent_waiting_paper: compactAgentWaitingPaper(agentWaitingItems[0]),
+    items: [
+      ...workspaceProofItems,
+      compactAgentWaitingPaper(agentWaitingItems[0]),
+    ],
+  };
+}
+
+function assertAgentWaitingPaper(item) {
+  if (!item?.id) throw new Error("waiting-agent paper missing from demo queue proof");
+  if (item.task_id !== demoWaitingAgent.taskId) {
+    throw new Error(`waiting-agent paper expected task ${demoWaitingAgent.taskId}, got ${item.task_id}`);
+  }
+  if (!String(item.title ?? "").includes("Codex needs human input")) {
+    throw new Error(`waiting-agent paper title did not identify Codex waiting input: ${item.title}`);
+  }
+  if (!String(item.summary ?? "").includes("needs human approval")) {
+    throw new Error(`waiting-agent paper summary missing human-approval reason: ${item.summary}`);
+  }
+  if (!String(item.decision_needed ?? "").includes("Approve resume action")) {
+    throw new Error(`waiting-agent paper decision did not ask for approval: ${item.decision_needed}`);
+  }
+  if (!item.priority_reasons.includes("agent_run_waiting")) {
+    throw new Error(`waiting-agent paper missing agent_run_waiting priority reason: ${JSON.stringify(item.priority_reasons)}`);
+  }
+  if (item.recommended_action !== "resume_agent") {
+    throw new Error(`waiting-agent paper recommended_action expected resume_agent, got ${item.recommended_action}`);
+  }
+  return {
+    ok: true,
+    ...item,
+  };
+}
+
+function compactAgentWaitingPaper(item) {
+  return {
+    id: item.id,
+    task_id: item.task_id,
+    title: item.review_packet?.title,
+    agent_run_id: item.review_packet?.agent_run_id,
+    priority_score: item.priority_score,
+    priority_reasons: item.priority_reasons ?? [],
+    recommended_action: item.review_packet?.recommended_action?.type ?? null,
+    summary: item.review_packet?.summary ?? "",
+    decision_needed: item.review_packet?.decision_needed ?? "",
   };
 }
 
@@ -1147,6 +1213,54 @@ async function queuePaper(paper, summary) {
   return body;
 }
 
+async function queueWaitingAgentPaper(agent) {
+  const now = new Date().toISOString();
+  const slug = agent.taskId.replace(/^task_/, "");
+  const runId = `run_human_demo_agent_waiting_${slug}_${stamp}`;
+  const response = await fetch(`${orchestratorUrl}/agent-runs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      id: runId,
+      provider: agent.provider,
+      task_id: agent.taskId,
+      thread_id: `thread_human_demo_agent_waiting_${slug}`,
+      status: agent.status,
+      started_at: now,
+      updated_at: now,
+      blocked_reason: agent.blockedReason,
+      risk_tags: ["human_review"],
+      evidence: [{
+        id: `ev_${runId}`,
+        kind: "agent_run",
+        title: agent.title,
+        url: `eventloopos-demo://agent-waiting/${slug}/${stamp}`,
+        captured_at: now,
+      }],
+      output_refs: [{
+        id: `raw_${runId}`,
+        uri: `eventloopos-demo://agent-waiting/${slug}/${stamp}`,
+        media_type: "application/json",
+      }],
+      resume_actions: [{
+        id: `resume_${runId}`,
+        type: "resume_agent",
+        label: "Approve and continue demo Codex session",
+        requires_confirmation: true,
+        side_effect: "local",
+        payload: {
+          agent_run_id: runId,
+          thread_id: `thread_human_demo_agent_waiting_${slug}`,
+        },
+      }],
+    }),
+  });
+  const body = await response.json();
+  if (!response.ok) throw new Error(`queue waiting agent ${agent.taskId} HTTP ${response.status}: ${JSON.stringify(body)}`);
+  if (!body.queue_item?.id) throw new Error(`waiting agent ${agent.taskId} did not create queue item: ${JSON.stringify(body)}`);
+  return body;
+}
+
 async function queueAmbientProbePaper(paper, probeKind = "ambient-probe") {
   const now = new Date().toISOString();
   const slug = paper.taskId.replace(/^task_/, "");
@@ -1317,6 +1431,44 @@ function sampleWindow(id, app, title) {
     monitorId: 1,
     layout: "floating",
     frame: { x: 1, y: 1, width: 100, height: 100 },
+  };
+}
+
+function sampleDemoQueueItems(customerSnapshot, metricsSnapshot) {
+  return [
+    sampleWorkspaceQueueItem("qit_customer", paperCustomer, customerSnapshot, paperCustomer.priority),
+    sampleWorkspaceQueueItem("qit_metrics", paperMetrics, metricsSnapshot, paperMetrics.priority),
+    {
+      id: "qit_demo_agent_waiting",
+      task_id: paperCustomer.taskId,
+      priority_score: demoWaitingAgent.priority,
+      priority_reasons: ["agent_run_waiting"],
+      review_packet: {
+        title: "Codex needs human input",
+        agent_run_id: "run_demo_agent_waiting",
+        summary: demoWaitingAgent.blockedReason,
+        decision_needed: "Approve resume action or send followup instructions.",
+        recommended_action: {
+          type: "resume_agent",
+        },
+      },
+    },
+  ];
+}
+
+function sampleWorkspaceQueueItem(id, paper, snapshot, priorityScore) {
+  return {
+    id,
+    task_id: paper.taskId,
+    priority_score: priorityScore,
+    priority_reasons: ["human_demo_setup"],
+    review_packet: {
+      title: paper.title,
+      context: [{
+        kind: "workspace_snapshot",
+        snapshot,
+      }],
+    },
   };
 }
 
