@@ -114,6 +114,8 @@ const checks = {
   agent_spawn_window_containment_proof_ok: templateJson?.agent_spawn_window_containment_ok === true,
   screen_sharing_capture_ok: skipScreenshot || (screenshotStage?.ok === true && screenshot?.ok === true),
   queue_briefing_strip_visible: skipScreenshot || screenshotStage?.result?.queue_briefing_strip_present === true,
+  paper_reminder_hud_visible: skipScreenshot || screenshotStage?.result?.paper_reminder_hud_present === true
+    || screenshot?.lab_capture_summary?.queue_app?.paper_reminder_hud_present === true,
   queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
   workspace_latency_ok: !workspaceLatencyEnabled || (workspaceLatency?.status === 0 && workspaceLatencyManifest?.ok === true),
   hotkey_feedback_latency_ok: !hotkeyLatencyEnabled || (hotkeyLatency?.status === 0 && hotkeyLatencyManifest?.ok === true),
@@ -355,6 +357,7 @@ const briefingStrip = queueBriefingStripStatus({
   taskId: customer.task_id,
   priority: customer.priority_score,
 });
+const paperReminderHud = paperReminderHudStatus();
 
 console.log(JSON.stringify({
   ok: true,
@@ -367,6 +370,10 @@ console.log(JSON.stringify({
   queue_briefing_strip_present: briefingStrip.present,
   queue_briefing_strip_line: briefingStrip.line,
   queue_briefing_strip_error: briefingStrip.error,
+  paper_reminder_hud_present: paperReminderHud.present,
+  paper_reminder_hud_source: paperReminderHud.source,
+  paper_reminder_hud_title: paperReminderHud.title,
+  paper_reminder_hud_error: paperReminderHud.error,
 }));
 
 function latestDemoProofSnapshot(taskId) {
@@ -414,7 +421,7 @@ function focusDemoWindows(snapshot) {
     focusWindow(window.id, focusIds);
   }
   const queueId = currentAerospaceWindows()
-    .find((window) => /eventloopOS Queue/i.test(\`\${window["app-name"] ?? ""} \${window["window-title"] ?? ""}\`))?.["window-id"];
+    .find(isQueueWindow)?.["window-id"];
   if (queueId) focusWindow(queueId, focusIds);
   return focusIds;
 }
@@ -442,7 +449,7 @@ function raiseDemoApps() {
     "        repeat with candidateWindow in windows",
     "          try",
     "            set windowName to name of candidateWindow as string",
-    "            if windowName contains \\"Human Demo\\" or windowName contains \\"eventloopOS Queue\\" or processNameText is \\"eventloopOS Queue\\" then",
+    "            if windowName contains \\"Human Demo\\" or windowName is \\"eventloopOS Queue\\" then",
     "              perform action \\"AXRaise\\" of candidateWindow",
     "              set raisedWindows to raisedWindows + 1",
     "            end if",
@@ -586,6 +593,48 @@ function currentAerospaceWindows() {
     ], { encoding: "utf8" }));
   } catch {
     return [];
+  }
+}
+
+function isQueueWindow(window) {
+  return String(window?.["window-title"] ?? "") === "eventloopOS Queue";
+}
+
+function paperReminderHudStatus() {
+  const aerospaceMatch = currentAerospaceWindows()
+    .find((window) => String(window?.["window-title"] ?? "") === "eventloopOS Paper Reminder");
+  if (aerospaceMatch) {
+    return {
+      present: true,
+      source: "aerospace",
+      title: String(aerospaceMatch["window-title"] ?? ""),
+    };
+  }
+  try {
+    const script = [
+      "tell application \\"System Events\\"",
+      "  if not (exists process \\"eventloopOS Queue\\") then return \\"missing:process\\"",
+      "  tell process \\"eventloopOS Queue\\"",
+      "    repeat with candidateWindow in windows",
+      "      set windowName to name of candidateWindow as string",
+      "      if windowName is \\"eventloopOS Paper Reminder\\" then return \\"ok:\\" & windowName",
+      "    end repeat",
+      "  end tell",
+      "end tell",
+      "return \\"missing:window\\"",
+    ].join("\\n");
+    const output = execFileSync("osascript", [], { input: script, encoding: "utf8" }).trim();
+    if (output.startsWith("ok:")) {
+      return { present: true, source: "system_events", title: output.slice(3) };
+    }
+    return { present: false, source: "system_events", title: "", error: output };
+  } catch (error) {
+    return {
+      present: false,
+      source: "system_events",
+      title: "",
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -977,6 +1026,7 @@ function renderReadyMarkdown(manifest) {
 - Agent-spawn containment proof: ${latest?.agent_spawn_window_containment_ok === true ? "ok" : "missing"}
 - Fresh screenshot capture: ${screenshot?.output ?? "skipped"}${screenshot?.capture_mode ? ` mode=${screenshot.capture_mode}` : ""}${screenshot?.image?.dimensions ? ` (${screenshot.image.dimensions}, ${screenshot.image.bytes} bytes)` : ""}
 - Queue briefing strip: ${manifest.checks?.queue_briefing_strip_visible === true ? "visible" : "missing"}
+- Desktop paper reminder HUD: ${manifest.checks?.paper_reminder_hud_visible === true ? "visible" : "missing"}
 - Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
 - Workspace latency: ${workspaceLatency?.manifest_path ?? "skipped"}${manifest.workspace_latency_required ? " (required)" : ""}
 - Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}${manifest.hotkey_latency_required ? " (required)" : ""}
@@ -1044,7 +1094,7 @@ function runSelfTest() {
     ok: true,
     profile: "lab-human-demo",
     url: "http://127.0.0.1:4480",
-    checks: { queue_briefing_strip_visible: true },
+    checks: { queue_briefing_strip_visible: true, paper_reminder_hud_visible: true },
     failed_checks: [],
     queue_latency_required: true,
     workspace_latency_required: true,
@@ -1075,6 +1125,8 @@ function runSelfTest() {
   assert.ok(labDemoScreenshotStageScript().includes("latestDemoProofSnapshot"));
   assert.ok(labDemoScreenshotStageScript().includes("raiseDemoApps"));
   assert.ok(labDemoScreenshotStageScript().includes("queueBriefingStripStatus"));
+  assert.ok(labDemoScreenshotStageScript().includes("paperReminderHudStatus"));
+  assert.ok(labDemoScreenshotStageScript().includes("eventloopOS Paper Reminder"));
   assert.ok(labDemoScreenshotStageScript().includes("matchingBriefingLine"));
   assert.ok(labDemoScreenshotStageScript().includes("queue-paper-briefing-strip"));
   assert.ok(labDemoScreenshotStageScript().includes("queue-paper-briefing-title"));
@@ -1108,7 +1160,7 @@ function runSelfTest() {
     ok: true,
     profile: "lab-human-demo",
     url: "http://127.0.0.1:4480",
-    checks: { queue_briefing_strip_visible: true },
+    checks: { queue_briefing_strip_visible: true, paper_reminder_hud_visible: true },
     failed_checks: [],
     latest_human_demo: {
       manifest_path: "artifacts/lab-runs/demo/manifest.json",
@@ -1137,6 +1189,7 @@ function runSelfTest() {
   assert.match(markdown, /Foreign-window containment proof: ok/);
   assert.match(markdown, /Agent-spawn containment proof: ok/);
   assert.match(markdown, /Queue briefing strip: visible/);
+  assert.match(markdown, /Desktop paper reminder HUD: visible/);
   assert.match(markdown, /Hotkey feedback latency: skipped/);
   assert.match(markdown, /Queue latency: artifacts\/lab-runs\/ready\/queue-latency\.json/);
   assert.match(markdown, /Workspace latency: artifacts\/lab-runs\/ready\/workspace-latency\.json/);

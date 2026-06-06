@@ -322,4 +322,40 @@ final class QueueWindowPresentationTests: XCTestCase {
         XCTAssertEqual(briefing.decision, "Send selected answer to agent")
         XCTAssertEqual(briefing.context, "task_blog_feedback | P90 | medium | Waiting for bound session")
     }
+
+    func testPaperReminderMirrorsBriefingForDesktopHud() {
+        let packet = ReviewPacket(
+            id: "packet-review-1",
+            taskId: "task_blog_feedback",
+            title: "Review feedback",
+            summary: "Needs human call.",
+            decisionNeeded: "Decide whether to send the draft now or wait for owner review.",
+            source: "slack://thread/1",
+            priority: 90,
+            riskLevel: "medium",
+            recommendedAction: "Send selected answer to agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+
+        let reminder = QueuePaperReminderPresentation(
+            packet: packet,
+            selectedTaskSessions: [
+                TaskSession(
+                    id: "codex_thread_abc",
+                    taskId: "task_blog_feedback",
+                    provider: "codex",
+                    status: "running"
+                )
+            ]
+        )
+
+        XCTAssertEqual(reminder.title, "Review feedback")
+        XCTAssertEqual(reminder.decision, "Decide whether to send the draft now or wait for owner review.")
+        XCTAssertEqual(reminder.context, "task_blog_feedback | P90 | medium | Codex | Running | codex_thread_abc")
+        XCTAssertEqual(
+            reminder.accessibilityLabel,
+            "Review feedback | Decide whether to send the draft now or wait for owner review. | task_blog_feedback | P90 | medium | Codex | Running | codex_thread_abc"
+        )
+    }
 }

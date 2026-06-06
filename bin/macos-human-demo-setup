@@ -362,12 +362,17 @@ tell application "System Events"
     if exists process processName then
       tell process processName
         set frontmost to true
-        if (count of windows) > 0 then
-          set position of window 1 to {1080, 650}
-          set size of window 1 to {760, 380}
-          perform action "AXRaise" of window 1
-          return processName & "|" & (position of window 1 as string) & "|" & (size of window 1 as string)
-        end if
+        repeat with candidateWindow in windows
+          try
+            set windowName to name of candidateWindow as string
+            if windowName is "eventloopOS Queue" then
+              set position of candidateWindow to {1080, 650}
+              set size of candidateWindow to {760, 380}
+              perform action "AXRaise" of candidateWindow
+              return processName & "|" & (position of candidateWindow as string) & "|" & (size of candidateWindow as string)
+            end if
+          end try
+        end repeat
       end tell
       exit repeat
     end if
@@ -401,7 +406,7 @@ function findQueueAerospaceWindow() {
     ], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     const windows = JSON.parse(stdout);
     const match = windows.find((window) =>
-      /eventloopOS Queue/i.test(`${window["app-name"] ?? ""} ${window["window-title"] ?? ""}`),
+      String(window["window-title"] ?? "") === "eventloopOS Queue",
     );
     if (!match) return undefined;
     return {
@@ -589,7 +594,7 @@ function assertRestoredSnapshot(actualSnapshot, expectedSnapshot, label) {
 
 function assertQueueWindowVisible(snapshot, expectedWorkspace) {
   const window = snapshot.windows.find((candidate) =>
-    /eventloopOS Queue/i.test(`${candidate.app ?? ""} ${candidate.title ?? ""}`),
+    String(candidate.title ?? "") === "eventloopOS Queue",
   );
   if (!window) {
     throw new Error(`queue window missing from final demo snapshot on ${expectedWorkspace}`);
@@ -836,6 +841,7 @@ async function proveAgentSpawnWindowContainment() {
         late_matching_existing_claimed_count: spawnResult.late_matching_existing_claimed_count,
         moved_count: spawnResult.moved_count,
         late_matching_existing_moved_count: spawnResult.late_matching_existing_moved_count,
+        final_focus_restore: spawnResult.final_focus_restore,
       };
     }
     await sleep(500);

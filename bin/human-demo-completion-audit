@@ -71,6 +71,7 @@ function buildAudit(root, options = {}) {
     readiness_screenshot_gate_present: readiness?.checks?.latest_human_demo_screenshot_ok === true
       && readiness?.latest_human_demo?.screenshot_image?.ok === true,
     readiness_queue_briefing_strip_visible: readiness?.checks?.queue_briefing_strip_visible === true,
+    readiness_paper_reminder_hud_visible: readiness?.checks?.paper_reminder_hud_visible === true,
     readiness_new_window_autosave_proof_ok: readiness?.checks?.new_window_autosave_proof_ok === true
       && readiness?.latest_human_demo?.new_window_autosave_ok === true,
     readiness_foreign_window_containment_proof_ok: readiness?.checks?.foreign_window_containment_proof_ok === true
@@ -427,6 +428,7 @@ function runSelfTest() {
     checks: {
       latest_human_demo_screenshot_ok: true,
       queue_briefing_strip_visible: true,
+      paper_reminder_hud_visible: true,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
@@ -515,6 +517,7 @@ ship
     checks: {
       latest_human_demo_screenshot_ok: true,
       queue_briefing_strip_visible: true,
+      paper_reminder_hud_visible: true,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
@@ -538,6 +541,7 @@ ship
     checks: {
       latest_human_demo_screenshot_ok: true,
       queue_briefing_strip_visible: false,
+      paper_reminder_hud_visible: true,
       new_window_autosave_proof_ok: true,
       foreign_window_containment_proof_ok: true,
       agent_spawn_window_containment_proof_ok: true,
@@ -555,6 +559,31 @@ ship
   });
   assert.equal(missingBriefingStrip.ok, false);
   assert.ok(missingBriefingStrip.failed_checks.includes("readiness_queue_briefing_strip_visible"));
+
+  writeJson(readinessPath, {
+    ok: true,
+    started_at: new Date().toISOString(),
+    checks: {
+      latest_human_demo_screenshot_ok: true,
+      queue_briefing_strip_visible: true,
+      paper_reminder_hud_visible: false,
+      new_window_autosave_proof_ok: true,
+      foreign_window_containment_proof_ok: true,
+      agent_spawn_window_containment_proof_ok: true,
+    },
+    latest_human_demo: {
+      new_window_autosave_ok: true,
+      foreign_window_containment_ok: true,
+      agent_spawn_window_containment_ok: true,
+      screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
+    },
+  });
+  const missingPaperReminderHud = buildAudit(root, {
+    resultPath: relativeResultPath,
+    verificationPath: path.relative(root, verificationPath),
+  });
+  assert.equal(missingPaperReminderHud.ok, false);
+  assert.ok(missingPaperReminderHud.failed_checks.includes("readiness_paper_reminder_hud_visible"));
   writeJson(readinessPath, readyManifest(new Date().toISOString()));
 
   fs.writeFileSync(resultPath, `Pass/fail:

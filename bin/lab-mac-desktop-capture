@@ -370,6 +370,9 @@ const displays = read("displays.txt");
 const tccRows = [read("tcc-system-capture-access.txt"), read("tcc-user-capture-access.txt")].filter(Boolean).join("\n");
 const axWindowCount = Number(axSummary.match(/(?:^|\n)windows=([0-9]+)/)?.[1] ?? 0);
 const axWindowTitles = axSummary.match(/(?:^|\n)window_titles=(.*)$/)?.[1] ?? "";
+const paperReminderHudWindowCount = Array.isArray(windows)
+  ? windows.filter((window) => String(window["window-title"] ?? "") === "eventloopOS Paper Reminder").length
+  : 0;
 const queueWindowCount = Array.isArray(windows)
   ? windows.filter((window) => /eventloop|queue/i.test(String(window["app-name"] ?? ""))).length
   : 0;
@@ -410,6 +413,8 @@ const summary = {
     ax_window_count: axWindowCount,
     ax_window_titles: axWindowTitles,
     ax_window_title_present: /eventloopOS Queue/i.test(axWindowTitles),
+    paper_reminder_hud_present: paperReminderHudWindowCount > 0 || axWindowTitles.includes("eventloopOS Paper Reminder"),
+    paper_reminder_hud_window_count: paperReminderHudWindowCount,
     menu_items_present: queueMenu.includes("Pull Next Paper") && queueMenu.includes("Master Command"),
     ax_summary_present: /process=(EventLoopQueueApp|eventloopOS Queue)/.test(axSummary),
     ax_tree_present: axTree.includes("AXWindow") || axTree.includes("window"),
@@ -788,6 +793,9 @@ const axSummary = read("queue-ax-summary.txt");
 const axTree = read("queue-ax-tree.txt");
 const axWindowCount = Number(axSummary.match(/(?:^|\n)windows=([0-9]+)/)?.[1] ?? 0);
 const axWindowTitles = axSummary.match(/(?:^|\n)window_titles=(.*)$/)?.[1] ?? "";
+const paperReminderHudWindowCount = Array.isArray(windows)
+  ? windows.filter((window) => String(window["window-title"] ?? "") === "eventloopOS Paper Reminder").length
+  : 0;
 summary.queue_app = {
   ...summary.queue_app,
   process_present: /EventLoopQueueApp|eventloopOS Queue/.test(processes),
@@ -800,6 +808,8 @@ summary.queue_app = {
   ax_window_count: axWindowCount,
   ax_window_titles: axWindowTitles,
   ax_window_title_present: /eventloopOS Queue/i.test(axWindowTitles),
+  paper_reminder_hud_present: paperReminderHudWindowCount > 0 || axWindowTitles.includes("eventloopOS Paper Reminder"),
+  paper_reminder_hud_window_count: paperReminderHudWindowCount,
   menu_items_present: queueMenu.includes("Pull Next Paper") && queueMenu.includes("Master Command"),
   ax_summary_present: /process=(EventLoopQueueApp|eventloopOS Queue)/.test(axSummary),
   ax_tree_present: axTree.includes("AXWindow") || axTree.includes("window"),

@@ -181,6 +181,12 @@ async function runTaskWindowSpawn(options) {
   const lateMatchingExisting = waitResult.lateMatchingExisting;
   const lateClaimed = waitResult.lateClaimed;
   const lateMoved = waitResult.lateMoved;
+  const finalFocusRestore = await restoreSourceFocusWorkspace({
+    options,
+    taskWorkspace,
+    focusWorkspace,
+    errors,
+  });
 
   return {
     ok: errors.length === 0 && (command.exit_code === 0 || command.exit_code === null),
@@ -210,6 +216,7 @@ async function runTaskWindowSpawn(options) {
     late_matching_existing_claimed: lateClaimed,
     late_matching_existing_moved_count: lateMoved.length,
     late_matching_existing_moved: lateMoved,
+    final_focus_restore: finalFocusRestore,
     errors,
   };
 }
@@ -350,6 +357,47 @@ async function claimAndMaybeMoveWindow({ options, window, source, taskWorkspace,
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+}
+
+async function restoreSourceFocusWorkspace({ options, taskWorkspace, focusWorkspace, errors }) {
+  if (!taskWorkspace || !focusWorkspace || taskWorkspace === focusWorkspace) {
+    return {
+      attempted: false,
+      ok: true,
+      reason: "same_or_missing_workspace",
+    };
+  }
+  try {
+    await runAerospaceCommand(options, ["workspace", focusWorkspace]);
+    const focused = await captureWorkspace(options);
+    const activeWorkspace = focused.snapshot?.activeWorkspace;
+    const ok = activeWorkspace === focusWorkspace;
+    if (!ok) {
+      errors.push({
+        focus_workspace: focusWorkspace,
+        active_workspace: activeWorkspace,
+        error: "final focus restore did not leave source workspace active",
+      });
+    }
+    return {
+      attempted: true,
+      ok,
+      requested_workspace: focusWorkspace,
+      active_workspace: activeWorkspace,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    errors.push({
+      focus_workspace: focusWorkspace,
+      error: message,
+    });
+    return {
+      attempted: true,
+      ok: false,
+      requested_workspace: focusWorkspace,
+      error: message,
+    };
   }
 }
 
@@ -581,9 +629,13 @@ async function runSelfTest() {
     if (claims[1]?.app_bundle !== "com.google.Chrome") throw new Error(`claim app bundle mismatch: ${JSON.stringify(claims[1])}`);
     if (result.moved_count !== 1) throw new Error(`expected one moved window, got ${result.moved_count}`);
     if (result.moved[0]?.to_workspace !== "task-checkout") throw new Error(`move target mismatch: ${JSON.stringify(result.moved)}`);
+    if (result.final_focus_restore?.ok !== true || result.final_focus_restore?.active_workspace !== "main") {
+      throw new Error(`expected final focus restore to main, got ${JSON.stringify(result.final_focus_restore)}`);
+    }
     const commandJson = JSON.stringify(aerospaceCommands);
     if (commandJson !== JSON.stringify([
       ["move-node-to-workspace", "--window-id", "99", "task-checkout"],
+      ["workspace", "main"],
       ["workspace", "main"],
     ])) {
       throw new Error(`expected move then focus restore, got ${commandJson}`);
@@ -679,9 +731,13 @@ async function runSelfTest() {
       if (existingResult.new_window_count !== 0) throw new Error(`expected no new windows, got ${existingResult.new_window_count}`);
       if (existingClaims[0]?.window_id !== "77") throw new Error(`existing claim window mismatch: ${JSON.stringify(existingClaims[0])}`);
       if (existingClaims[0]?.source !== "self-test-existing:existing_matching") throw new Error(`existing claim source mismatch: ${JSON.stringify(existingClaims[0])}`);
+      if (existingResult.final_focus_restore?.ok !== true || existingResult.final_focus_restore?.active_workspace !== "main") {
+        throw new Error(`expected existing final focus restore to main, got ${JSON.stringify(existingResult.final_focus_restore)}`);
+      }
       const existingCommandJson = JSON.stringify(existingAerospaceCommands);
       if (existingCommandJson !== JSON.stringify([
         ["move-node-to-workspace", "--window-id", "77", "task-checkout"],
+        ["workspace", "main"],
         ["workspace", "main"],
       ])) {
         throw new Error(`expected existing move then focus restore, got ${existingCommandJson}`);
@@ -764,9 +820,13 @@ async function runSelfTest() {
       if (lateWindowClaim.source !== "self-test-late-existing:late_existing_matching") {
         throw new Error(`late existing source mismatch: ${JSON.stringify(lateWindowClaim)}`);
       }
+      if (lateResult.final_focus_restore?.ok !== true || lateResult.final_focus_restore?.active_workspace !== "main") {
+        throw new Error(`expected late existing final focus restore to main, got ${JSON.stringify(lateResult.final_focus_restore)}`);
+      }
       const lateCommandJson = JSON.stringify(lateExistingAerospaceCommands);
       if (lateCommandJson !== JSON.stringify([
         ["move-node-to-workspace", "--window-id", "88", "task-checkout"],
+        ["workspace", "main"],
         ["workspace", "main"],
       ])) {
         throw new Error(`expected late existing move then focus restore, got ${lateCommandJson}`);

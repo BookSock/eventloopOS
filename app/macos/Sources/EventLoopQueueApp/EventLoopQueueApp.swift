@@ -224,9 +224,11 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
     weak var viewModel: QueueViewModel?
     private var terminationRestoreInFlight = false
     private var harnessWindow: NSWindow?
+    private var paperReminderHUD: PaperReminderHUDController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         openHarnessWindowIfRequested()
+        openPaperReminderHUDIfAvailable()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -293,6 +295,22 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
         window.makeKeyAndOrderFront(nil)
         harnessWindow = window
         NSApp.activate(ignoringOtherApps: true)
+        return true
+    }
+
+    @discardableResult
+    func openPaperReminderHUDIfAvailable(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> Bool {
+        guard let viewModel else {
+            return false
+        }
+        guard PaperReminderHUDController.shouldEnable(environment: environment) else {
+            paperReminderHUD?.hide()
+            paperReminderHUD = nil
+            return false
+        }
+        paperReminderHUD = PaperReminderHUDController(viewModel: viewModel, environment: environment)
         return true
     }
 

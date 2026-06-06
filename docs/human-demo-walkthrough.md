@@ -70,15 +70,16 @@ orchestrator is running on the controller Mac; the lab demo default keeps
 
 Latest known-good proof:
 
-- Manifest: `artifacts/lab-runs/20260605-152524-human-demo/manifest.json`
-- Screenshot: `artifacts/lab-runs/20260605-152524-human-demo/screen-sharing.png`
-- Readiness manifest: `artifacts/lab-runs/20260605T222714Z-human-demo-ready/manifest.json`
-- Readiness screenshot: `artifacts/lab-runs/20260605T222714Z-human-demo-ready/screen-sharing.png`
+- Manifest: `artifacts/lab-runs/20260605-180307-human-demo/manifest.json`
+- Screenshot: `artifacts/lab-runs/20260605-180307-human-demo/screen-sharing.png`
+- Readiness manifest: `artifacts/lab-runs/20260606T010448Z-human-demo-ready/manifest.json`
+- Readiness screenshot: `artifacts/lab-runs/20260606T010448Z-human-demo-ready/screen-sharing.png`
 - Queue proof: 2 current-run papers.
 - Ambient proof: customer paper context saved the moved shared TextEdit, and the automated scratch window was remembered by the current paper before cleanup.
 - Background containment proof: Metrics Chrome was intentionally pushed into the Customer paper and moved back to the Metrics paper.
 - Agent-spawn containment proof: a Metrics-owned TextEdit window was opened while Customer was focused, claimed, moved back to Metrics, and Customer focus was restored.
 - Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture.
+- Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper.
 
 ## Starting State
 
@@ -129,14 +130,17 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 13. Confirm the Queue detail starts with a compact briefing strip that repeats
     the current paper title, exact decision needed, task id, priority, and
     session/binding state.
-14. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
-15. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
+14. Confirm the top-of-screen paper reminder HUD shows the current paper title
+    and decision while you work in Chrome/TextEdit. It should not take focus or
+    block mouse clicks.
+15. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
+16. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
     confirm the Queue footer acknowledges `No paper selected.` instead of
     staying silent.
-16. Press `Ctrl-Option-M` to enter Manual Mode.
-17. Open or move a dummy app.
-18. Press `Ctrl-Option-M`.
-19. Confirm eventloopOS restores the saved paper context and Queue remains usable.
+17. Press `Ctrl-Option-M` to enter Manual Mode.
+18. Open or move a dummy app.
+19. Press `Ctrl-Option-M`.
+20. Confirm eventloopOS restores the saved paper context and Queue remains usable.
 
 ## What To Report
 
@@ -146,6 +150,7 @@ Report any of these as product issues:
 - same shared window does not move between paper-specific positions,
 - ambient autosave misses a moved window after waiting 2 to 3 seconds,
 - Queue briefing strip does not make the current decision obvious,
+- top-of-screen paper reminder is missing, stale, grabs focus, or blocks clicks,
 - green `Showing paper: ...` feedback is missing, stale, or too hard to see after restore,
 - Queue is hard to find or blocks work,
 - Rectangle-style hotkeys feel surprising or conflict with another common app,
@@ -194,6 +199,7 @@ Pass/fail:
 - Background window containment proof passed:
 - Agent-spawned window containment proof passed:
 - Paper briefing strip shows current decision:
+- Desktop paper reminder HUD is visible:
 - Rectangle hotkeys feel usable:
 - Manual Mode entry/return works:
 - Queue footer feedback is visible and current:

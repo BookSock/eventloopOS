@@ -213,6 +213,27 @@ public struct QueuePaperBriefingPresentation: Equatable, Sendable {
     }
 }
 
+public struct QueuePaperReminderPresentation: Equatable, Sendable {
+    public let title: String
+    public let decision: String
+    public let context: String
+    public let accessibilityLabel: String
+
+    public init(packet: ReviewPacket, selectedTaskSessions: [TaskSession] = []) {
+        let briefing = QueuePaperBriefingPresentation(
+            packet: packet,
+            selectedTaskSessions: selectedTaskSessions
+        )
+        title = briefing.title
+        decision = briefing.decision
+        context = briefing.context
+        accessibilityLabel = [title, decision, context]
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " | ")
+    }
+}
+
 public func userFacingQueueStatusDetail(_ message: String) -> String {
     let normalized = message
         .replacingOccurrences(of: "\n", with: " ")

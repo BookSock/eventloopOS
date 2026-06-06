@@ -80,4 +80,44 @@ final class QueueAppDelegateTests: XCTestCase {
         XCTAssertEqual(window.identifier?.rawValue, "eventloopos-queue-harness-window")
         XCTAssertEqual(window.level, .floating)
     }
+
+    func testPaperReminderHudCanBeDisabledByEnvironment() {
+        XCTAssertTrue(PaperReminderHUDController.shouldEnable(environment: [:]))
+        XCTAssertFalse(PaperReminderHUDController.shouldEnable(environment: [
+            "EVENTLOOPOS_PAPER_REMINDER_DISABLED": "1",
+        ]))
+    }
+
+    func testPaperReminderHudWindowIsNonActivatingFloatingOverlay() {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 96),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+
+        PaperReminderHUDController.configureWindow(panel)
+
+        XCTAssertEqual(panel.title, "eventloopOS Paper Reminder")
+        XCTAssertEqual(panel.identifier?.rawValue, "eventloopos-paper-reminder-hud")
+        XCTAssertEqual(panel.level, .floating)
+        XCTAssertTrue(panel.collectionBehavior.contains(.canJoinAllSpaces))
+        XCTAssertTrue(panel.collectionBehavior.contains(.fullScreenAuxiliary))
+        XCTAssertTrue(panel.hidesOnDeactivate == false)
+        XCTAssertTrue(panel.ignoresMouseEvents)
+        XCTAssertTrue(panel.styleMask.contains(.nonactivatingPanel))
+    }
+
+    func testPaperReminderHudOpenRequiresViewModelAndHonorsDisableFlag() {
+        let delegate = QueueAppDelegate()
+
+        XCTAssertFalse(delegate.openPaperReminderHUDIfAvailable(environment: [:]))
+
+        let viewModel = QueueViewModel(client: FakeQueueClient(packets: []))
+        delegate.viewModel = viewModel
+        XCTAssertFalse(delegate.openPaperReminderHUDIfAvailable(environment: [
+            "EVENTLOOPOS_PAPER_REMINDER_DISABLED": "1",
+        ]))
+        XCTAssertTrue(delegate.openPaperReminderHUDIfAvailable(environment: [:]))
+    }
 }
