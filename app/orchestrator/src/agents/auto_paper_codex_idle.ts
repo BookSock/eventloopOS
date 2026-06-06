@@ -111,6 +111,7 @@ type AutoPaperCandidate = {
   task: AutoPaperTaskRecord;
   provider: string;
   anchorId: string;
+  sessionId?: string;
   anchorKind: "codex_thread" | "claude_session" | "task_session";
   session?: TaskRuntimeSession;
   status?: string;
@@ -199,7 +200,7 @@ export class AutoPaperCodexIdleWatcher {
           dedupeAnchor: attention.dedupeAnchor,
           now,
           summary: attention.summary,
-          rawUri: `eventloopos://task-sessions/${encodeURIComponent(candidate.anchorId)}`,
+          rawUri: `eventloopos://task-sessions/${encodeURIComponent(candidate.sessionId ?? candidate.anchorId)}`,
           rawMediaType: "application/json",
         });
         const result = await this.deps.ingestor.ingestEventAsReviewPacket(event, now);
@@ -366,6 +367,7 @@ export class AutoPaperCodexIdleWatcher {
         task,
         provider,
         anchorId: anchor ?? sessionId,
+        sessionId,
         anchorKind: provider === "claude" && anchor ? "claude_session" : provider === "codex" && anchor ? "codex_thread" : "task_session",
         session,
         status,
@@ -559,9 +561,10 @@ function humanAttentionDetailsForCandidate(
 ): { occurredAt: string; dedupeAnchor: string; summary: string } {
   const status = normalizeStatus(candidate.status) ?? reason;
   const statusTimestamp = sessionStatusTimestamp(candidate.session);
+  const sessionKey = candidate.sessionId ?? candidate.anchorId;
   const dedupeAnchor = statusTimestamp
     ? `status:${status}:at:${statusTimestamp}`
-    : `status:${status}:session:${candidate.anchorId}`;
+    : `status:${status}:session:${sessionKey}`;
   return {
     occurredAt: statusTimestamp ?? now.toISOString(),
     dedupeAnchor,

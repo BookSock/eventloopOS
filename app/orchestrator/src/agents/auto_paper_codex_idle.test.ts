@@ -430,6 +430,34 @@ describe("AutoPaperCodexIdleWatcher", () => {
     assert.equal(deps.ingested[0]!.event.raw_ref.uri, "eventloopos://task-sessions/task_session_waiting");
   });
 
+  it("uses the task-session id, not native thread id, for anchored waiting paper refs", async () => {
+    const deps = createDeps({
+      tasks: [],
+      taskSessions: [
+        {
+          id: "task_session_codex_waiting",
+          task_id: "task_agent_waiting_anchor",
+          provider: "codex",
+          status: "waiting_approval",
+          native_thread_id: "thread_native_codex_waiting",
+          status_detail: "Approve shell command before continuing.",
+        },
+      ],
+      inspections: new Map(),
+    });
+
+    const result = await new AutoPaperCodexIdleWatcher(deps).tick();
+
+    assert.equal(result.emitted.length, 1);
+    assert.equal(deps.ingested[0]!.event.type, "codex.task_waiting");
+    assert.equal(deps.ingested[0]!.event.raw_ref.uri, "eventloopos://task-sessions/task_session_codex_waiting");
+    assert.match(
+      deps.ingested[0]!.event.idempotency_key ?? "",
+      /status:waiting_approval:session:task_session_codex_waiting/,
+    );
+    assert.doesNotMatch(deps.ingested[0]!.event.idempotency_key ?? "", /thread_native_codex_waiting/);
+  });
+
   it("includes session context in waiting papers so the queue reminder is actionable", async () => {
     const deps = createDeps({
       tasks: [],
