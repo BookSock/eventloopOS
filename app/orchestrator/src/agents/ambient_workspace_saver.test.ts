@@ -254,6 +254,7 @@ describe("ambient_workspace_saver", () => {
     });
 
     assert.equal((await saver.tick()).decision, "debounced");
+    assert.deepEqual(workspace.captureOptions?.()[0], { captureFrames: false });
     assert.deepEqual(workspace.captureOptions?.()[1], {
       frameWindowIds: [2],
       focusFrameWorkspaces: true,

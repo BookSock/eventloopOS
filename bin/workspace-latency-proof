@@ -69,20 +69,24 @@ async function measureWorkspaceLatency({ baseUrl, runs, executeRestore }) {
     try {
       await timed(sample, "health", () => requestJson(baseUrl, "/health"));
       await timed(sample, "queue", () => requestJson(baseUrl, "/queue"));
-      const capture = await timed(sample, "workspace_capture", () => requestJson(baseUrl, "/workspace/capture", {
-        method: "POST",
-        body: {},
-      }));
-      const snapshot = capture.snapshot;
-      if (!snapshot || !Array.isArray(snapshot.windows)) {
-        throw new Error("workspace capture response missing snapshot.windows");
-      }
       const fastCapture = await timed(sample, "workspace_capture_no_frames", () => requestJson(baseUrl, "/workspace/capture", {
         method: "POST",
         body: { capture_frames: false },
       }));
       if (!fastCapture.snapshot || !Array.isArray(fastCapture.snapshot.windows)) {
         throw new Error("workspace no-frame capture response missing snapshot.windows");
+      }
+      const capture = await timed(sample, "workspace_capture", () => requestJson(baseUrl, "/workspace/capture", {
+        method: "POST",
+        body: {
+          frame_window_ids: activeFrameWindowIds(fastCapture.snapshot),
+          focus_frame_workspaces: true,
+          restore_frame_capture_focus: true,
+        },
+      }));
+      const snapshot = capture.snapshot;
+      if (!snapshot || !Array.isArray(snapshot.windows)) {
+        throw new Error("workspace capture response missing snapshot.windows");
       }
       await timed(sample, "workspace_restore_plan", () => requestJson(baseUrl, "/workspace/restore-plan", {
         method: "POST",
@@ -198,6 +202,24 @@ function summarize(samples) {
     };
   }
   return result;
+}
+
+function activeFrameWindowIds(snapshot) {
+  const windows = Array.isArray(snapshot?.windows) ? snapshot.windows : [];
+  const activeWorkspace = typeof snapshot?.activeWorkspace === "string" && snapshot.activeWorkspace
+    ? snapshot.activeWorkspace
+    : undefined;
+  const activeWindowIds = windows
+    .filter((window) => activeWorkspace && window.workspace === activeWorkspace)
+    .map((window) => window.id)
+    .filter(isPositiveInteger);
+  if (activeWindowIds.length > 0) return activeWindowIds;
+  if (isPositiveInteger(snapshot?.focusedWindowId)) return [snapshot.focusedWindowId];
+  return windows.map((window) => window.id).filter(isPositiveInteger);
+}
+
+function isPositiveInteger(value) {
+  return Number.isInteger(value) && value > 0;
 }
 
 function percentile(values, p) {

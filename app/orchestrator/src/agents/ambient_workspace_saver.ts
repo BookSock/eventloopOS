@@ -135,7 +135,7 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
         return { decision: "skipped_unbounded" };
       }
 
-      const rawSnapshot = await deps.workspace.capture();
+      const rawSnapshot = await deps.workspace.capture({ captureFrames: false });
       const taskWorkspaceId = taskState.currentTaskWorkspaceId?.trim();
       if (taskWorkspaceId && rawSnapshot.activeWorkspace && rawSnapshot.activeWorkspace !== taskWorkspaceId) {
         pending = undefined;
@@ -603,7 +603,12 @@ async function recaptureMissingActiveWorkspaceFrames(
     return { ...window, frame: recapturedWindow.frame };
   });
 
-  if (mergedFrameCount === 0) return snapshot;
+  if (mergedFrameCount === 0) {
+    return {
+      ...snapshot,
+      frameCapture: recaptured.frameCapture ?? snapshot.frameCapture,
+    };
+  }
   const focusedWindowId =
     snapshot.focusedWindowId !== undefined && windows.some((window) => window.id === snapshot.focusedWindowId)
       ? snapshot.focusedWindowId
