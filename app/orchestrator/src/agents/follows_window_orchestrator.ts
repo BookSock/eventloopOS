@@ -11,6 +11,8 @@ import type { TaskRuntimeSession } from "../task_sessions/types.js";
 export const DEFAULT_FOLLOWS_POLL_MS = 500;
 export const DEFAULT_FOLLOWS_TTL_HOURS = 24;
 export const DEFAULT_FOLLOWS_PRUNE_MS = 60 * 60 * 1_000;
+const FOREIGN_FOCUS_RESTORE_RETRIES = 3;
+const FOREIGN_FOCUS_RESTORE_SETTLE_MS = 150;
 
 export type FocusedWorkspaceReader = () => Promise<string | undefined>;
 export type AerospaceCommandRunner = (command: AerospaceCommand) => Promise<unknown>;
@@ -428,33 +430,52 @@ async function redirectForeignClaimedWindows(
     }
   }
 
-  if (moved > 0) {
+  if (moved > 0) await restoreFocusAfterForeignRedirect(deps, { focusedWorkspace: input.focusedWorkspace, moved, tickNow: input.tickNow });
+
+  return { moved, skipped, movedWindowIds };
+}
+
+async function restoreFocusAfterForeignRedirect(
+  deps: FollowsWindowOrchestratorDeps,
+  input: { focusedWorkspace: string; moved: number; tickNow: Date },
+): Promise<void> {
+  let lastActiveWorkspace: string | undefined;
+  let lastError: string | undefined;
+  for (let attempt = 1; attempt <= FOREIGN_FOCUS_RESTORE_RETRIES; attempt += 1) {
     try {
       await deps.runAerospaceCommand(focusWorkspacePlan(input.focusedWorkspace));
-      await emitForeignRedirectActivity(deps, {
-        type: "foreign_claimed_window_focus_restored",
-        summary: `Focus restored to workspace ${input.focusedWorkspace} after foreign window redirect`,
-        tickNow: input.tickNow,
-        details: {
-          workspace: input.focusedWorkspace,
-          moved,
-        },
-      });
+      await sleep(FOREIGN_FOCUS_RESTORE_SETTLE_MS);
+      const snapshot = await deps.workspace.capture({ captureFrames: false });
+      lastActiveWorkspace = snapshot.activeWorkspace;
+      if (lastActiveWorkspace === input.focusedWorkspace) {
+        await emitForeignRedirectActivity(deps, {
+          type: "foreign_claimed_window_focus_restored",
+          summary: `Focus restored to workspace ${input.focusedWorkspace} after foreign window redirect`,
+          tickNow: input.tickNow,
+          details: {
+            workspace: input.focusedWorkspace,
+            moved: input.moved,
+            attempts: attempt,
+          },
+        });
+        return;
+      }
     } catch (error) {
-      await emitForeignRedirectActivity(deps, {
-        type: "foreign_claimed_window_focus_restore_failed",
-        summary: `Focus restore to workspace ${input.focusedWorkspace} failed after foreign window redirect`,
-        tickNow: input.tickNow,
-        status: "failed",
-        details: {
-          workspace: input.focusedWorkspace,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      });
+      lastError = error instanceof Error ? error.message : String(error);
     }
   }
 
-  return { moved, skipped, movedWindowIds };
+  await emitForeignRedirectActivity(deps, {
+    type: "foreign_claimed_window_focus_restore_failed",
+    summary: `Focus restore to workspace ${input.focusedWorkspace} failed after foreign window redirect`,
+    tickNow: input.tickNow,
+    status: "failed",
+    details: {
+      workspace: input.focusedWorkspace,
+      active_workspace: lastActiveWorkspace,
+      error: lastError,
+    },
+  });
 }
 
 async function ownerWorkspaceForTask(
@@ -615,6 +636,10 @@ function setIntersects(left: ReadonlySet<number>, right: ReadonlySet<number>): b
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export type FollowsWindowOrchestratorRuntimeOptions = {

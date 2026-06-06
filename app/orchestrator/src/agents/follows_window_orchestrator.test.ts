@@ -16,6 +16,7 @@ function makeDeps(overrides: Partial<{
   follows: FollowsWindowRecord[];
   snapshot: WorkspaceSnapshot;
   runError: Error | undefined;
+  captureSnapshots: WorkspaceSnapshot[];
   claims: Array<{
     claim_id: string;
     task_id: string;
@@ -48,6 +49,7 @@ function makeDeps(overrides: Partial<{
     ],
   };
   const follows = overrides.follows ?? [{ window_id: "100", known_workspaces: ["ws-1", "ws-2"] }];
+  let captureCount = 0;
 
   const deps: FollowsWindowOrchestratorDeps = {
     store: {
@@ -99,7 +101,11 @@ function makeDeps(overrides: Partial<{
     },
     workspace: {
       async capture() {
-        return snapshot;
+        const captureSnapshots = overrides.captureSnapshots;
+        if (!captureSnapshots || captureSnapshots.length === 0) return snapshot;
+        const next = captureSnapshots[Math.min(captureCount, captureSnapshots.length - 1)] ?? snapshot;
+        captureCount += 1;
+        return next;
       },
     },
     async getFocusedWorkspace() {
@@ -235,6 +241,57 @@ describe("follows_window_orchestrator", () => {
     ]);
     assert.ok(activities.some((a) => a.type === "foreign_claimed_window_redirected"));
     assert.ok(activities.some((a) => a.type === "foreign_claimed_window_focus_restored"));
+  });
+
+  it("retries focus restore after moving a foreign task-claimed window", async () => {
+    const contaminatedSnapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "ws-a",
+      windows: [
+        { id: 100, app: "Ghostty", title: "paper A", workspace: "ws-a" },
+        { id: 200, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "Paper B Playwright", workspace: "ws-a" },
+      ],
+    };
+    const stillOnOwnerSnapshot: WorkspaceSnapshot = {
+      ...contaminatedSnapshot,
+      activeWorkspace: "ws-b",
+      windows: contaminatedSnapshot.windows.map((window) =>
+        window.id === 200 ? { ...window, workspace: "ws-b" } : window,
+      ),
+    };
+    const restoredFocusSnapshot: WorkspaceSnapshot = {
+      ...stillOnOwnerSnapshot,
+      activeWorkspace: "ws-a",
+    };
+    const { deps, ranCommands, activities } = makeDeps({
+      focusedWorkspace: "ws-a",
+      follows: [],
+      snapshot: contaminatedSnapshot,
+      captureSnapshots: [contaminatedSnapshot, stillOnOwnerSnapshot, restoredFocusSnapshot],
+      claims: [
+        {
+          claim_id: "twc_b_chrome",
+          task_id: "task_b",
+          window_id: "200",
+          created_at: "2026-05-06T12:00:00.000Z",
+        },
+      ],
+      taskWorkspaces: { task_b: "ws-b" },
+    });
+
+    const orch = createFollowsWindowOrchestrator(deps);
+    const result = await orch.tick();
+
+    assert.equal(result.decision, "switch_handled");
+    if (result.decision !== "switch_handled") return;
+    assert.equal(result.foreignClaimedMoved, 1);
+    assert.deepEqual(ranCommands.map((command) => command.args), [
+      ["move-node-to-workspace", "--window-id", "200", "ws-b"],
+      ["workspace", "ws-a"],
+      ["workspace", "ws-a"],
+    ]);
+    const restored = activities.find((activity) => activity.type === "foreign_claimed_window_focus_restored");
+    assert.equal(restored?.details?.attempts, 2);
   });
 
   it("moves a process-root descendant window away even when focused workspace is unchanged", async () => {
