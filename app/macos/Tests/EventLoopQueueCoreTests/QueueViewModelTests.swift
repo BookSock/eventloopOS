@@ -1715,6 +1715,11 @@ final class QueueViewModelTests: XCTestCase {
                 appBundle: nil,
                 titleSubstring: "Already ignored"
             ),
+            FollowsWindowExclusion(
+                exclusionId: "fwex_chrome_staging",
+                appBundle: "com.google.Chrome",
+                titleSubstring: "Staging Report"
+            ),
         ])
         client.setFakeFollowsWindows([
             FollowsWindowRecord(

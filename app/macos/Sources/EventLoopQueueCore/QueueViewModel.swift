@@ -1756,15 +1756,7 @@ public final class QueueViewModel: ObservableObject {
         let windowBundle = (normalizedOptional(window.appBundleId) ?? normalizedOptional(window.app))?.lowercased()
         let title = normalizedOptional(window.title)?.lowercased() ?? ""
         return exclusions.contains { exclusion in
-            if let appBundle = normalizedOptional(exclusion.appBundle)?.lowercased(),
-               let windowBundle,
-               appBundle == windowBundle {
-                return true
-            }
-            if let titleSubstring = normalizedOptional(exclusion.titleSubstring)?.lowercased(), title.contains(titleSubstring) {
-                return true
-            }
-            return false
+            followsExclusionMatches(appBundle: windowBundle, title: title, exclusion: exclusion)
         }
     }
 
@@ -1772,16 +1764,19 @@ public final class QueueViewModel: ObservableObject {
         let candidateBundle = normalizedOptional(candidate.appBundle)?.lowercased()
         let title = normalizedOptional(candidate.titlePrefix)?.lowercased() ?? ""
         return exclusions.contains { exclusion in
-            if let appBundle = normalizedOptional(exclusion.appBundle)?.lowercased(),
-               let candidateBundle,
-               appBundle == candidateBundle {
-                return true
-            }
-            if let titleSubstring = normalizedOptional(exclusion.titleSubstring)?.lowercased(), title.contains(titleSubstring) {
-                return true
-            }
+            followsExclusionMatches(appBundle: candidateBundle, title: title, exclusion: exclusion)
+        }
+    }
+
+    private func followsExclusionMatches(appBundle: String?, title: String, exclusion: FollowsWindowExclusion) -> Bool {
+        let exclusionBundle = normalizedOptional(exclusion.appBundle)?.lowercased()
+        let exclusionTitle = normalizedOptional(exclusion.titleSubstring)?.lowercased()
+        guard exclusionBundle != nil || exclusionTitle != nil else {
             return false
         }
+        let appMatches = exclusionBundle == nil || (appBundle != nil && appBundle == exclusionBundle)
+        let titleMatches = exclusionTitle.map { title.contains($0) } ?? true
+        return appMatches && titleMatches
     }
 
     public func scanOnboarding() async {
