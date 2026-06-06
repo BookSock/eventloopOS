@@ -66,6 +66,18 @@ final class QueueAppDelegateTests: XCTestCase {
         XCTAssertFalse(delegate.focusExistingQueueWindow())
     }
 
+    func testOpenFloatingQueueWindowReturnsFalseWithoutViewModel() {
+        let delegate = QueueAppDelegate()
+
+        XCTAssertFalse(delegate.openFloatingQueueWindow())
+    }
+
+    func testMasterCommandRequestReturnsFalseWithoutViewModel() {
+        let delegate = QueueAppDelegate()
+
+        XCTAssertFalse(delegate.presentMasterCommandFromGlobalHotkey())
+    }
+
     func testHarnessWindowIsConfiguredAsFloatingQueueSurface() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
@@ -79,6 +91,7 @@ final class QueueAppDelegateTests: XCTestCase {
         XCTAssertEqual(window.title, "eventloopOS Queue")
         XCTAssertEqual(window.identifier?.rawValue, "eventloopos-queue-harness-window")
         XCTAssertEqual(window.level, .floating)
+        XCTAssertEqual(window.minSize, NSSize(width: 760, height: 460))
     }
 
     func testPaperReminderHudCanBeDisabledByEnvironment() {

@@ -227,6 +227,12 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
     private var paperReminderHUD: PaperReminderHUDController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMasterCommandRequested(_:)),
+            name: .eventLoopQueueMasterCommandRequested,
+            object: nil
+        )
         openHarnessWindowIfRequested()
         openPaperReminderHUDIfAvailable()
     }
@@ -253,6 +259,21 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    @objc
+    private func handleMasterCommandRequested(_ notification: Notification) {
+        _ = presentMasterCommandFromGlobalHotkey()
+    }
+
+    @discardableResult
+    func presentMasterCommandFromGlobalHotkey() -> Bool {
+        let opened = openFloatingQueueWindow()
+        if !opened {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        viewModel?.presentMasterCommand()
+        return opened && viewModel != nil
+    }
+
     @discardableResult
     func openHarnessWindowIfRequested(
         arguments: [String] = CommandLine.arguments,
@@ -261,7 +282,7 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
         guard Self.shouldOpenHarnessWindow(arguments: arguments, environment: environment) else {
             return false
         }
-        return openHarnessWindow()
+        return openFloatingQueueWindow()
     }
 
     static func shouldOpenHarnessWindow(
@@ -273,7 +294,7 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @discardableResult
-    private func openHarnessWindow() -> Bool {
+    func openFloatingQueueWindow() -> Bool {
         guard let viewModel else {
             return false
         }
@@ -290,7 +311,8 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         Self.configureHarnessWindow(window)
-        window.contentViewController = NSHostingController(rootView: QueueWindowView(viewModel: viewModel))
+        window.contentViewController = NSHostingController(rootView: QueueWindowView(viewModel: viewModel)
+            .frame(minWidth: 760, minHeight: 460))
         window.center()
         window.makeKeyAndOrderFront(nil)
         harnessWindow = window
@@ -318,6 +340,7 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
         window.title = "eventloopOS Queue"
         window.identifier = NSUserInterfaceItemIdentifier("eventloopos-queue-harness-window")
         window.level = .floating
+        window.minSize = NSSize(width: 760, height: 460)
     }
 
     @discardableResult
@@ -532,10 +555,6 @@ private struct QueueMenuView: View {
         }
         .task(id: viewModel.selectedTaskId) {
             await viewModel.loadTaskSessionsForSelectedPacketIfNeeded()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .eventLoopQueueMasterCommandRequested)) { _ in
-            openQueueWindow()
-            viewModel.presentMasterCommand()
         }
     }
 }
