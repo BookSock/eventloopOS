@@ -15,6 +15,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 - Current closeout auditor: `bin/human-demo-completion-audit --strict` (JSON output includes `next_actions` with the exact result-template, verification, and closeout commands while pending)
 - Walkthrough: `docs/human-demo-walkthrough.md`
 - Mac Studio status check: `bin/lab-mac-dogfood status`
+- Broader non-demo UX proof: `bin/lab-mac-human-ux-proof` includes queue render, paper workspace switching, task workspace memory, Manual Mode, Codex waiting/lost auto-paper, live send-back handoff, and final orphan cleanup. It restarts and cleans the lab stack, so run it before re-staging the two-paper human demo, not during a ready-to-show demo.
 
 ## Requirement Audit
 
@@ -31,6 +32,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 | Ambient autosave after opening a new window | Human demo `proofs.new_window_autosave.ok=true` opens a scratch TextEdit on the current paper, waits for ambient save, verifies future queue context includes the scratch window/frame, then closes it before the hands-on walkthrough; readiness requires this proof | Proven by automation |
 | Snapshot capture avoids unrelated lab/system windows | Human demo queue context includes only shared TextEdit and matching Chrome; ambient saver filtering tests cover blocklisted apps | Proven by automation |
 | Agent-spawned foreign window containment | Human demo `proofs.agent_spawn_window_containment.ok=true` uses `bin/task-window-spawn` to open a real Metrics-owned Chrome window while Customer is focused, proves it is claimed/moved to Metrics, and proves Customer focus is restored; readiness and completion audit require this proof | Proven by automation |
+| Stuck/idle/waiting agent sessions queue human-needed papers without foreground spam | `AutoPaperCodexIdleWatcher` detects idle Codex/Claude anchors plus blocked/lost/waiting task-session statuses, suppresses current/focused task papers, dedupes repeated waiting states, and marks very old idle tasks dormant; `app/orchestrator/src/agents/auto_paper_codex_idle.test.ts`; `app/orchestrator/bin/p5-auto-paper-codex-idle-smoke`; `bin/lab-mac-human-ux-proof` command `Codex waiting/lost auto-paper proof`; `bin/event-loop-codex-completion-workspace-proof-smoke` proves real Codex completion marker -> agent-run queue -> approval back to same thread | Proven by automation; not shown in the staged two-paper hands-on demo to keep the demo queue simple |
 | Autosave observability | `/activity` shows `ambient_workspace_save_*`; `ambient_workspace_saver` tests cover commit/skip/fail paths | Proven |
 | Current paper briefing remains visible | Queue detail begins with `queue-paper-briefing-strip`, backed by `QueuePaperBriefingPresentation` tests, Swift render smoke screenshots, `bin/human-demo-ready` screenshot staging, and `bin/human-demo-completion-audit --strict` requiring `checks.queue_briefing_strip_visible=true` | Proven |
 | Desktop paper reminder remains visible outside the queue window | The macOS app opens a non-activating floating `eventloopOS Paper Reminder` HUD with the selected paper title/decision/context and transient hotkey feedback; `QueuePaperReminderPresentation`, `PaperReminderHUDController`, and `PaperReminderFeedbackPresentation` tests cover presentation/window behavior; `bin/human-demo-ready` and completion audit require `checks.paper_reminder_hud_visible=true` and `checks.paper_reminder_feedback_ok=true` | Proven by automation |
@@ -90,3 +92,4 @@ intentionally need a different closeout window.
 
 - Remote Mac Studio repo can be synced to latest `main` without restarting the demo when changes are docs/tests/helpers only.
 - Human demo proof artifacts are controller-side artifacts; they are not expected to exist under the remote Mac repo after `bin/lab-mac-sync`.
+- The two-paper human demo intentionally leaves agent-waiting auto-paper out of the live queue. Use `bin/lab-mac-human-ux-proof` for a fresh Mac-lab proof of that path, then rerun `bin/lab-mac-human-demo-setup` before handing the Mac to Jason.
