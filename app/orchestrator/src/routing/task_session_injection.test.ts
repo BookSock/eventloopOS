@@ -83,6 +83,76 @@ describe("task session injection", () => {
 
     assert.equal(result?.routeDecision.target_task_session_id, "task_session_running_old");
   });
+
+  it("does not inject source events into sessions that are waiting for human input", async () => {
+    const sentTo: string[] = [];
+    const taskSessions: TaskSessionController = {
+      listSessions: () => [
+        session({
+          id: "task_session_waiting",
+          task_id: "task_blog_feedback",
+          status: "waiting_approval",
+          updated_at: "2026-05-08T15:00:00.000Z",
+        }),
+      ],
+      sendFollowupMessage: (input) => {
+        sentTo.push(input.task_session_id);
+        return {
+          id: `msg_${input.task_session_id}`,
+          task_session_id: input.task_session_id,
+          status: "sent",
+        };
+      },
+    };
+
+    const result = await injectEventIntoTaskSessionIfPossible(
+      slackEvent({ task_hint: "blog feedback" }),
+      taskSessions,
+      { listContextEntries: async () => [] } as unknown as GatewayStore,
+      new Date("2026-05-08T15:30:00.000Z"),
+    );
+
+    assert.equal(result, undefined);
+    assert.deepEqual(sentTo, []);
+  });
+
+  it("routes automatic source events to an available session instead of a newer waiting duplicate", async () => {
+    const sentTo: string[] = [];
+    const taskSessions: TaskSessionController = {
+      listSessions: () => [
+        session({
+          id: "task_session_idle_old",
+          task_id: "task_blog_feedback",
+          status: "idle",
+          updated_at: "2026-05-08T10:00:00.000Z",
+        }),
+        session({
+          id: "task_session_waiting_new",
+          task_id: "task_blog_feedback",
+          status: "Needs User Input",
+          updated_at: "2026-05-08T16:00:00.000Z",
+        }),
+      ],
+      sendFollowupMessage: (input) => {
+        sentTo.push(input.task_session_id);
+        return {
+          id: `msg_${input.task_session_id}`,
+          task_session_id: input.task_session_id,
+          status: "sent",
+        };
+      },
+    };
+
+    const result = await injectEventIntoTaskSessionIfPossible(
+      slackEvent({ task_hint: "blog feedback" }),
+      taskSessions,
+      { listContextEntries: async () => [] } as unknown as GatewayStore,
+      new Date("2026-05-08T15:30:00.000Z"),
+    );
+
+    assert.equal(result?.routeDecision.target_task_session_id, "task_session_idle_old");
+    assert.deepEqual(sentTo, ["task_session_idle_old"]);
+  });
 });
 
 function session(input: {

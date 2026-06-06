@@ -70,7 +70,7 @@ async function taskInjectionTargetForEvent(
 } | undefined> {
   const hintedTaskId = taskIdForHint(event.task_hint);
   if (hintedTaskId) {
-    const session = bestTaskSessionForTask(sessions, hintedTaskId);
+    const session = bestTaskSessionForTask(sessions, hintedTaskId, { mode: "automatic_injection" });
     if (!session) return undefined;
     return {
       session,
@@ -83,7 +83,7 @@ async function taskInjectionTargetForEvent(
   const match = await strongestContextTaskMatch(event, store, taskIdsForSessions(sessions));
   if (!match) return undefined;
 
-  const session = bestTaskSessionForTask(sessions, match.taskId);
+  const session = bestTaskSessionForTask(sessions, match.taskId, { mode: "automatic_injection" });
   if (!session) return undefined;
 
   return {
