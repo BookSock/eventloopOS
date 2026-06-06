@@ -1192,7 +1192,7 @@ function runLocalScreenSharingCapture(localOutputPath, envOverride, label = "scr
 }
 
 function runLabDesktopCapture(envOverride, fallbackReason, label = "human-demo-ready") {
-  const captureLabel = label.replace(/[^a-z0-9-]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "human-demo-ready";
+  const captureLabel = safeCaptureLabel(label);
   const captureEnv = {
     ...envOverride,
     LAB_MAC_CAPTURE_WORKSPACE: screenshotStage?.result?.workspace ?? envOverride.LAB_MAC_CAPTURE_WORKSPACE ?? "",
@@ -1203,7 +1203,7 @@ function runLabDesktopCapture(envOverride, fallbackReason, label = "human-demo-r
     ? remoteCapturePath
     : path.join(runDir, "captures", label);
   const sync = remoteCapturePath
-    ? syncLabCapture(remoteCapturePath, localCaptureDir, captureEnv)
+    ? syncLabCapture(remoteCapturePath, localCaptureDir, captureEnv, captureLabel)
     : { ok: false, reason: "missing_remote_capture_path" };
   const output = path.join(localCaptureDir, "screen.png");
   const image = imageArtifactSummary(output);
@@ -1228,7 +1228,8 @@ function runLabDesktopCapture(envOverride, fallbackReason, label = "human-demo-r
   };
 }
 
-function syncLabCapture(remoteCapturePath, localCaptureDir, envOverride) {
+function syncLabCapture(remoteCapturePath, localCaptureDir, envOverride, label = "human-demo-ready") {
+  const captureLabel = safeCaptureLabel(label);
   mkdirSync(path.resolve(repoRoot, localCaptureDir), { recursive: true });
   const labHost = envOverride.LAB_MAC_HOST ?? "100.71.111.25";
   const labUser = envOverride.LAB_MAC_USER ?? "claw";
@@ -1279,6 +1280,10 @@ function syncLabCapture(remoteCapturePath, localCaptureDir, envOverride) {
     stdout_path: stdoutPath,
     stderr_path: stderrPath,
   };
+}
+
+function safeCaptureLabel(label) {
+  return String(label ?? "").replace(/[^a-z0-9-]+/gi, "-").replace(/^-|-$/g, "").toLowerCase() || "human-demo-ready";
 }
 
 function normalizeScreenshotTarget(raw) {
@@ -1605,6 +1610,8 @@ function runSelfTest() {
   assert.ok(readyMarkdown.includes("Verify: `bin/human-demo-result-verify 'artifacts/human-demo-results/demo-human-demo-result.md' --lab-status`"));
   assert.ok(readyMarkdown.includes("Closeout: `bin/human-demo-completion-audit --strict`"));
   assert.equal(shellQuote("a'b"), "'a'\\''b'");
+  assert.equal(safeCaptureLabel("human demo final"), "human-demo-final");
+  assert.equal(safeCaptureLabel(""), "human-demo-ready");
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-r", "--expect", "Review Demo Customer Reply", "--runs", "5"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD = "ctrl-option-h";
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h"]);
