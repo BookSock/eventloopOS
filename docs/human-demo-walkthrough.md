@@ -70,10 +70,10 @@ orchestrator is running on the controller Mac; the lab demo default keeps
 
 Latest known-good proof:
 
-- Manifest: `artifacts/lab-runs/20260605-180307-human-demo/manifest.json`
-- Screenshot: `artifacts/lab-runs/20260605-180307-human-demo/screen-sharing.png`
-- Readiness manifest: `artifacts/lab-runs/20260606T010448Z-human-demo-ready/manifest.json`
-- Readiness screenshot: `artifacts/lab-runs/20260606T010448Z-human-demo-ready/screen-sharing.png`
+- Manifest: `artifacts/lab-runs/20260605-185031-human-demo/manifest.json`
+- Screenshot: `artifacts/lab-runs/20260605-185031-human-demo/screen-sharing.png`
+- Readiness manifest: `artifacts/lab-runs/20260606T015217Z-human-demo-ready/manifest.json`
+- Readiness screenshot: `artifacts/lab-runs/20260606T015217Z-human-demo-ready/screen-sharing.png`
 - Queue proof: 2 current-run papers.
 - Ambient proof: customer paper context saved the moved shared TextEdit, and the automated scratch window was remembered by the current paper before cleanup.
 - Background containment proof: Metrics Chrome was intentionally pushed into the Customer paper and moved back to the Metrics paper.

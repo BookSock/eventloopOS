@@ -48,6 +48,14 @@ const demoHotkeys = Object.freeze({
   rectangle_maximize: "Ctrl-Option-Shift-Return",
 });
 
+const demoFrames = Object.freeze({
+  customerChrome: { x: 40, y: 60, width: 980, height: 720 },
+  customerSharedText: { x: 1060, y: 100, width: 760, height: 440 },
+  metricsChrome: { x: 760, y: 70, width: 980, height: 690 },
+  metricsSharedText: { x: 80, y: 210, width: 680, height: 560 },
+  queue: { x: 1080, y: 590, width: 760, height: 380 },
+});
+
 const demoWalkthrough = Object.freeze([
   "Start on demo-customer. Press Ctrl-Option-R; Customer Chrome and shared TextEdit should come forward.",
   "Move shared TextEdit with Ctrl-Option-Left or drag it toward center/left. It starts on the right side, so right-half can look unchanged. Wait 2-3 seconds for ambient autosave.",
@@ -366,8 +374,8 @@ tell application "System Events"
           try
             set windowName to name of candidateWindow as string
             if windowName is "eventloopOS Queue" then
-              set position of candidateWindow to {1080, 650}
-              set size of candidateWindow to {760, 380}
+              set position of candidateWindow to {${demoFrames.queue.x}, ${demoFrames.queue.y}}
+              set size of candidateWindow to {${demoFrames.queue.width}, ${demoFrames.queue.height}}
               perform action "AXRaise" of candidateWindow
               return processName & "|" & (position of candidateWindow as string) & "|" & (size of candidateWindow as string)
             end if
@@ -529,11 +537,11 @@ function buildSnapshot(windows, mode) {
   const workspace = mode === "customer" ? paperCustomer.workspace : paperMetrics.workspace;
   const chrome = mode === "customer" ? windows.customerChrome : windows.metricsChrome;
   const chromeFrame = mode === "customer"
-    ? { x: 40, y: 60, width: 980, height: 720 }
-    : { x: 760, y: 70, width: 980, height: 690 };
+    ? demoFrames.customerChrome
+    : demoFrames.metricsChrome;
   const sharedFrame = mode === "customer"
-    ? { x: 1060, y: 120, width: 760, height: 520 }
-    : { x: 80, y: 210, width: 680, height: 560 };
+    ? demoFrames.customerSharedText
+    : demoFrames.metricsSharedText;
   return {
     backend: "aerospace",
     activeWorkspace: workspace,
@@ -605,8 +613,7 @@ function assertQueueWindowVisible(snapshot, expectedWorkspace) {
   if (window.layout !== "floating") {
     throw new Error(`queue window layout expected floating, got ${window.layout}`);
   }
-  const expectedFrame = { x: 1080, y: 650, width: 760, height: 380 };
-  assertNearFrame(window.frame, expectedFrame, "queue window final frame");
+  assertNearFrame(window.frame, demoFrames.queue, "queue window final frame");
   return {
     ok: true,
     workspace: window.workspace,
