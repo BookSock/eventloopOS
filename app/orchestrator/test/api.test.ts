@@ -885,6 +885,29 @@ describe("orchestrator gateway API", () => {
       assert.equal(stuckBody.agent_run.status, "blocked");
       assert.equal(stuckBody.queue_item.priority_score, 850);
       assert.equal(stuckBody.review_packet.decision_needed, "Claude cannot make progress without a choice.");
+
+      const lostResponse = await fetch(`${agentRunBaseUrl}/agent-runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "run_codex_lost",
+          provider: "codex",
+          task_id: "task_checkout",
+          status: "lost",
+          blocked_reason: "Codex native thread disappeared before sending results.",
+        }),
+      });
+      const lostBody = await lostResponse.json() as {
+        agent_run: { status: string };
+        review_packet: { decision_needed: string };
+        queue_item: { id: string; priority_score: number };
+      };
+
+      assert.equal(lostResponse.status, 200);
+      assert.equal(lostBody.agent_run.status, "blocked");
+      assert.equal(lostBody.queue_item.id, "qit_run_codex_lost_agent_waiting");
+      assert.equal(lostBody.queue_item.priority_score, 850);
+      assert.equal(lostBody.review_packet.decision_needed, "Codex native thread disappeared before sending results.");
     } finally {
       await new Promise<void>((resolve, reject) => {
         agentRunServer.close((error) => (error ? reject(error) : resolve()));

@@ -112,6 +112,8 @@ export type AgentRunStatus = typeof agentRunStatuses[number];
 const agentRunBlockedStatusAliases = new Set([
   "agent_stuck",
   "human_blocked",
+  "lost",
+  "native_thread_lost",
   "needs_unblock",
   "needs_unblocking",
   "requires_unblock",

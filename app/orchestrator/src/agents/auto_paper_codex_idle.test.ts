@@ -454,6 +454,40 @@ describe("AutoPaperCodexIdleWatcher", () => {
     assert.doesNotMatch(deps.ingested[0]!.event.summary, /Fallback text/);
   });
 
+  it("emits one lost session paper with actionable context", async () => {
+    const sessions: TaskRuntimeSession[] = [
+      {
+        id: "task_session_lost",
+        task_id: "task_agent_lost",
+        provider: "codex",
+        status: "lost",
+        name: "Lost checkout agent",
+        status_message: "Native Codex thread disappeared; start a replacement before resuming.",
+        updated_at: "2026-05-09T11:30:00.000Z",
+      },
+    ];
+    const deps = createDeps({
+      tasks: [],
+      taskSessions: sessions,
+      inspections: new Map(),
+    });
+    const watcher = new AutoPaperCodexIdleWatcher(deps);
+
+    const first = await watcher.tick();
+    const second = await watcher.tick();
+
+    assert.equal(first.emitted.length, 1);
+    assert.equal(first.emitted[0]?.task_id, "task_agent_lost");
+    assert.equal(second.emitted.length, 0);
+    assert.equal(second.skipped[0]?.reason, "already_emitted_for_window");
+    assert.equal(deps.ingested.length, 1);
+    assert.equal(deps.ingested[0]!.event.type, "codex.task_lost");
+    assert.match(deps.ingested[0]!.event.title, /Codex session lost/);
+    assert.match(deps.ingested[0]!.event.summary, /Lost checkout agent/);
+    assert.match(deps.ingested[0]!.event.summary, /Native Codex thread disappeared/);
+    assert.match(deps.ingested[0]!.event.idempotency_key ?? "", /status:lost:at:2026-05-09T11:30:00.000Z/);
+  });
+
   it("does not spam waiting papers when a session has no timestamp fields", async () => {
     const deps = createDeps({
       tasks: [],

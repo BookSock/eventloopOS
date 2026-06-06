@@ -116,6 +116,8 @@ type AutoPaperCandidate = {
   status?: string;
 };
 
+type HumanAttentionReason = "blocked" | "waiting" | "lost";
+
 export class AutoPaperCodexIdleWatcher {
   private readonly idleState = new Map<string, IdleWindowState>();
 
@@ -378,7 +380,7 @@ function buildAgentAttentionEvent(input: {
   task: AutoPaperTaskRecord;
   provider: string;
   anchorId: string;
-  reason: "idle" | "blocked" | "waiting";
+  reason: "idle" | HumanAttentionReason;
   occurredAt: string;
   dedupeAnchor?: string;
   now: Date;
@@ -433,9 +435,10 @@ function sessionStatus(session: TaskRuntimeSession): string | undefined {
   return stringField(session, "status");
 }
 
-function humanAttentionReasonForStatus(status: string | undefined): "blocked" | "waiting" | undefined {
+function humanAttentionReasonForStatus(status: string | undefined): HumanAttentionReason | undefined {
   const normalized = normalizeStatus(status);
   if (!normalized) return undefined;
+  if (normalized === "lost" || normalized.includes("lost")) return "lost";
   if (normalized.includes("blocked") || HUMAN_BLOCKED_STATUSES.has(normalized)) return "blocked";
   if (HUMAN_WAITING_STATUSES.has(normalized)) return "waiting";
   if (
@@ -551,7 +554,7 @@ function normalizeStatus(status: string | undefined): string | undefined {
 
 function humanAttentionDetailsForCandidate(
   candidate: AutoPaperCandidate,
-  reason: "blocked" | "waiting",
+  reason: HumanAttentionReason,
   now: Date,
 ): { occurredAt: string; dedupeAnchor: string; summary: string } {
   const status = normalizeStatus(candidate.status) ?? reason;
@@ -581,8 +584,12 @@ function validTimestampField(record: Record<string, unknown> | undefined, key: s
   return Number.isNaN(Date.parse(value)) ? undefined : value;
 }
 
-function humanAttentionSummary(candidate: AutoPaperCandidate, reason: "blocked" | "waiting"): string {
-  const action = reason === "blocked" ? "blocked" : "waiting for human input";
+function humanAttentionSummary(candidate: AutoPaperCandidate, reason: HumanAttentionReason): string {
+  const action = reason === "blocked"
+    ? "blocked"
+    : reason === "lost"
+      ? "lost"
+      : "waiting for human input";
   const prefix = `${providerLabel(candidate.provider)} session ${action} on ${candidate.task.id}`;
   const name = stringField(candidate.session, "name");
   const detail = firstStringField(candidate.session, [
@@ -628,15 +635,17 @@ function providerLabel(provider: string): string {
   return "Agent";
 }
 
-function eventKindForReason(reason: "idle" | "blocked" | "waiting"): string {
+function eventKindForReason(reason: "idle" | HumanAttentionReason): string {
   if (reason === "idle") return "task_idle";
   if (reason === "blocked") return "task_blocked";
+  if (reason === "lost") return "task_lost";
   return "task_waiting";
 }
 
-function eventTitleForReason(reason: "idle" | "blocked" | "waiting"): string {
+function eventTitleForReason(reason: "idle" | HumanAttentionReason): string {
   if (reason === "idle") return "session idle";
   if (reason === "blocked") return "session blocked";
+  if (reason === "lost") return "session lost";
   return "session waiting";
 }
 

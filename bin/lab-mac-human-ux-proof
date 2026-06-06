@@ -113,7 +113,7 @@ const checks = {
   workspace_task_switch: commandPassed("Paper task workspace switch proof"),
   task_workspace_memory: commandPassed("Task paper workspace memory proof"),
   manual_mode_return: commandPassed("Manual mode return proof"),
-  codex_waiting_auto_paper: commandPassed("Codex waiting auto-paper proof"),
+  codex_waiting_auto_paper: commandPassed("Codex waiting/lost auto-paper proof"),
   send_back_target_and_action: commandPassed("Live Queue send-back handoff proof"),
   final_no_orphans: orphanPassed,
 };
@@ -136,7 +136,7 @@ const scenarioCoverage = [
   {
     id: "codex_waiting_user_input_queue",
     passed: checks.codex_waiting_auto_paper,
-    evidence: ["Codex waiting auto-paper proof"],
+    evidence: ["Codex waiting/lost auto-paper proof"],
   },
   {
     id: "final_cleanup",
@@ -223,7 +223,7 @@ export EVENTLOOPOS_PROOF_COMMANDS='[
     "args": ["-lc", "cd app/macos && swift test --filter QueueViewModelTests/testToggleEnteringManualModeDoesNotCaptureUntilReturn && swift test --filter QueueViewModelTests/testToggleIntoManualModeRestoresSavedManualWorkspace && swift test --filter QueueViewModelTests/testRestoreManualWorkspaceUsesSavedSnapshotAndKeepsManualMode && swift test --filter QueueViewModelTests/testReturnToEventLoopKeepingCurrentLayoutDoesNotRestoreWorkspace && cd ../.. && pnpm --filter @eventloopos/orchestrator run build && (cd app/orchestrator && node --test dist/test/manual_mode_round_trip.test.js)"]
   },
   {
-    "name": "Codex waiting auto-paper proof",
+    "name": "Codex waiting/lost auto-paper proof",
     "cmd": "bash",
     "args": ["-lc", "pnpm --filter @eventloopos/orchestrator run build && node app/orchestrator/bin/p5-auto-paper-codex-idle-smoke"]
   },
