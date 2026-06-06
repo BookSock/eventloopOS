@@ -14,6 +14,7 @@ final class PaperReminderHUDController {
     private var transientFeedbackExpiresAt: Date?
     private var feedbackClearGeneration = 0
     private static let feedbackDisplayDuration: TimeInterval = 3.0
+    static let preferredContentSize = NSSize(width: 760, height: 116)
 
     init(viewModel: QueueViewModel, environment: [String: String] = ProcessInfo.processInfo.environment) {
         self.viewModel = viewModel
@@ -80,7 +81,7 @@ final class PaperReminderHUDController {
             return window
         }
         let window = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 760, height: 94),
+            contentRect: NSRect(origin: .zero, size: Self.preferredContentSize),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -95,8 +96,8 @@ final class PaperReminderHUDController {
         guard let frame = screen?.visibleFrame else {
             return
         }
-        let width = min(CGFloat(760), max(CGFloat(320), frame.width - 96))
-        let height = CGFloat(94)
+        let width = min(Self.preferredContentSize.width, max(CGFloat(320), frame.width - 96))
+        let height = Self.preferredContentSize.height
         let x = frame.midX - width / 2
         let y = frame.maxY - height - 18
         window.setFrame(NSRect(x: x, y: y, width: width, height: height), display: true)
@@ -182,8 +183,9 @@ struct PaperReminderHUDView: View {
                     Text(presentation.context)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                        .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("paper-reminder-context")
                 }
             }

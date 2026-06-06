@@ -89,6 +89,8 @@ final class QueueAppDelegateTests: XCTestCase {
     }
 
     func testPaperReminderHudWindowIsNonActivatingFloatingOverlay() {
+        XCTAssertGreaterThanOrEqual(PaperReminderHUDController.preferredContentSize.height, 116)
+
         let panel = NSPanel(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 96),
             styleMask: [.borderless, .nonactivatingPanel],
