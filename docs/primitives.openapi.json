@@ -4532,15 +4532,7 @@
             "type": "string"
           },
           "status": {
-            "enum": [
-              "queued",
-              "running",
-              "blocked",
-              "waiting_approval",
-              "completed",
-              "failed",
-              "cancelled"
-            ],
+            "minLength": 1,
             "type": "string"
           },
           "task_id": {

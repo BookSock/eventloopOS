@@ -1,0 +1,12 @@
+{
+  "schema": "AgentRunUpsertRequest",
+  "data": {
+    "id": "run_claude_review_alias",
+    "provider": "claude",
+    "task_id": "task_checkout",
+    "thread_id": "claude_thread_checkout",
+    "status": "ready_for_review",
+    "blocked_reason": "Review checkout diff and approve next step.",
+    "risk_tags": ["low_confidence"]
+  }
+}

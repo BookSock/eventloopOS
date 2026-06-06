@@ -1,4 +1,11 @@
-import type { Action, AgentRun, EvidenceRef, RawRef } from "../contracts.js";
+import {
+  agentRunUpsertStatuses,
+  normalizeAgentRunStatus,
+  type Action,
+  type AgentRun,
+  type EvidenceRef,
+  type RawRef,
+} from "../contracts.js";
 import type { Runtime } from "../runtime.js";
 import type { JsonBodyReader } from "./context_restore.js";
 import type { RouteResult } from "./types.js";
@@ -75,7 +82,7 @@ function validateAgentRun(input: unknown, fallbackUpdatedAt: string, existing?: 
   if (!id.ok) return id;
   const provider = readEnum(input, "provider", ["codex", "claude", "openai", "manual", "fake"]);
   if (!provider.ok) return provider;
-  const status = readEnum(input, "status", ["queued", "running", "blocked", "waiting_approval", "completed", "failed", "cancelled"]);
+  const status = readAgentRunStatus(input, "status");
   if (!status.ok) return status;
 
   return {
@@ -116,6 +123,21 @@ function readEnum<T extends string>(
     return { ok: false, message: `${key} must be one of ${values.join(", ")}` };
   }
   return { ok: true, value: value as T };
+}
+
+function readAgentRunStatus(
+  input: Record<string, unknown>,
+  key: string,
+): { ok: true; value: AgentRun["status"] } | { ok: false; message: string } {
+  const value = input[key];
+  if (typeof value !== "string") {
+    return { ok: false, message: `${key} must be one of ${agentRunUpsertStatuses.join(", ")}` };
+  }
+  const normalized = normalizeAgentRunStatus(value);
+  if (!normalized) {
+    return { ok: false, message: `${key} must be one of ${agentRunUpsertStatuses.join(", ")}` };
+  }
+  return { ok: true, value: normalized };
 }
 
 function optionalString(input: Record<string, unknown>, key: string): string | undefined {

@@ -828,6 +828,70 @@ describe("orchestrator gateway API", () => {
     }
   });
 
+  it("canonicalizes human-attention agent run status aliases into review queue items", async () => {
+    const store = createInMemoryGatewayStore(await createSeededStore("fixtures/empty-review-packets.json"));
+    const agentRunServer = createGatewayServer({
+      store,
+      now: () => new Date("2026-05-06T19:06:00.000Z"),
+    });
+    await new Promise<void>((resolve) => agentRunServer.listen(0, "127.0.0.1", resolve));
+    const address = agentRunServer.address() as AddressInfo;
+    const agentRunBaseUrl = `http://127.0.0.1:${address.port}`;
+
+    try {
+      const response = await fetch(`${agentRunBaseUrl}/agent-runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "run_claude_review_ready",
+          provider: "claude",
+          task_id: "task_checkout",
+          thread_id: "claude_thread_checkout",
+          status: "ready_for_review",
+          blocked_reason: "Review checkout diff and approve next step.",
+        }),
+      });
+      const body = await response.json() as {
+        agent_run: { id: string; status: string };
+        review_packet: { summary: string; decision_needed: string };
+        queue_item: { id: string; priority_score: number };
+      };
+
+      assert.equal(response.status, 200);
+      assert.equal(body.agent_run.status, "waiting_approval");
+      assert.equal(body.queue_item.id, "qit_run_claude_review_ready_agent_waiting");
+      assert.equal(body.queue_item.priority_score, 800);
+      assert.equal(body.review_packet.summary, "Review checkout diff and approve next step.");
+      assert.equal(body.review_packet.decision_needed, "Approve resume action or send followup instructions.");
+
+      const stuckResponse = await fetch(`${agentRunBaseUrl}/agent-runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          id: "run_claude_stuck",
+          provider: "claude",
+          task_id: "task_checkout",
+          status: "stuck",
+          blocked_reason: "Claude cannot make progress without a choice.",
+        }),
+      });
+      const stuckBody = await stuckResponse.json() as {
+        agent_run: { status: string };
+        review_packet: { decision_needed: string };
+        queue_item: { priority_score: number };
+      };
+
+      assert.equal(stuckResponse.status, 200);
+      assert.equal(stuckBody.agent_run.status, "blocked");
+      assert.equal(stuckBody.queue_item.priority_score, 850);
+      assert.equal(stuckBody.review_packet.decision_needed, "Claude cannot make progress without a choice.");
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        agentRunServer.close((error) => (error ? reject(error) : resolve()));
+      });
+    }
+  });
+
   it("records local activity and metrics for routed events and done decisions", async () => {
     const store = createInMemoryGatewayStore(await createSeededStore());
     const observability = createInMemoryObservability();

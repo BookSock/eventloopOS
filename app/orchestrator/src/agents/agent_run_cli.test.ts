@@ -76,6 +76,27 @@ describe("agent run CLI", () => {
     assert.equal(run.value.resume_actions[0]?.requires_confirmation, true);
   });
 
+  it("accepts human-attention status aliases and sends canonical status", async () => {
+    const options = agentRunCliOptionsFromEnvAndArgv(
+      {
+        EVENTLOOPOS_AGENT_RUN_ID: "run_cli_review",
+        EVENTLOOPOS_AGENT_RUN_PROVIDER: "claude",
+        EVENTLOOPOS_AGENT_RUN_STATUS: "ready for review",
+      },
+      [],
+    );
+    const run = await buildAgentRunFromCliOptions({
+      ...options,
+      blockedReason: "Review checkout fix.",
+      riskTags: [],
+      now: () => new Date("2026-05-07T12:00:00.000Z"),
+    });
+
+    assert.equal(run.ok, true);
+    if (!run.ok) return;
+    assert.equal(run.value.status, "waiting_approval");
+  });
+
   it("sends an upsert request to orchestrator", async () => {
     const writes: string[] = [];
     let requestedUrl = "";

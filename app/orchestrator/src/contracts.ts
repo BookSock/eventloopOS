@@ -86,7 +86,7 @@ export type AgentRun = {
   provider: "codex" | "claude" | "openai" | "manual" | "fake";
   task_id?: string;
   thread_id?: string;
-  status: "queued" | "running" | "blocked" | "waiting_approval" | "completed" | "failed" | "cancelled";
+  status: AgentRunStatus;
   started_at?: string;
   updated_at: string;
   completed_at?: string;
@@ -96,6 +96,111 @@ export type AgentRun = {
   output_refs: RawRef[];
   resume_actions: Action[];
 };
+
+export const agentRunStatuses = [
+  "queued",
+  "running",
+  "blocked",
+  "waiting_approval",
+  "completed",
+  "failed",
+  "cancelled",
+] as const;
+
+export type AgentRunStatus = typeof agentRunStatuses[number];
+
+const agentRunBlockedStatusAliases = new Set([
+  "agent_stuck",
+  "human_blocked",
+  "needs_unblock",
+  "needs_unblocking",
+  "requires_unblock",
+  "stuck",
+]);
+
+const agentRunWaitingStatusAliases = new Set([
+  "action_required",
+  "approval_pending",
+  "approval_required",
+  "awaiting_answer",
+  "awaiting_approval",
+  "awaiting_human",
+  "awaiting_human_input",
+  "awaiting_input",
+  "awaiting_review",
+  "awaiting_user",
+  "awaiting_user_input",
+  "human_input_required",
+  "human_question",
+  "human_review",
+  "human_review_required",
+  "input_required",
+  "needs_action",
+  "needs_answer",
+  "needs_approval",
+  "needs_human",
+  "needs_human_input",
+  "needs_input",
+  "needs_review",
+  "needs_user",
+  "needs_user_input",
+  "paused_for_input",
+  "pending_approval",
+  "pending_human",
+  "pending_human_input",
+  "pending_review",
+  "question_for_human",
+  "question_for_user",
+  "ready_for_review",
+  "requires_action",
+  "requires_approval",
+  "requires_human",
+  "requires_human_input",
+  "requires_input",
+  "requires_review",
+  "requires_user_input",
+  "review_needed",
+  "review_requested",
+  "review_required",
+  "user_input_required",
+  "user_question",
+  "waiting_for_approval",
+  "waiting_for_human",
+  "waiting_for_human_input",
+  "waiting_for_input",
+  "waiting_for_user",
+  "waiting_for_user_input",
+  "waiting_input",
+  "waiting_on_human",
+  "waiting_on_user",
+]);
+
+const agentRunTerminalStatusAliases = new Map<string, AgentRunStatus>([
+  ["canceled", "cancelled"],
+  ["done", "completed"],
+  ["errored", "failed"],
+  ["error", "failed"],
+  ["finished", "completed"],
+  ["success", "completed"],
+  ["succeeded", "completed"],
+]);
+
+export const agentRunUpsertStatuses = [
+  ...agentRunStatuses,
+  ...Array.from(agentRunBlockedStatusAliases),
+  ...Array.from(agentRunWaitingStatusAliases),
+  ...Array.from(agentRunTerminalStatusAliases.keys()),
+] as const;
+
+export type AgentRunUpsertStatus = typeof agentRunUpsertStatuses[number];
+
+export function normalizeAgentRunStatus(status: string): AgentRunStatus | undefined {
+  const normalized = status.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if ((agentRunStatuses as readonly string[]).includes(normalized)) return normalized as AgentRunStatus;
+  if (agentRunBlockedStatusAliases.has(normalized)) return "blocked";
+  if (agentRunWaitingStatusAliases.has(normalized)) return "waiting_approval";
+  return agentRunTerminalStatusAliases.get(normalized);
+}
 
 export type AgentRunQueueResult = {
   agent_run: AgentRun;

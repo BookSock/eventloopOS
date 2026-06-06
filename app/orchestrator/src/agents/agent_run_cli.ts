@@ -1,5 +1,13 @@
 import { pathToFileURL } from "node:url";
-import type { Action, AgentRun, EvidenceRef, RawRef } from "../contracts.js";
+import {
+  agentRunUpsertStatuses,
+  agentRunStatuses,
+  normalizeAgentRunStatus,
+  type Action,
+  type AgentRun,
+  type EvidenceRef,
+  type RawRef,
+} from "../contracts.js";
 
 type AgentRunCliCommand = "upsert" | "get";
 
@@ -34,7 +42,6 @@ type StdinLike = {
   [Symbol.asyncIterator](): AsyncIterator<unknown, unknown, unknown>;
 };
 
-const runStatuses: AgentRun["status"][] = ["queued", "running", "blocked", "waiting_approval", "completed", "failed", "cancelled"];
 const providers: AgentRun["provider"][] = ["codex", "claude", "openai", "manual", "fake"];
 const sideEffects: Action["side_effect"][] = ["none", "local", "external", "production", "sensitive"];
 
@@ -293,8 +300,9 @@ function parseProvider(input: string): AgentRun["provider"] {
 }
 
 function parseStatus(input: string): AgentRun["status"] {
-  if (runStatuses.includes(input as AgentRun["status"])) return input as AgentRun["status"];
-  throw new Error(`status must be one of: ${runStatuses.join(", ")}`);
+  const normalized = normalizeAgentRunStatus(input);
+  if (normalized) return normalized;
+  throw new Error(`status must be one of: ${agentRunStatuses.join(", ")} or alias ${agentRunUpsertStatuses.join(", ")}`);
 }
 
 function parseSideEffect(input: string): Action["side_effect"] {

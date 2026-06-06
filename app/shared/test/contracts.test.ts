@@ -10,6 +10,7 @@ import {
   ContextResourceSchema,
   EventSchema,
   FollowsWindowExclusionCreateRequestSchema,
+  AgentRunUpsertRequestSchema,
   ManualModeSetRequestSchema,
   PrimitiveCatalogSchema,
   ReviewPacketSchema,
@@ -143,6 +144,24 @@ describe("contract schemas", () => {
   it("validates normalized event fixtures", () => {
     const fixture = readFixture(join(fixturesDir, "valid/event.json"));
     expect(EventSchema.parse(fixture.data).id).toBe("evt_slack_001");
+  });
+
+  it("accepts human-attention agent run status aliases in upsert requests", () => {
+    const request = AgentRunUpsertRequestSchema.parse({
+      id: "run_review_ready",
+      provider: "claude",
+      task_id: "task_checkout",
+      status: "ready_for_review",
+      blocked_reason: "Review checkout fix."
+    });
+    expect(request.status).toBe("ready_for_review");
+
+    const spaced = AgentRunUpsertRequestSchema.parse({
+      id: "run_human_question",
+      provider: "codex",
+      status: "Question For User"
+    });
+    expect(spaced.status).toBe("Question For User");
   });
 
   it("validates discriminated context resources and flexible unknown resources", () => {

@@ -990,6 +990,86 @@ export const AgentRunSchema = z
   .strict();
 export type AgentRun = z.infer<typeof AgentRunSchema>;
 
+const AgentRunCanonicalStatuses = ["queued", "running", "blocked", "waiting_approval", "completed", "failed", "cancelled"] as const;
+const AgentRunHumanAttentionStatusAliases = [
+  "action_required",
+  "agent_stuck",
+  "approval_pending",
+  "approval_required",
+  "awaiting_answer",
+  "awaiting_approval",
+  "awaiting_human",
+  "awaiting_human_input",
+  "awaiting_input",
+  "awaiting_review",
+  "awaiting_user",
+  "awaiting_user_input",
+  "canceled",
+  "done",
+  "error",
+  "errored",
+  "finished",
+  "human_blocked",
+  "human_input_required",
+  "human_question",
+  "human_review",
+  "human_review_required",
+  "input_required",
+  "needs_action",
+  "needs_answer",
+  "needs_approval",
+  "needs_human",
+  "needs_human_input",
+  "needs_input",
+  "needs_review",
+  "needs_unblock",
+  "needs_unblocking",
+  "needs_user",
+  "needs_user_input",
+  "paused_for_input",
+  "pending_approval",
+  "pending_human",
+  "pending_human_input",
+  "pending_review",
+  "question_for_human",
+  "question_for_user",
+  "ready_for_review",
+  "requires_action",
+  "requires_approval",
+  "requires_human",
+  "requires_human_input",
+  "requires_input",
+  "requires_review",
+  "requires_unblock",
+  "requires_user_input",
+  "review_needed",
+  "review_requested",
+  "review_required",
+  "stuck",
+  "success",
+  "succeeded",
+  "user_input_required",
+  "user_question",
+  "waiting_for_approval",
+  "waiting_for_human",
+  "waiting_for_human_input",
+  "waiting_for_input",
+  "waiting_for_user",
+  "waiting_for_user_input",
+  "waiting_input",
+  "waiting_on_human",
+  "waiting_on_user",
+] as const;
+const AgentRunUpsertStatusValues = new Set<string>([
+  ...AgentRunCanonicalStatuses,
+  ...AgentRunHumanAttentionStatusAliases,
+]);
+export const AgentRunUpsertStatusSchema = nonEmpty.refine(
+  (status) => AgentRunUpsertStatusValues.has(status.trim().toLowerCase().replace(/[\s-]+/g, "_")),
+  "unsupported agent run status"
+);
+export type AgentRunUpsertStatus = z.infer<typeof AgentRunUpsertStatusSchema>;
+
 export const TaskSessionSchema = z
   .object({
     id,
@@ -1956,7 +2036,7 @@ export const AgentRunUpsertRequestSchema = AgentRunSchema.partial({
 }).extend({
   id,
   provider: z.enum(["codex", "claude", "openai", "manual", "fake"]),
-  status: z.enum(["queued", "running", "blocked", "waiting_approval", "completed", "failed", "cancelled"])
+  status: AgentRunUpsertStatusSchema
 }).passthrough();
 export type AgentRunUpsertRequest = z.infer<typeof AgentRunUpsertRequestSchema>;
 

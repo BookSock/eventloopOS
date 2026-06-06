@@ -1935,7 +1935,7 @@
         "provider": { "type": "string", "enum": ["codex", "claude", "openai", "manual", "fake"] },
         "task_id": { "type": "string", "minLength": 1 },
         "thread_id": { "type": "string" },
-        "status": { "type": "string", "enum": ["queued", "running", "blocked", "waiting_approval", "completed", "failed", "cancelled"] },
+        "status": { "type": "string", "minLength": 1 },
         "started_at": { "type": "string", "format": "date-time" },
         "updated_at": { "type": "string", "format": "date-time" },
         "completed_at": { "type": "string", "format": "date-time" },
