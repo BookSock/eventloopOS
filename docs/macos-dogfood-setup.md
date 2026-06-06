@@ -77,7 +77,10 @@ SCREEN_SHARING_TITLE=Zeus bin/local-screen-sharing-capture
 ```
 
 The helper writes `artifacts/screen-sharing-captures/<timestamp>-screen-sharing.png`
-and a sibling JSON manifest with the CGWindow id and capture engine.
+and a sibling JSON manifest with the CGWindow id, capture engine, and frontmost
+app before/after capture. No-raise captures fail if they change the frontmost
+app; set `SCREEN_SHARING_ASSERT_NO_FOCUS=0` only when you want to disable that
+guard.
 Set `SCREEN_SHARING_RAISE=1` only when you explicitly want the helper to raise
 and focus Screen Sharing before capture. The default capture engine is
 CoreGraphics; set `SCREEN_SHARING_CAPTURE_ENGINE=screencapture` only when you

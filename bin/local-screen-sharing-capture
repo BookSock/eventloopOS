@@ -12,6 +12,7 @@ Environment:
   SCREEN_SHARING_TITLE   optional title substring, e.g. Zeus
   SCREEN_SHARING_RAISE   default: 0; set 1 to raise/focus before capture
   SCREEN_SHARING_CAPTURE_ENGINE default: coregraphics; set screencapture only if explicitly wanted
+  SCREEN_SHARING_ASSERT_NO_FOCUS default: 1; fail if no-raise capture changes frontmost app
 EOF
 }
 
@@ -26,6 +27,7 @@ owner="${SCREEN_SHARING_OWNER:-Screen Sharing}"
 title="${SCREEN_SHARING_TITLE:-}"
 raise_requested="${SCREEN_SHARING_RAISE:-${EVENTLOOPOS_SCREEN_SHARING_RAISE:-0}}"
 capture_engine="${SCREEN_SHARING_CAPTURE_ENGINE:-coregraphics}"
+assert_no_focus_requested="${SCREEN_SHARING_ASSERT_NO_FOCUS:-1}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 output="${1:-artifacts/screen-sharing-captures/$stamp-screen-sharing.png}"
 capture_tmpdir=""
@@ -58,6 +60,33 @@ case "$capture_engine" in
     exit 2
     ;;
 esac
+
+case "$assert_no_focus_requested" in
+  1|true|TRUE|yes|YES|on|ON)
+    assert_no_focus=1
+    ;;
+  0|false|FALSE|no|NO|off|OFF|"")
+    assert_no_focus=0
+    ;;
+  *)
+    echo "invalid SCREEN_SHARING_ASSERT_NO_FOCUS: $assert_no_focus_requested (use 0 or 1)" >&2
+    exit 2
+    ;;
+esac
+
+frontmost_app() {
+  osascript <<'APPLESCRIPT' 2>/dev/null
+tell application "System Events"
+  get name of first application process whose frontmost is true
+end tell
+APPLESCRIPT
+}
+
+json_string() {
+  node -e 'process.stdout.write(JSON.stringify(process.argv[1] ?? ""))' "$1"
+}
+
+frontmost_before="$(frontmost_app || true)"
 
 raise_exit=0
 if [[ "$do_raise" == "1" ]]; then
@@ -221,6 +250,14 @@ else
   screencapture -x -l "$window_id" "$output"
 fi
 
+frontmost_after="$(frontmost_app || true)"
+focus_changed=false
+focus_assertion_failed=false
+if [[ "$do_raise" == "0" && "$assert_no_focus" == "1" && -n "$frontmost_before" && -n "$frontmost_after" && "$frontmost_before" != "$frontmost_after" ]]; then
+  focus_changed=true
+  focus_assertion_failed=true
+fi
+
 manifest="${output%.png}.json"
 cat >"$manifest" <<EOF
 {
@@ -231,9 +268,19 @@ cat >"$manifest" <<EOF
   "title_filter": "$title",
   "raise_requested": $(if [[ "$do_raise" == "1" ]]; then echo true; else echo false; fi),
   "raise_exit": $raise_exit,
+  "assert_no_focus": $(if [[ "$assert_no_focus" == "1" ]]; then echo true; else echo false; fi),
+  "frontmost_before": $(json_string "$frontmost_before"),
+  "frontmost_after": $(json_string "$frontmost_after"),
+  "focus_changed": $focus_changed,
+  "focus_assertion_failed": $focus_assertion_failed,
   "output": "$output",
   "captured_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }
 EOF
+
+if [[ "$focus_assertion_failed" == "true" ]]; then
+  echo "local Screen Sharing capture changed frontmost app: '$frontmost_before' -> '$frontmost_after'" >&2
+  exit 3
+fi
 
 echo "$output"
