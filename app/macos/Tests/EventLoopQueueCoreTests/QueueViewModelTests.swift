@@ -1458,7 +1458,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(client.sentMasterCommands.count, 0)
         XCTAssertEqual(
             viewModel.masterCommandState,
-            .failed("Queue request failed with HTTP 409: idempotency_conflict: duplicate idempotency key")
+            .failed("Request already handled or still running. Wait a second, then try again.")
         )
         XCTAssertEqual(
             viewModel.advanceToast,

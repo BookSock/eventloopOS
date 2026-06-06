@@ -255,7 +255,7 @@ struct MasterCommandSheet: View {
 
             HStack {
                 Spacer()
-                Button("Cancel") {
+                Button("Close") {
                     dismiss()
                 }
                 .keyboardShortcut(.cancelAction)

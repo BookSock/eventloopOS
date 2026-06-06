@@ -88,6 +88,7 @@ Latest known-good proof:
 - Agent-spawn containment proof: a Metrics-owned Chrome window was opened while Customer was focused, claimed, moved back to Metrics, and Customer focus was restored.
 - Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture; readiness also proves live Queue feedback within the configured budget.
 - Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper and proves restore-hotkey HUD feedback within the configured budget.
+- Master Command proof: readiness presses `Ctrl-Option-K` from another app and proves the Queue window opens a Master Command sheet with `Route to Master`, `Start Task`, `Rerank`, `Broadcast`, and the current task hint.
 - Manual Mode feedback proof: readiness proves `Ctrl-Option-M` enter feedback and `Ctrl-Option-Shift-M` return feedback within the configured budget.
 
 ## Starting State
@@ -144,13 +145,17 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
     and decision while you work in Chrome/TextEdit. It should not take focus or
     block mouse clicks.
 15. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
-16. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
+16. Press `Ctrl-Option-K`.
+17. Confirm the Master Command sheet opens on the Queue window with `Route to Master`, `Start Task`, `Rerank`, and `Broadcast`.
+    The Task Hint field should default to the current paper's task, such as `task_demo_customer`.
+    Close the sheet with `Escape`, the `Close` button, or the top-right `x` so the two-paper demo stays clean.
+18. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
     confirm the top HUD and Queue footer acknowledge `No paper selected.`
     instead of staying silent.
-17. Press `Ctrl-Option-M` to enter Manual Mode.
-18. Open or move a dummy app.
-19. Press `Ctrl-Option-M`.
-20. Confirm eventloopOS restores the saved paper context and Queue remains usable.
+19. Press `Ctrl-Option-M` to enter Manual Mode.
+20. Open or move a dummy app.
+21. Press `Ctrl-Option-M`.
+22. Confirm eventloopOS restores the saved paper context and Queue remains usable.
 
 ## What To Report
 
@@ -198,6 +203,7 @@ Readiness screenshot:
 Readiness queue latency:  ok= required=
 Readiness workspace latency:  ok= required=
 Readiness desktop HUD feedback:  ok= required=
+Readiness master command hotkey:  ok= required=
 Readiness manual mode feedback:  ok= required=
 Readiness hotkey latency:  ok= required=
 
@@ -214,6 +220,7 @@ Pass/fail:
 - Desktop paper reminder HUD is visible:
 - Rectangle hotkeys feel usable:
 - Manual Mode entry/return works:
+- Master Command opens with current task hint:
 - Queue/HUD hotkey feedback is visible and current:
 - Queue/master latency readiness gate passed:
 - Workspace capture/restore-plan latency readiness gate passed:

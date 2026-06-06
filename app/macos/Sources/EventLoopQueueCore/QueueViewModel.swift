@@ -604,6 +604,12 @@ public final class QueueViewModel: ObservableObject {
         return true
     }
 
+    private func failMasterAction(_ prefix: String, error: Error) {
+        let message = Self.shortStatusMessage(error.localizedDescription)
+        masterCommandState = .failed(message)
+        advanceToast = .actionComplete("\(prefix): \(message)")
+    }
+
     private func isQueueConflict(_ error: Error) -> Bool {
         if let queueError = error as? QueueClientError {
             return queueError.statusCode == 409
@@ -1279,8 +1285,7 @@ public final class QueueViewModel: ObservableObject {
                 await requestSelectedBrowserContextRestoresIfNeeded()
             }
         } catch {
-            masterCommandState = .failed(error.localizedDescription)
-            advanceToast = .actionComplete("Master command failed: \(Self.shortStatusMessage(error.localizedDescription))")
+            failMasterAction("Master command failed", error: error)
         }
     }
 
@@ -1320,8 +1325,7 @@ public final class QueueViewModel: ObservableObject {
             await prepareSelectedWorkspaceRestore()
             await requestSelectedBrowserContextRestoresIfNeeded()
         } catch {
-            masterCommandState = .failed(error.localizedDescription)
-            advanceToast = .actionComplete("Start task failed: \(Self.shortStatusMessage(error.localizedDescription))")
+            failMasterAction("Start task failed", error: error)
         }
     }
 
@@ -1340,8 +1344,7 @@ public final class QueueViewModel: ObservableObject {
             advanceToast = .actionComplete("Fan-out preview: \(result.matchedCount) matches.")
             return result
         } catch {
-            masterCommandState = .failed(error.localizedDescription)
-            advanceToast = .actionComplete("Fan-out preview failed: \(Self.shortStatusMessage(error.localizedDescription))")
+            failMasterAction("Fan-out preview failed", error: error)
             return nil
         }
     }
@@ -1363,8 +1366,7 @@ public final class QueueViewModel: ObservableObject {
             await loadTaskSessions()
             return result
         } catch {
-            masterCommandState = .failed(error.localizedDescription)
-            advanceToast = .actionComplete("Fan-out failed: \(Self.shortStatusMessage(error.localizedDescription))")
+            failMasterAction("Fan-out failed", error: error)
             return nil
         }
     }
@@ -1383,8 +1385,7 @@ public final class QueueViewModel: ObservableObject {
             await refreshQueue()
             selectedPacketID = packetId
         } catch {
-            masterCommandState = .failed(error.localizedDescription)
-            advanceToast = .actionComplete("Priority update failed: \(Self.shortStatusMessage(error.localizedDescription))")
+            failMasterAction("Priority update failed", error: error)
         }
     }
 
