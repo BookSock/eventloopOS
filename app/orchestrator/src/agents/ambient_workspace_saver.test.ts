@@ -268,6 +268,52 @@ describe("ambient_workspace_saver", () => {
     );
   });
 
+  it("skips saving active-paper layouts when frame capture still failed after recapture", async () => {
+    const missingFrame = {
+      backend: "aerospace",
+      activeWorkspace: "main",
+      focusedWindowId: 2,
+      frameCapture: { status: "failed" as const, timeoutMs: 2_500, observed: 0, error: "osascript timed out" },
+      windows: [
+        {
+          id: 1,
+          app: "Google Chrome",
+          title: "Customer",
+          workspace: "main",
+          layout: "floating" as const,
+        },
+        {
+          id: 2,
+          app: "TextEdit",
+          title: "Scratch",
+          workspace: "main",
+          layout: "floating" as const,
+        },
+      ],
+    } satisfies WorkspaceSnapshot;
+    const workspace = makeSequencedWorkspace([missingFrame, missingFrame]);
+    const obs = makeFakeObservability();
+    const writes: Array<{ taskId: string; snapshot: WorkspaceSnapshot }> = [];
+    const saver = createAmbientWorkspaceSaver({
+      workspace,
+      getCurrentTaskState: async () => ({ currentTaskId: "task_customer", currentTaskWorkspaceId: "main" }),
+      updateTaskLayout: async (taskId, snapshot) => {
+        writes.push({ taskId, snapshot });
+      },
+      isManualModeActive: () => false,
+      observability: obs.recorder,
+      debounceMs: 0,
+      now: () => new Date("2026-05-10T15:00:00.000Z"),
+    });
+
+    const result = await saver.tick();
+
+    assert.deepEqual(result, { decision: "skipped_missing_frames", taskId: "task_customer", windowIds: [1, 2] });
+    assert.equal(writes.length, 0);
+    assert.equal(obs.activities.at(-1)?.type, "ambient_workspace_save_skipped_missing_frames");
+    assert.equal(obs.activities.at(-1)?.status, "failed");
+  });
+
   it("skips when current task is bound to a different AeroSpace workspace", async () => {
     const workspace = makeFakeWorkspace(makeSnapshot([1, 2], {
       activeWorkspace: "lab-ops",

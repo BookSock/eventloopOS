@@ -104,6 +104,7 @@ export ORCHESTRATOR_WORKSPACE_EXECUTE="$workspace_execute"
 export EVENTLOOPOS_AMBIENT_WORKSPACE_SAVE="$ambient_save"
 export EVENTLOOPOS_AMBIENT_SAVE_POLL_MS="${EVENTLOOPOS_AMBIENT_SAVE_POLL_MS:-2000}"
 export EVENTLOOPOS_AMBIENT_SAVE_DEBOUNCE_MS="${EVENTLOOPOS_AMBIENT_SAVE_DEBOUNCE_MS:-1000}"
+export EVENTLOOPOS_FRAME_CAPTURE_TIMEOUT_MS="${EVENTLOOPOS_FRAME_CAPTURE_TIMEOUT_MS:-7000}"
 export EVENTLOOPOS_FOLLOWS_WINDOWS="$follows_windows"
 export EVENTLOOPOS_FOLLOWS_THRESHOLD="$follows_threshold"
 export EVENTLOOPOS_FOLLOWS_POLL_MS="${EVENTLOOPOS_FOLLOWS_POLL_MS:-250}"
@@ -592,8 +593,10 @@ PY
     ssh_remote "bash -lc '
 set +e
 pkill -TERM -f \"bin/dev-dogfood|pnpm run dev:dogfood|EventLoopQueueApp|node dist/src/index.js|codex app-server|ghostty-codex-remote\" 2>/dev/null
+pkill -TERM -f \"osascript .*set outputRows.*eventloopOS\" 2>/dev/null
 sleep 2
 	pkill -KILL -f \"bin/dev-dogfood|pnpm run dev:dogfood|EventLoopQueueApp|node dist/src/index.js|codex app-server|ghostty-codex-remote\" 2>/dev/null
+	pkill -KILL -f \"osascript .*set outputRows.*eventloopOS\" 2>/dev/null
 	lsof -tiTCP:4480 -sTCP:LISTEN 2>/dev/null | xargs kill -TERM 2>/dev/null
 	sleep 1
 	lsof -tiTCP:4480 -sTCP:LISTEN 2>/dev/null | xargs kill -KILL 2>/dev/null

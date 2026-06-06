@@ -81,6 +81,7 @@ export type AmbientSaveTickResult =
   | { decision: "skipped_unbounded" }
   | { decision: "skipped_manual_mode" }
   | { decision: "skipped_workspace_mismatch"; taskId: string; activeWorkspace?: string; taskWorkspace: string }
+  | { decision: "skipped_missing_frames"; taskId: string; windowIds: number[] }
   | { decision: "skipped_unchanged"; taskId: string }
   | { decision: "debounced"; taskId: string; pendingSince: string }
   | { decision: "committed"; taskId: string; capturedAt: string }
@@ -107,6 +108,7 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
   const lastSavedSnapshotByTask = new Map<string, string>();
   let pending: PendingChange | undefined;
   let timer: NodeJS.Timeout | undefined;
+  let timerTick: Promise<unknown> | undefined;
 
   async function tick(injectedNow?: Date): Promise<AmbientSaveTickResult> {
     const tickNow = injectedNow ?? now();
@@ -173,6 +175,27 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
         currentTaskId,
         taskWindowClaims,
       );
+      const missingFrameWindowIds = missingActiveWorkspaceFrameWindowIds(snapshot);
+      if (missingFrameWindowIds.length > 0 && snapshot.frameCapture?.status === "failed") {
+        pending = undefined;
+        await emit({
+          type: "ambient_workspace_save_skipped_missing_frames",
+          summary: `Ambient workspace save skipped: frame capture failed for ${currentTaskId}`,
+          taskId: currentTaskId,
+          tickNow,
+          status: "failed",
+          details: {
+            missing_frame_window_ids: missingFrameWindowIds,
+            frame_capture_status: snapshot.frameCapture.status,
+            frame_capture_error: snapshot.frameCapture.error,
+          },
+        });
+        return {
+          decision: "skipped_missing_frames",
+          taskId: currentTaskId,
+          windowIds: missingFrameWindowIds,
+        };
+      }
       const fingerprint = snapshotFingerprint(snapshot);
       const lastFingerprint = lastSavedSnapshotByTask.get(currentTaskId);
 
@@ -272,7 +295,12 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
   function start(): void {
     if (timer) return;
     timer = setInterval(() => {
-      tick().catch(() => undefined);
+      if (timerTick) return;
+      timerTick = tick()
+        .catch(() => undefined)
+        .finally(() => {
+          timerTick = undefined;
+        });
     }, pollIntervalMs);
     if (typeof timer.unref === "function") timer.unref();
   }
@@ -281,6 +309,7 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
     if (!timer) return;
     clearInterval(timer);
     timer = undefined;
+    timerTick = undefined;
   }
 
   return {
@@ -289,6 +318,15 @@ export function createAmbientWorkspaceSaver(deps: AmbientWorkspaceSaverDeps): Am
     stop,
     isRunning: () => timer !== undefined,
   };
+}
+
+function missingActiveWorkspaceFrameWindowIds(snapshot: WorkspaceSnapshot): number[] {
+  const activeWorkspace = snapshot.activeWorkspace;
+  if (!activeWorkspace) return [];
+  return snapshot.windows
+    .filter((window) => window.workspace === activeWorkspace && window.frame === undefined)
+    .map((window) => window.id)
+    .filter(isPositiveInteger);
 }
 
 async function autoClaimTaggedTaskWindows(
