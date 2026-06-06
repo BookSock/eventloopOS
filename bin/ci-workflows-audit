@@ -76,6 +76,7 @@ export async function auditWorkflows(root) {
   requireIncludes(texts.macos, "timeout-minutes: 20", "macos-app.yml must keep bounded runtime", errors);
 
   auditSharedWorkflowGuards("secret-scan.yml", texts.secretScan, errors);
+  requireIncludes(texts.secretScan, "workflow_dispatch:", "secret-scan.yml must support manual dispatch for explicit verification", errors);
   requireIncludes(texts.secretScan, "gitleaks/gitleaks-action@v2", "secret-scan.yml must use gitleaks action", errors);
   requireIncludes(texts.secretScan, "GITLEAKS_CONFIG: .gitleaks.toml", "secret-scan.yml must use repo allow-list config", errors);
   requireIncludes(texts.secretScan, "timeout-minutes: 10", "secret-scan.yml must keep bounded runtime", errors);
@@ -86,6 +87,7 @@ export async function auditWorkflows(root) {
   requireIncludes(texts.aiReview, "github.event.label.name == 'needs-ai-review'", "ai-review-template.yml must be opt-in by label", errors);
   requireIncludes(texts.aiReview, "pull-requests: write", "ai-review-template.yml must scope write permission to PR comments", errors);
   requireIncludes(texts.aiReview, "contents: read", "ai-review-template.yml must keep contents permission read-only", errors);
+  requireIncludes(texts.aiReview, "timeout-minutes: 5", "ai-review-template.yml must keep bounded runtime", errors);
   requireIncludes(texts.aiReview, "not a paid AI pass", "ai-review-template.yml must state it is not a paid AI pass", errors);
 
   auditCiLinux(texts.ciLinux, errors);
@@ -197,6 +199,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 concurrency:
   group: secret-scan-\${{ github.workflow }}-\${{ github.ref }}
   cancel-in-progress: true
@@ -219,9 +222,12 @@ on:
 concurrency:
   group: ai-review-template-\${{ github.event.pull_request.number }}
   cancel-in-progress: true
+permissions:
+  contents: read
 jobs:
   template-review:
     if: github.event.label.name == 'needs-ai-review'
+    timeout-minutes: 5
     permissions:
       pull-requests: write
       contents: read

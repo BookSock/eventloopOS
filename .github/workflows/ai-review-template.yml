@@ -8,10 +8,14 @@ concurrency:
   group: ai-review-template-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   template-review:
     if: github.event.label.name == 'needs-ai-review'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       pull-requests: write
       contents: read
