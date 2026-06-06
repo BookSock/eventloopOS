@@ -3750,7 +3750,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestored(receipt))
         XCTAssertEqual(
             viewModel.advanceToast,
-            .switchedToPaper(packetId: "packet-with-workspace", title: "Review with workspace", decision: "Needs workspace restore")
+            .actionComplete("Paper already restored: Review with workspace.")
         )
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }

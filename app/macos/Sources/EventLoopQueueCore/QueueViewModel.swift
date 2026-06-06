@@ -2081,13 +2081,14 @@ public final class QueueViewModel: ObservableObject {
            recent.snapshot == snapshot,
            Date().timeIntervalSince(recent.completedAt) < workspaceRestoreRepeatWindow {
             workspaceRestoreState = .alreadyRestored(recent.receipt)
-            advanceToast = .actionComplete("Workspace already restored.")
-            return true
+            advanceToast = Self.workspaceAlreadyRestoredToast(startToast: startToast)
+            return false
         }
 
         workspaceRestoreInFlight = true
         workspaceRestoreState = .restoring
         advanceToast = startToast
+        await Task.yield()
         defer {
             workspaceRestoreInFlight = false
         }
@@ -2126,6 +2127,22 @@ public final class QueueViewModel: ObservableObject {
         default:
             return .actionComplete("Workspace restore already running...")
         }
+    }
+
+    private static func workspaceAlreadyRestoredToast(startToast: AdvanceToast) -> AdvanceToast {
+        guard case let .actionComplete(message) = startToast,
+              message.hasPrefix("Restoring paper:"),
+              message.hasSuffix("...") else {
+            return .actionComplete("Workspace already restored.")
+        }
+        let title = message
+            .dropFirst("Restoring paper:".count)
+            .dropLast(3)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else {
+            return .actionComplete("Workspace already restored.")
+        }
+        return .actionComplete("Paper already restored: \(title).")
     }
 
     private func workspaceRestoreStartToast(snapshot: WorkspaceSnapshot) -> AdvanceToast {
