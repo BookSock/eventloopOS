@@ -58,7 +58,8 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY=0 skips hotkey latency
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_TARGET=local runs latency on this Mac instead of the lab Mac
   EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD default: ctrl-option-r
-  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT optional expected feedback substring
+  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT optional expected feedback substring (default for ctrl-option-r: Review Demo Customer Reply)
+  EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_RUNS default: 5 for ctrl-option-r, 1 otherwise
   EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY=1 forces Master Command hotkey proof on
   EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY=0 skips Master Command hotkey proof
   EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY_TARGET=local runs proof on this Mac instead of the lab Mac
@@ -910,8 +911,13 @@ function hotkeyLatencyArgs() {
     "--hotkey",
     chord,
   ];
-  const expected = process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT;
+  const normalizedChord = normalizeHotkeyText(chord);
+  const expected = process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT
+    ?? (normalizedChord === "ctrl-option-r" ? "Review Demo Customer Reply" : undefined);
   if (expected) args.push("--expect", expected);
+  const runs = process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_RUNS
+    ?? (normalizedChord === "ctrl-option-r" ? "5" : undefined);
+  if (runs) args.push("--runs", runs);
   return args;
 }
 
@@ -1588,13 +1594,16 @@ function runSelfTest() {
   assert.ok(readyMarkdown.includes("Verify: `bin/human-demo-result-verify 'artifacts/human-demo-results/demo-human-demo-result.md' --lab-status`"));
   assert.ok(readyMarkdown.includes("Closeout: `bin/human-demo-completion-audit --strict`"));
   assert.equal(shellQuote("a'b"), "'a'\\''b'");
-  assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-r"]);
+  assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-r", "--expect", "Review Demo Customer Reply", "--runs", "5"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD = "ctrl-option-h";
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT = "No paper selected.";
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h", "--expect", "No paper selected."]);
+  process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_RUNS = "4";
+  assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h", "--expect", "No paper selected.", "--runs", "4"]);
   delete process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD;
   delete process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_EXPECT;
+  delete process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_RUNS;
   assert.deepEqual(masterCommandHotkeyArgs(), ["--hotkey", "ctrl-option-k", "--expect-task-hint", "task_demo_customer"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY_CHORD = "ctrl-option-shift-k";
   assert.deepEqual(masterCommandHotkeyArgs(), ["--hotkey", "ctrl-option-shift-k", "--expect-task-hint", "task_demo_customer"]);

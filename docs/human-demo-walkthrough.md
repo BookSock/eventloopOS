@@ -57,10 +57,13 @@ default the latest proof must be no older than 24 hours; use
 `--demo-proof-max-age-hours` to change that window. It also writes read-only
 queue/master latency and workspace capture/restore-plan latency manifests, so
 demo readiness proves the Queue path and workspace path are responsive without
-mutating the active paper. On macOS it includes a live hotkey-to-first-feedback
-p95 latency gate and a separate top-HUD feedback proof in the readiness artifact
-by running the probes on the Mac Studio. The Queue feedback gate requires a
-fresh `feedback_seq` change. Screenshot staging still verifies final
+mutating the active paper. On macOS it includes a live repeated
+restore-hotkey-to-first-feedback p95 latency gate and a separate top-HUD
+feedback proof in the readiness artifact by running the probes on the Mac
+Studio. By default the restore hotkey gate presses `Ctrl-Option-R` five times
+and expects fresh Customer-paper feedback, so stale feedback, raw 409s, or
+repeated-key silence fail readiness before handoff. The Queue feedback gate
+requires a fresh `feedback_seq` change. Screenshot staging still verifies final
 `Showing paper:` feedback after restore. The top-of-screen reminder HUD also
 briefly echoes hotkey feedback, so keyboard users do not need to hunt for the
 Queue footer after pressing a chord. The desktop HUD proof accepts stable
