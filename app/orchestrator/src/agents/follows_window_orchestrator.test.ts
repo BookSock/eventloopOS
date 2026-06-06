@@ -300,6 +300,55 @@ describe("follows_window_orchestrator", () => {
     assert.equal(restored?.details?.focus_window_id, 100);
   });
 
+  it("restores current task focus when a foreign window animation leaves focus on its owner workspace", async () => {
+    const snapshot: WorkspaceSnapshot = {
+      backend: "aerospace",
+      activeWorkspace: "ws-b",
+      focusedWindowId: 200,
+      windows: [
+        { id: 100, app: "Ghostty", title: "paper A", workspace: "ws-a" },
+        { id: 200, app: "Google Chrome", appBundleId: "com.google.Chrome", title: "Paper B Playwright", workspace: "ws-b" },
+      ],
+    };
+    const restoredSnapshot: WorkspaceSnapshot = {
+      ...snapshot,
+      activeWorkspace: "ws-a",
+      focusedWindowId: 100,
+    };
+    const { deps, ranCommands, activities } = makeDeps({
+      currentTaskId: "task_a",
+      focusedWorkspace: "ws-b",
+      follows: [],
+      snapshot,
+      captureSnapshots: [snapshot, restoredSnapshot],
+      claims: [
+        {
+          claim_id: "twc_b_chrome",
+          task_id: "task_b",
+          window_id: "200",
+          created_at: "2026-05-06T12:00:00.000Z",
+        },
+      ],
+      taskWorkspaces: { task_a: "ws-a", task_b: "ws-b" },
+    });
+
+    const orch = createFollowsWindowOrchestrator(deps);
+    const result = await orch.tick();
+
+    assert.equal(result.decision, "switch_handled");
+    if (result.decision !== "switch_handled") return;
+    assert.equal(result.foreignClaimedMoved, 0);
+    assert.equal(result.foreignClaimedSkipped, 1);
+    assert.deepEqual(ranCommands.map((command) => command.args), [
+      ["workspace", "ws-a"],
+      ["focus", "--window-id", "100"],
+    ]);
+    assert.ok(activities.some((activity) => activity.type === "foreign_claimed_window_redirect_skipped"));
+    const restored = activities.find((activity) => activity.type === "foreign_claimed_window_focus_restored");
+    assert.equal(restored?.details?.workspace, "ws-a");
+    assert.equal(restored?.details?.focus_window_id, 100);
+  });
+
   it("moves a process-root descendant window away even when focused workspace is unchanged", async () => {
     const snapshot: WorkspaceSnapshot = {
       backend: "aerospace",

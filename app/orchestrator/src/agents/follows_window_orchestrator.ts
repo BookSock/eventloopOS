@@ -355,6 +355,13 @@ async function redirectForeignClaimedWindows(
   const taskWorkspaceCache = new Map<string, string | undefined>();
   let moved = 0;
   let skipped = 0;
+  let currentTaskWorkspace: string | undefined;
+
+  async function readCurrentTaskWorkspace(): Promise<string | undefined> {
+    if (currentTaskWorkspace !== undefined) return currentTaskWorkspace;
+    currentTaskWorkspace = await ownerWorkspaceForTask(deps, input.currentTaskId);
+    return currentTaskWorkspace;
+  }
 
   for (const window of snapshot.windows) {
     if (window.workspace !== input.focusedWorkspace) continue;
@@ -394,6 +401,17 @@ async function redirectForeignClaimedWindows(
           reason: ownerWorkspace ? "already_on_owner_workspace" : "owner_workspace_unknown",
         },
       });
+      if (ownerWorkspace === input.focusedWorkspace) {
+        const currentWorkspace = await readCurrentTaskWorkspace();
+        if (currentWorkspace && currentWorkspace !== input.focusedWorkspace) {
+          await restoreFocusAfterForeignRedirect(deps, {
+            focusedWorkspace: currentWorkspace,
+            focusWindowId: restoreFocusWindowId(snapshot, currentWorkspace, movedWindowIds),
+            moved,
+            tickNow: input.tickNow,
+          });
+        }
+      }
       continue;
     }
 
