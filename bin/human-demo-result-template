@@ -25,6 +25,7 @@ if (args.includes("--self-test")) {
       ambient_autosave: { ok: true },
       new_window_autosave: { ok: true },
       foreign_window_containment: { ok: true },
+      agent_spawn_window_containment: { ok: true },
     },
   };
   const rendered = renderTemplate({
@@ -61,7 +62,7 @@ if (args.includes("--self-test")) {
   assertIncludes(rendered, "Readiness queue latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/queue-latency.json ok=true required=true");
   assertIncludes(rendered, "Readiness workspace latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/workspace-latency.json ok=true required=true");
   assertIncludes(rendered, "Readiness hotkey latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/hotkey-latency.json ok=true required=true");
-  assertIncludes(rendered, "Automated proof: ok=true, queue_count=2, ambient_autosave=true, new_window_autosave=true, foreign_window_containment=true");
+  assertIncludes(rendered, "Automated proof: ok=true, queue_count=2, ambient_autosave=true, new_window_autosave=true, foreign_window_containment=true, agent_spawn_window_containment=true");
   assertEqual(defaultOutputPath(manifest), "artifacts/human-demo-results/20260603T202742Z-human-demo-result.md");
   const staleReadiness = readinessSummary({});
   assertEqual(staleReadiness.ok, false);
@@ -157,6 +158,8 @@ const result = {
   queue_count: manifest.proofs?.demo_queue?.count ?? null,
   ambient_autosave_ok: manifest.proofs?.ambient_autosave?.ok === true,
   new_window_autosave_ok: manifest.proofs?.new_window_autosave?.ok === true,
+  foreign_window_containment_ok: manifest.proofs?.foreign_window_containment?.ok === true,
+  agent_spawn_window_containment_ok: manifest.proofs?.agent_spawn_window_containment?.ok === true,
   generated_at: manifest.generated_at ?? null,
   template,
 };
@@ -244,6 +247,7 @@ function renderTemplate({ manifestPath, screenshotPath, readyManifestPath, ready
   const ambientOk = manifest.proofs?.ambient_autosave?.ok === true ? "true" : "false";
   const newWindowOk = manifest.proofs?.new_window_autosave?.ok === true ? "true" : "false";
   const containmentOk = manifest.proofs?.foreign_window_containment?.ok === true ? "true" : "false";
+  const agentSpawnContainmentOk = manifest.proofs?.agent_spawn_window_containment?.ok === true ? "true" : "false";
   const readiness = readinessSummary(ready);
   return `Human demo date: ${date}
 Mac: Mac Studio
@@ -254,7 +258,7 @@ Readiness screenshot: ${readyScreenshotPath ?? ""}
 Readiness queue latency: ${readiness.queue.path} ok=${readiness.queue.ok} required=${readiness.queue.required}
 Readiness workspace latency: ${readiness.workspace.path} ok=${readiness.workspace.ok} required=${readiness.workspace.required}
 Readiness hotkey latency: ${readiness.hotkey.path} ok=${readiness.hotkey.ok} required=${readiness.hotkey.required}
-Automated proof: ok=${manifest.ok === true}, queue_count=${queueCount}, ambient_autosave=${ambientOk}, new_window_autosave=${newWindowOk}, foreign_window_containment=${containmentOk}
+Automated proof: ok=${manifest.ok === true}, queue_count=${queueCount}, ambient_autosave=${ambientOk}, new_window_autosave=${newWindowOk}, foreign_window_containment=${containmentOk}, agent_spawn_window_containment=${agentSpawnContainmentOk}
 
 Pass/fail:
 ${renderHumanDemoPassFailTemplate()}

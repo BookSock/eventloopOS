@@ -73,6 +73,10 @@ function buildAudit(root, options = {}) {
     readiness_queue_briefing_strip_visible: readiness?.checks?.queue_briefing_strip_visible === true,
     readiness_new_window_autosave_proof_ok: readiness?.checks?.new_window_autosave_proof_ok === true
       && readiness?.latest_human_demo?.new_window_autosave_ok === true,
+    readiness_foreign_window_containment_proof_ok: readiness?.checks?.foreign_window_containment_proof_ok === true
+      && readiness?.latest_human_demo?.foreign_window_containment_ok === true,
+    readiness_agent_spawn_window_containment_proof_ok: readiness?.checks?.agent_spawn_window_containment_proof_ok === true
+      && readiness?.latest_human_demo?.agent_spawn_window_containment_ok === true,
     human_result_recorded: Boolean(resultPath && fs.existsSync(path.resolve(root, resultPath))),
     human_result_filled: resultAudit.filled === true,
     verification_manifest_present: Boolean(verificationPath),
@@ -424,9 +428,13 @@ function runSelfTest() {
       latest_human_demo_screenshot_ok: true,
       queue_briefing_strip_visible: true,
       new_window_autosave_proof_ok: true,
+      foreign_window_containment_proof_ok: true,
+      agent_spawn_window_containment_proof_ok: true,
     },
     latest_human_demo: {
       new_window_autosave_ok: true,
+      foreign_window_containment_ok: true,
+      agent_spawn_window_containment_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });
@@ -508,9 +516,13 @@ ship
       latest_human_demo_screenshot_ok: true,
       queue_briefing_strip_visible: true,
       new_window_autosave_proof_ok: true,
+      foreign_window_containment_proof_ok: true,
+      agent_spawn_window_containment_proof_ok: true,
     },
     latest_human_demo: {
       new_window_autosave_ok: true,
+      foreign_window_containment_ok: true,
+      agent_spawn_window_containment_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });
@@ -527,9 +539,13 @@ ship
       latest_human_demo_screenshot_ok: true,
       queue_briefing_strip_visible: false,
       new_window_autosave_proof_ok: true,
+      foreign_window_containment_proof_ok: true,
+      agent_spawn_window_containment_proof_ok: true,
     },
     latest_human_demo: {
       new_window_autosave_ok: true,
+      foreign_window_containment_ok: true,
+      agent_spawn_window_containment_ok: true,
       screenshot_image: { ok: true, path: "artifacts/lab-runs/demo/screen-sharing.png" },
     },
   });

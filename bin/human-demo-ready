@@ -110,6 +110,8 @@ const checks = {
   latest_human_demo_queue_has_two_papers: Number(templateJson?.queue_count ?? 0) >= 2,
   ambient_autosave_proof_ok: templateJson?.ambient_autosave_ok === true,
   new_window_autosave_proof_ok: templateJson?.new_window_autosave_ok === true,
+  foreign_window_containment_proof_ok: templateJson?.foreign_window_containment_ok === true,
+  agent_spawn_window_containment_proof_ok: templateJson?.agent_spawn_window_containment_ok === true,
   screen_sharing_capture_ok: skipScreenshot || (screenshotStage?.ok === true && screenshot?.ok === true),
   queue_briefing_strip_visible: skipScreenshot || screenshotStage?.result?.queue_briefing_strip_present === true,
   queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
@@ -152,6 +154,8 @@ const manifest = {
     queue_count: templateJson.queue_count,
     ambient_autosave_ok: templateJson.ambient_autosave_ok === true,
     new_window_autosave_ok: templateJson.new_window_autosave_ok === true,
+    foreign_window_containment_ok: templateJson.foreign_window_containment_ok === true,
+    agent_spawn_window_containment_ok: templateJson.agent_spawn_window_containment_ok === true,
     generated_at: templateJson.generated_at,
     freshness: latestHumanDemoFreshness,
   } : undefined,
@@ -969,6 +973,8 @@ function renderReadyMarkdown(manifest) {
 - Suggested result file: ${latest?.suggested_result_path ?? ""}
 - Latest proof freshness: ${freshness ? `${freshness.ok ? "ok" : "stale"} age=${freshness.age_hours ?? ""}h max=${freshness.max_age_hours}h${freshness.allowed_stale ? " allowed" : ""}` : ""}
 - Opened-window autosave proof: ${latest?.new_window_autosave_ok === true ? "ok" : "missing"}
+- Foreign-window containment proof: ${latest?.foreign_window_containment_ok === true ? "ok" : "missing"}
+- Agent-spawn containment proof: ${latest?.agent_spawn_window_containment_ok === true ? "ok" : "missing"}
 - Fresh screenshot capture: ${screenshot?.output ?? "skipped"}${screenshot?.capture_mode ? ` mode=${screenshot.capture_mode}` : ""}${screenshot?.image?.dimensions ? ` (${screenshot.image.dimensions}, ${screenshot.image.bytes} bytes)` : ""}
 - Queue briefing strip: ${manifest.checks?.queue_briefing_strip_visible === true ? "visible" : "missing"}
 - Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
@@ -1013,8 +1019,15 @@ function demoProofFreshness(generatedAt, nowIso, maxAgeHours, allowStale) {
 }
 
 function runSelfTest() {
-  const noisyJson = `prefix\n{\"ok\":true,\"queue_count\":2,\"ambient_autosave_ok\":true,\"new_window_autosave_ok\":true}`;
-  assert.deepEqual(extractJsonObject(noisyJson), { ok: true, queue_count: 2, ambient_autosave_ok: true, new_window_autosave_ok: true });
+  const noisyJson = `prefix\n{\"ok\":true,\"queue_count\":2,\"ambient_autosave_ok\":true,\"new_window_autosave_ok\":true,\"foreign_window_containment_ok\":true,\"agent_spawn_window_containment_ok\":true}`;
+  assert.deepEqual(extractJsonObject(noisyJson), {
+    ok: true,
+    queue_count: 2,
+    ambient_autosave_ok: true,
+    new_window_autosave_ok: true,
+    foreign_window_containment_ok: true,
+    agent_spawn_window_containment_ok: true,
+  });
   assert.equal(extractJsonObject("no json"), undefined);
   assert.deepEqual(demoProofFreshness("2026-06-03T10:00:00.000Z", "2026-06-03T20:00:00.000Z", 24, false), {
     ok: true,
@@ -1041,6 +1054,8 @@ function runSelfTest() {
       screenshot_path: "artifacts/lab-runs/demo/screen-sharing.png",
       suggested_result_path: "artifacts/human-demo-results/demo-human-demo-result.md",
       new_window_autosave_ok: true,
+      foreign_window_containment_ok: true,
+      agent_spawn_window_containment_ok: true,
       freshness: { ok: true, age_hours: 1, max_age_hours: 24 },
     },
     screen_sharing_capture: { output: "artifacts/lab-runs/ready/screen-sharing.png" },
@@ -1099,6 +1114,8 @@ function runSelfTest() {
       manifest_path: "artifacts/lab-runs/demo/manifest.json",
       screenshot_path: "artifacts/lab-runs/demo/screen-sharing.png",
       new_window_autosave_ok: true,
+      foreign_window_containment_ok: true,
+      agent_spawn_window_containment_ok: true,
       freshness: { ok: true, age_hours: 1.25, max_age_hours: 24, allowed_stale: false },
     },
     screen_sharing_capture: {
@@ -1117,6 +1134,8 @@ function runSelfTest() {
   assert.match(markdown, /Latest proof freshness: ok age=1.25h max=24h/);
   assert.match(markdown, /Fresh screenshot capture: artifacts\/lab-runs\/ready\/screen-sharing\.png mode=local_screen_sharing_window \(1280x720, 2048 bytes\)/);
   assert.match(markdown, /Opened-window autosave proof: ok/);
+  assert.match(markdown, /Foreign-window containment proof: ok/);
+  assert.match(markdown, /Agent-spawn containment proof: ok/);
   assert.match(markdown, /Queue briefing strip: visible/);
   assert.match(markdown, /Hotkey feedback latency: skipped/);
   assert.match(markdown, /Queue latency: artifacts\/lab-runs\/ready\/queue-latency\.json/);

@@ -24,6 +24,8 @@ The setup script:
   into future queue context without pressing Done/Defer/Advance, then closes it
   before the hands-on walkthrough,
 - proves a background/foreign paper window is moved back to its owning paper,
+- proves a real agent-spawned TextEdit window opened while Customer is focused
+  is claimed for Metrics, moved back to Metrics, and leaves Customer focused,
 - captures a local Screen Sharing window-only screenshot, or falls back to a lab Mac desktop capture when Screen Sharing is unavailable.
 
 Before handing the keyboard to Jason, run a non-destructive readiness check:
@@ -75,6 +77,7 @@ Latest known-good proof:
 - Queue proof: 2 current-run papers.
 - Ambient proof: customer paper context saved the moved shared TextEdit, and the automated scratch window was remembered by the current paper before cleanup.
 - Background containment proof: Metrics Chrome was intentionally pushed into the Customer paper and moved back to the Metrics paper.
+- Agent-spawn containment proof: a Metrics-owned TextEdit window was opened while Customer was focused, claimed, moved back to Metrics, and Customer focus was restored.
 - Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture.
 
 ## Starting State
@@ -189,6 +192,7 @@ Pass/fail:
 - Metrics paper brings same TextEdit to metrics position:
 - Customer paper brings same TextEdit back to customer position:
 - Background window containment proof passed:
+- Agent-spawned window containment proof passed:
 - Paper briefing strip shows current decision:
 - Rectangle hotkeys feel usable:
 - Manual Mode entry/return works:

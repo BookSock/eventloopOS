@@ -28,6 +28,8 @@ const paperMetrics = {
   workspace: "demo-metrics",
   chromeTitle: "eventloopOS Human Demo Metrics Review",
   chromeFile: path.join(demoDir, "eventloopOS Demo Metrics Review.html"),
+  agentSpawnTitle: "eventloopOS Human Demo Agent Spawn",
+  agentSpawnFile: path.join(demoDir, "eventloopOS Human Demo Agent Spawn.txt"),
   textTitle: "eventloopOS Human Demo Shared Notes.txt",
   priority: 1450,
 };
@@ -52,6 +54,7 @@ const demoWalkthrough = Object.freeze([
   "Select Demo Metrics Review in queue and press Ctrl-Option-R. Same TextEdit window should move to metrics position with Metrics Chrome.",
   "Select Demo Customer Reply and press Ctrl-Option-R. Same TextEdit window should return to customer position.",
   "Containment proof already ran during setup: Metrics Chrome was pushed into Customer paper and eventloopOS moved it back to Metrics.",
+  "Agent-spawn containment proof also ran during setup: a background Metrics-owned TextEdit window was opened while Customer was focused, then moved back to Metrics and Customer focus was restored.",
   "Try Rectangle-style hotkeys on shared TextEdit: Ctrl-Option-Left/Right/Up/Down/C and Ctrl-Option-Shift-Return.",
   "Press Ctrl-Option-M, move/open a dummy app, then Ctrl-Option-M again. eventloopOS should restore saved paper context.",
   "Use Ctrl-Option-Shift-M only when you want to return from Manual Mode and keep current windows where they are.",
@@ -122,6 +125,7 @@ const queueProof = assertDemoQueueItems(demoItems);
 
 await setCurrentTask(paperCustomer.taskId);
 const foreignWindowContainmentProof = await proveForeignWindowContainment(windows);
+const agentSpawnContainmentProof = await proveAgentSpawnWindowContainment();
 const readySnapshotTarget = buildReadySnapshot(customerSnapshot, metricsSnapshot, windows);
 const readyRestore = await restoreAndAssert(readySnapshotTarget, customerSnapshot, "ready customer restore", "ready-customer-layout");
 const readyCustomerProof = readyRestore.proof;
@@ -172,6 +176,7 @@ const manifest = {
     ambient_autosave: ambientAutosaveProof,
     new_window_autosave: newWindowAutosaveProof,
     foreign_window_containment: foreignWindowContainmentProof,
+    agent_spawn_window_containment: agentSpawnContainmentProof,
     final_ready_customer_restore: finalReadyCustomerProof,
     demo_queue: queueProof,
     queue_window: {
@@ -209,6 +214,13 @@ function writeDemoFiles() {
     "",
     "This window is opened during setup to prove newly opened paper windows are remembered.",
     "The harness closes it again before the hands-on demo starts.",
+    "",
+  ].join("\n"));
+  fs.writeFileSync(paperMetrics.agentSpawnFile, [
+    "eventloopOS Human Demo Agent Spawn",
+    "",
+    "This window is opened during setup while Customer is focused.",
+    "eventloopOS should claim it for Metrics, move it back there, and restore Customer focus.",
     "",
   ].join("\n"));
   fs.writeFileSync(paperCustomer.chromeFile, demoHtml({
@@ -773,6 +785,62 @@ async function proveForeignWindowContainment(windows) {
     await sleep(500);
   }
   throw new Error(`foreign window containment did not return metrics Chrome to owner workspace: ${JSON.stringify(last)}`);
+}
+
+async function proveAgentSpawnWindowContainment() {
+  execFileSync("aerospace", ["workspace", paperCustomer.workspace]);
+  const spawnOutput = execFileSync("node", [
+    "bin/task-window-spawn",
+    "--url", orchestratorUrl,
+    "--task-id", paperMetrics.taskId,
+    "--source", "human-demo-agent-spawn",
+    "--app", "TextEdit",
+    "--title", paperMetrics.agentSpawnTitle,
+    "--claim-existing-matching",
+    "--wait-ms", "8000",
+    "--settle-ms", "1200",
+    "--poll-ms", "100",
+    "--",
+    "open",
+    "-a",
+    "TextEdit",
+    paperMetrics.agentSpawnFile,
+  ], { encoding: "utf8", maxBuffer: 1024 * 1024 });
+  const spawnResult = JSON.parse(spawnOutput);
+  const claimedCount = Number(spawnResult.claimed_count ?? 0) + Number(spawnResult.late_matching_existing_claimed_count ?? 0);
+  if (spawnResult.ok !== true || claimedCount < 1) {
+    throw new Error(`agent-spawn containment did not claim spawned window: ${JSON.stringify(spawnResult)}`);
+  }
+
+  let last;
+  for (let attempt = 1; attempt <= 30; attempt += 1) {
+    const snapshot = await capture();
+    const spawned = findWindow(snapshot, "TextEdit", paperMetrics.agentSpawnTitle);
+    last = {
+      active_workspace: snapshot.activeWorkspace,
+      spawned_workspace: spawned?.workspace,
+      spawned_window_id: spawned?.id,
+    };
+    if (snapshot.activeWorkspace === paperCustomer.workspace && spawned?.workspace === paperMetrics.workspace) {
+      closeWindowById(spawned.id);
+      return {
+        ok: true,
+        attempts: attempt,
+        spawned_window_id: spawned.id,
+        task_id: paperMetrics.taskId,
+        contaminated_workspace: paperCustomer.workspace,
+        owner_workspace: paperMetrics.workspace,
+        restored_focus_workspace: snapshot.activeWorkspace,
+        root_claimed_count: spawnResult.root_claimed_count,
+        claimed_count: spawnResult.claimed_count,
+        late_matching_existing_claimed_count: spawnResult.late_matching_existing_claimed_count,
+        moved_count: spawnResult.moved_count,
+        late_matching_existing_moved_count: spawnResult.late_matching_existing_moved_count,
+      };
+    }
+    await sleep(500);
+  }
+  throw new Error(`agent-spawn containment did not return spawned window to owner workspace: ${JSON.stringify(last)}`);
 }
 
 async function waitForWindow(app, titlePart) {
