@@ -253,6 +253,17 @@ public enum WorkspaceRestoreState: Equatable, Sendable {
     case failed(String)
 }
 
+extension WorkspaceRestoreState {
+    var isTransientSuccess: Bool {
+        switch self {
+        case .executed, .alreadyRestored, .savedTaskLayout, .keptCurrentLayout:
+            return true
+        case .idle, .skippedManualMode, .restoring, .alreadyRestoring, .planned, .failed:
+            return false
+        }
+    }
+}
+
 public enum WorkspaceHealthState: Equatable, Sendable {
     case idle
     case checking

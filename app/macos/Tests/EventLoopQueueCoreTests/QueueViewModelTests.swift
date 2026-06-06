@@ -4214,6 +4214,60 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertTrue(workspaceClient.restoreIdempotencyKeys[0].hasPrefix("mac_workspace_restore_"))
     }
 
+    func testWorkspaceRestoreSuccessBannerClearsAfterDwell() async {
+        let receipt = WorkspaceRestoreReceipt(
+            commands: [WorkspaceExecutedCommand(command: "aerospace", args: ["workspace", "eventloop-blog"], stdout: "ok")],
+            skipped: []
+        )
+        let workspaceClient = FakeWorkspaceClient(
+            restoreEnvelope: WorkspaceRestoreExecutionEnvelope(
+                ok: true,
+                plan: WorkspaceRestorePlan(commands: [], skipped: []),
+                receipt: receipt,
+                executeSupported: true,
+                idempotencyKey: "idem_fake"
+            )
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: workspaceClient,
+            transientStatusDwellNanoseconds: 1_000_000
+        )
+        let snapshot = WorkspaceSnapshot(
+            windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")],
+            activeWorkspace: "eventloop-blog"
+        )
+
+        await viewModel.confirmWorkspaceRestore(snapshot: snapshot)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
+
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertEqual(viewModel.workspaceRestoreState, .idle)
+    }
+
+    func testManualWorkspaceSavedBannerClearsAfterDwell() async {
+        let snapshot = WorkspaceSnapshot(
+            windows: [
+                WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")
+            ],
+            activeWorkspace: "eventloop-blog"
+        )
+        let viewModel = QueueViewModel(
+            client: FakeQueueClient(packets: SeededQueue.packets),
+            workspaceClient: FakeWorkspaceClient(captureSnapshot: snapshot),
+            transientStatusDwellNanoseconds: 1_000_000
+        )
+
+        await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+        await viewModel.toggleManualModeAndPrepareWorkspaceRestoreIfNeeded()
+
+        XCTAssertEqual(viewModel.manualWorkspaceCaptureState, .captured(snapshot))
+
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        XCTAssertEqual(viewModel.manualWorkspaceCaptureState, .idle)
+        XCTAssertEqual(viewModel.manualWorkspaceSnapshot, snapshot)
+    }
+
     func testGenericWorkspaceRestoreKeepsGenericStartFeedback() async {
         let snapshot = WorkspaceSnapshot(
             windows: [WorkspaceWindow(id: 9, app: "Ghostty", title: "codex", workspace: "eventloop-blog")]

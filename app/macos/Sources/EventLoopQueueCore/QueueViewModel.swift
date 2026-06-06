@@ -118,9 +118,17 @@ public final class QueueViewModel: ObservableObject {
     @Published public private(set) var mode: EventLoopMode
     @Published public private(set) var shouldRestoreWorkspace: Bool
     @Published public private(set) var workspaceHealthState: WorkspaceHealthState = .idle
-    @Published public private(set) var workspaceRestoreState: WorkspaceRestoreState
+    @Published public private(set) var workspaceRestoreState: WorkspaceRestoreState {
+        didSet {
+            scheduleWorkspaceRestoreStateClearIfNeeded(workspaceRestoreState)
+        }
+    }
     @Published public private(set) var manualWorkspaceSnapshot: WorkspaceSnapshot?
-    @Published public private(set) var manualWorkspaceCaptureState: ManualWorkspaceCaptureState
+    @Published public private(set) var manualWorkspaceCaptureState: ManualWorkspaceCaptureState {
+        didSet {
+            scheduleManualWorkspaceCaptureStateClearIfNeeded(manualWorkspaceCaptureState)
+        }
+    }
     @Published public private(set) var contextRestoreState: ContextRestoreState
     @Published public private(set) var queueLineageState: QueueLineageState
     @Published public private(set) var taskSessions: [TaskSession]
@@ -169,8 +177,11 @@ public final class QueueViewModel: ObservableObject {
     private var workspaceRestoreInFlight = false
     private var lastWorkspaceRestore: RecentWorkspaceRestore?
     private var timedOutWorkspaceRestore: TimedOutWorkspaceRestore?
+    private var workspaceRestoreStatusClearTask: Task<Void, Never>?
+    private var manualWorkspaceStatusClearTask: Task<Void, Never>?
     private let workspaceRestoreRepeatWindow: TimeInterval = 2.0
     private let workspaceRestoreTimeoutGraceWindow: TimeInterval = 12.0
+    private let transientStatusDwellNanoseconds: UInt64
 
     public init(
         client: any QueueClient,
@@ -180,7 +191,8 @@ public final class QueueViewModel: ObservableObject {
         limboWorkspaceId: String = "limbo",
         initialPackets: [ReviewPacket] = [],
         voiceTranscriptionService: VoiceTranscriptionService? = nil,
-        userDefaults: UserDefaults = .standard
+        userDefaults: UserDefaults = .standard,
+        transientStatusDwellNanoseconds: UInt64 = 4_000_000_000
     ) {
         self.client = client
         self.workspaceClient = workspaceClient
@@ -189,6 +201,7 @@ public final class QueueViewModel: ObservableObject {
         self.limboWorkspaceId = limboWorkspaceId
         self.voiceTranscriptionService = voiceTranscriptionService
         self.userDefaults = userDefaults
+        self.transientStatusDwellNanoseconds = transientStatusDwellNanoseconds
         self.packets = initialPackets
         self.selectedPacketID = initialPackets.first?.id
         self.state = .idle
@@ -213,6 +226,40 @@ public final class QueueViewModel: ObservableObject {
         contextRestoreRefreshTask?.cancel()
         activityRefreshTask?.cancel()
         autoBindLoopTask?.cancel()
+        workspaceRestoreStatusClearTask?.cancel()
+        manualWorkspaceStatusClearTask?.cancel()
+    }
+
+    private func scheduleWorkspaceRestoreStateClearIfNeeded(_ state: WorkspaceRestoreState) {
+        workspaceRestoreStatusClearTask?.cancel()
+        guard state.isTransientSuccess else {
+            return
+        }
+        let expectedState = state
+        let dwellNanoseconds = transientStatusDwellNanoseconds
+        workspaceRestoreStatusClearTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: dwellNanoseconds)
+            guard let self, !Task.isCancelled, self.workspaceRestoreState == expectedState else {
+                return
+            }
+            self.workspaceRestoreState = .idle
+        }
+    }
+
+    private func scheduleManualWorkspaceCaptureStateClearIfNeeded(_ state: ManualWorkspaceCaptureState) {
+        manualWorkspaceStatusClearTask?.cancel()
+        guard case .captured = state else {
+            return
+        }
+        let expectedState = state
+        let dwellNanoseconds = transientStatusDwellNanoseconds
+        manualWorkspaceStatusClearTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: dwellNanoseconds)
+            guard let self, !Task.isCancelled, self.manualWorkspaceCaptureState == expectedState else {
+                return
+            }
+            self.manualWorkspaceCaptureState = .idle
+        }
     }
 
     public func changeBadge(for packet: ReviewPacket) -> PacketChangeBadge {
