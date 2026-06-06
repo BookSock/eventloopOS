@@ -58,7 +58,7 @@ const demoFrames = Object.freeze({
   customerSharedText: { x: 1060, y: 100, width: 760, height: 440 },
   metricsChrome: { x: 760, y: 70, width: 980, height: 690 },
   metricsSharedText: { x: 80, y: 210, width: 680, height: 560 },
-  queue: { x: 1080, y: 520, width: 760, height: 512 },
+  queue: { x: 1080, y: 400, width: 760, height: 512 },
 });
 
 const demoWalkthrough = Object.freeze([
@@ -84,6 +84,7 @@ if (dryRun) {
   assertSnapshotShape(sampleCustomerSnapshot);
   assertSnapshotShape(sampleMetricsSnapshot);
   assertReadySnapshotShape(buildReadySnapshot(sampleCustomerSnapshot, sampleMetricsSnapshot, sampleWindows));
+  assertDemoFrames();
   assertDemoInstructions();
   console.log(JSON.stringify({ ok: true, self_test: true }));
   process.exit(0);
@@ -1257,6 +1258,13 @@ function assertReadySnapshotShape(snapshot) {
   for (const window of backgroundWindows) {
     if (window.frame !== undefined) throw new Error("ready snapshot background windows must not carry frame requirements");
     if (window.layout !== "floating") throw new Error("ready snapshot background window layout must be floating");
+  }
+}
+
+function assertDemoFrames() {
+  const queueBottom = demoFrames.queue.y + demoFrames.queue.height;
+  if (queueBottom > 940) {
+    throw new Error(`queue demo frame extends into the 1080p Dock-safe area: bottom=${queueBottom}`);
   }
 }
 
