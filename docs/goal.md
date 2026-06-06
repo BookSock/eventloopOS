@@ -10,7 +10,7 @@ Ship and prove macOS workspace UX for a real human dogfood session.
 - Prove one real window can belong to more than one paper/task, with a different saved position per paper.
 - Make ambient autosave/follows-window behavior production-real enough that moved or newly opened windows on the active paper are remembered without extra user work.
 - Tighten snapshot capture so saved task layouts include the intended paper/follows windows, not unrelated lab windows.
-- Keep local Screen Sharing window-only screenshot capture working so the agent can inspect the Mac Studio demo without capturing unrelated local desktop content, with lab Mac desktop capture available as a readiness fallback.
+- Use lab Mac desktop screenshots by default for automated demo readiness so the controller Mac keeps focus; keep local Screen Sharing window-only capture available as an explicit no-raise helper.
 - Build a repeatable Mac Studio human demo that starts from a clean state, opens real dummy work windows, queues several papers, and lets Jason test the UX with keyboard and mouse.
 
 ## Proof
@@ -23,7 +23,7 @@ Ship and prove macOS workspace UX for a real human dogfood session.
   - exact geometry restore
   - one shared window restored to different positions on two papers
   - ambient autosave after moving/opening windows
-  - local Screen Sharing screenshot capture or explicit lab Mac desktop fallback
+  - lab Mac desktop screenshot capture by default, plus explicit no-raise local Screen Sharing capture when needed
 - Use screenshots during proof where useful.
 - Push interesting completed commits to GitHub after tests pass.
 

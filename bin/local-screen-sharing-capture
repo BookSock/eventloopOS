@@ -10,6 +10,7 @@ Capture only the local macOS Screen Sharing window, not the whole desktop.
 Environment:
   SCREEN_SHARING_OWNER   default: Screen Sharing
   SCREEN_SHARING_TITLE   optional title substring, e.g. Zeus
+  SCREEN_SHARING_RAISE   default: 0; set 1 to raise/focus before capture
 EOF
 }
 
@@ -22,11 +23,26 @@ esac
 
 owner="${SCREEN_SHARING_OWNER:-Screen Sharing}"
 title="${SCREEN_SHARING_TITLE:-}"
+raise_requested="${SCREEN_SHARING_RAISE:-${EVENTLOOPOS_SCREEN_SHARING_RAISE:-0}}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 output="${1:-artifacts/screen-sharing-captures/$stamp-screen-sharing.png}"
 
+case "$raise_requested" in
+  1|true|TRUE|yes|YES|on|ON)
+    do_raise=1
+    ;;
+  0|false|FALSE|no|NO|off|OFF|"")
+    do_raise=0
+    ;;
+  *)
+    echo "invalid SCREEN_SHARING_RAISE: $raise_requested (use 0 or 1)" >&2
+    exit 2
+    ;;
+esac
+
 raise_exit=0
-osascript - "$owner" "$title" <<'APPLESCRIPT' >/dev/null 2>&1 || raise_exit=$?
+if [[ "$do_raise" == "1" ]]; then
+  osascript - "$owner" "$title" <<'APPLESCRIPT' >/dev/null 2>&1 || raise_exit=$?
 on run argv
   set ownerNeedle to item 1 of argv
   set titleNeedle to ""
@@ -52,7 +68,8 @@ on run argv
   end tell
 end run
 APPLESCRIPT
-sleep 0.2
+  sleep 0.2
+fi
 
 set +e
 window_id="$(
@@ -107,6 +124,7 @@ cat >"$manifest" <<EOF
   "window_id": "$window_id",
   "owner_filter": "$owner",
   "title_filter": "$title",
+  "raise_requested": $(if [[ "$do_raise" == "1" ]]; then echo true; else echo false; fi),
   "raise_exit": $raise_exit,
   "output": "$output",
   "captured_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"

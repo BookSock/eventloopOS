@@ -29,7 +29,7 @@ const skipManualModeFeedback = args.includes("--skip-manual-mode-feedback") || p
 const manualModeFeedbackRequested = args.includes("--manual-mode-feedback") || process.env.EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_FEEDBACK === "1";
 const manualModeFeedbackEnabled = !skipManualModeFeedback && (manualModeFeedbackRequested || process.platform === "darwin");
 const jsonOnly = args.includes("--json");
-const screenshotTarget = normalizeScreenshotTarget(process.env.EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET ?? "auto");
+const screenshotTarget = normalizeScreenshotTarget(process.env.EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET ?? "lab");
 
 if (args.includes("-h") || args.includes("--help")) {
   console.log(`Usage: bin/human-demo-ready [--skip-screenshot] [--skip-queue-latency] [--skip-workspace-latency] [--skip-hotkey-latency] [--hotkey-latency] [--skip-master-command-hotkey] [--master-command-hotkey] [--skip-paper-reminder-feedback] [--paper-reminder-feedback] [--skip-manual-mode-feedback] [--manual-mode-feedback] [--demo-proof-max-age-hours n] [--allow-stale-demo-proof] [--json]
@@ -76,8 +76,10 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_SETTLE_MS default: 2000
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_START_BUDGET_MS default: 1000
   EVENTLOOPOS_HUMAN_DEMO_MANUAL_MODE_RETURN_BUDGET_MS default: 3000
-  EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=auto|local|lab default: auto
-    auto captures local Screen Sharing window first, then falls back to lab Mac desktop only
+  EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=lab|auto|local default: lab
+    lab captures the Mac Studio desktop over SSH and never focuses local Screen Sharing
+    local captures the local Screen Sharing window without raising it unless SCREEN_SHARING_RAISE=1
+    auto tries local first, then falls back to lab
 `);
   process.exit(0);
 }
@@ -1582,7 +1584,7 @@ function runSelfTest() {
     },
     final_handoff_screen_sharing_capture: {
       output: "artifacts/lab-runs/ready/screen-sharing-final.png",
-      capture_mode: "local_screen_sharing_window",
+      capture_mode: "lab_desktop",
       image: { dimensions: "1280x720", bytes: 4096 },
     },
     queue_latency: { manifest_path: "artifacts/lab-runs/ready/queue-latency.json" },
@@ -1602,7 +1604,7 @@ function runSelfTest() {
   assert.ok(readyMarkdown.includes("Waiting-agent paper proof: ok"));
   assert.ok(readyMarkdown.includes("Final handoff stage: ok"));
   assert.ok(readyMarkdown.includes("Final handoff feedback: Showing paper: Review Demo Customer Reply."));
-  assert.ok(readyMarkdown.includes("Final handoff screenshot: artifacts/lab-runs/ready/screen-sharing-final.png mode=local_screen_sharing_window (1280x720, 4096 bytes)"));
+  assert.ok(readyMarkdown.includes("Final handoff screenshot: artifacts/lab-runs/ready/screen-sharing-final.png mode=lab_desktop (1280x720, 4096 bytes)"));
   assert.ok(readyMarkdown.includes("Manual Mode enter feedback: artifacts/lab-runs/ready/manual-mode-enter-feedback.json"));
   assert.ok(readyMarkdown.includes("Manual Mode return-start feedback: artifacts/lab-runs/ready/manual-mode-return-start-feedback.json"));
   assert.ok(readyMarkdown.includes("Manual Mode return-complete feedback: artifacts/lab-runs/ready/manual-mode-return-complete-feedback.json"));
@@ -1695,7 +1697,7 @@ function runSelfTest() {
     },
     screen_sharing_capture: {
       output: "artifacts/lab-runs/ready/screen-sharing.png",
-      capture_mode: "local_screen_sharing_window",
+      capture_mode: "lab_desktop",
       image: { dimensions: "1280x720", bytes: 2048 },
     },
     final_handoff_stage: {
@@ -1707,7 +1709,7 @@ function runSelfTest() {
     },
     final_handoff_screen_sharing_capture: {
       output: "artifacts/lab-runs/ready/screen-sharing-final.png",
-      capture_mode: "local_screen_sharing_window",
+      capture_mode: "lab_desktop",
       image: { dimensions: "1280x720", bytes: 4096 },
     },
     queue_latency: { manifest_path: "artifacts/lab-runs/ready/queue-latency.json" },
@@ -1719,7 +1721,7 @@ function runSelfTest() {
   assert.match(markdown, /Ready: yes/);
   assert.match(markdown, /artifacts\/lab-runs\/demo\/manifest\.json/);
   assert.match(markdown, /Latest proof freshness: ok age=1.25h max=24h/);
-  assert.match(markdown, /Fresh screenshot capture: artifacts\/lab-runs\/ready\/screen-sharing\.png mode=local_screen_sharing_window \(1280x720, 2048 bytes\)/);
+  assert.match(markdown, /Fresh screenshot capture: artifacts\/lab-runs\/ready\/screen-sharing\.png mode=lab_desktop \(1280x720, 2048 bytes\)/);
   assert.match(markdown, /Opened-window autosave proof: ok/);
   assert.match(markdown, /Foreign-window containment proof: ok/);
   assert.match(markdown, /Agent-spawn Chrome containment proof: ok app=Google Chrome/);
@@ -1728,7 +1730,7 @@ function runSelfTest() {
   assert.match(markdown, /Desktop paper reminder HUD: visible/);
   assert.match(markdown, /Final handoff stage: ok/);
   assert.match(markdown, /Final handoff feedback: Showing paper: Review Demo Customer Reply\./);
-  assert.match(markdown, /Final handoff screenshot: artifacts\/lab-runs\/ready\/screen-sharing-final\.png mode=local_screen_sharing_window \(1280x720, 4096 bytes\)/);
+  assert.match(markdown, /Final handoff screenshot: artifacts\/lab-runs\/ready\/screen-sharing-final\.png mode=lab_desktop \(1280x720, 4096 bytes\)/);
   assert.match(markdown, /Hotkey feedback latency: skipped/);
   assert.match(markdown, /Queue latency: artifacts\/lab-runs\/ready\/queue-latency\.json/);
   assert.match(markdown, /Workspace latency: artifacts\/lab-runs\/ready\/workspace-latency\.json/);

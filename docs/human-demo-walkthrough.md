@@ -27,7 +27,7 @@ The setup script:
 - proves a real agent-spawned Chrome window opened while Customer is focused
   is claimed for Metrics, moved back to Metrics, and leaves Customer focused,
 - proves a Codex waiting-for-approval agent run creates a human-needed queue paper,
-- captures a local Screen Sharing window-only screenshot, or falls back to a lab Mac desktop capture when Screen Sharing is unavailable.
+- captures a lab Mac desktop screenshot over SSH by default, with local Screen Sharing window-only capture available only when requested.
 
 Before handing the keyboard to Jason, run a non-destructive readiness check:
 
@@ -37,21 +37,21 @@ bin/human-demo-ready
 
 This does not restart or reseed the demo. It checks the current lab dogfood
 stack, verifies the latest human-demo proof artifact, stages the live lab Mac
-back to the Customer demo paper, captures the local Screen Sharing window first,
-falls back to a lab Mac desktop capture if that local window is unavailable,
-runs queue/workspace latency probes on the lab Mac by default, and writes
+back to the Customer demo paper, captures the lab Mac desktop over SSH by
+default, runs queue/workspace latency probes on the lab Mac, and writes
 `artifacts/lab-runs/*-human-demo-ready/READY.md`. Treat that `READY.md` as the
 source of truth for the current proof paths, screenshots, timings, and suggested
 human result file.
 The screenshot capture gate verifies the chosen artifact exists and has
 readable PNG/JPEG dimensions, and the lab staging gate must pass, so readiness
 cannot pass from an empty, invalid, or wrong-workspace screenshot file. The
-default `auto` mode never captures the controller Mac desktop: the first attempt
-is a Screen Sharing window capture after the lab has been staged, and the
-fallback captures the remote lab Mac desktop over SSH. Use
+default `lab` mode never captures or focuses the controller Mac desktop: it
+captures the remote lab Mac desktop over SSH. Use
 `EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=local` to require only the local
-Screen Sharing window, or `EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=lab` to use
-only the lab Mac desktop capture.
+Screen Sharing window, or `EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET=auto` to
+try local Screen Sharing first and fall back to the lab Mac desktop. Local
+Screen Sharing capture does not raise/focus the window unless
+`SCREEN_SHARING_RAISE=1` is set.
 Run `bin/human-demo-ready` after the queue app has Accessibility permission. By
 default the latest proof must be no older than 24 hours; use
 `EVENTLOOPOS_HUMAN_DEMO_PROOF_MAX_AGE_HOURS` or

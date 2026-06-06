@@ -67,9 +67,10 @@ From the controller Mac, use the cheapest lab check first:
 pnpm product:transport
 ```
 
-For visual dogfood, prefer a window-only capture of the local Screen Sharing
-app so the artifact contains the Mac Studio screen without exposing the rest of
-the controller desktop:
+For visual dogfood where the Mac Studio is reachable over SSH, prefer the lab
+desktop capture used by readiness. For manual inspection from the controller Mac,
+the local helper can capture only the Screen Sharing window without exposing the
+rest of the controller desktop and without raising/focusing it by default:
 
 ```sh
 SCREEN_SHARING_TITLE=Zeus bin/local-screen-sharing-capture
@@ -77,6 +78,8 @@ SCREEN_SHARING_TITLE=Zeus bin/local-screen-sharing-capture
 
 The helper writes `artifacts/screen-sharing-captures/<timestamp>-screen-sharing.png`
 and a sibling JSON manifest with the CGWindow id used by `screencapture -l`.
+Set `SCREEN_SHARING_RAISE=1` only when you explicitly want the helper to raise
+and focus Screen Sharing before capture.
 
 This answers only "are SSH and VNC reachable?" and skips sync, baseline,
 screenshots, and Codex. Use it while the Mac is rebooting or probably offline.

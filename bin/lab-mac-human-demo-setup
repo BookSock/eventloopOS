@@ -15,6 +15,8 @@ Environment:
   LAB_DOGFOOD_PROFILE    default: lab-human-demo
   LAB_DOGFOOD_URL        default: http://127.0.0.1:4480
   SCREEN_SHARING_TITLE   default: Zeus
+  EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET default: lab (lab|auto|local)
+  SCREEN_SHARING_RAISE   default: 0; set 1 only when local capture should raise/focus
 EOF
 }
 
@@ -45,6 +47,7 @@ lab_key="${LAB_MAC_KEY:-$HOME/.ssh/eventloop_lab_mac}"
 eventloop_path="${LAB_MAC_EVENTLOOP_PATH:-~/dev/2026/eventloopOS}"
 profile="${LAB_DOGFOOD_PROFILE:-lab-human-demo}"
 url="${LAB_DOGFOOD_URL:-http://127.0.0.1:4480}"
+screenshot_target="${EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET:-lab}"
 remote="${lab_user}@${lab_host}"
 run_dir="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-human-demo"
 manifest="$run_dir/manifest.json"
@@ -52,6 +55,15 @@ manifest="$run_dir/manifest.json"
 case "$profile" in
   ""|*[!A-Za-z0-9_.-]*)
     echo "unsafe LAB_DOGFOOD_PROFILE: $profile" >&2
+    exit 2
+    ;;
+esac
+
+case "$screenshot_target" in
+  lab|auto|local)
+    ;;
+  *)
+    echo "invalid EVENTLOOPOS_HUMAN_DEMO_SCREENSHOT_TARGET: $screenshot_target (use lab, auto, or local)" >&2
     exit 2
     ;;
 esac
@@ -117,6 +129,39 @@ exit 1
 '"
 }
 
+capture_local_screen_sharing() {
+  echo "human demo local Screen Sharing capture"
+  set +e
+  SCREEN_SHARING_TITLE="${SCREEN_SHARING_TITLE:-Zeus}" bin/local-screen-sharing-capture "$run_dir/screen-sharing.png" >"$run_dir/screen-sharing.out" 2>"$run_dir/screen-sharing.err"
+  screenshot_exit=$?
+  set -e
+  printf "%s\n" "$screenshot_exit" >"$run_dir/screen-sharing.exit"
+  if [[ "$screenshot_exit" == "0" && -s "$run_dir/screen-sharing.png" ]]; then
+    printf "%s\n" "local_screen_sharing_window" >"$run_dir/screen-sharing.mode"
+    return 0
+  fi
+  return 1
+}
+
+capture_lab_desktop() {
+  echo "human demo lab desktop screenshot"
+  set +e
+  bin/lab-mac-desktop-capture "$run_dir" human-demo-setup >"$run_dir/lab-desktop-capture.out" 2>"$run_dir/lab-desktop-capture.err"
+  capture_exit=$?
+  set -e
+  remote_capture_path="$(tail -n 1 "$run_dir/lab-desktop-capture.out")"
+  printf "%s\n" "$capture_exit" >"$run_dir/lab-desktop-capture.exit"
+  if [[ "$capture_exit" == "0" && -n "$remote_capture_path" ]]; then
+    sync_remote_dir "$remote_capture_path" "$run_dir/captures/human-demo-setup"
+    if [[ -s "$run_dir/captures/human-demo-setup/screen.png" ]]; then
+      cp "$run_dir/captures/human-demo-setup/screen.png" "$run_dir/screen-sharing.png"
+      printf "%s\n" "lab_desktop" >"$run_dir/screen-sharing.mode"
+      return 0
+    fi
+  fi
+  return 1
+}
+
 mkdir -p "$run_dir"
 printf "%s\n" "$remote" >"$run_dir/remote.txt"
 printf "%s\n" "$remote_repo" >"$run_dir/remote-repo.txt"
@@ -144,30 +189,17 @@ ssh_remote "bash -lc 'set -euo pipefail; export PATH=\"/opt/homebrew/bin:/opt/ho
 sync_remote_artifact "$remote_run/manifest.json" "$manifest"
 
 if [[ "$skip_screenshot" == "0" ]]; then
-  echo "human demo local Screen Sharing capture"
-  set +e
-  SCREEN_SHARING_TITLE="${SCREEN_SHARING_TITLE:-Zeus}" bin/local-screen-sharing-capture "$run_dir/screen-sharing.png" >"$run_dir/screen-sharing.out" 2>"$run_dir/screen-sharing.err"
-  screenshot_exit=$?
-  set -e
-  printf "%s\n" "$screenshot_exit" >"$run_dir/screen-sharing.exit"
-  if [[ "$screenshot_exit" != "0" || ! -s "$run_dir/screen-sharing.png" ]]; then
-    echo "human demo lab desktop screenshot fallback"
-    set +e
-    bin/lab-mac-desktop-capture "$run_dir" human-demo-setup >"$run_dir/lab-desktop-capture.out" 2>"$run_dir/lab-desktop-capture.err"
-    capture_exit=$?
-    set -e
-    remote_capture_path="$(tail -n 1 "$run_dir/lab-desktop-capture.out")"
-    printf "%s\n" "$capture_exit" >"$run_dir/lab-desktop-capture.exit"
-    if [[ "$capture_exit" == "0" && -n "$remote_capture_path" ]]; then
-      sync_remote_dir "$remote_capture_path" "$run_dir/captures/human-demo-setup"
-      if [[ -s "$run_dir/captures/human-demo-setup/screen.png" ]]; then
-        cp "$run_dir/captures/human-demo-setup/screen.png" "$run_dir/screen-sharing.png"
-        printf "%s\n" "lab_desktop" >"$run_dir/screen-sharing.mode"
-      fi
-    fi
-  else
-    printf "%s\n" "local_screen_sharing_window" >"$run_dir/screen-sharing.mode"
-  fi
+  case "$screenshot_target" in
+    lab)
+      capture_lab_desktop || true
+      ;;
+    local)
+      capture_local_screen_sharing || true
+      ;;
+    auto)
+      capture_local_screen_sharing || capture_lab_desktop || true
+      ;;
+  esac
 fi
 
 cat "$manifest"
