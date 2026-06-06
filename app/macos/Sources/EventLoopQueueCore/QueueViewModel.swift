@@ -2114,6 +2114,11 @@ public final class QueueViewModel: ObservableObject {
                 advanceToast = .actionComplete("Workspace restore already running.")
                 return false
             }
+            if Self.isClientRestoreTimeout(error) {
+                workspaceRestoreState = .alreadyRestoring
+                advanceToast = Self.workspaceRestoreTimedOutToast(startToast: startToast)
+                return false
+            }
             workspaceRestoreState = .failed(error.localizedDescription)
             advanceToast = .actionComplete("Workspace restore failed: \(Self.shortStatusMessage(error.localizedDescription))")
             return false
@@ -2143,6 +2148,30 @@ public final class QueueViewModel: ObservableObject {
             return .actionComplete("Workspace already restored.")
         }
         return .actionComplete("Paper already restored: \(title).")
+    }
+
+    private static func workspaceRestoreTimedOutToast(startToast: AdvanceToast) -> AdvanceToast {
+        guard case let .actionComplete(message) = startToast,
+              message.hasPrefix("Restoring paper:"),
+              message.hasSuffix("...") else {
+            return .actionComplete("Workspace restore still running. Wait a second.")
+        }
+        let title = message
+            .dropFirst("Restoring paper:".count)
+            .dropLast(3)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else {
+            return .actionComplete("Workspace restore still running. Wait a second.")
+        }
+        return .actionComplete("Paper restore still running: \(title).")
+    }
+
+    private static func isClientRestoreTimeout(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            return urlError.code == .timedOut
+        }
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorTimedOut
     }
 
     private func workspaceRestoreStartToast(snapshot: WorkspaceSnapshot) -> AdvanceToast {
@@ -2274,6 +2303,11 @@ public final class QueueViewModel: ObservableObject {
             advanceToast = .actionComplete("Manual Mode active. Manual workspace restored.")
         } catch {
             guard !startedInManualMode || (mode == .manual && !shouldRestoreWorkspace) else {
+                return
+            }
+            if Self.isClientRestoreTimeout(error) {
+                workspaceRestoreState = .alreadyRestoring
+                advanceToast = .actionComplete("Manual Mode active. Manual workspace restore still running...")
                 return
             }
             workspaceRestoreState = .failed(error.localizedDescription)
