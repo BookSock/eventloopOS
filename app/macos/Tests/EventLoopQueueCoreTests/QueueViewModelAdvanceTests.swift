@@ -228,7 +228,7 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         if case let .switchedToPaper(packetId, title, decision) = viewModel.advanceToast {
             XCTAssertEqual(packetId, "pkt_b")
             XCTAssertEqual(title, "B paper")
-            XCTAssertEqual(decision, "review")
+            XCTAssertEqual(decision, "switch me")
         } else {
             XCTFail("expected switchedToPaper toast, got \(String(describing: viewModel.advanceToast))")
         }
@@ -300,7 +300,7 @@ final class QueueViewModelAdvanceTests: XCTestCase {
         if case let .switchedToPaper(packetId, title, decision) = viewModel.advanceToast {
             XCTAssertEqual(packetId, "pkt_b")
             XCTAssertEqual(title, "B paper")
-            XCTAssertEqual(decision, "review")
+            XCTAssertEqual(decision, "switch me")
         } else {
             XCTFail("expected switchedToPaper toast, got \(String(describing: viewModel.advanceToast))")
         }

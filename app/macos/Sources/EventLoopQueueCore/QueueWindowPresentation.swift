@@ -196,13 +196,38 @@ public struct QueuePaperBriefingPresentation: Equatable, Sendable {
     public init(packet: ReviewPacket, selectedTaskSessions: [TaskSession] = []) {
         title = packet.title
         let trimmedDecision = packet.decisionNeeded.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSummary = packet.summary.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedAction = packet.recommendedAction.trimmingCharacters(in: .whitespacesAndNewlines)
-        decision = trimmedDecision.isEmpty ? trimmedAction : trimmedDecision
+        if !trimmedDecision.isEmpty {
+            decision = trimmedDecision
+        } else if !trimmedAction.isEmpty && !Self.isGenericAction(trimmedAction) {
+            decision = trimmedAction
+        } else if !trimmedSummary.isEmpty {
+            decision = Self.shortContextPart(trimmedSummary, maxLength: 140)
+        } else {
+            decision = trimmedAction.isEmpty ? "Review this paper and choose next action." : trimmedAction
+        }
         action = trimmedAction.isEmpty ? "Pick Done, Defer, Ignore, or Send to Agent." : trimmedAction
 
-        var parts = [packet.taskId ?? "No task linked", "P\(packet.priority)", packet.riskLevel]
+        var parts: [String] = []
+        if let reason = Self.paperReason(packet: packet, decision: decision) {
+            parts.append(reason)
+        }
+        parts.append(packet.taskId ?? "No task linked")
+        parts.append("P\(packet.priority)")
+        parts.append(packet.riskLevel)
+        if let workspace = Self.workspaceContext(packet.workspaceSnapshot) {
+            parts.append(workspace)
+        }
+        if let source = Self.sourceContext(packet) {
+            parts.append(source)
+        }
         if let session = selectedTaskSessions.first {
-            parts.append(TaskSessionTargetPresentation(session: session).subtitle)
+            let sessionPresentation = TaskSessionTargetPresentation(session: session)
+            parts.append(sessionPresentation.subtitle)
+            if let detail = sessionPresentation.detail {
+                parts.append(Self.shortContextPart(detail, maxLength: 80))
+            }
         } else if packet.recommendedActionType == "resume_agent" {
             parts.append("Waiting for bound session")
         }
@@ -210,6 +235,61 @@ public struct QueuePaperBriefingPresentation: Equatable, Sendable {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " | ")
+    }
+
+    private static func isGenericAction(_ action: String) -> Bool {
+        let normalized = action
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return [
+            "review",
+            "review packet",
+            "review prepared work",
+            "route to task agent",
+            "open or send to agent",
+        ].contains(normalized)
+    }
+
+    private static func paperReason(packet: ReviewPacket, decision: String) -> String? {
+        let summary = packet.summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !summary.isEmpty else { return nil }
+        let normalizedSummary = summary.lowercased()
+        let normalizedTitle = packet.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedDecision = decision.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard normalizedSummary != normalizedTitle, normalizedSummary != normalizedDecision else {
+            return nil
+        }
+        return shortContextPart(summary, maxLength: 96)
+    }
+
+    private static func workspaceContext(_ snapshot: WorkspaceSnapshot?) -> String? {
+        guard let snapshot else { return nil }
+        let workspace = snapshot.activeWorkspace?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let label = workspace?.isEmpty == false ? workspace! : "captured workspace"
+        return "\(label), \(snapshot.windows.count) windows"
+    }
+
+    private static func sourceContext(_ packet: ReviewPacket) -> String? {
+        if let resource = packet.contextResources.first {
+            let title = resource.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !title.isEmpty {
+                return shortContextPart("Context: \(title)", maxLength: 80)
+            }
+        }
+        let source = packet.source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !source.isEmpty else { return nil }
+        return shortContextPart("Source: \(source)", maxLength: 80)
+    }
+
+    private static func shortContextPart(_ value: String, maxLength: Int) -> String {
+        let normalized = value
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count > maxLength else {
+            return normalized
+        }
+        let end = normalized.index(normalized.startIndex, offsetBy: max(0, maxLength - 1))
+        return String(normalized[..<end]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
     }
 }
 

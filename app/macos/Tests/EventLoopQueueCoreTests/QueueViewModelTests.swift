@@ -3303,7 +3303,7 @@ final class QueueViewModelTests: XCTestCase {
         }
         XCTAssertEqual(
             viewModel.advanceToast,
-            .switchedToPaper(packetId: "packet-with-workspace", title: "Review with workspace", decision: "Review")
+            .switchedToPaper(packetId: "packet-with-workspace", title: "Review with workspace", decision: "Needs workspace restore")
         )
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }
@@ -3348,7 +3348,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.currentTask?.taskId, "task_blog")
         XCTAssertEqual(
             viewModel.advanceToast,
-            .switchedToPaper(packetId: "packet-with-task-workspace", title: "Review with workspace", decision: "Review")
+            .switchedToPaper(packetId: "packet-with-task-workspace", title: "Review with workspace", decision: "Needs workspace restore")
         )
     }
 
@@ -3443,7 +3443,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.workspaceRestoreState, .executed(receipt))
         XCTAssertEqual(
             viewModel.advanceToast,
-            .switchedToPaper(packetId: "packet-with-workspace", title: "Review with workspace", decision: "Review")
+            .switchedToPaper(packetId: "packet-with-workspace", title: "Review with workspace", decision: "Needs workspace restore")
         )
     }
 
@@ -3488,7 +3488,7 @@ final class QueueViewModelTests: XCTestCase {
         XCTAssertEqual(viewModel.workspaceRestoreState, .alreadyRestored(receipt))
         XCTAssertEqual(
             viewModel.advanceToast,
-            .switchedToPaper(packetId: "packet-with-workspace", title: "Review with workspace", decision: "Review")
+            .switchedToPaper(packetId: "packet-with-workspace", title: "Review with workspace", decision: "Needs workspace restore")
         )
         XCTAssertEqual(workspaceClient.restoreIdempotencyKeys.count, 1)
     }

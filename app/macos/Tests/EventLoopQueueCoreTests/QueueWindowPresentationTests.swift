@@ -300,7 +300,7 @@ final class QueueWindowPresentationTests: XCTestCase {
         XCTAssertEqual(briefing.title, "Review feedback")
         XCTAssertEqual(briefing.decision, "Decide whether to send the draft now or wait for owner review.")
         XCTAssertEqual(briefing.action, "Send selected answer to agent")
-        XCTAssertEqual(briefing.context, "task_blog_feedback | P90 | medium | Codex | Running | codex_thread_abc")
+        XCTAssertEqual(briefing.context, "Needs human call. | task_blog_feedback | P90 | medium | Source: slack://thread/1 | Codex | Running | codex_thread_abc")
     }
 
     func testPaperBriefingFallsBackToRecommendedActionAndMissingSessionHint() {
@@ -320,7 +320,49 @@ final class QueueWindowPresentationTests: XCTestCase {
         let briefing = QueuePaperBriefingPresentation(packet: packet)
 
         XCTAssertEqual(briefing.decision, "Send selected answer to agent")
-        XCTAssertEqual(briefing.context, "task_blog_feedback | P90 | medium | Waiting for bound session")
+        XCTAssertEqual(briefing.context, "Needs human call. | task_blog_feedback | P90 | medium | Source: slack://thread/1 | Waiting for bound session")
+    }
+
+    func testPaperBriefingUsesSummaryWhenActionIsGeneric() {
+        let packet = ReviewPacket(
+            id: "packet-waiting-1",
+            taskId: "task_checkout",
+            title: "Review Codex session waiting on task_checkout",
+            summary: "Codex session waiting for human input on task_checkout.",
+            source: "eventloopos://task-sessions/session_checkout",
+            priority: 700,
+            riskLevel: "medium",
+            recommendedAction: "Route to task agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0),
+            workspaceSnapshot: WorkspaceSnapshot(
+                windows: [
+                    WorkspaceWindow(id: 91, app: "Ghostty", title: "codex checkout", workspace: "demo-checkout")
+                ],
+                activeWorkspace: "demo-checkout",
+                focusedWindowId: 91
+            )
+        )
+
+        let briefing = QueuePaperBriefingPresentation(
+            packet: packet,
+            selectedTaskSessions: [
+                TaskSession(
+                    id: "session_checkout",
+                    taskId: "task_checkout",
+                    provider: "codex",
+                    status: "waiting_approval",
+                    preview: "Approve shell command",
+                    terminalRef: "ghostty:win-91"
+                )
+            ]
+        )
+
+        XCTAssertEqual(briefing.decision, "Codex session waiting for human input on task_checkout.")
+        XCTAssertEqual(
+            briefing.context,
+            "task_checkout | P700 | medium | demo-checkout, 1 windows | Source: eventloopos://task-sessions/session_checkout | Codex | Waiting Approval | session_checkout | Approve shell command"
+        )
     }
 
     func testPaperReminderMirrorsBriefingForDesktopHud() {
@@ -352,10 +394,10 @@ final class QueueWindowPresentationTests: XCTestCase {
 
         XCTAssertEqual(reminder.title, "Review feedback")
         XCTAssertEqual(reminder.decision, "Decide whether to send the draft now or wait for owner review.")
-        XCTAssertEqual(reminder.context, "task_blog_feedback | P90 | medium | Codex | Running | codex_thread_abc")
+        XCTAssertEqual(reminder.context, "Needs human call. | task_blog_feedback | P90 | medium | Source: slack://thread/1 | Codex | Running | codex_thread_abc")
         XCTAssertEqual(
             reminder.accessibilityLabel,
-            "Review feedback | Decide whether to send the draft now or wait for owner review. | task_blog_feedback | P90 | medium | Codex | Running | codex_thread_abc"
+            "Review feedback | Decide whether to send the draft now or wait for owner review. | Needs human call. | task_blog_feedback | P90 | medium | Source: slack://thread/1 | Codex | Running | codex_thread_abc"
         )
     }
 }
