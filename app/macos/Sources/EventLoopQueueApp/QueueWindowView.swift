@@ -173,7 +173,7 @@ struct QueueWindowView: View {
                                 await viewModel.returnToEventLoopModeKeepingCurrentLayout()
                             }
                         } label: {
-                            Label("Return Here", systemImage: "arrow.down.right.and.arrow.up.left")
+                            Label("Keep Current Layout", systemImage: "arrow.down.right.and.arrow.up.left")
                         }
                         .accessibilityIdentifier("queue-return-here-button")
                         .keyboardShortcut("m", modifiers: [.control, .option, .shift])

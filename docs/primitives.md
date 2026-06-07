@@ -906,7 +906,7 @@ Hotkeys:
 - `Ctrl-Option-K`: master command
 - `Ctrl-Option-/`: hotkeys sheet
 - `Ctrl-Option-M`: manual mode / return and restore
-- `Ctrl-Option-Shift-M`: return here from manual mode
+- `Ctrl-Option-Shift-M`: return from manual mode and keep current windows where they are
 
 Restore hotkey feedback is explicit: start, success, duplicate in-flight,
 recent-repeat, skipped-manual-mode, and missing-snapshot cases update the same

@@ -81,9 +81,9 @@ Queue footer after pressing a chord. The desktop HUD proof accepts stable
 current-paper reminder feedback after restore, so it does not depend on catching
 only the first transient `Restoring paper:` frame. Use `--skip-hotkey-latency`
 or `--skip-paper-reminder-feedback` only while bootstrapping permission setup.
-The readiness gate also presses `Ctrl-Option-M` and `Ctrl-Option-Shift-M` to
-prove Manual Mode entry and return produce visible feedback before any slow
-layout save or restore finishes.
+The readiness gate presses `Ctrl-Option-M` to prove Manual Mode entry and the
+normal return-and-restore path produce visible feedback before any slow layout
+save or restore finishes.
 It also focuses the shared TextEdit window, presses `Ctrl-Option-Left`, and
 verifies the window reaches the expected left-half Rectangle-style frame before
 the final handoff restore puts the demo back on Customer.
@@ -109,7 +109,7 @@ Latest known-good proof:
 - Master Command proof: readiness presses `Ctrl-Option-K` from another app and proves the Queue window opens a Master Command sheet with `Route to Master`, `Start Task`, `Rerank`, `Broadcast`, and the current task hint.
 - Rectangle hotkey proof: readiness presses `Ctrl-Option-Left` on the shared TextEdit window and proves it moves to the expected left-half frame.
 - Hotkeys sheet proof: live lab proof presses `Ctrl-Option-/` from another app and verifies the Queue opens a Hotkeys sheet with Queue and Windows command rows.
-- Manual Mode feedback proof: readiness proves `Ctrl-Option-M` enter feedback and `Ctrl-Option-Shift-M` return feedback within the configured budget.
+- Manual Mode feedback proof: readiness proves `Ctrl-Option-M` enter feedback and `Ctrl-Option-M` return-and-restore feedback within the configured budget.
 
 ## Starting State
 
@@ -133,7 +133,7 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 - Master command: `Ctrl-Option-K`
 - Enter Manual Mode: `Ctrl-Option-M`
 - Return from Manual Mode + restore saved paper: `Ctrl-Option-M`
-- Return from Manual Mode and keep current windows: `Ctrl-Option-Shift-M`
+- Return from Manual Mode and keep current windows where they are: `Ctrl-Option-Shift-M`
 - Rectangle-style left/right/top/bottom: `Ctrl-Option-Left/Right/Up/Down`
 - Rectangle-style center: `Ctrl-Option-C`
 - Rectangle-style maximize: `Ctrl-Option-Shift-Return`

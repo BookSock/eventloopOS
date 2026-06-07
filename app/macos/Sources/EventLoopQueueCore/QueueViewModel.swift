@@ -574,12 +574,17 @@ public final class QueueViewModel: ObservableObject {
     public func returnToEventLoopModeAndPrepareWorkspaceRestore() async {
         let wasManual = mode == .manual
         if wasManual {
-            advanceToast = .actionComplete("Returning to Event Loop...")
+            advanceToast = returnToSelectedPaperToast() ?? .actionComplete("Returning to Event Loop...")
+            await Task.yield()
             await captureManualWorkspaceSnapshot()
         }
         applyLocalReturnToEventLoopMode()
-        if selectedWorkspaceSnapshot != nil {
-            advanceToast = .actionComplete("Returned to Event Loop. Restoring selected paper...")
+        if workspaceRestoreInFlight {
+            advanceToast = returnToSelectedPaperToast() ?? .actionComplete("Waiting for current workspace restore...")
+            await waitForWorkspaceRestoreInFlightToFinish()
+        }
+        if let selectedWorkspaceSnapshot {
+            advanceToast = workspaceRestoreStartToast(snapshot: selectedWorkspaceSnapshot)
         }
         await prepareSelectedWorkspaceRestore()
         if wasManual {
@@ -2324,6 +2329,25 @@ public final class QueueViewModel: ObservableObject {
         }
 
         return .actionComplete("Restoring paper: \(paperTitleForFeedback(packetId: packetId))...")
+    }
+
+    private func returnToSelectedPaperToast() -> AdvanceToast? {
+        guard selectedWorkspaceSnapshot != nil,
+              let packetId = selectedPacketID else {
+            return nil
+        }
+
+        return .actionComplete("Returning to paper: \(paperTitleForFeedback(packetId: packetId))...")
+    }
+
+    private func waitForWorkspaceRestoreInFlightToFinish(timeout: TimeInterval = 6) async {
+        let startedAt = Date()
+        while workspaceRestoreInFlight {
+            if Date().timeIntervalSince(startedAt) >= timeout {
+                return
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
     }
 
     private func workspaceRestoreIdempotencyPrefix(snapshot: WorkspaceSnapshot) -> String {

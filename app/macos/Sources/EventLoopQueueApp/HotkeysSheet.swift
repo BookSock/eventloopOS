@@ -31,8 +31,8 @@ struct HotkeysSheet: View {
                     HotkeyRowModel(label: "Send action", chord: "Ctrl-Option-Return", systemImage: "arrowshape.turn.up.right.circle"),
                     HotkeyRowModel(label: "Defer", chord: "Ctrl-Option-H", systemImage: "clock"),
                     HotkeyRowModel(label: "Master Command", chord: "Ctrl-Option-K", systemImage: "command"),
-                    HotkeyRowModel(label: "Manual Mode", chord: "Ctrl-Option-M", systemImage: "pause.circle"),
-                    HotkeyRowModel(label: "Return Here", chord: "Ctrl-Option-Shift-M", systemImage: "arrow.down.right.and.arrow.up.left"),
+                    HotkeyRowModel(label: "Manual Mode / Return", chord: "Ctrl-Option-M", systemImage: "pause.circle"),
+                    HotkeyRowModel(label: "Keep Current Layout", chord: "Ctrl-Option-Shift-M", systemImage: "arrow.down.right.and.arrow.up.left"),
                 ])
                 HotkeySection(title: "Windows", rows: [
                     HotkeyRowModel(label: "Left half", chord: "Ctrl-Option-Left", systemImage: "arrow.left.to.line"),

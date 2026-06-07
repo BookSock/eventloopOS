@@ -163,7 +163,7 @@ struct EventLoopQueueApp: App {
                     .keyboardShortcut("m", modifiers: [.control, .option])
                     .accessibilityIdentifier("queue-command-return-restore")
 
-                    Button("Return Here") {
+                    Button("Keep Current Layout") {
                         Task {
                             await viewModel.returnToEventLoopModeKeepingCurrentLayout()
                         }
@@ -568,7 +568,7 @@ private struct QueueMenuView: View {
                 .keyboardShortcut("m", modifiers: [.control, .option])
                 .accessibilityIdentifier("queue-menu-return-restore")
 
-                Button("Return Here") {
+                Button("Keep Current Layout") {
                     Task {
                         await viewModel.returnToEventLoopModeKeepingCurrentLayout()
                     }

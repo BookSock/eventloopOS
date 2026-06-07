@@ -1211,14 +1211,14 @@ function runManualModeFeedbackStep(resetManifestPath, enterManifestPath, returnS
   const returnStart = runManualModeHotkeyStep(
     "manual mode return start feedback",
     returnStartManifestPath,
-    ["--hotkey", "ctrl-option-shift-m", "--expect", "Returning to Event Loop", "--budget-ms", manualModeReturnStartBudgetMs()],
+    ["--hotkey", "ctrl-option-m", "--expect", "Review Demo Customer Reply", "--budget-ms", manualModeReturnStartBudgetMs()],
     envOverride,
   );
   const returnStartManifest = readJsonIfPresent(returnStartManifestPath);
   const returnComplete = runManualModeHotkeyStep(
     "manual mode return completion feedback",
     returnCompleteManifestPath,
-    ["--no-hotkey", "--expect", "Returned to Event Loop", "--budget-ms", manualModeReturnBudgetMs()],
+    ["--no-hotkey", "--expect", "Review Demo Customer Reply", "--budget-ms", manualModeReturnBudgetMs()],
     envOverride,
   );
   const returnCompleteManifest = readJsonIfPresent(returnCompleteManifestPath);
