@@ -82,6 +82,27 @@ const demoWalkthrough = Object.freeze([
   "Use Ctrl-Option-Shift-M only when you want to return from Manual Mode and keep current windows where they are.",
 ]);
 
+const customerPageSteps = Object.freeze([
+  "Press Ctrl-Option-R to restore this Customer paper.",
+  "Focus shared TextEdit, press Ctrl-Option-Left, then wait 2-3 seconds for autosave.",
+  "Select Demo Metrics Review in Queue and press Ctrl-Option-R.",
+  "Return to Demo Customer Reply and press Ctrl-Option-R; same TextEdit should move back here.",
+  "Press Ctrl-Option-/ for hotkeys, Ctrl-Option-K for Master Command, Ctrl-Option-M for Manual Mode.",
+]);
+
+const metricsPageSteps = Object.freeze([
+  "Confirm Metrics Chrome and same shared TextEdit are visible together.",
+  "Notice shared TextEdit uses a different saved position on this paper.",
+  "Try Ctrl-Option-Right or Ctrl-Option-C on TextEdit, wait 2-3 seconds, then switch away.",
+  "Select Demo Customer Reply in Queue and press Ctrl-Option-R; TextEdit should return to its Customer position.",
+  "Use the Queue Codex paper to inspect a waiting-agent handoff.",
+]);
+
+const agentSpawnPageSteps = Object.freeze([
+  "This page belongs to Metrics, even if an agent opens it while Customer is active.",
+  "Setup should claim this Chrome window, move it back to Metrics, and restore Customer focus.",
+]);
+
 if (dryRun) {
   const sampleWindows = {
     customerChrome: sampleWindow(100, "Google Chrome", paperCustomer.chromeTitle),
@@ -259,6 +280,7 @@ function writeDemoFiles() {
     prompt: "This Chrome window belongs to Metrics.",
     note: "It opens while Customer is focused. eventloopOS should claim it for Metrics, move it back there, and restore Customer focus.",
     accent: "#b42318",
+    steps: agentSpawnPageSteps,
   }));
   fs.writeFileSync(paperCustomer.chromeFile, demoHtml({
     eyebrow: "Customer paper",
@@ -266,6 +288,7 @@ function writeDemoFiles() {
     prompt: "Can I use this on my Mac today?",
     note: "Answer with honest dogfood status. Watch whether restore/focus feels smooth.",
     accent: "#1f7a4d",
+    steps: customerPageSteps,
   }));
   fs.writeFileSync(paperMetrics.chromeFile, demoHtml({
     eyebrow: "Metrics paper",
@@ -273,10 +296,14 @@ function writeDemoFiles() {
     prompt: "Are ambient saves and shared windows reliable?",
     note: "Check whether one shared TextEdit window keeps separate per-paper positions.",
     accent: "#9a3412",
+    steps: metricsPageSteps,
   }));
 }
 
-function demoHtml({ eyebrow, title, prompt, note, accent }) {
+function demoHtml({ eyebrow, title, prompt, note, accent, steps = [] }) {
+  const stepsHtml = steps.length > 0
+    ? `<section class="steps"><h2>Try This Next</h2><ol>${steps.map((step) => `<li>${escapeHtml(step)}</li>`).join("")}</ol></section>`
+    : "";
   return `<!doctype html>
 <html>
 <head>
@@ -291,6 +318,9 @@ function demoHtml({ eyebrow, title, prompt, note, accent }) {
     section { border: 1px solid #d8e0ea; border-radius: 8px; padding: 24px; background: #fff; margin: 16px 0; }
     h2 { font-size: 22px; margin: 0 0 12px; }
     p { font-size: 17px; line-height: 1.45; margin: 0; color: #475569; }
+    ol { margin: 0; padding-left: 24px; }
+    li { font-size: 16px; line-height: 1.45; color: #334155; margin: 8px 0; }
+    .steps { border-left: 5px solid ${accent}; }
   </style>
 </head>
 <body>
@@ -299,6 +329,7 @@ function demoHtml({ eyebrow, title, prompt, note, accent }) {
     <div class="eyebrow">eventloopOS Human Demo</div>
     <h1>${escapeHtml(title)}</h1>
     <section><h2>${escapeHtml(prompt)}</h2><p>${escapeHtml(note)}</p></section>
+    ${stepsHtml}
     <section><h2>Hotkeys</h2><p>Use Ctrl-Option-R to restore paper, then Rectangle-style Ctrl-Option arrows to move focused window.</p></section>
   </main>
 </body>
@@ -1517,6 +1548,54 @@ function assertDemoInstructions() {
   const agentSpawnLine = demoWalkthrough.find((line) => line.includes("Agent-spawn containment proof"));
   if (!agentSpawnLine?.includes("Chrome")) {
     throw new Error(`agent-spawn walkthrough must demonstrate Chrome contamination, got: ${agentSpawnLine ?? "missing"}`);
+  }
+  const customerHtml = demoHtml({
+    eyebrow: "Customer paper",
+    title: paperCustomer.chromeTitle,
+    prompt: "Can I use this on my Mac today?",
+    note: "Answer with honest dogfood status. Watch whether restore/focus feels smooth.",
+    accent: "#1f7a4d",
+    steps: customerPageSteps,
+  });
+  for (const expected of [
+    "Try This Next",
+    "Ctrl-Option-R",
+    "Ctrl-Option-Left",
+    "2-3 seconds for autosave",
+    "Ctrl-Option-K",
+    "Ctrl-Option-M",
+  ]) {
+    if (!customerHtml.includes(expected)) {
+      throw new Error(`customer demo page missing ${expected}`);
+    }
+  }
+  const metricsHtml = demoHtml({
+    eyebrow: "Metrics paper",
+    title: paperMetrics.chromeTitle,
+    prompt: "Are ambient saves and shared windows reliable?",
+    note: "Check whether one shared TextEdit window keeps separate per-paper positions.",
+    accent: "#9a3412",
+    steps: metricsPageSteps,
+  });
+  for (const expected of [
+    "same shared TextEdit",
+    "different saved position",
+    "waiting-agent handoff",
+  ]) {
+    if (!metricsHtml.includes(expected)) {
+      throw new Error(`metrics demo page missing ${expected}`);
+    }
+  }
+  const agentHtml = demoHtml({
+    eyebrow: "Agent spawned browser",
+    title: paperMetrics.agentSpawnTitle,
+    prompt: "This Chrome window belongs to Metrics.",
+    note: "It opens while Customer is focused. eventloopOS should claim it for Metrics, move it back there, and restore Customer focus.",
+    accent: "#b42318",
+    steps: agentSpawnPageSteps,
+  });
+  if (!agentHtml.includes("move it back to Metrics") || !agentHtml.includes("restore Customer focus")) {
+    throw new Error("agent-spawn demo page missing containment instruction");
   }
   for (const paper of [paperCustomer, paperMetrics]) {
     if (!paper.decisionNeeded?.includes(" ")) {
