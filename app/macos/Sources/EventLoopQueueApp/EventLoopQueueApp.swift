@@ -70,6 +70,10 @@ struct EventLoopQueueApp: App {
             masterCommand: {
                 NSApp.activate(ignoringOtherApps: true)
                 NotificationCenter.default.post(name: .eventLoopQueueMasterCommandRequested, object: nil)
+            },
+            hotkeys: {
+                NSApp.activate(ignoringOtherApps: true)
+                NotificationCenter.default.post(name: .eventLoopQueueHotkeysRequested, object: nil)
             }
         )
         appDelegate.viewModel = viewModel
@@ -207,6 +211,13 @@ struct EventLoopQueueApp: App {
                     viewModel.presentFollowsRules()
                 }
                 .accessibilityIdentifier("queue-command-follows-rules")
+
+                Button("Hotkeys") {
+                    openQueueWindow()
+                    viewModel.presentHotkeys()
+                }
+                .keyboardShortcut("/", modifiers: [.control, .option])
+                .accessibilityIdentifier("queue-command-hotkeys")
             }
         }
     }
@@ -231,6 +242,12 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(handleMasterCommandRequested(_:)),
             name: .eventLoopQueueMasterCommandRequested,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleHotkeysRequested(_:)),
+            name: .eventLoopQueueHotkeysRequested,
             object: nil
         )
         openHarnessWindowIfRequested()
@@ -264,6 +281,11 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
         _ = presentMasterCommandFromGlobalHotkey()
     }
 
+    @objc
+    private func handleHotkeysRequested(_ notification: Notification) {
+        _ = presentHotkeysFromGlobalHotkey()
+    }
+
     @discardableResult
     func presentMasterCommandFromGlobalHotkey() -> Bool {
         let opened = openFloatingQueueWindow()
@@ -271,6 +293,16 @@ final class QueueAppDelegate: NSObject, NSApplicationDelegate {
             NSApp.activate(ignoringOtherApps: true)
         }
         viewModel?.presentMasterCommand()
+        return opened && viewModel != nil
+    }
+
+    @discardableResult
+    func presentHotkeysFromGlobalHotkey() -> Bool {
+        let opened = openFloatingQueueWindow()
+        if !opened {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        viewModel?.presentHotkeys()
         return opened && viewModel != nil
     }
 
@@ -447,6 +479,13 @@ private struct QueueMenuView: View {
             .keyboardShortcut("k", modifiers: [.control, .option])
             .accessibilityIdentifier("queue-menu-master-command")
 
+            Button("Hotkeys") {
+                openQueueWindow()
+                viewModel.presentHotkeys()
+            }
+            .keyboardShortcut("/", modifiers: [.control, .option])
+            .accessibilityIdentifier("queue-menu-hotkeys")
+
             Button("Scan Desk") {
                 openQueueWindow()
                 viewModel.presentOnboarding()
@@ -568,4 +607,5 @@ private struct QueueMenuView: View {
 
 private extension Notification.Name {
     static let eventLoopQueueMasterCommandRequested = Notification.Name("eventLoopQueueMasterCommandRequested")
+    static let eventLoopQueueHotkeysRequested = Notification.Name("eventLoopQueueHotkeysRequested")
 }

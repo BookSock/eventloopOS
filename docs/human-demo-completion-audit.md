@@ -23,6 +23,7 @@ Use this audit to decide whether the macOS non-tiling workspace UX goal can clos
 | --- | --- | --- |
 | AeroSpace profile floats by default | `config/aerospace/eventloopos-floating.toml` enables `experimental-force-floating-windows = true` and `[[on-window-detected]] run = "layout floating"`; `bin/macos-aerospace-profile --self-test`; `app/orchestrator/src/config/aerospace_profile.test.ts` | Proven |
 | Rectangle-compatible hotkeys | `config/aerospace/eventloopos-floating.toml`; `bin/macos-window-snap`; hotkey profile tests; `bin/macos-aerospace-profile` safe override support; `bin/human-demo-ready` requires `checks.rectangle_hotkey_ok=true` from a live `Ctrl-Option-Left` shared-TextEdit movement proof | Proven |
+| In-app hotkey reference | Queue toolbar/menu exposes Hotkeys; `Ctrl-Option-/` global hotkey opens the sheet; `QueueWindowRenderTests/testHotkeysSheetRendersWithoutBlanking`; `GlobalHotKeyControllerTests`; `bin/lab-mac-hotkeys-sheet-proof` proves live Mac Studio hotkey-to-sheet in 127ms | Proven by automation |
 | Event-loop hotkey conflicts avoided | `ctrl-alt-enter`, `ctrl-alt-j`, `ctrl-alt-k`, `ctrl-alt-r`, `ctrl-alt-m`, `ctrl-alt-shift-m` rejected or avoided by profile validation | Proven |
 | Exact floating geometry capture/restore | `app/orchestrator/src/workspace/aerospace.ts`; focused AeroSpace workspace tests; live human demo manifest shows `layout: "floating"` and frame `x/y/width/height` restored | Proven |
 | Missing/stale windows skipped | `app/orchestrator/src/workspace/aerospace.test.ts` stale-window coverage | Proven |

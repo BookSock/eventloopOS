@@ -1678,6 +1678,10 @@ public final class QueueViewModel: ObservableObject {
         Task { await refreshFollowsRules() }
     }
 
+    public func presentHotkeys() {
+        auxiliarySheet = .hotkeys
+    }
+
     public func dismissActivitySheetIfNeeded() {
         stopAutomaticActivityRefresh()
     }

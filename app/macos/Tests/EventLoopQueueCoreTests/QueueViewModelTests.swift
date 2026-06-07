@@ -2435,6 +2435,9 @@ final class QueueViewModelTests: XCTestCase {
         viewModel.presentFollowsRules()
         XCTAssertEqual(viewModel.auxiliarySheet, .followsRules)
 
+        viewModel.presentHotkeys()
+        XCTAssertEqual(viewModel.auxiliarySheet, .hotkeys)
+
         viewModel.dismissAuxiliarySheet()
         XCTAssertNil(viewModel.auxiliarySheet)
     }

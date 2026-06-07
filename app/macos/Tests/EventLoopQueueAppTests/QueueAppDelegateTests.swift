@@ -78,6 +78,12 @@ final class QueueAppDelegateTests: XCTestCase {
         XCTAssertFalse(delegate.presentMasterCommandFromGlobalHotkey())
     }
 
+    func testHotkeysRequestReturnsFalseWithoutViewModel() {
+        let delegate = QueueAppDelegate()
+
+        XCTAssertFalse(delegate.presentHotkeysFromGlobalHotkey())
+    }
+
     func testHarnessWindowIsConfiguredAsFloatingQueueSurface() {
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),

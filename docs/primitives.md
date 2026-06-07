@@ -65,7 +65,7 @@ Use `pnpm --silent primitives:builder-gate:release -- --json` or add
 `--manifest artifacts/primitives-builder-gate/release.json` when another agent
 needs a machine-readable release gate result.
 Current catalog summary: 18 primitives, 80 HTTP routes, 8 CLI commands, 21
-self-tests, 75 proof refs, 11 latency budgets.
+self-tests, 76 proof refs, 11 latency budgets.
 Strict readiness is expected to stay green: every cataloged primitive
 has a `self_tests` command, and the shared primitive operation-helper test
 proves typed helper coverage for every cataloged HTTP route.
@@ -904,6 +904,7 @@ Hotkeys:
 - `Ctrl-Option-H`: defer one hour
 - `Ctrl-Option-R`: restore selected paper
 - `Ctrl-Option-K`: master command
+- `Ctrl-Option-/`: hotkeys sheet
 - `Ctrl-Option-M`: manual mode / return and restore
 - `Ctrl-Option-Shift-M`: return here from manual mode
 
@@ -921,6 +922,7 @@ Proof:
 
 - Swift package tests under `app/macos/Tests`
 - `bin/lab-mac-human-demo-setup`
+- `bin/lab-mac-hotkeys-sheet-proof`
 - `docs/human-demo-walkthrough.md`
 
 Status: product dogfood surface; Swift API is not versioned as SDK.

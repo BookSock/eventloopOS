@@ -20,6 +20,7 @@ final class GlobalHotKeyController: @unchecked Sendable {
     private static let returnHereHotKeyID = UInt32(15)
     private static let toggleManualModeHotKeyID = UInt32(16)
     private static let masterCommandHotKeyID = UInt32(17)
+    private static let hotkeysHotKeyID = UInt32(18)
 
     static let registeredBindings: [GlobalHotKeyBinding] = {
         let legacyModifiers = UInt32(cmdKey | optionKey | shiftKey)
@@ -81,6 +82,11 @@ final class GlobalHotKeyController: @unchecked Sendable {
                 modifiers: superhumanModifiers,
                 actionID: masterCommandHotKeyID
             ),
+            GlobalHotKeyBinding(
+                keyCode: UInt32(kVK_ANSI_Slash),
+                modifiers: superhumanModifiers,
+                actionID: hotkeysHotKeyID
+            ),
         ]
     }()
 
@@ -94,6 +100,7 @@ final class GlobalHotKeyController: @unchecked Sendable {
     private let returnHere: @MainActor @Sendable () -> Void
     private let toggleManualMode: @MainActor @Sendable () -> Void
     private let masterCommand: @MainActor @Sendable () -> Void
+    private let hotkeys: @MainActor @Sendable () -> Void
     private let repeatDebounceInterval: TimeInterval
     private var lastDispatchByActionKey: [UInt32: Date] = [:]
 
@@ -106,6 +113,7 @@ final class GlobalHotKeyController: @unchecked Sendable {
         returnHere: @escaping @MainActor @Sendable () -> Void,
         toggleManualMode: @escaping @MainActor @Sendable () -> Void,
         masterCommand: @escaping @MainActor @Sendable () -> Void,
+        hotkeys: @escaping @MainActor @Sendable () -> Void,
         repeatDebounceInterval: TimeInterval = 0.30
     ) {
         self.advance = advance
@@ -116,6 +124,7 @@ final class GlobalHotKeyController: @unchecked Sendable {
         self.returnHere = returnHere
         self.toggleManualMode = toggleManualMode
         self.masterCommand = masterCommand
+        self.hotkeys = hotkeys
         self.repeatDebounceInterval = repeatDebounceInterval
     }
 
@@ -229,6 +238,8 @@ final class GlobalHotKeyController: @unchecked Sendable {
             return toggleManualMode
         case Self.legacyMasterCommandHotKeyID, Self.masterCommandHotKeyID:
             return masterCommand
+        case Self.hotkeysHotKeyID:
+            return hotkeys
         default:
             return nil
         }

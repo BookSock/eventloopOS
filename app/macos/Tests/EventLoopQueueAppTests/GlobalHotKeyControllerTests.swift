@@ -13,6 +13,7 @@ final class GlobalHotKeyControllerTests: XCTestCase {
         XCTAssertTrue(keyPairs.contains("\(UInt32(kVK_ANSI_H)):\(superhumanModifiers)"))
         XCTAssertTrue(keyPairs.contains("\(UInt32(kVK_ANSI_R)):\(superhumanModifiers)"))
         XCTAssertTrue(keyPairs.contains("\(UInt32(kVK_ANSI_K)):\(superhumanModifiers)"))
+        XCTAssertTrue(keyPairs.contains("\(UInt32(kVK_ANSI_Slash)):\(superhumanModifiers)"))
         XCTAssertTrue(keyPairs.contains("\(UInt32(kVK_ANSI_M)):\(superhumanModifiers)"))
         XCTAssertTrue(keyPairs.contains("\(UInt32(kVK_ANSI_J)):\(UInt32(cmdKey | optionKey | shiftKey))"))
     }
@@ -37,6 +38,10 @@ final class GlobalHotKeyControllerTests: XCTestCase {
             keyCode: UInt32(kVK_ANSI_K),
             modifiers: UInt32(controlKey | optionKey)
         )
+        let hotkeysActionID = Self.actionID(
+            keyCode: UInt32(kVK_ANSI_Slash),
+            modifiers: UInt32(controlKey | optionKey)
+        )
         let startedAt = Date(timeIntervalSince1970: 100)
 
         XCTAssertTrue(controller.dispatchHotKeyAction(hotKeyID: restoreActionID, now: startedAt))
@@ -51,6 +56,11 @@ final class GlobalHotKeyControllerTests: XCTestCase {
             now: startedAt.addingTimeInterval(0.10)
         ))
         XCTAssertEqual(counts.masterCommand, 1)
+        XCTAssertTrue(controller.dispatchHotKeyAction(
+            hotKeyID: hotkeysActionID,
+            now: startedAt.addingTimeInterval(0.12)
+        ))
+        XCTAssertEqual(counts.hotkeys, 1)
 
         XCTAssertTrue(controller.dispatchHotKeyAction(
             hotKeyID: restoreActionID,
@@ -111,6 +121,7 @@ final class GlobalHotKeyControllerTests: XCTestCase {
             returnHere: { counts.returnHere += 1 },
             toggleManualMode: { counts.toggleManualMode += 1 },
             masterCommand: { counts.masterCommand += 1 },
+            hotkeys: { counts.hotkeys += 1 },
             repeatDebounceInterval: repeatDebounceInterval
         )
     }
@@ -126,4 +137,5 @@ private final class HotKeyActionCounts {
     var returnHere = 0
     var toggleManualMode = 0
     var masterCommand = 0
+    var hotkeys = 0
 }

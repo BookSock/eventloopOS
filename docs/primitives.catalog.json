@@ -2763,13 +2763,18 @@
         "Ctrl-Option-E",
         "Ctrl-Option-Return",
         "Ctrl-Option-H",
-        "Ctrl-Option-R",
         "Ctrl-Option-K",
+        "Ctrl-Option-/",
         "Ctrl-Option-M",
         "Ctrl-Option-Shift-M"
       ],
       "code": ["app/macos/Sources/EventLoopQueueCore", "app/macos/Sources/EventLoopQueueApp"],
-      "proofs": ["docs/human-demo-walkthrough.md", "bin/lab-mac-human-demo-setup", "bin/macos-hotkey-feedback-latency"],
+      "proofs": [
+        "docs/human-demo-walkthrough.md",
+        "bin/lab-mac-human-demo-setup",
+        "bin/macos-hotkey-feedback-latency",
+        "bin/lab-mac-hotkeys-sheet-proof"
+      ],
       "self_tests": ["bin/macos-hotkey-feedback-latency --self-test"]
     },
     {

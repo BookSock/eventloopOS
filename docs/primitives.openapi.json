@@ -123,6 +123,7 @@
         "app/macos/Sources/EventLoopQueueCore"
       ],
       "x-eventloopos-proofs": [
+        "bin/lab-mac-hotkeys-sheet-proof",
         "bin/lab-mac-human-demo-setup",
         "bin/macos-hotkey-feedback-latency",
         "docs/human-demo-walkthrough.md"

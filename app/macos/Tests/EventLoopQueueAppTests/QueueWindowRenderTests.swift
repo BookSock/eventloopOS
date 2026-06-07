@@ -216,6 +216,18 @@ final class QueueWindowRenderTests: XCTestCase {
         try writePNGArtifact(cgImage, name: "follows-rules-exact-window-action.png")
     }
 
+    func testHotkeysSheetRendersWithoutBlanking() throws {
+        let view = HotkeysSheet()
+            .frame(width: 760, height: 430)
+
+        let cgImage = try render(view, width: 760, height: 430)
+
+        XCTAssertEqual(cgImage.width, 760)
+        XCTAssertEqual(cgImage.height, 430)
+        try assertQueueSurfaceRendered(in: cgImage)
+        try writePNGArtifact(cgImage, name: "hotkeys-sheet.png")
+    }
+
     private func render<Content: View>(_ view: Content, width: CGFloat, height: CGFloat) throws -> CGImage {
         let hostingView = NSHostingView(rootView:
             ZStack {

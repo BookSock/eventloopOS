@@ -243,6 +243,15 @@ struct QueueWindowView: View {
                     .help("Manage windows that should not follow every paper.")
                     .accessibilityIdentifier("queue-follows-rules-button")
 
+                    Button {
+                        viewModel.presentHotkeys()
+                    } label: {
+                        Label("Hotkeys", systemImage: "keyboard")
+                    }
+                    .help("Show eventloopOS and Rectangle-style hotkeys.")
+                    .keyboardShortcut("/", modifiers: [.control, .option])
+                    .accessibilityIdentifier("queue-hotkeys-button")
+
                     Menu {
                         Button("Auto-bind once") {
                             Task { await viewModel.runCodexAutoBindOnce() }
@@ -481,6 +490,8 @@ struct QueueWindowView: View {
                         Task { await viewModel.deleteFollowsRule(id: id) }
                     }
                 )
+            case .hotkeys:
+                HotkeysSheet()
             }
         }
         .sheet(isPresented: showPaperBinding) {

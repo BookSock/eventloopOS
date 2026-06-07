@@ -1972,7 +1972,7 @@
       "routeCount": 0,
       "cliCommandCount": 0,
       "selfTestCount": 1,
-      "proofRefCount": 3,
+      "proofRefCount": 4,
       "latencyBudgetCount": 1,
       "responsivenessCritical": true,
       "responseSchemaRouteCount": 0,
@@ -1983,6 +1983,7 @@
         "app/macos/Sources/EventLoopQueueCore"
       ],
       "proofs": [
+        "bin/lab-mac-hotkeys-sheet-proof",
         "bin/lab-mac-human-demo-setup",
         "bin/macos-hotkey-feedback-latency",
         "docs/human-demo-walkthrough.md"

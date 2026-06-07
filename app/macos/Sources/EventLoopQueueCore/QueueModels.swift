@@ -5,6 +5,7 @@ public enum QueueAuxiliarySheet: String, Identifiable, Equatable, Sendable {
     case onboarding
     case activity
     case followsRules
+    case hotkeys
 
     public var id: String {
         rawValue

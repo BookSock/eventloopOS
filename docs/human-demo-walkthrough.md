@@ -108,6 +108,7 @@ Latest known-good proof:
 - Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper and proves restore-hotkey HUD feedback within the configured budget.
 - Master Command proof: readiness presses `Ctrl-Option-K` from another app and proves the Queue window opens a Master Command sheet with `Route to Master`, `Start Task`, `Rerank`, `Broadcast`, and the current task hint.
 - Rectangle hotkey proof: readiness presses `Ctrl-Option-Left` on the shared TextEdit window and proves it moves to the expected left-half frame.
+- Hotkeys sheet proof: live lab proof presses `Ctrl-Option-/` from another app and verifies the Queue opens a Hotkeys sheet with Queue and Windows command rows.
 - Manual Mode feedback proof: readiness proves `Ctrl-Option-M` enter feedback and `Ctrl-Option-Shift-M` return feedback within the configured budget.
 
 ## Starting State
@@ -128,6 +129,7 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 ## Hotkeys
 
 - Restore selected paper: `Ctrl-Option-R`
+- Show Hotkeys sheet: `Ctrl-Option-/`
 - Master command: `Ctrl-Option-K`
 - Enter Manual Mode: `Ctrl-Option-M`
 - Return from Manual Mode + restore saved paper: `Ctrl-Option-M`
@@ -138,48 +140,50 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 
 ## Walkthrough
 
-1. Click `Review Demo Customer Reply` in Queue.
-2. Press `Ctrl-Option-R`.
-3. Confirm Customer Chrome and the shared TextEdit come forward on `demo-customer`.
+1. Press `Ctrl-Option-/`.
+2. Confirm the Hotkeys sheet opens with Queue and Windows command rows, then close it with `Escape` or the `x`.
+3. Click `Review Demo Customer Reply` in Queue.
+4. Press `Ctrl-Option-R`.
+5. Confirm Customer Chrome and the shared TextEdit come forward on `demo-customer`.
    Queue should immediately acknowledge `Restoring paper: Review Demo Customer Reply...`, then show green feedback starting with `Showing paper: Review Demo Customer Reply...`.
    The top-of-screen reminder HUD should briefly echo the restore feedback, then return to the current paper reminder.
-4. Move the shared TextEdit window with `Ctrl-Option-Left`, or drag it manually toward the center/left.
+6. Move the shared TextEdit window with `Ctrl-Option-Left`, or drag it manually toward the center/left.
    It starts on the right side, so `Ctrl-Option-Right` may look like nothing happened.
-5. Wait 2 to 3 seconds. Ambient autosave should remember the moved position without pressing Done/Defer/Advance.
+7. Wait 2 to 3 seconds. Ambient autosave should remember the moved position without pressing Done/Defer/Advance.
    The Queue footer should keep showing a compact `feedback=...` status so the demo is not silent while actions complete.
-6. Click `Review Demo Metrics Review` in Queue.
-7. Press `Ctrl-Option-R`.
-8. Confirm the same TextEdit window moves to the metrics position and Metrics Chrome appears.
+8. Click `Review Demo Metrics Review` in Queue.
+9. Press `Ctrl-Option-R`.
+10. Confirm the same TextEdit window moves to the metrics position and Metrics Chrome appears.
    Queue should show green feedback for `Review Demo Metrics Review`.
-9. Click `Review Demo Customer Reply` again.
-10. Press `Ctrl-Option-R`.
-11. Confirm the same TextEdit window returns to the customer position.
+11. Click `Review Demo Customer Reply` again.
+12. Press `Ctrl-Option-R`.
+13. Confirm the same TextEdit window returns to the customer position.
     Queue should again remind you what decision the Customer paper needs.
-12. Confirm the setup proof reports background window containment passed:
+14. Confirm the setup proof reports background window containment passed:
     Metrics Chrome was intentionally moved into the Customer paper and
     eventloopOS moved it back to the Metrics paper.
-13. Confirm the Queue contains `Codex needs human input`.
+15. Confirm the Queue contains `Codex needs human input`.
     Click it once if you want to inspect it: the detail should say the Codex
     session needs human approval and the recommended action should be resume
     agent. Then click `Review Demo Customer Reply` again before continuing.
-14. Confirm the Queue detail starts with a compact briefing strip that repeats
+16. Confirm the Queue detail starts with a compact briefing strip that repeats
     the current paper title, exact decision needed, task id, priority, and
     session/binding state.
-15. Confirm the top-of-screen paper reminder HUD shows the current paper title
+17. Confirm the top-of-screen paper reminder HUD shows the current paper title
     and decision while you work in Chrome/TextEdit. It should not take focus or
     block mouse clicks.
-16. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
-17. Press `Ctrl-Option-K`.
-18. Confirm the Master Command sheet opens on the Queue window with `Route to Master`, `Start Task`, `Rerank`, and `Broadcast`.
+18. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
+19. Press `Ctrl-Option-K`.
+20. Confirm the Master Command sheet opens on the Queue window with `Route to Master`, `Start Task`, `Rerank`, and `Broadcast`.
     The Task Hint field should default to the current paper's task, such as `task_demo_customer`.
     Close the sheet with `Escape`, the `Close` button, or the top-right `x` so the hands-on demo stays clean.
-19. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
+21. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
     confirm the top HUD and Queue footer acknowledge `No paper selected.`
     instead of staying silent.
-20. Press `Ctrl-Option-M` to enter Manual Mode.
-21. Open or move a dummy app.
-22. Press `Ctrl-Option-M`.
-23. Confirm eventloopOS restores the saved paper context and Queue remains usable.
+22. Press `Ctrl-Option-M` to enter Manual Mode.
+23. Open or move a dummy app.
+24. Press `Ctrl-Option-M`.
+25. Confirm eventloopOS restores the saved paper context and Queue remains usable.
 
 ## What To Report
 
@@ -193,6 +197,7 @@ Report any of these as product issues:
 - `Codex needs human input` is missing or does not explain why approval is needed,
 - green `Showing paper: ...` feedback is missing, stale, or too hard to see after restore,
 - Queue is hard to find or blocks work,
+- Hotkeys sheet is missing, slow, clipped, or does not include the command you needed,
 - Rectangle-style hotkeys feel surprising or conflict with another common app,
 - Manual Mode return restores the wrong workspace or loses a user-opened window unexpectedly.
 - Queue/HUD feedback stays stale or does not acknowledge restore/manual actions.
