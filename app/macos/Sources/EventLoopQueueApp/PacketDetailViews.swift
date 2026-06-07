@@ -223,22 +223,24 @@ struct PacketDetail: View {
                     Button {
                         moveToNext()
                     } label: {
-                        Label("Skip / Next", systemImage: "arrow.right.circle")
+                        Label("Skip", systemImage: "arrow.right.circle")
                     }
                     .controlSize(.large)
                     .disabled(paperActionInFlight)
                     .help("Leave this paper in the queue and pull the next paper.")
+                    .accessibilityLabel("Skip / Next")
                     .accessibilityIdentifier("queue-skip-next-button")
 
                     Button {
                         doneAndNext()
                     } label: {
-                        Label("Done / Next", systemImage: "checkmark.circle")
+                        Label("Done", systemImage: "checkmark.circle")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
                     .disabled(paperActionInFlight)
                     .help("Save this workspace for the task, mark this paper done, then pull the next paper.")
+                    .accessibilityLabel("Done / Next")
                     .accessibilityIdentifier("queue-done-next-button")
                 }
             } else {

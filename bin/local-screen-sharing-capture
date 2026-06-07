@@ -12,6 +12,7 @@ Environment:
   SCREEN_SHARING_OWNER   default: Screen Sharing
   SCREEN_SHARING_TITLE   optional title substring, e.g. Zeus
   SCREEN_SHARING_RAISE   default: 0; set 1 to raise/focus before capture
+  EVENTLOOPOS_ALLOW_SCREEN_SHARING_FOCUS default: 0; must be 1 with SCREEN_SHARING_RAISE=1
   SCREEN_SHARING_CAPTURE_ENGINE default: coregraphics; set screencapture only if explicitly wanted
   SCREEN_SHARING_ASSERT_NO_FOCUS default: 1; fail if no-raise capture changes frontmost app
 EOF
@@ -28,6 +29,7 @@ owner="${SCREEN_SHARING_OWNER:-Screen Sharing}"
 title="${SCREEN_SHARING_TITLE:-}"
 allow_requested="${EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE:-0}"
 raise_requested="${SCREEN_SHARING_RAISE:-${EVENTLOOPOS_SCREEN_SHARING_RAISE:-0}}"
+allow_focus_requested="${EVENTLOOPOS_ALLOW_SCREEN_SHARING_FOCUS:-${SCREEN_SHARING_ALLOW_FOCUS:-0}}"
 capture_engine="${SCREEN_SHARING_CAPTURE_ENGINE:-coregraphics}"
 assert_no_focus_requested="${SCREEN_SHARING_ASSERT_NO_FOCUS:-1}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -66,6 +68,24 @@ case "$raise_requested" in
     exit 2
     ;;
 esac
+
+case "$allow_focus_requested" in
+  1|true|TRUE|yes|YES|on|ON)
+    allow_focus=1
+    ;;
+  0|false|FALSE|no|NO|off|OFF|"")
+    allow_focus=0
+    ;;
+  *)
+    echo "invalid EVENTLOOPOS_ALLOW_SCREEN_SHARING_FOCUS: $allow_focus_requested (use 0 or 1)" >&2
+    exit 2
+    ;;
+esac
+
+if [[ "$do_raise" == "1" && "$allow_focus" != "1" ]]; then
+  echo "local Screen Sharing focus disabled: set EVENTLOOPOS_ALLOW_SCREEN_SHARING_FOCUS=1 with SCREEN_SHARING_RAISE=1 to opt in" >&2
+  exit 2
+fi
 
 case "$capture_engine" in
   coregraphics|screencapture)
@@ -282,6 +302,7 @@ cat >"$manifest" <<EOF
   "owner_filter": "$owner",
   "title_filter": "$title",
   "raise_requested": $(if [[ "$do_raise" == "1" ]]; then echo true; else echo false; fi),
+  "focus_allowed": $(if [[ "$allow_focus" == "1" ]]; then echo true; else echo false; fi),
   "raise_exit": $raise_exit,
   "assert_no_focus": $(if [[ "$assert_no_focus" == "1" ]]; then echo true; else echo false; fi),
   "frontmost_before": $(json_string "$frontmost_before"),

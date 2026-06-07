@@ -84,9 +84,10 @@ app before/after capture. No-raise captures fail if they change the frontmost
 app; set `SCREEN_SHARING_ASSERT_NO_FOCUS=0` only when you want to disable that
 guard.
 Set `SCREEN_SHARING_RAISE=1` only when you explicitly want the helper to raise
-and focus Screen Sharing before capture. The default capture engine is
-CoreGraphics; set `SCREEN_SHARING_CAPTURE_ENGINE=screencapture` only when you
-explicitly want the old system `screencapture -l` behavior.
+and focus Screen Sharing before capture; it still fails closed unless
+`EVENTLOOPOS_ALLOW_SCREEN_SHARING_FOCUS=1` is set too. The default capture
+engine is CoreGraphics; set `SCREEN_SHARING_CAPTURE_ENGINE=screencapture` only
+when you explicitly want the old system `screencapture -l` behavior.
 Treat the direct local helper as manual debugging only: no-raise capture records
 and fails focus changes, but it can still briefly change focus on some macOS
 states. The helper itself refuses to run unless
