@@ -53,6 +53,8 @@ allow_local_screen_sharing_capture="${EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAP
 remote="${lab_user}@${lab_host}"
 run_dir="artifacts/lab-runs/$(date +%Y%m%d-%H%M%S)-human-demo"
 manifest="$run_dir/manifest.json"
+controller_focus_log="$run_dir/controller-focus-samples.tsv"
+controller_focus_monitor_pid=""
 
 case "$profile" in
   ""|*[!A-Za-z0-9_.-]*)
@@ -108,24 +110,86 @@ controller_frontmost_app() {
 record_controller_focus() {
   local before="$1"
   local after="$2"
-  node - "$manifest" "$before" "$after" <<'NODE'
+  local timeline_path="$3"
+  node - "$manifest" "$before" "$after" "$timeline_path" <<'NODE'
 const fs = require("node:fs");
-const [manifestPath, before, after] = process.argv.slice(2);
+const [manifestPath, before, after, timelinePath] = process.argv.slice(2);
 const observed = Boolean(before && after);
 const isScreenSharing = (value) => /Screen Sharing/i.test(String(value ?? ""));
+const samples = fs.existsSync(timelinePath)
+  ? fs.readFileSync(timelinePath, "utf8")
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => {
+        const [ts, ...rest] = line.split("\t");
+        return { ts, app: rest.join("\t") };
+      })
+  : [];
+const uniqueApps = Array.from(new Set(samples.map((sample) => sample.app).filter(Boolean)));
+const screenSharingSamples = samples.filter((sample) => isScreenSharing(sample.app));
+const screenSharingObserved = screenSharingSamples.length > 0;
+const timelineScreenSharingBecameFrontmost = screenSharingObserved && !isScreenSharing(before);
+const timeline = {
+  ok: !timelineScreenSharingBecameFrontmost,
+  skipped: false,
+  log_path: timelinePath,
+  sample_count: samples.length,
+  first_app: samples[0]?.app ?? null,
+  last_app: samples.at(-1)?.app ?? null,
+  unique_apps: uniqueApps,
+  changed: uniqueApps.length > 1,
+  screen_sharing_observed: screenSharingObserved,
+  screen_sharing_became_frontmost: timelineScreenSharingBecameFrontmost,
+  screen_sharing_samples: screenSharingSamples.slice(0, 10),
+};
 const focus = {
-  ok: !(observed && !isScreenSharing(before) && isScreenSharing(after)),
+  ok: !(observed && !isScreenSharing(before) && isScreenSharing(after)) && timeline.ok,
   observed,
   frontmost_before: before || null,
   frontmost_after: after || null,
   changed: observed ? before !== after : false,
   screen_sharing_became_frontmost: observed && !isScreenSharing(before) && isScreenSharing(after),
+  timeline_screen_sharing_became_frontmost: timelineScreenSharingBecameFrontmost,
+  timeline,
 };
 const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
 manifest.controller_focus = focus;
 fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+if (!focus.ok) {
+  process.exitCode = 1;
+}
 NODE
 }
+
+start_controller_focus_monitor() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    return 0
+  fi
+  : >"$controller_focus_log"
+  (
+    while :; do
+      ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      app="$(controller_frontmost_app)"
+      printf "%s\t%s\n" "$ts" "$app" >>"$controller_focus_log"
+      sleep 0.5
+    done
+  ) &
+  controller_focus_monitor_pid="$!"
+}
+
+stop_controller_focus_monitor() {
+  if [[ -n "$controller_focus_monitor_pid" ]]; then
+    kill "$controller_focus_monitor_pid" >/dev/null 2>&1 || true
+    wait "$controller_focus_monitor_pid" >/dev/null 2>&1 || true
+    controller_focus_monitor_pid=""
+  fi
+}
+
+cleanup() {
+  stop_controller_focus_monitor
+}
+trap cleanup EXIT
 
 ensure_aerospace_ready() {
   ssh_remote "bash -lc 'set -euo pipefail
@@ -208,6 +272,7 @@ mkdir -p "$run_dir"
 printf "%s\n" "$remote" >"$run_dir/remote.txt"
 printf "%s\n" "$remote_repo" >"$run_dir/remote-repo.txt"
 controller_frontmost_before="$(controller_frontmost_app)"
+start_controller_focus_monitor
 
 echo "human demo sync: $remote:$remote_repo"
 bin/lab-mac-sync
@@ -246,6 +311,7 @@ if [[ "$skip_screenshot" == "0" ]]; then
 fi
 
 controller_frontmost_after="$(controller_frontmost_app)"
-record_controller_focus "$controller_frontmost_before" "$controller_frontmost_after"
+stop_controller_focus_monitor
+record_controller_focus "$controller_frontmost_before" "$controller_frontmost_after" "$controller_focus_log"
 
 cat "$manifest"

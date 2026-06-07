@@ -58,10 +58,11 @@ helper refuses to run without that same opt-in, records frontmost app
 before/after capture, and fails no-raise captures that change it. Raising or
 focusing Screen Sharing requires both `SCREEN_SHARING_RAISE=1` and
 `EVENTLOOPOS_ALLOW_SCREEN_SHARING_FOCUS=1`.
-Demo setup/readiness manifests also include `controller_focus`; readiness
-samples the controller Mac's frontmost app throughout the run and fails
+Demo setup/readiness manifests also include `controller_focus`; both sample the
+controller Mac's frontmost app throughout the run. Readiness fails
 `controller_screen_sharing_focus_ok` if Screen Sharing becomes frontmost after
-starting from another app.
+starting from another app, and setup marks its `controller_focus.ok=false` for
+the same transient focus leak.
 Run `bin/human-demo-ready` after the queue app has Accessibility permission. By
 default the latest proof must be no older than 24 hours; use
 `EVENTLOOPOS_HUMAN_DEMO_PROOF_MAX_AGE_HOURS` or
