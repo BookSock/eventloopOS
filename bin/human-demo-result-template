@@ -43,6 +43,8 @@ if (args.includes("--self-test")) {
         final_handoff_current_feedback_ok: true,
         queue_briefing_strip_visible: true,
         paper_reminder_hud_visible: true,
+        paper_reminder_hud_return_target_visible: true,
+        final_handoff_paper_reminder_hud_return_target_visible: true,
         queue_latency_ok: true,
         workspace_latency_ok: true,
         paper_reminder_feedback_ok: true,
@@ -104,6 +106,7 @@ if (args.includes("--self-test")) {
   assertIncludes(rendered, "Automated proof: ok=true, queue_count=3, ambient_autosave=true, new_window_autosave=true, foreign_window_containment=true, agent_spawn_window_containment=true, agent_spawn_app=Google Chrome, agent_waiting_paper=true");
   assertIncludes(rendered, "- Starting state on demo-customer with Queue visible: pass - automated proof: readiness screenshot and queue state green");
   assertIncludes(rendered, "- Moving shared TextEdit is remembered after 2-3 seconds: pass - automated proof: ambient autosave saved moved shared window");
+  assertIncludes(rendered, "- Desktop paper reminder HUD is visible: pass - automated proof: readiness saw desktop HUD return target");
   assertIncludes(rendered, "- Rectangle hotkeys feel usable:");
   assertIncludes(rendered, "- Manual Mode entry/return works: pass - automated proof: Manual Mode hotkey feedback gate green");
   assertEqual(defaultOutputPath(manifest), "artifacts/human-demo-results/20260603T202742Z-human-demo-result.md");
@@ -374,7 +377,14 @@ function automatedPassFailValues({ manifest, ready, readiness }) {
   setIf(values, "Agent-spawned window containment proof passed", proofs.agent_spawn_window_containment?.ok === true, `agent-spawned ${proofs.agent_spawn_window_containment?.spawned_app ?? "window"} redirected home`);
   setIf(values, "Waiting agent paper appears in queue", proofs.agent_waiting_paper?.ok === true, "waiting agent run created human-needed paper");
   setIf(values, "Paper briefing strip shows current decision", ready?.checks?.queue_briefing_strip_visible === true, "readiness saw Queue briefing strip");
-  setIf(values, "Desktop paper reminder HUD is visible", ready?.checks?.paper_reminder_hud_visible === true, "readiness saw desktop HUD");
+  setIf(
+    values,
+    "Desktop paper reminder HUD is visible",
+    ready?.checks?.paper_reminder_hud_visible === true
+      && ready?.checks?.paper_reminder_hud_return_target_visible === true
+      && ready?.checks?.final_handoff_paper_reminder_hud_return_target_visible === true,
+    "readiness saw desktop HUD return target",
+  );
   setIf(values, "Hotkeys sheet opens and is readable", ready?.checks?.hotkeys_sheet_ok === true, "Hotkeys sheet proof green");
   setIf(values, "Manual Mode entry/return works", ready?.checks?.manual_mode_feedback_ok === true, "Manual Mode hotkey feedback gate green");
   setIf(values, "Master Command opens with current task hint", ready?.checks?.master_command_hotkey_ok === true, "Master Command hotkey proof green");

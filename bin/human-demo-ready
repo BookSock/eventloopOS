@@ -220,6 +220,8 @@ const checks = {
   queue_briefing_strip_visible: skipScreenshot || screenshotStage?.result?.queue_briefing_strip_present === true,
   paper_reminder_hud_visible: skipScreenshot || screenshotStage?.result?.paper_reminder_hud_present === true
     || screenshot?.lab_capture_summary?.queue_app?.paper_reminder_hud_present === true,
+  paper_reminder_hud_return_target_visible: skipScreenshot
+    || screenshotStage?.result?.paper_reminder_hud_focus_hint_present === true,
   stale_workspace_status_hidden: skipScreenshot || screenshotStage?.result?.stale_workspace_status_banner_present === false,
   lineage_error_hidden: skipScreenshot || screenshotStage?.result?.raw_lineage_error_present === false,
   queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
@@ -234,6 +236,8 @@ const checks = {
   final_handoff_screen_sharing_capture_ok: skipScreenshot || finalHandoffScreenshot?.ok === true,
   final_handoff_queue_briefing_strip_visible: skipScreenshot || finalHandoffStage?.result?.queue_briefing_strip_present === true,
   final_handoff_paper_reminder_hud_visible: skipScreenshot || finalHandoffStage?.result?.paper_reminder_hud_present === true,
+  final_handoff_paper_reminder_hud_return_target_visible: skipScreenshot
+    || finalHandoffStage?.result?.paper_reminder_hud_focus_hint_present === true,
   final_handoff_stale_workspace_status_hidden: skipScreenshot || finalHandoffStage?.result?.stale_workspace_status_banner_present === false,
   final_handoff_lineage_error_hidden: skipScreenshot || finalHandoffStage?.result?.raw_lineage_error_present === false,
   final_handoff_feedback_refresh_ok: skipScreenshot || finalHandoffStage?.result?.paper_feedback_refresh?.ok === true,
@@ -734,7 +738,10 @@ const briefingStrip = queueBriefingStripStatus({
   taskId: customer.task_id,
   priority: customer.priority_score,
 });
-const paperReminderHud = paperReminderHudStatus();
+const paperReminderHud = paperReminderHudStatus({
+  title: customer.review_packet?.title ?? customer.title,
+  focusHint: "task_session_" + customer.task_id,
+});
 const staleWorkspaceStatusBanner = staleWorkspaceStatusBannerStatus();
 const rawLineageError = rawLineageErrorStatus();
 const expectedFeedbackTitle = String(customer.review_packet?.title ?? customer.title ?? "Review Demo Customer Reply");
@@ -756,6 +763,9 @@ console.log(JSON.stringify({
   paper_reminder_hud_present: paperReminderHud.present,
   paper_reminder_hud_source: paperReminderHud.source,
   paper_reminder_hud_title: paperReminderHud.title,
+  paper_reminder_hud_text: paperReminderHud.text,
+  paper_reminder_hud_focus_hint_present: paperReminderHud.focus_hint_present,
+  paper_reminder_hud_focus_hint_line: paperReminderHud.focus_hint_line,
   paper_reminder_hud_error: paperReminderHud.error,
   stale_workspace_status_banner_present: staleWorkspaceStatusBanner.present,
   stale_workspace_status_banner_line: staleWorkspaceStatusBanner.line,
@@ -1001,42 +1011,134 @@ function isQueueWindow(window) {
   return String(window?.["window-title"] ?? "") === "eventloopOS Queue";
 }
 
-function paperReminderHudStatus() {
+function paperReminderHudStatus(expected = {}) {
   const aerospaceMatch = currentAerospaceWindows()
     .find((window) => String(window?.["window-title"] ?? "") === "eventloopOS Paper Reminder");
-  if (aerospaceMatch) {
-    return {
-      present: true,
-      source: "aerospace",
-      title: String(aerospaceMatch["window-title"] ?? ""),
-    };
-  }
   try {
     const script = [
       "tell application \\"System Events\\"",
       "  if not (exists process \\"eventloopOS Queue\\") then return \\"missing:process\\"",
       "  tell process \\"eventloopOS Queue\\"",
       "    repeat with candidateWindow in windows",
-      "      set windowName to name of candidateWindow as string",
-      "      if windowName is \\"eventloopOS Paper Reminder\\" then return \\"ok:\\" & windowName",
+      "      set windowName to \\"\\"",
+      "      try",
+      "        set windowName to name of candidateWindow as string",
+      "      end try",
+      "      if windowName is \\"eventloopOS Paper Reminder\\" then",
+      "        set hudTitle to \\"\\"",
+      "        set hudDecision to \\"\\"",
+      "        set hudFocusHint to \\"\\"",
+      "        set hudContext to \\"\\"",
+      "        set allLines to {}",
+      "        set flattenedElements to entire contents of candidateWindow",
+      "        set elementCount to count of flattenedElements",
+      "        if elementCount is greater than 120 then set elementCount to 120",
+      "        repeat with elementIndex from 1 to elementCount",
+      "          set candidateElement to item elementIndex of flattenedElements",
+      "          set identifierText to \\"\\"",
+      "          set nameText to \\"\\"",
+      "          set valueText to \\"\\"",
+      "          try",
+      "            set identifierText to (value of attribute \\"AXIdentifier\\" of candidateElement) as string",
+      "          end try",
+      "          try",
+      "            set nameText to name of candidateElement as string",
+      "          end try",
+      "          try",
+      "            set valueText to value of candidateElement as string",
+      "          end try",
+      "          set readableText to nameText",
+      "          if readableText is \\"\\" then set readableText to valueText",
+      "          set end of allLines to identifierText & \\" \\" & readableText",
+      "          if identifierText is \\"paper-reminder-title\\" then set hudTitle to readableText",
+      "          if identifierText is \\"paper-reminder-decision\\" then set hudDecision to readableText",
+      "          if identifierText is \\"paper-reminder-focus-hint\\" then set hudFocusHint to readableText",
+      "          if identifierText is \\"paper-reminder-context\\" then set hudContext to readableText",
+      "          if hudFocusHint is \\"\\" and readableText contains \\"Return target:\\" then set hudFocusHint to readableText",
+      "        end repeat",
+      "        set AppleScript's text item delimiters to linefeed",
+      "        set flattenedText to allLines as string",
+      "        set AppleScript's text item delimiters to tab",
+      "        return \\"present:parts:\\" & ({windowName, hudTitle, hudDecision, hudFocusHint, hudContext, flattenedText} as string)",
+      "      end if",
       "    end repeat",
       "  end tell",
       "end tell",
       "return \\"missing:window\\"",
     ].join("\\n");
     const output = execFileSync("osascript", [], { input: script, encoding: "utf8" }).trim();
-    if (output.startsWith("ok:")) {
-      return { present: true, source: "system_events", title: output.slice(3) };
+    if (output.startsWith("present:parts:")) {
+      const [windowTitle, hudTitle, hudDecision, hudFocusHint, hudContext, flattenedText] =
+        output.slice("present:parts:".length).split("\\t");
+      return paperReminderHudLineStatus({
+        source: "system_events",
+        title: windowTitle,
+        text: [hudTitle, hudDecision, hudFocusHint, hudContext, flattenedText].filter(Boolean).join(" | "),
+        focusHint: hudFocusHint,
+        expected,
+      });
     }
-    return { present: false, source: "system_events", title: "", error: output };
+    if (aerospaceMatch) {
+      return {
+        present: true,
+        source: "aerospace",
+        title: String(aerospaceMatch["window-title"] ?? ""),
+        text: "",
+        focus_hint_present: false,
+        focus_hint_line: "",
+        error: output === "missing:window" ? "system_events_missing_window_text" : output,
+      };
+    }
+    return { present: false, source: "system_events", title: "", text: "", focus_hint_present: false, focus_hint_line: "", error: output };
   } catch (error) {
+    if (aerospaceMatch) {
+      return {
+        present: true,
+        source: "aerospace",
+        title: String(aerospaceMatch["window-title"] ?? ""),
+        text: "",
+        focus_hint_present: false,
+        focus_hint_line: "",
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
     return {
       present: false,
       source: "system_events",
       title: "",
+      text: "",
+      focus_hint_present: false,
+      focus_hint_line: "",
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function paperReminderHudLineStatus({ source, title, text, focusHint, expected }) {
+  const normalizedText = String(text ?? "").replace(/\\s+/g, " ").trim();
+  const normalizedFocusHint = String(focusHint ?? "").replace(/\\s+/g, " ").trim();
+  const comparableText = briefingComparableText(normalizedText);
+  const missing = expectedPaperReminderHudParts(expected)
+    .filter((part) => !comparableText.includes(briefingComparableText(part)));
+  return {
+    present: true,
+    source,
+    title: String(title ?? ""),
+    text: normalizedText,
+    focus_hint_present: missing.length === 0,
+    focus_hint_line: normalizedFocusHint,
+    error: missing.length > 0 ? "paper reminder HUD missing expected parts: " + missing.join(", ") : undefined,
+  };
+}
+
+function expectedPaperReminderHudParts(expected) {
+  const title = String(expected?.title ?? "").trim();
+  const focusHint = String(expected?.focusHint ?? "").trim();
+  return [
+    title,
+    "Return target",
+    focusHint,
+  ].filter(Boolean);
 }
 
 function staleWorkspaceStatusBannerStatus() {
@@ -1932,7 +2034,7 @@ function renderReadyMarkdown(manifest) {
 - Waiting-agent paper proof: ${latest?.agent_waiting_paper_ok === true ? "ok" : "missing"}
 - Fresh screenshot capture: ${screenshot?.output ?? "skipped"}${screenshot?.capture_mode ? ` mode=${screenshot.capture_mode}` : ""}${screenshot?.image?.dimensions ? ` (${screenshot.image.dimensions}, ${screenshot.image.bytes} bytes)` : ""}
 - Queue briefing strip: ${manifest.checks?.queue_briefing_strip_visible === true ? "visible" : "missing"}
-- Desktop paper reminder HUD: ${manifest.checks?.paper_reminder_hud_visible === true ? "visible" : "missing"}
+- Desktop paper reminder HUD: ${manifest.checks?.paper_reminder_hud_visible === true ? "visible" : "missing"}${manifest.checks?.paper_reminder_hud_return_target_visible === true ? " return-target=visible" : " return-target=missing"}
 - Stale workspace status banners: ${manifest.checks?.stale_workspace_status_hidden === true && manifest.checks?.final_handoff_stale_workspace_status_hidden === true ? "absent" : "present"}
 - Raw lineage error: ${manifest.checks?.lineage_error_hidden === true && manifest.checks?.final_handoff_lineage_error_hidden === true ? "absent" : "present"}
 - Final handoff stage: ${finalHandoff?.ok === true ? "ok" : finalHandoff?.skipped ? "skipped" : "failed"}
@@ -2042,6 +2144,7 @@ function runSelfTest() {
     checks: {
       queue_briefing_strip_visible: true,
       paper_reminder_hud_visible: true,
+      paper_reminder_hud_return_target_visible: true,
       stale_workspace_status_hidden: true,
       final_handoff_stale_workspace_status_hidden: true,
       lineage_error_hidden: true,
@@ -2102,6 +2205,7 @@ function runSelfTest() {
   });
   assert.ok(readyMarkdown.includes("Suggested result file: artifacts/human-demo-results/demo-human-demo-result.md"));
   assert.ok(readyMarkdown.includes("Desktop HUD feedback: artifacts/lab-runs/ready/paper-reminder-feedback.json"));
+  assert.ok(readyMarkdown.includes("Desktop paper reminder HUD: visible return-target=visible"));
   assert.ok(readyMarkdown.includes("Master Command hotkey: artifacts/lab-runs/ready/master-command-hotkey.json"));
   assert.ok(readyMarkdown.includes("Hotkeys sheet: artifacts/lab-runs/ready/hotkeys-sheet.json"));
   assert.ok(readyMarkdown.includes("Rectangle hotkey: artifacts/lab-runs/ready/rectangle-hotkey.json (required) ctrl-option-left->left-half 140ms"));
@@ -2246,6 +2350,9 @@ function runSelfTest() {
   assert.ok(labDemoScreenshotStageScript().includes("paper_feedback_refresh"));
   assert.ok(labDemoScreenshotStageScript().includes("queue_harness_feedback"));
   assert.ok(labDemoScreenshotStageScript().includes("eventloopOS Paper Reminder"));
+  assert.ok(labDemoScreenshotStageScript().includes("paper-reminder-focus-hint"));
+  assert.ok(labDemoScreenshotStageScript().includes("paper_reminder_hud_focus_hint_present"));
+  assert.ok(labDemoScreenshotStageScript().includes("expectedPaperReminderHudParts"));
   assert.ok(labDemoScreenshotStageScript().includes('windowName is not \\"eventloopOS Paper Reminder\\"'));
   assert.ok(labDemoScreenshotStageScript().includes("matchingBriefingLine"));
   assert.ok(labDemoScreenshotStageScript().includes("queue-paper-briefing-strip"));
@@ -2283,6 +2390,7 @@ function runSelfTest() {
     checks: {
       queue_briefing_strip_visible: true,
       paper_reminder_hud_visible: true,
+      paper_reminder_hud_return_target_visible: true,
       stale_workspace_status_hidden: true,
       final_handoff_stale_workspace_status_hidden: true,
     },
