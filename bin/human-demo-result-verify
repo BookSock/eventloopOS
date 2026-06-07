@@ -153,7 +153,8 @@ function verifyResultText(text) {
     queue: fieldOrSectionText(lines, "Readiness queue latency:", "Readiness workspace latency:").trim(),
     workspace: fieldOrSectionText(lines, "Readiness workspace latency:", "Readiness desktop HUD feedback:").trim(),
     paperReminderFeedback: fieldOrSectionText(lines, "Readiness desktop HUD feedback:", "Readiness master command hotkey:").trim(),
-    masterCommandHotkey: fieldOrSectionText(lines, "Readiness master command hotkey:", "Readiness manual mode feedback:").trim(),
+    masterCommandHotkey: fieldOrSectionText(lines, "Readiness master command hotkey:", "Readiness Rectangle hotkey:").trim(),
+    rectangleHotkey: fieldOrSectionText(lines, "Readiness Rectangle hotkey:", "Readiness manual mode feedback:").trim(),
     manualModeFeedback: fieldOrSectionText(lines, "Readiness manual mode feedback:", "Readiness hotkey latency:").trim(),
     hotkey: fieldOrSectionText(lines, "Readiness hotkey latency:", "Automated proof:").trim(),
   };
@@ -175,6 +176,7 @@ function verifyResultText(text) {
     readiness_workspace_latency_ok: latencyLineOk(readinessLatency.workspace),
     readiness_desktop_hud_feedback_ok: latencyLineOk(readinessLatency.paperReminderFeedback),
     readiness_master_command_hotkey_ok: latencyLineOk(readinessLatency.masterCommandHotkey),
+    readiness_rectangle_hotkey_ok: latencyLineOk(readinessLatency.rectangleHotkey),
     readiness_manual_mode_feedback_ok: latencyLineOk(readinessLatency.manualModeFeedback),
     readiness_hotkey_latency_ok: latencyLineOk(readinessLatency.hotkey),
     friction_has_no_blocker: frictionHasNoBlocker(friction),
@@ -420,6 +422,7 @@ Readiness queue latency: artifacts/lab-runs/ready/queue-latency.json ok=true req
 Readiness workspace latency: artifacts/lab-runs/ready/workspace-latency.json ok=true required=true
 Readiness desktop HUD feedback: artifacts/lab-runs/ready/paper-reminder-feedback.json ok=true required=true
 Readiness master command hotkey: artifacts/lab-runs/ready/master-command-hotkey.json ok=true required=true
+Readiness Rectangle hotkey: artifacts/lab-runs/ready/rectangle-hotkey.json ok=true required=true
 Readiness manual mode feedback: artifacts/lab-runs/ready/manual-mode-enter-feedback.json ok=true required=true
 Readiness hotkey latency: artifacts/lab-runs/ready/hotkey-latency.json ok=true required=true
 Automated proof: ok=true, queue_count=3, ambient_autosave=true, agent_waiting_paper=true
@@ -442,6 +445,8 @@ Ship/block decision: ship
   assert.ok(missingLatency.failed_checks.includes("readiness_queue_latency_ok"));
   const missingMasterCommandHotkey = verifyResultText(filled.replace("Readiness master command hotkey: artifacts/lab-runs/ready/master-command-hotkey.json ok=true required=true\n", ""));
   assert.ok(missingMasterCommandHotkey.failed_checks.includes("readiness_master_command_hotkey_ok"));
+  const missingRectangleHotkey = verifyResultText(filled.replace("Readiness Rectangle hotkey: artifacts/lab-runs/ready/rectangle-hotkey.json ok=true required=true\n", ""));
+  assert.ok(missingRectangleHotkey.failed_checks.includes("readiness_rectangle_hotkey_ok"));
   const missingManualModeFeedback = verifyResultText(filled.replace("Readiness manual mode feedback: artifacts/lab-runs/ready/manual-mode-enter-feedback.json ok=true required=true\n", ""));
   assert.ok(missingManualModeFeedback.failed_checks.includes("readiness_manual_mode_feedback_ok"));
   const missingScreenshot = verifyResultText(filled.replace("Screenshot: artifacts/lab-runs/demo/screen-sharing.png", "Screenshot: "));

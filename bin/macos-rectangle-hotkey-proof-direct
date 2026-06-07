@@ -1,0 +1,342 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: bin/macos-rectangle-hotkey-proof-direct [--app-name NAME] [--title-substring TEXT] [--hotkey ctrl-option-left] [--expect left-half] [--budget-ms N] [--manifest PATH]
+
+Focus a real macOS window, press a Rectangle-style AeroSpace hotkey, and verify
+the focused window reaches the expected snap frame.
+EOF
+}
+
+app_name="${EVENTLOOPOS_RECTANGLE_HOTKEY_APP:-TextEdit}"
+title_substring="${EVENTLOOPOS_RECTANGLE_HOTKEY_TITLE:-eventloopOS Human Demo Shared Notes}"
+hotkey="${EVENTLOOPOS_RECTANGLE_HOTKEY_CHORD:-ctrl-option-left}"
+expected_action="${EVENTLOOPOS_RECTANGLE_HOTKEY_EXPECT:-left-half}"
+budget_ms="${EVENTLOOPOS_RECTANGLE_HOTKEY_BUDGET_MS:-1500}"
+manifest="artifacts/macos-rectangle-hotkey/$(date -u +%Y%m%dT%H%M%SZ)/manifest.json"
+tolerance="${EVENTLOOPOS_RECTANGLE_HOTKEY_TOLERANCE:-36}"
+
+while (($#)); do
+  case "$1" in
+    --app-name) app_name="${2:-}"; shift 2 ;;
+    --title-substring) title_substring="${2:-}"; shift 2 ;;
+    --hotkey) hotkey="${2:-}"; shift 2 ;;
+    --expect) expected_action="${2:-}"; shift 2 ;;
+    --budget-ms) budget_ms="${2:-}"; shift 2 ;;
+    --manifest) manifest="${2:-}"; shift 2 ;;
+    --tolerance) tolerance="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) echo "unknown argument: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+case "$budget_ms" in (*[!0-9]*|"") echo "--budget-ms must be a positive integer" >&2; exit 2 ;; esac
+case "$tolerance" in (*[!0-9]*|"") echo "--tolerance must be a non-negative integer" >&2; exit 2 ;; esac
+if ((budget_ms <= 0)); then
+  echo "--budget-ms must be positive" >&2
+  exit 2
+fi
+
+key_code_for() {
+  case "$1" in
+    left) echo 123 ;;
+    right) echo 124 ;;
+    down) echo 125 ;;
+    up) echo 126 ;;
+    c) echo 8 ;;
+    return|enter) echo 36 ;;
+    *) echo "unsupported hotkey key: $1" >&2; return 2 ;;
+  esac
+}
+
+hotkey_key="${hotkey##*[-+]}"
+key_code="$(key_code_for "$hotkey_key")"
+modifier_list=()
+modifier_prefix="${hotkey%[-+]*}"
+if [[ "$modifier_prefix" != "$hotkey" ]]; then
+  IFS='-+' read -r -a modifier_parts <<<"$modifier_prefix"
+  for modifier in "${modifier_parts[@]}"; do
+    case "$modifier" in
+      ctrl|control) modifier_list+=("control down") ;;
+      option|alt) modifier_list+=("option down") ;;
+      shift) modifier_list+=("shift down") ;;
+      cmd|command) modifier_list+=("command down") ;;
+      *) echo "unsupported hotkey modifier: $modifier" >&2; exit 2 ;;
+    esac
+  done
+fi
+modifier_part=""
+if ((${#modifier_list[@]} > 0)); then
+  joined=""
+  for item in "${modifier_list[@]}"; do
+    if [[ -n "$joined" ]]; then joined+=", "; fi
+    joined+="$item"
+  done
+  modifier_part=" using {$joined}"
+fi
+
+now_ms() {
+  node -e 'process.stdout.write(String(Date.now()))'
+}
+
+json_string() {
+  node -e 'process.stdout.write(JSON.stringify(process.argv[1] ?? ""))' "$1"
+}
+
+json_frame() {
+  node -e '
+const [x, y, width, height] = process.argv.slice(1).map(Number);
+process.stdout.write(JSON.stringify({ x, y, width, height }));
+' "$1" "$2" "$3" "$4"
+}
+
+desktop_frame() {
+  swift - <<'SWIFT'
+import AppKit
+
+guard let screen = NSScreen.main else {
+  exit(1)
+}
+
+let screenFrame = screen.frame
+let visibleFrame = screen.visibleFrame
+let x = Int(visibleFrame.minX.rounded())
+let y = Int((screenFrame.maxY - visibleFrame.maxY).rounded())
+let width = Int(visibleFrame.width.rounded())
+let height = Int(visibleFrame.height.rounded())
+print("\(x)\t\(y)\t\(width)\t\(height)")
+SWIFT
+}
+
+expected_frame() {
+  node - "$expected_action" "$1" "$2" "$3" "$4" <<'NODE'
+const [action, rawX, rawY, rawWidth, rawHeight] = process.argv.slice(2);
+const desktop = {
+  x: Number(rawX),
+  y: Number(rawY),
+  width: Number(rawWidth),
+  height: Number(rawHeight),
+};
+const halfWidth = Math.floor(desktop.width / 2);
+const halfHeight = Math.floor(desktop.height / 2);
+const centerWidth = Math.floor(desktop.width * 0.72);
+const centerHeight = Math.floor(desktop.height * 0.72);
+let frame;
+switch (action) {
+  case "left-half":
+    frame = { x: desktop.x, y: desktop.y, width: halfWidth, height: desktop.height };
+    break;
+  case "right-half":
+    frame = { x: desktop.x + halfWidth, y: desktop.y, width: desktop.width - halfWidth, height: desktop.height };
+    break;
+  case "top-half":
+    frame = { x: desktop.x, y: desktop.y, width: desktop.width, height: halfHeight };
+    break;
+  case "bottom-half":
+    frame = { x: desktop.x, y: desktop.y + halfHeight, width: desktop.width, height: desktop.height - halfHeight };
+    break;
+  case "maximize":
+    frame = desktop;
+    break;
+  case "center":
+    frame = {
+      x: desktop.x + Math.floor((desktop.width - centerWidth) / 2),
+      y: desktop.y + Math.floor((desktop.height - centerHeight) / 2),
+      width: centerWidth,
+      height: centerHeight,
+    };
+    break;
+  default:
+    console.error(`unsupported expected action: ${action}`);
+    process.exit(2);
+}
+process.stdout.write(`${frame.x}\t${frame.y}\t${frame.width}\t${frame.height}`);
+NODE
+}
+
+focus_window() {
+  osascript - "$app_name" "$title_substring" <<'APPLESCRIPT'
+on run argv
+  set appNeedle to item 1 of argv
+  set titleNeedle to item 2 of argv
+  tell application "System Events"
+    if not (exists process appNeedle) then error "process not found: " & appNeedle
+    tell process appNeedle
+      set frontmost to true
+      repeat with candidateWindow in windows
+        set windowName to ""
+        try
+          set windowName to name of candidateWindow as string
+        end try
+        if titleNeedle is "" or windowName contains titleNeedle then
+          perform action "AXRaise" of candidateWindow
+          return windowName
+        end if
+      end repeat
+    end tell
+  end tell
+  error "window not found: " & titleNeedle
+end run
+APPLESCRIPT
+}
+
+read_window_frame() {
+  osascript - "$app_name" "$title_substring" <<'APPLESCRIPT'
+on run argv
+  set appNeedle to item 1 of argv
+  set titleNeedle to item 2 of argv
+  tell application "System Events"
+    if not (exists process appNeedle) then error "process not found: " & appNeedle
+    tell process appNeedle
+      repeat with candidateWindow in windows
+        set windowName to ""
+        try
+          set windowName to name of candidateWindow as string
+        end try
+        if titleNeedle is "" or windowName contains titleNeedle then
+          set windowPosition to position of candidateWindow
+          set windowSize to size of candidateWindow
+          return ((item 1 of windowPosition) as string) & tab & ((item 2 of windowPosition) as string) & tab & ((item 1 of windowSize) as string) & tab & ((item 2 of windowSize) as string) & tab & windowName
+        end if
+      end repeat
+    end tell
+  end tell
+  error "window not found: " & titleNeedle
+end run
+APPLESCRIPT
+}
+
+press_hotkey() {
+  osascript -e "tell application \"System Events\" to key code $key_code$modifier_part"
+}
+
+frame_close() {
+  local ax="$1" ay="$2" aw="$3" ah="$4" ex="$5" ey="$6" ew="$7" eh="$8"
+  node - "$tolerance" "$ax" "$ay" "$aw" "$ah" "$ex" "$ey" "$ew" "$eh" <<'NODE'
+const [tolerance, ax, ay, aw, ah, ex, ey, ew, eh] = process.argv.slice(2).map(Number);
+const ok = [Math.abs(ax - ex), Math.abs(ay - ey), Math.abs(aw - ew), Math.abs(ah - eh)].every((delta) => delta <= tolerance);
+process.exit(ok ? 0 : 1);
+NODE
+}
+
+started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+mkdir -p "$(dirname "$manifest")"
+
+set +e
+focus_output="$(focus_window 2>&1)"
+focus_status=$?
+set -e
+if ((focus_status != 0)); then
+  cat >"$manifest" <<EOF
+{
+  "schema_version": 1,
+  "kind": "eventloopos.macos_rectangle_hotkey",
+  "ok": false,
+  "failed_checks": ["focus_window"],
+  "started_at": $(json_string "$started_at"),
+  "finished_at": $(json_string "$(date -u +%Y-%m-%dT%H:%M:%SZ)"),
+  "app_name": $(json_string "$app_name"),
+  "title_substring": $(json_string "$title_substring"),
+  "hotkey": $(json_string "$hotkey"),
+  "expected_action": $(json_string "$expected_action"),
+  "focus_error": $(json_string "$focus_output")
+}
+EOF
+  cat "$manifest"
+  exit 1
+fi
+
+IFS=$'\t' read -r desktop_x desktop_y desktop_width desktop_height <<<"$(desktop_frame)"
+IFS=$'\t' read -r expected_x expected_y expected_width expected_height <<<"$(expected_frame "$desktop_x" "$desktop_y" "$desktop_width" "$desktop_height")"
+before_raw="$(read_window_frame)"
+IFS=$'\t' read -r before_x before_y before_width before_height before_title <<<"$before_raw"
+
+start_ms="$(now_ms)"
+press_error=""
+set +e
+press_hotkey 2>/tmp/eventloopos-rectangle-hotkey-press.err
+press_status=$?
+if ((press_status != 0)); then
+  press_error="$(cat /tmp/eventloopos-rectangle-hotkey-press.err 2>/dev/null || true)"
+fi
+rm -f /tmp/eventloopos-rectangle-hotkey-press.err
+set -e
+
+ok=false
+last_error=""
+last_raw=""
+after_x="$before_x"
+after_y="$before_y"
+after_width="$before_width"
+after_height="$before_height"
+after_title="$before_title"
+latency_ms=""
+if ((press_status == 0)); then
+  deadline_ms=$((start_ms + budget_ms * 3))
+  while true; do
+    current_ms="$(now_ms)"
+    if ((current_ms > deadline_ms)); then
+      last_error="timed out waiting for frame"
+      break
+    fi
+    set +e
+    last_raw="$(read_window_frame 2>&1)"
+    read_status=$?
+    set -e
+    if ((read_status == 0)); then
+      IFS=$'\t' read -r after_x after_y after_width after_height after_title <<<"$last_raw"
+      if frame_close "$after_x" "$after_y" "$after_width" "$after_height" "$expected_x" "$expected_y" "$expected_width" "$expected_height"; then
+        ok=true
+        latency_ms=$((current_ms - start_ms))
+        break
+      fi
+    else
+      last_error="$last_raw"
+    fi
+    sleep 0.05
+  done
+else
+  last_error="$press_error"
+fi
+
+failed_checks=()
+if [[ "$ok" != "true" ]]; then
+  failed_checks+=("expected_frame_reached")
+fi
+if ((press_status != 0)); then
+  failed_checks+=("press_hotkey")
+fi
+failed_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' "${failed_checks[@]}")"
+finished_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+cat >"$manifest" <<EOF
+{
+  "schema_version": 1,
+  "kind": "eventloopos.macos_rectangle_hotkey",
+  "ok": $ok,
+  "failed_checks": $failed_json,
+  "started_at": $(json_string "$started_at"),
+  "finished_at": $(json_string "$finished_at"),
+  "app_name": $(json_string "$app_name"),
+  "title_substring": $(json_string "$title_substring"),
+  "focused_window_title": $(json_string "$focus_output"),
+  "hotkey": $(json_string "$hotkey"),
+  "expected_action": $(json_string "$expected_action"),
+  "budget_ms": $budget_ms,
+  "tolerance_px": $tolerance,
+  "latency_ms": $(if [[ -n "$latency_ms" ]]; then echo "$latency_ms"; else echo "null"; fi),
+  "desktop_frame": $(json_frame "$desktop_x" "$desktop_y" "$desktop_width" "$desktop_height"),
+  "expected_frame": $(json_frame "$expected_x" "$expected_y" "$expected_width" "$expected_height"),
+  "before_frame": $(json_frame "$before_x" "$before_y" "$before_width" "$before_height"),
+  "after_frame": $(json_frame "$after_x" "$after_y" "$after_width" "$after_height"),
+  "last_error": $(json_string "$last_error")
+}
+EOF
+
+cat "$manifest"
+if [[ "$ok" == "true" ]]; then
+  exit 0
+fi
+exit 1

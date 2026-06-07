@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 
@@ -22,6 +22,9 @@ const hotkeyLatencyEnabled = !skipHotkeyLatency && (hotkeyLatencyRequested || pr
 const skipMasterCommandHotkey = args.includes("--skip-master-command-hotkey") || process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY === "0";
 const masterCommandHotkeyRequested = args.includes("--master-command-hotkey") || process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY === "1";
 const masterCommandHotkeyEnabled = !skipMasterCommandHotkey && (masterCommandHotkeyRequested || process.platform === "darwin");
+const skipRectangleHotkey = args.includes("--skip-rectangle-hotkey") || process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY === "0";
+const rectangleHotkeyRequested = args.includes("--rectangle-hotkey") || process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY === "1";
+const rectangleHotkeyEnabled = !skipRectangleHotkey && (rectangleHotkeyRequested || process.platform === "darwin");
 const skipPaperReminderFeedback = args.includes("--skip-paper-reminder-feedback") || process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK === "0";
 const paperReminderFeedbackRequested = args.includes("--paper-reminder-feedback") || process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK === "1";
 const paperReminderFeedbackEnabled = !skipPaperReminderFeedback && (paperReminderFeedbackRequested || process.platform === "darwin");
@@ -66,6 +69,11 @@ Environment:
   EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY_TARGET=local runs proof on this Mac instead of the lab Mac
   EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY_CHORD default: ctrl-option-k
   EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_EXPECT_TASK_HINT default: task_demo_customer
+  EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY=1 forces Rectangle hotkey proof on
+  EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY=0 skips Rectangle hotkey proof
+  EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_TARGET=local runs proof on this Mac instead of the lab Mac
+  EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_CHORD default: ctrl-option-left
+  EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_EXPECT default: left-half
   EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK=1 forces desktop HUD feedback proof on
   EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK=0 skips desktop HUD feedback proof
   EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_TARGET=local runs proof on this Mac instead of the lab Mac
@@ -96,6 +104,7 @@ const runDir = path.join("artifacts", "lab-runs", `${utcStamp()}-human-demo-read
 mkdirSync(path.join(repoRoot, runDir, "steps"), { recursive: true });
 
 const startedAt = new Date().toISOString();
+const controllerFocusMonitor = startControllerFocusMonitor(runDir);
 const env = {
   ...process.env,
   LAB_DOGFOOD_PROFILE: process.env.LAB_DOGFOOD_PROFILE ?? "lab-human-demo",
@@ -120,6 +129,7 @@ if (!skipScreenshot) {
 }
 const hotkeyLatencyManifestPath = path.join(runDir, "hotkey-latency.json");
 const masterCommandHotkeyManifestPath = path.join(runDir, "master-command-hotkey.json");
+const rectangleHotkeyManifestPath = path.join(runDir, "rectangle-hotkey.json");
 const paperReminderFeedbackManifestPath = path.join(runDir, "paper-reminder-feedback.json");
 const manualModeResetFeedbackManifestPath = path.join(runDir, "manual-mode-reset-feedback.json");
 const manualModeEnterFeedbackManifestPath = path.join(runDir, "manual-mode-enter-feedback.json");
@@ -136,6 +146,10 @@ const workspaceLatency = workspaceLatencyEnabled
   : undefined;
 const workspaceLatencyManifest = workspaceLatency ? readJsonIfPresent(workspaceLatencyManifestPath) : undefined;
 const hotkeyProofsCanRun = skipScreenshot || screenshotStage?.ok === true;
+const rectangleHotkey = rectangleHotkeyEnabled && hotkeyProofsCanRun
+  ? runRectangleHotkeyStep(rectangleHotkeyManifestPath, env)
+  : undefined;
+const rectangleHotkeyManifest = rectangleHotkey ? readJsonIfPresent(rectangleHotkeyManifestPath) : undefined;
 const paperReminderFeedback = paperReminderFeedbackEnabled && hotkeyProofsCanRun
   ? runPaperReminderFeedbackStep(paperReminderFeedbackManifestPath, env)
   : undefined;
@@ -170,7 +184,8 @@ if (!skipScreenshot) {
   finalHandoffScreenshot = runScreenshotStep(path.join(runDir, "screen-sharing-final.png"), env, "human-demo-final");
 }
 const controllerFocusAfter = controllerFrontmostApp();
-const controllerFocus = controllerFocusSummary(controllerFocusBefore, controllerFocusAfter);
+const controllerFocusTimeline = stopControllerFocusMonitor(controllerFocusMonitor);
+const controllerFocus = controllerFocusSummary(controllerFocusBefore, controllerFocusAfter, controllerFocusTimeline);
 const finalHandoffFeedback = String(
   finalHandoffStage?.result?.queue_harness_feedback
     ?? finalHandoffStage?.result?.queue_harness_status
@@ -198,6 +213,7 @@ const checks = {
   workspace_latency_ok: !workspaceLatencyEnabled || (workspaceLatency?.status === 0 && workspaceLatencyManifest?.ok === true),
   paper_reminder_feedback_ok: !paperReminderFeedbackEnabled || (paperReminderFeedback?.status === 0 && paperReminderFeedbackManifest?.ok === true),
   master_command_hotkey_ok: !masterCommandHotkeyEnabled || (masterCommandHotkey?.status === 0 && masterCommandHotkeyManifest?.ok === true),
+  rectangle_hotkey_ok: !rectangleHotkeyEnabled || (rectangleHotkey?.status === 0 && rectangleHotkeyManifest?.ok === true),
   hotkey_feedback_latency_ok: !hotkeyLatencyEnabled || (hotkeyLatency?.status === 0 && hotkeyLatencyManifest?.ok === true),
   manual_mode_feedback_ok: !manualModeFeedbackEnabled || manualModeFeedback?.ok === true,
   final_handoff_stage_ok: skipScreenshot || finalHandoffStage?.ok === true,
@@ -227,6 +243,7 @@ const manifest = {
   workspace_latency_required: workspaceLatencyEnabled,
   paper_reminder_feedback_required: paperReminderFeedbackEnabled,
   master_command_hotkey_required: masterCommandHotkeyEnabled,
+  rectangle_hotkey_required: rectangleHotkeyEnabled,
   hotkey_latency_required: hotkeyLatencyEnabled,
   manual_mode_feedback_required: manualModeFeedbackEnabled,
   screenshot_target: screenshotTarget,
@@ -321,6 +338,21 @@ const manifest = {
     skipped: true,
     reason: masterCommandHotkeyEnabled && !hotkeyProofsCanRun ? "demo_stage_failed" : undefined,
   },
+  rectangle_hotkey: rectangleHotkey ? {
+    ok: rectangleHotkey.status === 0 && rectangleHotkeyManifest?.ok === true,
+    manifest_path: rectangleHotkeyManifestPath,
+    exit_code: rectangleHotkey.status,
+    failed_checks: rectangleHotkeyManifest?.failed_checks ?? [],
+    hotkey: rectangleHotkeyManifest?.hotkey,
+    expected_action: rectangleHotkeyManifest?.expected_action,
+    latency_ms: rectangleHotkeyManifest?.latency_ms,
+    before_frame: rectangleHotkeyManifest?.before_frame,
+    after_frame: rectangleHotkeyManifest?.after_frame,
+    expected_frame: rectangleHotkeyManifest?.expected_frame,
+  } : {
+    skipped: true,
+    reason: rectangleHotkeyEnabled && !hotkeyProofsCanRun ? "demo_stage_failed" : undefined,
+  },
   hotkey_feedback_latency: hotkeyLatency ? {
     ok: hotkeyLatency.status === 0 && hotkeyLatencyManifest?.ok === true,
     manifest_path: hotkeyLatencyManifestPath,
@@ -353,6 +385,7 @@ const output = {
   workspace_latency_required: manifest.workspace_latency_required,
   paper_reminder_feedback_required: manifest.paper_reminder_feedback_required,
   master_command_hotkey_required: manifest.master_command_hotkey_required,
+  rectangle_hotkey_required: manifest.rectangle_hotkey_required,
   hotkey_latency_required: manifest.hotkey_latency_required,
   manual_mode_feedback_required: manifest.manual_mode_feedback_required,
   git: manifest.git,
@@ -365,6 +398,7 @@ const output = {
   workspace_latency: manifest.workspace_latency,
   paper_reminder_feedback: manifest.paper_reminder_feedback,
   master_command_hotkey: manifest.master_command_hotkey,
+  rectangle_hotkey: manifest.rectangle_hotkey,
   hotkey_feedback_latency: manifest.hotkey_feedback_latency,
   manual_mode_feedback: manifest.manual_mode_feedback,
   controller_focus: manifest.controller_focus,
@@ -460,20 +494,120 @@ function controllerFrontmostApp() {
   };
 }
 
-function controllerFocusSummary(before, after) {
+function startControllerFocusMonitor(relativeRunDir) {
+  if (process.platform !== "darwin") {
+    return {
+      skipped: true,
+      reason: "not_macos",
+      log_path: null,
+      child: null,
+    };
+  }
+  const logPath = path.join(relativeRunDir, "controller-focus-samples.tsv");
+  const absoluteLogPath = path.join(repoRoot, logPath);
+  writeFileSync(absoluteLogPath, "", "utf8");
+  const child = spawn("/bin/bash", ["-lc", `
+while :; do
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  app="$(osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null || true)"
+  printf "%s\\t%s\\n" "$ts" "$app" >>"$EVENTLOOPOS_CONTROLLER_FOCUS_LOG"
+  sleep 0.5
+done
+`], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      EVENTLOOPOS_CONTROLLER_FOCUS_LOG: absoluteLogPath,
+    },
+    stdio: "ignore",
+  });
+  child.unref();
+  return {
+    skipped: false,
+    log_path: logPath,
+    child,
+  };
+}
+
+function stopControllerFocusMonitor(monitor) {
+  if (!monitor || monitor.skipped) {
+    return {
+      skipped: true,
+      reason: monitor?.reason ?? "not_started",
+      log_path: monitor?.log_path ?? null,
+      ok: true,
+    };
+  }
+  try {
+    monitor.child.kill("SIGTERM");
+  } catch {
+    // Monitor may have already exited during process teardown.
+  }
+  spawnSync("sleep", ["0.1"], { cwd: repoRoot });
+  const absoluteLogPath = path.join(repoRoot, monitor.log_path);
+  let rows = [];
+  try {
+    rows = readFileSync(absoluteLogPath, "utf8")
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => {
+        const [timestamp, ...appParts] = line.split("\t");
+        return {
+          timestamp,
+          app: appParts.join("\t") || null,
+        };
+      });
+  } catch {
+    rows = [];
+  }
+  return summarizeControllerFocusSamples(monitor.log_path, rows);
+}
+
+function summarizeControllerFocusSamples(logPath, rows) {
+  const apps = rows.map((row) => row.app).filter(Boolean);
+  const uniqueApps = Array.from(new Set(apps));
+  const screenSharingSamples = rows
+    .filter((row) => isScreenSharingApp(row.app))
+    .slice(0, 10);
+  const firstApp = apps[0] ?? null;
+  const lastApp = apps.at(-1) ?? null;
+  const screenSharingObserved = screenSharingSamples.length > 0;
+  const screenSharingBecameFrontmost = Boolean(firstApp)
+    && !isScreenSharingApp(firstApp)
+    && screenSharingObserved;
+  return {
+    ok: !screenSharingBecameFrontmost,
+    skipped: false,
+    log_path: logPath,
+    sample_count: rows.length,
+    first_app: firstApp,
+    last_app: lastApp,
+    unique_apps: uniqueApps,
+    changed: uniqueApps.length > 1,
+    screen_sharing_observed: screenSharingObserved,
+    screen_sharing_became_frontmost: screenSharingBecameFrontmost,
+    screen_sharing_samples: screenSharingSamples,
+  };
+}
+
+function controllerFocusSummary(before, after, timeline = undefined) {
   const observed = before?.ok === true && after?.ok === true && !before?.skipped && !after?.skipped;
   const beforeApp = before?.app ?? null;
   const afterApp = after?.app ?? null;
   const screenSharingBecameFrontmost = observed
     && !isScreenSharingApp(beforeApp)
     && isScreenSharingApp(afterApp);
+  const timelineScreenSharingBecameFrontmost = timeline?.screen_sharing_observed === true
+    && !isScreenSharingApp(beforeApp);
   return {
-    ok: !screenSharingBecameFrontmost,
+    ok: !screenSharingBecameFrontmost && !timelineScreenSharingBecameFrontmost,
     observed,
     frontmost_before: beforeApp,
     frontmost_after: afterApp,
     changed: observed ? beforeApp !== afterApp : false,
     screen_sharing_became_frontmost: screenSharingBecameFrontmost,
+    timeline_screen_sharing_became_frontmost: timelineScreenSharingBecameFrontmost,
+    timeline,
     before,
     after,
   };
@@ -1236,6 +1370,22 @@ function runMasterCommandHotkeyStep(manifestPath, envOverride) {
   ], envOverride);
 }
 
+function runRectangleHotkeyStep(manifestPath, envOverride) {
+  const proofArgs = rectangleHotkeyArgs();
+  if (process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_TARGET === "local") {
+    return runStep("rectangle hotkey", "bin/macos-rectangle-hotkey-proof-direct", [
+      "--manifest",
+      manifestPath,
+      ...proofArgs,
+    ], envOverride);
+  }
+  return runStep("rectangle hotkey", "bin/lab-mac-rectangle-hotkey-proof", [
+    "--manifest",
+    manifestPath,
+    ...proofArgs,
+  ], envOverride);
+}
+
 function masterCommandHotkeyArgs() {
   const chord = process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY_CHORD ?? "ctrl-option-k";
   const args = [
@@ -1244,6 +1394,22 @@ function masterCommandHotkeyArgs() {
   ];
   const expectedTaskHint = process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_EXPECT_TASK_HINT ?? "task_demo_customer";
   if (expectedTaskHint) args.push("--expect-task-hint", expectedTaskHint);
+  return args;
+}
+
+function rectangleHotkeyArgs() {
+  const chord = process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_CHORD ?? "ctrl-option-left";
+  const expected = process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_EXPECT ?? "left-half";
+  const args = [
+    "--hotkey",
+    chord,
+    "--expect",
+    expected,
+  ];
+  const title = process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_TITLE ?? "eventloopOS Human Demo Shared Notes";
+  if (title) args.push("--title-substring", title);
+  const budgetMs = process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_BUDGET_MS;
+  if (budgetMs) args.push("--budget-ms", budgetMs);
   return args;
 }
 
@@ -1620,6 +1786,7 @@ function renderReadyMarkdown(manifest) {
   const workspaceLatency = manifest.workspace_latency;
   const paperReminderFeedback = manifest.paper_reminder_feedback;
   const masterCommandHotkey = manifest.master_command_hotkey;
+  const rectangleHotkey = manifest.rectangle_hotkey;
   const hotkey = manifest.hotkey_feedback_latency;
   const manualModeFeedback = manifest.manual_mode_feedback;
   const controllerFocus = manifest.controller_focus;
@@ -1654,6 +1821,7 @@ function renderReadyMarkdown(manifest) {
 - Workspace latency: ${workspaceLatency?.manifest_path ?? "skipped"}${manifest.workspace_latency_required ? " (required)" : ""}
 - Desktop HUD feedback: ${paperReminderFeedback?.manifest_path ?? "skipped"}${manifest.paper_reminder_feedback_required ? " (required)" : ""}
 - Master Command hotkey: ${masterCommandHotkey?.manifest_path ?? "skipped"}${manifest.master_command_hotkey_required ? " (required)" : ""}
+- Rectangle hotkey: ${rectangleHotkey?.manifest_path ?? "skipped"}${manifest.rectangle_hotkey_required ? " (required)" : ""}${rectangleHotkey?.ok === true && rectangleHotkey?.hotkey ? ` ${rectangleHotkey.hotkey}->${rectangleHotkey.expected_action} ${rectangleHotkey.latency_ms ?? ""}ms` : ""}
 - Hotkey feedback latency: ${hotkey?.manifest_path ?? "skipped"}${manifest.hotkey_latency_required ? " (required)" : ""}
 - Manual Mode enter feedback: ${manualModeFeedback?.enter?.manifest_path ?? "skipped"}${manifest.manual_mode_feedback_required ? " (required)" : ""}
 - Manual Mode return-start feedback: ${manualModeFeedback?.return_start?.manifest_path ?? "skipped"}${manifest.manual_mode_feedback_required ? " (required)" : ""}
@@ -1676,7 +1844,15 @@ function controllerFocusLine(focus) {
   if (!focus) return "unknown";
   if (focus.observed !== true) return "not observed";
   const transition = `${focus.frontmost_before ?? ""} -> ${focus.frontmost_after ?? ""}`;
-  return focus.ok === true ? `ok (${transition})` : `changed (${transition})`;
+  const sampleSummary = focus.timeline?.sample_count
+    ? ` samples=${focus.timeline.sample_count} log=${focus.timeline.log_path}`
+    : "";
+  const screenSharingSummary = focus.timeline?.screen_sharing_observed === true
+    ? " Screen Sharing observed"
+    : "";
+  return focus.ok === true
+    ? `ok (${transition})${sampleSummary}`
+    : `changed (${transition})${screenSharingSummary}${sampleSummary}`;
 }
 
 function utcStamp() {
@@ -1751,6 +1927,7 @@ function runSelfTest() {
     queue_latency_required: true,
     workspace_latency_required: true,
     master_command_hotkey_required: true,
+    rectangle_hotkey_required: true,
     hotkey_latency_required: false,
     manual_mode_feedback_required: true,
     latest_human_demo: {
@@ -1782,6 +1959,13 @@ function runSelfTest() {
     workspace_latency: { manifest_path: "artifacts/lab-runs/ready/workspace-latency.json" },
     paper_reminder_feedback: { manifest_path: "artifacts/lab-runs/ready/paper-reminder-feedback.json" },
     master_command_hotkey: { manifest_path: "artifacts/lab-runs/ready/master-command-hotkey.json" },
+    rectangle_hotkey: {
+      ok: true,
+      manifest_path: "artifacts/lab-runs/ready/rectangle-hotkey.json",
+      hotkey: "ctrl-option-left",
+      expected_action: "left-half",
+      latency_ms: 140,
+    },
     hotkey_feedback_latency: { skipped: true },
     manual_mode_feedback: {
       enter: { manifest_path: "artifacts/lab-runs/ready/manual-mode-enter-feedback.json" },
@@ -1792,6 +1976,7 @@ function runSelfTest() {
   assert.ok(readyMarkdown.includes("Suggested result file: artifacts/human-demo-results/demo-human-demo-result.md"));
   assert.ok(readyMarkdown.includes("Desktop HUD feedback: artifacts/lab-runs/ready/paper-reminder-feedback.json"));
   assert.ok(readyMarkdown.includes("Master Command hotkey: artifacts/lab-runs/ready/master-command-hotkey.json"));
+  assert.ok(readyMarkdown.includes("Rectangle hotkey: artifacts/lab-runs/ready/rectangle-hotkey.json (required) ctrl-option-left->left-half 140ms"));
   assert.ok(readyMarkdown.includes("Waiting-agent paper proof: ok"));
   assert.ok(readyMarkdown.includes("Final handoff stage: ok"));
   assert.ok(readyMarkdown.includes("Final handoff feedback: Showing paper: Review Demo Customer Reply."));
@@ -1834,12 +2019,25 @@ function runSelfTest() {
     frontmost_after: "Google Chrome",
     changed: false,
     screen_sharing_became_frontmost: false,
+    timeline_screen_sharing_became_frontmost: false,
+    timeline: undefined,
     before: { ok: true, app: "Google Chrome" },
     after: { ok: true, app: "Google Chrome" },
   });
   assert.equal(controllerFocusSummary(
     { ok: true, app: "Google Chrome" },
     { ok: true, app: "Screen Sharing" },
+  ).ok, false);
+  const focusSamples = summarizeControllerFocusSamples("samples.tsv", [
+    { timestamp: "2026-06-03T10:00:00Z", app: "Google Chrome" },
+    { timestamp: "2026-06-03T10:00:01Z", app: "Screen Sharing" },
+    { timestamp: "2026-06-03T10:00:02Z", app: "Google Chrome" },
+  ]);
+  assert.equal(focusSamples.screen_sharing_became_frontmost, true);
+  assert.equal(controllerFocusSummary(
+    { ok: true, app: "Google Chrome" },
+    { ok: true, app: "Google Chrome" },
+    focusSamples,
   ).ok, false);
   assert.equal(controllerFocusLine({
     ok: true,
@@ -1864,6 +2062,32 @@ function runSelfTest() {
   assert.deepEqual(masterCommandHotkeyArgs(), ["--hotkey", "ctrl-option-shift-k", "--expect-task-hint", "task_demo_metrics"]);
   delete process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_HOTKEY_CHORD;
   delete process.env.EVENTLOOPOS_HUMAN_DEMO_MASTER_COMMAND_EXPECT_TASK_HINT;
+  assert.deepEqual(rectangleHotkeyArgs(), [
+    "--hotkey",
+    "ctrl-option-left",
+    "--expect",
+    "left-half",
+    "--title-substring",
+    "eventloopOS Human Demo Shared Notes",
+  ]);
+  process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_CHORD = "ctrl-option-c";
+  process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_EXPECT = "center";
+  process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_TITLE = "Notes";
+  process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_BUDGET_MS = "2000";
+  assert.deepEqual(rectangleHotkeyArgs(), [
+    "--hotkey",
+    "ctrl-option-c",
+    "--expect",
+    "center",
+    "--title-substring",
+    "Notes",
+    "--budget-ms",
+    "2000",
+  ]);
+  delete process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_CHORD;
+  delete process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_EXPECT;
+  delete process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_TITLE;
+  delete process.env.EVENTLOOPOS_HUMAN_DEMO_RECTANGLE_HOTKEY_BUDGET_MS;
   assert.deepEqual(paperReminderFeedbackArgs(), ["--hotkey", "ctrl-option-r", "--expect", "Review Demo Customer Reply"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_PAPER_REMINDER_FEEDBACK_HOTKEY = "ctrl-option-h";
   assert.deepEqual(paperReminderFeedbackArgs(), ["--hotkey", "ctrl-option-h"]);

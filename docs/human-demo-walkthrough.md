@@ -58,9 +58,10 @@ helper refuses to run without that same opt-in, records frontmost app
 before/after capture, and fails no-raise captures that change it. Raising or
 focusing Screen Sharing requires both `SCREEN_SHARING_RAISE=1` and
 `EVENTLOOPOS_ALLOW_SCREEN_SHARING_FOCUS=1`.
-Demo setup/readiness manifests also include `controller_focus`; a readiness
-run fails `controller_screen_sharing_focus_ok` if the controller Mac changes
-from another app to Screen Sharing during the run.
+Demo setup/readiness manifests also include `controller_focus`; readiness
+samples the controller Mac's frontmost app throughout the run and fails
+`controller_screen_sharing_focus_ok` if Screen Sharing becomes frontmost after
+starting from another app.
 Run `bin/human-demo-ready` after the queue app has Accessibility permission. By
 default the latest proof must be no older than 24 hours; use
 `EVENTLOOPOS_HUMAN_DEMO_PROOF_MAX_AGE_HOURS` or
@@ -83,6 +84,9 @@ or `--skip-paper-reminder-feedback` only while bootstrapping permission setup.
 The readiness gate also presses `Ctrl-Option-M` and `Ctrl-Option-Shift-M` to
 prove Manual Mode entry and return produce visible feedback before any slow
 layout save or restore finishes.
+It also focuses the shared TextEdit window, presses `Ctrl-Option-Left`, and
+verifies the window reaches the expected left-half Rectangle-style frame before
+the final handoff restore puts the demo back on Customer.
 `READY.md` also names the suggested human result file so the final checklist
 does not accidentally reuse an older blank artifact.
 Use `EVENTLOOPOS_HUMAN_DEMO_QUEUE_LATENCY_TARGET=local` or
@@ -103,6 +107,7 @@ Latest known-good proof:
 - Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture; readiness also proves live Queue feedback within the configured budget.
 - Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper and proves restore-hotkey HUD feedback within the configured budget.
 - Master Command proof: readiness presses `Ctrl-Option-K` from another app and proves the Queue window opens a Master Command sheet with `Route to Master`, `Start Task`, `Rerank`, `Broadcast`, and the current task hint.
+- Rectangle hotkey proof: readiness presses `Ctrl-Option-Left` on the shared TextEdit window and proves it moves to the expected left-half frame.
 - Manual Mode feedback proof: readiness proves `Ctrl-Option-M` enter feedback and `Ctrl-Option-Shift-M` return feedback within the configured budget.
 
 ## Starting State
@@ -224,6 +229,7 @@ Readiness queue latency:  ok= required=
 Readiness workspace latency:  ok= required=
 Readiness desktop HUD feedback:  ok= required=
 Readiness master command hotkey:  ok= required=
+Readiness Rectangle hotkey:  ok= required=
 Readiness manual mode feedback:  ok= required=
 Readiness hotkey latency:  ok= required=
 

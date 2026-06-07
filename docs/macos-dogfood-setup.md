@@ -94,9 +94,9 @@ states. The helper itself refuses to run unless
 `EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1` is set. Demo
 setup/readiness wrappers skip local Screen Sharing capture unless that same
 opt-in is set, and otherwise use lab desktop capture over SSH. Setup/readiness
-manifests also record `controller_focus`; readiness fails
-`controller_screen_sharing_focus_ok` if the controller Mac changes from another
-app to Screen Sharing during the run.
+manifests also record `controller_focus`; readiness samples controller
+frontmost app throughout the run and fails `controller_screen_sharing_focus_ok`
+if Screen Sharing becomes frontmost after starting from another app.
 
 This answers only "are SSH and VNC reachable?" and skips sync, baseline,
 screenshots, and Codex. Use it while the Mac is rebooting or probably offline.
