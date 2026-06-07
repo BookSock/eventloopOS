@@ -10,6 +10,7 @@ export const humanDemoPassFailLabels = Object.freeze([
   "Waiting agent paper appears in queue",
   "Paper briefing strip shows current decision",
   "Desktop paper reminder HUD is visible",
+  "Hotkeys sheet opens and is readable",
   "Rectangle hotkeys feel usable",
   "Manual Mode entry/return works",
   "Master Command opens with current task hint",

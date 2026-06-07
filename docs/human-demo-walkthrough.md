@@ -108,8 +108,8 @@ Latest known-good proof:
 - Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture; readiness also proves live Queue feedback within the configured budget.
 - Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper and proves restore-hotkey HUD feedback within the configured budget.
 - Master Command proof: readiness presses `Ctrl-Option-K` from another app and proves the Queue window opens a Master Command sheet with `Route to Master`, `Start Task`, `Rerank`, `Broadcast`, and the current task hint.
+- Hotkeys sheet proof: readiness presses `Ctrl-Option-/` from another app and proves the Queue window opens a Hotkeys sheet with Queue and Windows command rows.
 - Rectangle hotkey proof: readiness presses `Ctrl-Option-Left` on the shared TextEdit window and proves it moves to the expected left-half frame.
-- Hotkeys sheet proof: live lab proof presses `Ctrl-Option-/` from another app and verifies the Queue opens a Hotkeys sheet with Queue and Windows command rows.
 - Manual Mode feedback proof: readiness proves `Ctrl-Option-M` enter feedback and `Ctrl-Option-M` return-and-restore feedback within the configured budget.
 
 ## Starting State
@@ -178,9 +178,10 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
 20. Confirm the Master Command sheet opens on the Queue window with `Route to Master`, `Start Task`, `Rerank`, and `Broadcast`.
     The Task Hint field should default to the current paper's task, such as `task_demo_customer`.
     Close the sheet with `Escape`, the `Close` button, or the top-right `x` so the hands-on demo stays clean.
-21. If no paper is selected, try `Ctrl-Option-H` or `Ctrl-Option-E` once and
-    confirm the top HUD and Queue footer acknowledge `No paper selected.`
-    instead of staying silent.
+21. Optional edge check: only if the Queue visibly has no selected paper, try
+    `Ctrl-Option-H` or `Ctrl-Option-E` once and confirm the top HUD and Queue
+    footer acknowledge `No paper selected.` instead of staying silent. Skip
+    this during the default handoff if Customer remains selected.
 22. Press `Ctrl-Option-M` to enter Manual Mode.
 23. Open or move a dummy app.
 24. Press `Ctrl-Option-M`.
@@ -235,6 +236,7 @@ Readiness queue latency:  ok= required=
 Readiness workspace latency:  ok= required=
 Readiness desktop HUD feedback:  ok= required=
 Readiness master command hotkey:  ok= required=
+Readiness Hotkeys sheet:  ok= required=
 Readiness Rectangle hotkey:  ok= required=
 Readiness manual mode feedback:  ok= required=
 Readiness hotkey latency:  ok= required=
@@ -251,6 +253,7 @@ Pass/fail:
 - Waiting agent paper appears in queue:
 - Paper briefing strip shows current decision:
 - Desktop paper reminder HUD is visible:
+- Hotkeys sheet opens and is readable:
 - Rectangle hotkeys feel usable:
 - Manual Mode entry/return works:
 - Master Command opens with current task hint:
