@@ -98,6 +98,35 @@ sync_remote_dir() {
     "$remote:$remote_repo/${remote_path%/}/" "$local_path/" >/dev/null
 }
 
+controller_frontmost_app() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    return 0
+  fi
+  osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null || true
+}
+
+record_controller_focus() {
+  local before="$1"
+  local after="$2"
+  node - "$manifest" "$before" "$after" <<'NODE'
+const fs = require("node:fs");
+const [manifestPath, before, after] = process.argv.slice(2);
+const observed = Boolean(before && after);
+const isScreenSharing = (value) => /Screen Sharing/i.test(String(value ?? ""));
+const focus = {
+  ok: !(observed && !isScreenSharing(before) && isScreenSharing(after)),
+  observed,
+  frontmost_before: before || null,
+  frontmost_after: after || null,
+  changed: observed ? before !== after : false,
+  screen_sharing_became_frontmost: observed && !isScreenSharing(before) && isScreenSharing(after),
+};
+const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+manifest.controller_focus = focus;
+fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+NODE
+}
+
 ensure_aerospace_ready() {
   ssh_remote "bash -lc 'set -euo pipefail
 export PATH=\"/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:\$PATH\"
@@ -178,6 +207,7 @@ capture_lab_desktop() {
 mkdir -p "$run_dir"
 printf "%s\n" "$remote" >"$run_dir/remote.txt"
 printf "%s\n" "$remote_repo" >"$run_dir/remote-repo.txt"
+controller_frontmost_before="$(controller_frontmost_app)"
 
 echo "human demo sync: $remote:$remote_repo"
 bin/lab-mac-sync
@@ -214,5 +244,8 @@ if [[ "$skip_screenshot" == "0" ]]; then
       ;;
   esac
 fi
+
+controller_frontmost_after="$(controller_frontmost_app)"
+record_controller_focus "$controller_frontmost_before" "$controller_frontmost_after"
 
 cat "$manifest"

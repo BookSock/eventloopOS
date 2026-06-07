@@ -104,6 +104,7 @@ const env = {
 };
 
 const steps = [];
+const controllerFocusBefore = controllerFrontmostApp();
 const dogfood = runStep("dogfood status", "bin/lab-mac-dogfood", ["status"], env);
 const dogfoodManifest = extractJsonObject(dogfood.stdout);
 const template = runStep("human demo result template", "node", ["bin/human-demo-result-template", "--json"], env);
@@ -168,6 +169,8 @@ if (!skipScreenshot) {
   finalHandoffStage = runLabDemoScreenshotStageStep(env, "final lab demo handoff stage");
   finalHandoffScreenshot = runScreenshotStep(path.join(runDir, "screen-sharing-final.png"), env, "human-demo-final");
 }
+const controllerFocusAfter = controllerFrontmostApp();
+const controllerFocus = controllerFocusSummary(controllerFocusBefore, controllerFocusAfter);
 const finalHandoffFeedback = String(
   finalHandoffStage?.result?.queue_harness_feedback
     ?? finalHandoffStage?.result?.queue_harness_status
@@ -204,6 +207,7 @@ const checks = {
   final_handoff_stale_workspace_status_hidden: skipScreenshot || finalHandoffStage?.result?.stale_workspace_status_banner_present === false,
   final_handoff_feedback_refresh_ok: skipScreenshot || finalHandoffStage?.result?.paper_feedback_refresh?.ok === true,
   final_handoff_current_feedback_ok: skipScreenshot || /Showing paper: Review Demo Customer Reply/i.test(finalHandoffFeedback),
+  controller_screen_sharing_focus_ok: controllerFocus.ok === true,
 };
 const failedChecks = Object.entries(checks).filter(([, ok]) => ok !== true).map(([key]) => key);
 const finishedAt = new Date().toISOString();
@@ -227,6 +231,7 @@ const manifest = {
   manual_mode_feedback_required: manualModeFeedbackEnabled,
   screenshot_target: screenshotTarget,
   local_screen_sharing_capture_allowed: localScreenSharingCaptureAllowed,
+  controller_focus: controllerFocus,
   demo_proof_max_age_hours: demoProofMaxAgeHours,
   allow_stale_demo_proof: allowStaleDemoProof,
   checks,
@@ -362,6 +367,7 @@ const output = {
   master_command_hotkey: manifest.master_command_hotkey,
   hotkey_feedback_latency: manifest.hotkey_feedback_latency,
   manual_mode_feedback: manifest.manual_mode_feedback,
+  controller_focus: manifest.controller_focus,
 };
 
 if (jsonOnly) {
@@ -427,6 +433,54 @@ function gitOutput(commandArgs) {
     encoding: "utf8",
   });
   return result.status === 0 ? result.stdout.trim() || null : null;
+}
+
+function controllerFrontmostApp() {
+  if (process.platform !== "darwin") {
+    return {
+      ok: true,
+      skipped: true,
+      reason: "not_macos",
+      app: null,
+    };
+  }
+  const result = spawnSync("osascript", [
+    "-e",
+    'tell application "System Events" to get name of first application process whose frontmost is true',
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+  });
+  const app = result.status === 0 ? result.stdout.trim() : "";
+  return {
+    ok: result.status === 0 && app !== "",
+    app: app || null,
+    exit_code: result.status ?? 1,
+    stderr: result.status === 0 ? undefined : String(result.stderr ?? "").trim(),
+  };
+}
+
+function controllerFocusSummary(before, after) {
+  const observed = before?.ok === true && after?.ok === true && !before?.skipped && !after?.skipped;
+  const beforeApp = before?.app ?? null;
+  const afterApp = after?.app ?? null;
+  const screenSharingBecameFrontmost = observed
+    && !isScreenSharingApp(beforeApp)
+    && isScreenSharingApp(afterApp);
+  return {
+    ok: !screenSharingBecameFrontmost,
+    observed,
+    frontmost_before: beforeApp,
+    frontmost_after: afterApp,
+    changed: observed ? beforeApp !== afterApp : false,
+    screen_sharing_became_frontmost: screenSharingBecameFrontmost,
+    before,
+    after,
+  };
+}
+
+function isScreenSharingApp(appName) {
+  return /Screen Sharing/i.test(String(appName ?? ""));
 }
 
 function runLabDemoScreenshotStageStep(envOverride, name = "stage lab demo screenshot") {
@@ -1568,6 +1622,7 @@ function renderReadyMarkdown(manifest) {
   const masterCommandHotkey = manifest.master_command_hotkey;
   const hotkey = manifest.hotkey_feedback_latency;
   const manualModeFeedback = manifest.manual_mode_feedback;
+  const controllerFocus = manifest.controller_focus;
   const freshness = latest?.freshness;
   const suggestedResult = latest?.suggested_result_path ?? "";
   const verifyCommand = suggestedResult
@@ -1594,6 +1649,7 @@ function renderReadyMarkdown(manifest) {
 - Final handoff stage: ${finalHandoff?.ok === true ? "ok" : finalHandoff?.skipped ? "skipped" : "failed"}
 - Final handoff feedback: ${finalHandoff?.result?.queue_harness_feedback ?? ""}
 - Final handoff screenshot: ${finalScreenshot?.output ?? "skipped"}${finalScreenshot?.capture_mode ? ` mode=${finalScreenshot.capture_mode}` : ""}${finalScreenshot?.image?.dimensions ? ` (${finalScreenshot.image.dimensions}, ${finalScreenshot.image.bytes} bytes)` : ""}
+- Controller focus: ${controllerFocusLine(controllerFocus)}
 - Queue latency: ${queueLatency?.manifest_path ?? "skipped"}${manifest.queue_latency_required ? " (required)" : ""}
 - Workspace latency: ${workspaceLatency?.manifest_path ?? "skipped"}${manifest.workspace_latency_required ? " (required)" : ""}
 - Desktop HUD feedback: ${paperReminderFeedback?.manifest_path ?? "skipped"}${manifest.paper_reminder_feedback_required ? " (required)" : ""}
@@ -1614,6 +1670,13 @@ Next steps:
 
 function shellQuote(value) {
   return `'${String(value).replaceAll("'", "'\\''")}'`;
+}
+
+function controllerFocusLine(focus) {
+  if (!focus) return "unknown";
+  if (focus.observed !== true) return "not observed";
+  const transition = `${focus.frontmost_before ?? ""} -> ${focus.frontmost_after ?? ""}`;
+  return focus.ok === true ? `ok (${transition})` : `changed (${transition})`;
 }
 
 function utcStamp() {
@@ -1761,6 +1824,29 @@ function runSelfTest() {
   assert.equal(notAllowedCapture.skipped, true);
   assert.equal(notAllowedCapture.reason, "local_screen_sharing_capture_requires_EVENTLOOPOS_ALLOW_LOCAL_SCREEN_SHARING_CAPTURE=1");
   assert.equal(notAllowedCapture.image.reason, "local_screen_sharing_capture_not_opted_in");
+  assert.deepEqual(controllerFocusSummary(
+    { ok: true, app: "Google Chrome" },
+    { ok: true, app: "Google Chrome" },
+  ), {
+    ok: true,
+    observed: true,
+    frontmost_before: "Google Chrome",
+    frontmost_after: "Google Chrome",
+    changed: false,
+    screen_sharing_became_frontmost: false,
+    before: { ok: true, app: "Google Chrome" },
+    after: { ok: true, app: "Google Chrome" },
+  });
+  assert.equal(controllerFocusSummary(
+    { ok: true, app: "Google Chrome" },
+    { ok: true, app: "Screen Sharing" },
+  ).ok, false);
+  assert.equal(controllerFocusLine({
+    ok: true,
+    observed: true,
+    frontmost_before: "Google Chrome",
+    frontmost_after: "Google Chrome",
+  }), "ok (Google Chrome -> Google Chrome)");
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-r", "--expect", "Review Demo Customer Reply", "--runs", "5"]);
   process.env.EVENTLOOPOS_HUMAN_DEMO_HOTKEY_LATENCY_CHORD = "ctrl-option-h";
   assert.deepEqual(hotkeyLatencyArgs(), ["--hotkey", "ctrl-option-h"]);
