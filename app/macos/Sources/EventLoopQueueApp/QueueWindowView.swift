@@ -335,7 +335,7 @@ struct QueueWindowView: View {
                 }
             }
         }
-        .overlay(alignment: .bottomLeading) {
+        .safeAreaInset(edge: .bottom, alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 8) {
                 StatusBanner(state: viewModel.state)
                 WorkspaceHealthBanner(state: viewModel.workspaceHealthState)
@@ -352,7 +352,10 @@ struct QueueWindowView: View {
                     feedbackSequence: viewModel.feedbackSequence
                 )
             }
-                .padding(12)
+            .padding(.horizontal, 12)
+            .padding(.top, 4)
+            .padding(.bottom, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .confirmationDialog(
             "Restore workspace?",
