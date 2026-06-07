@@ -209,6 +209,7 @@ const checks = {
   paper_reminder_hud_visible: skipScreenshot || screenshotStage?.result?.paper_reminder_hud_present === true
     || screenshot?.lab_capture_summary?.queue_app?.paper_reminder_hud_present === true,
   stale_workspace_status_hidden: skipScreenshot || screenshotStage?.result?.stale_workspace_status_banner_present === false,
+  lineage_error_hidden: skipScreenshot || screenshotStage?.result?.raw_lineage_error_present === false,
   queue_latency_ok: !queueLatencyEnabled || (queueLatency?.status === 0 && queueLatencyManifest?.ok === true),
   workspace_latency_ok: !workspaceLatencyEnabled || (workspaceLatency?.status === 0 && workspaceLatencyManifest?.ok === true),
   paper_reminder_feedback_ok: !paperReminderFeedbackEnabled || (paperReminderFeedback?.status === 0 && paperReminderFeedbackManifest?.ok === true),
@@ -221,6 +222,7 @@ const checks = {
   final_handoff_queue_briefing_strip_visible: skipScreenshot || finalHandoffStage?.result?.queue_briefing_strip_present === true,
   final_handoff_paper_reminder_hud_visible: skipScreenshot || finalHandoffStage?.result?.paper_reminder_hud_present === true,
   final_handoff_stale_workspace_status_hidden: skipScreenshot || finalHandoffStage?.result?.stale_workspace_status_banner_present === false,
+  final_handoff_lineage_error_hidden: skipScreenshot || finalHandoffStage?.result?.raw_lineage_error_present === false,
   final_handoff_feedback_refresh_ok: skipScreenshot || finalHandoffStage?.result?.paper_feedback_refresh?.ok === true,
   final_handoff_current_feedback_ok: skipScreenshot || /Showing paper: Review Demo Customer Reply/i.test(finalHandoffFeedback),
   controller_screen_sharing_focus_ok: controllerFocus.ok === true,
@@ -707,6 +709,7 @@ const briefingStrip = queueBriefingStripStatus({
 });
 const paperReminderHud = paperReminderHudStatus();
 const staleWorkspaceStatusBanner = staleWorkspaceStatusBannerStatus();
+const rawLineageError = rawLineageErrorStatus();
 const expectedFeedbackTitle = String(customer.review_packet?.title ?? customer.title ?? "Review Demo Customer Reply");
 const paperFeedbackRefresh = await refreshSelectedPaperFeedback(expectedFeedbackTitle);
 const harnessStatus = readHarnessStatus();
@@ -730,6 +733,9 @@ console.log(JSON.stringify({
   stale_workspace_status_banner_present: staleWorkspaceStatusBanner.present,
   stale_workspace_status_banner_line: staleWorkspaceStatusBanner.line,
   stale_workspace_status_banner_error: staleWorkspaceStatusBanner.error,
+  raw_lineage_error_present: rawLineageError.present,
+  raw_lineage_error_line: rawLineageError.line,
+  raw_lineage_error_error: rawLineageError.error,
   paper_feedback_refresh: paperFeedbackRefresh,
   queue_harness_status: harnessStatus?.status ?? harnessStatus ?? null,
   queue_harness_feedback: harnessFeedback,
@@ -1035,6 +1041,64 @@ function staleWorkspaceStatusBannerStatus() {
     "          set readableText to nameText & \\" \\" & valueText",
     "          repeat with staleNeedle in staleNeedles",
     "            if readableText contains (staleNeedle as string) then return \\"present:\\" & staleNeedle & \\"|\\" & readableText",
+    "          end repeat",
+    "        end repeat",
+    "      end if",
+    "    end repeat",
+    "  end tell",
+    "end tell",
+    "return \\"absent\\"",
+  ].join("\\n");
+  try {
+    const output = execFileSync("osascript", [], { input: script, encoding: "utf8" }).trim();
+    if (output.startsWith("present:")) {
+      return {
+        present: true,
+        line: output.slice("present:".length),
+      };
+    }
+    return {
+      present: false,
+      line: output,
+    };
+  } catch (error) {
+    return {
+      present: true,
+      line: "",
+      error: String(error?.message ?? error),
+    };
+  }
+}
+
+function rawLineageErrorStatus() {
+  const script = [
+    "set rawNeedles to {\\"The data couldn\\", \\"data couldn't be read\\", \\"data could not be read\\"}",
+    "tell application \\"System Events\\"",
+    "  if not (exists process \\"eventloopOS Queue\\") then return \\"missing:process\\"",
+    "  tell process \\"eventloopOS Queue\\"",
+    "    if (count of windows) is 0 then return \\"missing:window\\"",
+    "    repeat with candidateWindow in windows",
+    "      set windowName to \\"\\"",
+    "      try",
+    "        set windowName to name of candidateWindow as string",
+    "      end try",
+    "      if windowName is not \\"eventloopOS Paper Reminder\\" then",
+    "        set flattenedElements to entire contents of candidateWindow",
+    "        set elementCount to count of flattenedElements",
+    "        if elementCount is greater than 360 then set elementCount to 360",
+    "        repeat with elementIndex from 1 to elementCount",
+    "          set candidateElement to item elementIndex of flattenedElements",
+    "          set nameText to \\"\\"",
+    "          set valueText to \\"\\"",
+    "          try",
+    "            set nameText to name of candidateElement as string",
+    "          end try",
+    "          try",
+    "            set valueText to value of candidateElement as string",
+    "          end try",
+    "          set readableText to nameText & \\" \\" & valueText",
+    "          repeat with rawNeedle in rawNeedles",
+    "            if readableText contains (rawNeedle as string) then return \\"present:\\" & readableText",
     "          end repeat",
     "        end repeat",
     "      end if",
@@ -1813,6 +1877,7 @@ function renderReadyMarkdown(manifest) {
 - Queue briefing strip: ${manifest.checks?.queue_briefing_strip_visible === true ? "visible" : "missing"}
 - Desktop paper reminder HUD: ${manifest.checks?.paper_reminder_hud_visible === true ? "visible" : "missing"}
 - Stale workspace status banners: ${manifest.checks?.stale_workspace_status_hidden === true && manifest.checks?.final_handoff_stale_workspace_status_hidden === true ? "absent" : "present"}
+- Raw lineage error: ${manifest.checks?.lineage_error_hidden === true && manifest.checks?.final_handoff_lineage_error_hidden === true ? "absent" : "present"}
 - Final handoff stage: ${finalHandoff?.ok === true ? "ok" : finalHandoff?.skipped ? "skipped" : "failed"}
 - Final handoff feedback: ${finalHandoff?.result?.queue_harness_feedback ?? ""}
 - Final handoff screenshot: ${finalScreenshot?.output ?? "skipped"}${finalScreenshot?.capture_mode ? ` mode=${finalScreenshot.capture_mode}` : ""}${finalScreenshot?.image?.dimensions ? ` (${finalScreenshot.image.dimensions}, ${finalScreenshot.image.bytes} bytes)` : ""}
@@ -1921,6 +1986,8 @@ function runSelfTest() {
       paper_reminder_hud_visible: true,
       stale_workspace_status_hidden: true,
       final_handoff_stale_workspace_status_hidden: true,
+      lineage_error_hidden: true,
+      final_handoff_lineage_error_hidden: true,
       final_handoff_current_feedback_ok: true,
     },
     failed_checks: [],
@@ -2101,8 +2168,10 @@ function runSelfTest() {
   assert.ok(labDemoScreenshotStageScript().includes("queueBriefingStripStatus"));
   assert.ok(labDemoScreenshotStageScript().includes("paperReminderHudStatus"));
   assert.ok(labDemoScreenshotStageScript().includes("staleWorkspaceStatusBannerStatus"));
+  assert.ok(labDemoScreenshotStageScript().includes("rawLineageErrorStatus"));
   assert.ok(labDemoScreenshotStageScript().includes("Manual workspace saved:"));
   assert.ok(labDemoScreenshotStageScript().includes("stale_workspace_status_banner_present"));
+  assert.ok(labDemoScreenshotStageScript().includes("raw_lineage_error_present"));
   assert.ok(labDemoScreenshotStageScript().includes("readHarnessStatus"));
   assert.ok(labDemoScreenshotStageScript().includes("refreshSelectedPaperFeedback"));
   assert.ok(labDemoScreenshotStageScript().includes("paper_feedback_refresh"));

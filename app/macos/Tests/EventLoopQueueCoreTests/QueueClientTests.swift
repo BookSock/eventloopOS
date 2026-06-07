@@ -384,6 +384,58 @@ final class QueueClientTests: XCTestCase {
         XCTAssertEqual(envelope.lineage.counts.taskMessages, 1)
     }
 
+    func testQueueLineageEnvelopeDecodesWrappedServerEvents() throws {
+        let data = """
+        {
+          "lineage": {
+            "queue_item": {
+              "id": "qit_demo_customer",
+              "task_id": "task_demo_customer",
+              "state": "ready",
+              "priority_score": 1500
+            },
+            "related_event_ids": ["evt_demo_customer"],
+            "events": [
+              {
+                "event": {
+                  "id": "evt_demo_customer",
+                  "source": "human_demo",
+                  "source_id": "human-demo:customer",
+                  "occurred_at": "2026-06-07T02:54:06Z",
+                  "received_at": "2026-06-07T02:54:07Z",
+                  "type": "manual.review_requested",
+                  "title": "Demo Customer Reply",
+                  "summary": "Customer asks whether eventloopOS is ready.",
+                  "task_hint": "demo customer"
+                },
+                "route_decision": {
+                  "id": "rte_demo_customer",
+                  "action": "ask_human_now"
+                },
+                "review_packet": {
+                  "id": "pkt_demo_customer",
+                  "title": "Review Demo Customer Reply"
+                }
+              }
+            ],
+            "activity": [],
+            "task_messages": [],
+            "counts": {"events": 1, "activity": 0, "task_messages": 0}
+          }
+        }
+        """.data(using: .utf8)!
+
+        let envelope = try QueueCoders.makeDecoder().decode(QueueLineageEnvelope.self, from: data)
+
+        XCTAssertEqual(envelope.lineage.queueItem?.id, "qit_demo_customer")
+        XCTAssertEqual(envelope.lineage.events.first?.id, "evt_demo_customer")
+        XCTAssertEqual(envelope.lineage.events.first?.source, "human_demo")
+        XCTAssertEqual(envelope.lineage.events.first?.title, "Demo Customer Reply")
+        XCTAssertEqual(envelope.lineage.events.first?.summary, "Customer asks whether eventloopOS is ready.")
+        XCTAssertEqual(envelope.lineage.events.first?.taskHint, "demo customer")
+        XCTAssertEqual(envelope.lineage.counts.events, 1)
+    }
+
     func testHTTPQueueClientFetchesQueueLineage() async throws {
         let (client, recorder) = makeHTTPClient { request in
             XCTAssertEqual(request.httpMethod, "GET")

@@ -131,6 +131,35 @@ public struct QueueLineageEvent: Codable, Equatable, Identifiable, Sendable {
         case taskHint = "task_hint"
         case projectHint = "project_hint"
     }
+
+    enum WrappedCodingKeys: String, CodingKey {
+        case event
+    }
+
+    public init(from decoder: Decoder) throws {
+        let wrappedContainer = try decoder.container(keyedBy: WrappedCodingKeys.self)
+        if wrappedContainer.contains(.event) {
+            let eventDecoder = try wrappedContainer.superDecoder(forKey: .event)
+            self = try QueueLineageEvent(from: eventDecoder)
+            return
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let id = try container.decode(String.self, forKey: .id)
+        let title = try container.decodeIfPresent(String.self, forKey: .title) ?? id
+        self.init(
+            id: id,
+            source: try container.decodeIfPresent(String.self, forKey: .source) ?? "unknown",
+            sourceId: try container.decodeIfPresent(String.self, forKey: .sourceId) ?? id,
+            type: try container.decodeIfPresent(String.self, forKey: .type) ?? "event",
+            title: title,
+            summary: try container.decodeIfPresent(String.self, forKey: .summary) ?? title,
+            occurredAt: try container.decode(Date.self, forKey: .occurredAt),
+            receivedAt: try container.decodeIfPresent(Date.self, forKey: .receivedAt),
+            taskHint: try container.decodeIfPresent(String.self, forKey: .taskHint),
+            projectHint: try container.decodeIfPresent(String.self, forKey: .projectHint)
+        )
+    }
 }
 
 public struct QueueLineageActivity: Codable, Equatable, Identifiable, Sendable {
