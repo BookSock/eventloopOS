@@ -183,31 +183,34 @@ struct PacketDetail: View {
                                     }
                                 }
                             } label: {
-                                Label("Bind Session", systemImage: "link")
+                                Label("Bind", systemImage: "link")
                             }
                             .controlSize(.large)
                             .help("Bind a Codex session before sending. Send to Agent stays disabled until a session is bound.")
+                            .accessibilityLabel("Bind Session")
                             .accessibilityIdentifier("queue-bind-session-shortcut")
                         }
                         Button {
                             executeRecommendedAction()
                         } label: {
-                            Label("Send to Agent", systemImage: "arrowshape.turn.up.right.circle")
+                            Label("Send", systemImage: "arrowshape.turn.up.right.circle")
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
                         .disabled(!canExecuteRecommendedAction || paperActionInFlight)
                         .help(actionConsequence(for: packet, selectedTaskSessions: selectedTaskSessions) ?? "Send recommended follow-up to bound agent.")
+                        .accessibilityLabel("Send to Agent")
                         .accessibilityIdentifier("queue-execute-recommended-action-button")
                     }
                     Button {
                         deferForOneHour()
                     } label: {
-                        Label("Defer 1h", systemImage: "clock")
+                        Label("Defer", systemImage: "clock")
                     }
                     .controlSize(.large)
                     .disabled(paperActionInFlight)
                     .help("Hide this paper for one hour, then it returns to the queue.")
+                    .accessibilityLabel("Defer 1h")
                     .accessibilityIdentifier("queue-defer-one-hour-button")
 
                     Button(role: .destructive) {
