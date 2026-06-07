@@ -55,11 +55,11 @@ Local Screen Sharing capture inside demo setup/readiness is skipped unless
 manual debugging, because even no-raise CoreGraphics window capture can change
 the controller Mac's frontmost app on some macOS states. The direct local
 helper refuses to run without that same opt-in, records frontmost app
-before/after capture, and fails no-raise captures that change it. Raising or
-focusing Screen Sharing requires both `SCREEN_SHARING_RAISE=1` and
-`EVENTLOOPOS_ALLOW_SCREEN_SHARING_FOCUS=1`.
+before/after capture plus a during-capture `focus_timeline`, and fails no-raise
+captures that change focus. Raising or focusing Screen Sharing requires both
+`SCREEN_SHARING_RAISE=1` and `EVENTLOOPOS_ALLOW_SCREEN_SHARING_FOCUS=1`.
 Demo setup/readiness manifests also include `controller_focus`; both sample the
-controller Mac's frontmost app throughout the run. Readiness fails
+controller Mac's frontmost app at 10 Hz throughout the run. Readiness fails
 `controller_screen_sharing_focus_ok` if Screen Sharing becomes frontmost after
 starting from another app, and setup marks its `controller_focus.ok=false` for
 the same transient focus leak.

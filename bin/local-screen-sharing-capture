@@ -35,8 +35,15 @@ assert_no_focus_requested="${SCREEN_SHARING_ASSERT_NO_FOCUS:-1}"
 stamp="$(date -u +%Y%m%dT%H%M%SZ)"
 output="${1:-artifacts/screen-sharing-captures/$stamp-screen-sharing.png}"
 capture_tmpdir=""
+focus_monitor_log="${output%.png}.focus.tsv"
+focus_monitor_pid=""
 
 cleanup_capture_tmpdir() {
+  if [[ -n "$focus_monitor_pid" ]]; then
+    kill "$focus_monitor_pid" >/dev/null 2>&1 || true
+    wait "$focus_monitor_pid" >/dev/null 2>&1 || true
+    focus_monitor_pid=""
+  fi
   if [[ -n "$capture_tmpdir" ]]; then
     rm -rf "$capture_tmpdir"
   fi
@@ -117,11 +124,34 @@ end tell
 APPLESCRIPT
 }
 
+start_focus_monitor() {
+  mkdir -p "$(dirname "$focus_monitor_log")"
+  : >"$focus_monitor_log"
+  (
+    while :; do
+      ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      app="$(frontmost_app || true)"
+      printf "%s\t%s\n" "$ts" "$app" >>"$focus_monitor_log"
+      sleep 0.05
+    done
+  ) &
+  focus_monitor_pid="$!"
+}
+
+stop_focus_monitor() {
+  if [[ -n "$focus_monitor_pid" ]]; then
+    kill "$focus_monitor_pid" >/dev/null 2>&1 || true
+    wait "$focus_monitor_pid" >/dev/null 2>&1 || true
+    focus_monitor_pid=""
+  fi
+}
+
 json_string() {
   node -e 'process.stdout.write(JSON.stringify(process.argv[1] ?? ""))' "$1"
 }
 
 frontmost_before="$(frontmost_app || true)"
+start_focus_monitor
 
 raise_exit=0
 if [[ "$do_raise" == "1" ]]; then
@@ -286,9 +316,41 @@ else
 fi
 
 frontmost_after="$(frontmost_app || true)"
+stop_focus_monitor
+focus_timeline="$(
+  node - "$focus_monitor_log" <<'NODE'
+const fs = require("node:fs");
+const logPath = process.argv[2];
+const isScreenSharing = (value) => /Screen Sharing/i.test(String(value ?? ""));
+const rows = fs.existsSync(logPath)
+  ? fs.readFileSync(logPath, "utf8").split(/\r?\n/).filter(Boolean).map((line) => {
+      const [timestamp, ...appParts] = line.split("\t");
+      return { timestamp, app: appParts.join("\t") || null };
+    })
+  : [];
+const apps = rows.map((row) => row.app).filter(Boolean);
+const uniqueApps = Array.from(new Set(apps));
+const screenSharingSamples = rows.filter((row) => isScreenSharing(row.app)).slice(0, 10);
+process.stdout.write(JSON.stringify({
+  log_path: logPath,
+  sample_count: rows.length,
+  first_app: apps[0] ?? null,
+  last_app: apps.at(-1) ?? null,
+  unique_apps: uniqueApps,
+  changed: uniqueApps.length > 1,
+  screen_sharing_observed: screenSharingSamples.length > 0,
+  screen_sharing_samples: screenSharingSamples,
+}));
+NODE
+)"
+timeline_focus_changed="$(node -e 'const value = JSON.parse(process.argv[1]); process.stdout.write(value.changed ? "true" : "false")' "$focus_timeline")"
 focus_changed=false
 focus_assertion_failed=false
 if [[ "$do_raise" == "0" && "$assert_no_focus" == "1" && -n "$frontmost_before" && -n "$frontmost_after" && "$frontmost_before" != "$frontmost_after" ]]; then
+  focus_changed=true
+  focus_assertion_failed=true
+fi
+if [[ "$do_raise" == "0" && "$assert_no_focus" == "1" && "$timeline_focus_changed" == "true" ]]; then
   focus_changed=true
   focus_assertion_failed=true
 fi
@@ -309,6 +371,7 @@ cat >"$manifest" <<EOF
   "frontmost_after": $(json_string "$frontmost_after"),
   "focus_changed": $focus_changed,
   "focus_assertion_failed": $focus_assertion_failed,
+  "focus_timeline": $focus_timeline,
   "output": "$output",
   "captured_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 }

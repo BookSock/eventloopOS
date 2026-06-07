@@ -79,10 +79,11 @@ bin/local-screen-sharing-capture
 ```
 
 The helper writes `artifacts/screen-sharing-captures/<timestamp>-screen-sharing.png`
-and a sibling JSON manifest with the CGWindow id, capture engine, and frontmost
-app before/after capture. No-raise captures fail if they change the frontmost
-app; set `SCREEN_SHARING_ASSERT_NO_FOCUS=0` only when you want to disable that
-guard.
+and a sibling JSON manifest with the CGWindow id, capture engine, frontmost app
+before/after capture, and a high-frequency `focus_timeline`. No-raise captures
+fail if the before/after app changes or the during-capture timeline sees a
+frontmost-app change; set `SCREEN_SHARING_ASSERT_NO_FOCUS=0` only when you want
+to disable that guard.
 Set `SCREEN_SHARING_RAISE=1` only when you explicitly want the helper to raise
 and focus Screen Sharing before capture; it still fails closed unless
 `EVENTLOOPOS_ALLOW_SCREEN_SHARING_FOCUS=1` is set too. The default capture
@@ -95,8 +96,9 @@ states. The helper itself refuses to run unless
 setup/readiness wrappers skip local Screen Sharing capture unless that same
 opt-in is set, and otherwise use lab desktop capture over SSH. Setup/readiness
 manifests also record `controller_focus`; readiness samples controller
-frontmost app throughout the run and fails `controller_screen_sharing_focus_ok`
-if Screen Sharing becomes frontmost after starting from another app.
+frontmost app at 10 Hz throughout the run and fails
+`controller_screen_sharing_focus_ok` if Screen Sharing becomes frontmost after
+starting from another app.
 
 This answers only "are SSH and VNC reachable?" and skips sync, baseline,
 screenshots, and Codex. Use it while the Mac is rebooting or probably offline.

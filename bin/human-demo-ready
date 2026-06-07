@@ -544,7 +544,7 @@ while :; do
   ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   app="$(osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null || true)"
   printf "%s\\t%s\\n" "$ts" "$app" >>"$EVENTLOOPOS_CONTROLLER_FOCUS_LOG"
-  sleep 0.5
+  sleep 0.1
 done
 `], {
     cwd: repoRoot,

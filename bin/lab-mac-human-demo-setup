@@ -172,7 +172,7 @@ start_controller_focus_monitor() {
       ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
       app="$(controller_frontmost_app)"
       printf "%s\t%s\n" "$ts" "$app" >>"$controller_focus_log"
-      sleep 0.5
+      sleep 0.1
     done
   ) &
   controller_focus_monitor_pid="$!"
