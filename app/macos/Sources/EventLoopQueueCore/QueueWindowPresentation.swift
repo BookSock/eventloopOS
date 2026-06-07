@@ -296,6 +296,7 @@ public struct QueuePaperBriefingPresentation: Equatable, Sendable {
 public struct QueuePaperReminderPresentation: Equatable, Sendable {
     public let title: String
     public let decision: String
+    public let focusHint: String?
     public let context: String
     public let accessibilityLabel: String
 
@@ -306,11 +307,54 @@ public struct QueuePaperReminderPresentation: Equatable, Sendable {
         )
         title = briefing.title
         decision = briefing.decision
+        focusHint = Self.focusHint(packet: packet, selectedTaskSessions: selectedTaskSessions)
         context = briefing.context
-        accessibilityLabel = [title, decision, context]
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        accessibilityLabel = [title, decision, focusHint, context]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " | ")
+    }
+
+    private static func focusHint(packet: ReviewPacket, selectedTaskSessions: [TaskSession]) -> String? {
+        if let session = selectedTaskSessions.first {
+            let sessionPresentation = TaskSessionTargetPresentation(session: session)
+            var parts: [String] = []
+            if sessionPresentation.title != sessionPresentation.sessionId {
+                parts.append(sessionPresentation.title)
+            }
+            parts.append("\(sessionPresentation.provider) \(sessionPresentation.status)")
+            parts.append(sessionPresentation.sessionId)
+            if let terminalLabel = sessionPresentation.terminalLabel {
+                parts.append(terminalLabel)
+            }
+            if let detail = sessionPresentation.detail {
+                parts.append(detail)
+            }
+            return Self.shortReminderPart(
+                "Return target: \(parts.joined(separator: " | "))",
+                maxLength: 140
+            )
+        }
+
+        guard packet.recommendedActionType == "resume_agent" else {
+            return nil
+        }
+        let task = packet.taskId?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let task, !task.isEmpty {
+            return "Return target: bind an agent session for \(task)"
+        }
+        return "Return target: bind an agent session before sending follow-up."
+    }
+
+    private static func shortReminderPart(_ value: String, maxLength: Int) -> String {
+        let normalized = value
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count > maxLength else {
+            return normalized
+        }
+        let end = normalized.index(normalized.startIndex, offsetBy: max(0, maxLength - 1))
+        return String(normalized[..<end]).trimmingCharacters(in: .whitespacesAndNewlines) + "..."
     }
 }
 

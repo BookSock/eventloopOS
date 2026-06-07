@@ -14,7 +14,7 @@ final class PaperReminderHUDController {
     private var transientFeedbackExpiresAt: Date?
     private var feedbackClearGeneration = 0
     private static let feedbackDisplayDuration: TimeInterval = 3.0
-    static let preferredContentSize = NSSize(width: 760, height: 116)
+    static let preferredContentSize = NSSize(width: 780, height: 132)
 
     init(viewModel: QueueViewModel, environment: [String: String] = ProcessInfo.processInfo.environment) {
         self.viewModel = viewModel
@@ -167,6 +167,14 @@ struct PaperReminderHUDView: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("paper-reminder-decision")
+                    if let focusHint = presentation.focusHint {
+                        Text(focusHint)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .accessibilityIdentifier("paper-reminder-focus-hint")
+                    }
                 }
                 if let feedback {
                     HStack(spacing: 5) {

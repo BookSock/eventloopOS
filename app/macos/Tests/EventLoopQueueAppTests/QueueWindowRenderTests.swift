@@ -228,6 +228,50 @@ final class QueueWindowRenderTests: XCTestCase {
         try writePNGArtifact(cgImage, name: "hotkeys-sheet.png")
     }
 
+    func testPaperReminderHudRendersReturnTargetWithoutBlanking() throws {
+        let packet = ReviewPacket(
+            id: "packet-waiting-1",
+            taskId: "task_checkout",
+            title: "Review Codex session waiting on task_checkout",
+            summary: "Codex session waiting for human input on task_checkout.",
+            decisionNeeded: "Approve the shell command or send a safer follow-up.",
+            source: "eventloopos://task-sessions/session_checkout",
+            priority: 700,
+            riskLevel: "medium",
+            recommendedAction: "Route to task agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 1_767_040_000)
+        )
+        let presentation = QueuePaperReminderPresentation(
+            packet: packet,
+            selectedTaskSessions: [
+                TaskSession(
+                    id: "session_checkout",
+                    taskId: "task_checkout",
+                    provider: "codex",
+                    status: "waiting_approval",
+                    preview: "Approve shell command",
+                    terminalRef: "ghostty:win-91"
+                )
+            ]
+        )
+        XCTAssertEqual(
+            presentation.focusHint,
+            "Return target: Codex Waiting Approval | session_checkout | Ghostty terminal win-91 | Approve shell command"
+        )
+
+        let size = PaperReminderHUDController.preferredContentSize
+        let view = PaperReminderHUDView(presentation: presentation, feedback: nil)
+            .frame(width: size.width, height: size.height)
+
+        let cgImage = try render(view, width: size.width, height: size.height)
+
+        XCTAssertEqual(cgImage.width, Int(size.width))
+        XCTAssertEqual(cgImage.height, Int(size.height))
+        try assertQueueSurfaceRendered(in: cgImage)
+        try writePNGArtifact(cgImage, name: "paper-reminder-hud-return-target.png")
+    }
+
     private func render<Content: View>(_ view: Content, width: CGFloat, height: CGFloat) throws -> CGImage {
         let hostingView = NSHostingView(rootView:
             ZStack {

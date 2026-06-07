@@ -106,7 +106,7 @@ Latest known-good proof:
 - Agent-spawn containment proof: a Metrics-owned Chrome window was opened while Customer was focused, claimed, moved back to Metrics, and Customer focus was restored.
 - Waiting-agent proof: a Codex `waiting_approval` run produced a `Codex needs human input` paper through `/agent-runs`.
 - Visual feedback proof: Queue shows the paper briefing strip and green `Showing paper: ...` restore feedback in the Screen Sharing capture; readiness also proves live Queue feedback within the configured budget.
-- Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper and proves restore-hotkey HUD feedback within the configured budget.
+- Desktop reminder proof: readiness requires the top-of-screen paper reminder HUD to be visible for the current paper, including return-target context when an agent session is bound, and proves restore-hotkey HUD feedback within the configured budget.
 - Master Command proof: readiness presses `Ctrl-Option-K` from another app and proves the Queue window opens a Master Command sheet with `Route to Master`, `Start Task`, `Rerank`, `Broadcast`, and the current task hint.
 - Hotkeys sheet proof: readiness presses `Ctrl-Option-/` from another app and proves the Queue window opens a Hotkeys sheet with Queue and Windows command rows.
 - Rectangle hotkey proof: readiness presses `Ctrl-Option-Left` on the shared TextEdit window and proves it moves to the expected left-half frame.
@@ -171,8 +171,10 @@ If Queue is hidden, click the eventloopOS Queue window, use the Dock icon, or pr
     the current paper title, exact decision needed, task id, priority, and
     session/binding state.
 17. Confirm the top-of-screen paper reminder HUD shows the current paper title
-    and decision while you work in Chrome/TextEdit. It should not take focus or
-    block mouse clicks.
+    and decision while you work in Chrome/TextEdit. On agent/waiting papers it
+    should also show a `Return target:` line with the bound Codex/Ghostty
+    session or say that an agent session still needs binding. It should not
+    take focus or block mouse clicks.
 18. Try Rectangle-style hotkeys on TextEdit: left, right, top, bottom, center, maximize.
 19. Press `Ctrl-Option-K`.
 20. Confirm the Master Command sheet opens on the Queue window with `Route to Master`, `Start Task`, `Rerank`, and `Broadcast`.
@@ -195,7 +197,7 @@ Report any of these as product issues:
 - same shared window does not move between paper-specific positions,
 - ambient autosave misses a moved window after waiting 2 to 3 seconds,
 - Queue briefing strip does not make the current decision obvious,
-- top-of-screen paper reminder is missing, stale, grabs focus, blocks clicks, or fails to briefly echo hotkey feedback,
+- top-of-screen paper reminder is missing, stale, lacks return-target context for agent papers, grabs focus, blocks clicks, or fails to briefly echo hotkey feedback,
 - `Codex needs human input` is missing or does not explain why approval is needed,
 - green `Showing paper: ...` feedback is missing, stale, or too hard to see after restore,
 - Queue is hard to find or blocks work,

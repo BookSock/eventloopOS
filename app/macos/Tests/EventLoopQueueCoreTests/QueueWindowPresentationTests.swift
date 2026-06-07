@@ -394,10 +394,65 @@ final class QueueWindowPresentationTests: XCTestCase {
 
         XCTAssertEqual(reminder.title, "Review feedback")
         XCTAssertEqual(reminder.decision, "Decide whether to send the draft now or wait for owner review.")
+        XCTAssertEqual(reminder.focusHint, "Return target: Codex Running | codex_thread_abc")
         XCTAssertEqual(reminder.context, "Needs human call. | task_blog_feedback | P90 | medium | Source: slack://thread/1 | Codex | Running | codex_thread_abc")
         XCTAssertEqual(
             reminder.accessibilityLabel,
-            "Review feedback | Decide whether to send the draft now or wait for owner review. | Needs human call. | task_blog_feedback | P90 | medium | Source: slack://thread/1 | Codex | Running | codex_thread_abc"
+            "Review feedback | Decide whether to send the draft now or wait for owner review. | Return target: Codex Running | codex_thread_abc | Needs human call. | task_blog_feedback | P90 | medium | Source: slack://thread/1 | Codex | Running | codex_thread_abc"
+        )
+    }
+
+    func testPaperReminderShowsMissingAgentSessionReturnTarget() {
+        let packet = ReviewPacket(
+            id: "packet-review-1",
+            taskId: "task_blog_feedback",
+            title: "Review feedback",
+            summary: "Needs human call.",
+            source: "slack://thread/1",
+            priority: 90,
+            riskLevel: "medium",
+            recommendedAction: "Send selected answer to agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+
+        let reminder = QueuePaperReminderPresentation(packet: packet)
+
+        XCTAssertEqual(reminder.focusHint, "Return target: bind an agent session for task_blog_feedback")
+        XCTAssertTrue(reminder.accessibilityLabel.contains("Return target: bind an agent session for task_blog_feedback"))
+    }
+
+    func testPaperReminderReturnTargetIncludesTerminalAndPreview() {
+        let packet = ReviewPacket(
+            id: "packet-waiting-1",
+            taskId: "task_checkout",
+            title: "Review Codex session waiting on task_checkout",
+            summary: "Codex session waiting for human input on task_checkout.",
+            source: "eventloopos://task-sessions/session_checkout",
+            priority: 700,
+            riskLevel: "medium",
+            recommendedAction: "Route to task agent",
+            recommendedActionType: "resume_agent",
+            createdAt: Date(timeIntervalSince1970: 0)
+        )
+
+        let reminder = QueuePaperReminderPresentation(
+            packet: packet,
+            selectedTaskSessions: [
+                TaskSession(
+                    id: "session_checkout",
+                    taskId: "task_checkout",
+                    provider: "codex",
+                    status: "waiting_approval",
+                    preview: "Approve shell command",
+                    terminalRef: "ghostty:win-91"
+                )
+            ]
+        )
+
+        XCTAssertEqual(
+            reminder.focusHint,
+            "Return target: Codex Waiting Approval | session_checkout | Ghostty terminal win-91 | Approve shell command"
         )
     }
 }
