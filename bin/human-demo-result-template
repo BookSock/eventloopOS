@@ -27,6 +27,8 @@ if (args.includes("--self-test")) {
       foreign_window_containment: { ok: true },
       agent_spawn_window_containment: { ok: true, spawned_app: "Google Chrome" },
       agent_waiting_paper: { ok: true },
+      metrics_restore: { ok: true },
+      final_ready_customer_restore: { ok: true },
     },
   };
   const rendered = renderTemplate({
@@ -37,6 +39,10 @@ if (args.includes("--self-test")) {
     manifest,
     ready: {
       checks: {
+        screen_sharing_capture_ok: true,
+        final_handoff_current_feedback_ok: true,
+        queue_briefing_strip_visible: true,
+        paper_reminder_hud_visible: true,
         queue_latency_ok: true,
         workspace_latency_ok: true,
         paper_reminder_feedback_ok: true,
@@ -84,6 +90,10 @@ if (args.includes("--self-test")) {
   assertIncludes(rendered, "Readiness manual mode feedback: artifacts/lab-runs/20260603T205150Z-human-demo-ready/manual-mode-enter-feedback.json ok=true required=true");
   assertIncludes(rendered, "Readiness hotkey latency: artifacts/lab-runs/20260603T205150Z-human-demo-ready/hotkey-latency.json ok=true required=true");
   assertIncludes(rendered, "Automated proof: ok=true, queue_count=3, ambient_autosave=true, new_window_autosave=true, foreign_window_containment=true, agent_spawn_window_containment=true, agent_spawn_app=Google Chrome, agent_waiting_paper=true");
+  assertIncludes(rendered, "- Starting state on demo-customer with Queue visible: pass - automated proof: readiness screenshot and queue state green");
+  assertIncludes(rendered, "- Moving shared TextEdit is remembered after 2-3 seconds: pass - automated proof: ambient autosave saved moved shared window");
+  assertIncludes(rendered, "- Rectangle hotkeys feel usable:");
+  assertIncludes(rendered, "- Manual Mode entry/return works: pass - automated proof: Manual Mode hotkey feedback gate green");
   assertEqual(defaultOutputPath(manifest), "artifacts/human-demo-results/20260603T202742Z-human-demo-result.md");
   const staleReadiness = readinessSummary({});
   assertEqual(staleReadiness.ok, false);
@@ -302,6 +312,7 @@ function renderTemplate({ manifestPath, screenshotPath, readyManifestPath, ready
   const agentSpawnApp = agentSpawn?.spawned_app ?? "unknown";
   const agentWaitingOk = manifest.proofs?.agent_waiting_paper?.ok === true ? "true" : "false";
   const readiness = readinessSummary(ready);
+  const passFailValues = automatedPassFailValues({ manifest, ready, readiness });
   return `Human demo date: ${date}
 Mac: Mac Studio
 Proof manifest: ${manifestPath}
@@ -317,13 +328,40 @@ Readiness hotkey latency: ${readiness.hotkey.path} ok=${readiness.hotkey.ok} req
 Automated proof: ok=${manifest.ok === true}, queue_count=${queueCount}, ambient_autosave=${ambientOk}, new_window_autosave=${newWindowOk}, foreign_window_containment=${containmentOk}, agent_spawn_window_containment=${agentSpawnContainmentOk}, agent_spawn_app=${agentSpawnApp}, agent_waiting_paper=${agentWaitingOk}
 
 Pass/fail:
-${renderHumanDemoPassFailTemplate()}
+${renderHumanDemoPassFailTemplate(passFailValues)}
 
 Friction:
 - 
 
 Ship/block decision:
 `;
+}
+
+function automatedPassFailValues({ manifest, ready, readiness }) {
+  const values = {};
+  const proofs = manifest.proofs ?? {};
+  setIf(values, "Starting state on demo-customer with Queue visible", ready?.checks?.screen_sharing_capture_ok === true, "readiness screenshot and queue state green");
+  setIf(values, "Ctrl-Option-R restores Customer paper", ready?.checks?.hotkey_feedback_latency_ok === true && ready?.checks?.final_handoff_current_feedback_ok === true, "restore hotkey feedback and final handoff green");
+  setIf(values, "Moving shared TextEdit is remembered after 2-3 seconds", proofs.ambient_autosave?.ok === true, "ambient autosave saved moved shared window");
+  setIf(values, "Automated new scratch window is remembered by current paper", proofs.new_window_autosave?.ok === true, "new scratch window saved into current paper context");
+  setIf(values, "Metrics paper brings same TextEdit to metrics position", proofs.metrics_restore?.ok === true, "shared TextEdit restored on Metrics paper");
+  setIf(values, "Customer paper brings same TextEdit back to customer position", proofs.final_ready_customer_restore?.ok === true || proofs.ready_customer_restore?.ok === true, "shared TextEdit restored on Customer paper");
+  setIf(values, "Background window containment proof passed", proofs.foreign_window_containment?.ok === true, "foreign Metrics window redirected back home");
+  setIf(values, "Agent-spawned window containment proof passed", proofs.agent_spawn_window_containment?.ok === true, `agent-spawned ${proofs.agent_spawn_window_containment?.spawned_app ?? "window"} redirected home`);
+  setIf(values, "Waiting agent paper appears in queue", proofs.agent_waiting_paper?.ok === true, "waiting agent run created human-needed paper");
+  setIf(values, "Paper briefing strip shows current decision", ready?.checks?.queue_briefing_strip_visible === true, "readiness saw Queue briefing strip");
+  setIf(values, "Desktop paper reminder HUD is visible", ready?.checks?.paper_reminder_hud_visible === true, "readiness saw desktop HUD");
+  setIf(values, "Manual Mode entry/return works", ready?.checks?.manual_mode_feedback_ok === true, "Manual Mode hotkey feedback gate green");
+  setIf(values, "Master Command opens with current task hint", ready?.checks?.master_command_hotkey_ok === true, "Master Command hotkey proof green");
+  setIf(values, "Queue/HUD hotkey feedback is visible and current", ready?.checks?.paper_reminder_feedback_ok === true && ready?.checks?.hotkey_feedback_latency_ok === true, "Queue and HUD feedback gates green");
+  setIf(values, "Queue/master latency readiness gate passed", readiness.queue.ok === true && readiness.masterCommandHotkey.ok === true, "queue latency and Master Command gates green");
+  setIf(values, "Workspace capture/restore-plan latency readiness gate passed", readiness.workspace.ok === true, "workspace latency gate green");
+  setIf(values, "Hotkey feedback latency readiness gate passed or skipped intentionally", readiness.hotkey.ok === true, readiness.hotkey.required ? "hotkey feedback latency gate green" : "hotkey feedback latency skipped intentionally");
+  return values;
+}
+
+function setIf(values, label, condition, proof) {
+  if (condition) values[label] = `pass - automated proof: ${proof}`;
 }
 
 function readinessSummary(ready) {

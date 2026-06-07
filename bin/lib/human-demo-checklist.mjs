@@ -19,8 +19,13 @@ export const humanDemoPassFailLabels = Object.freeze([
   "Hotkey feedback latency readiness gate passed or skipped intentionally",
 ]);
 
-export function renderHumanDemoPassFailTemplate() {
-  return humanDemoPassFailLabels.map((label) => `- ${label}:`).join("\n");
+export function renderHumanDemoPassFailTemplate(valuesByLabel = {}) {
+  return humanDemoPassFailLabels
+    .map((label) => {
+      const value = valuesByLabel[label] ?? "";
+      return `- ${label}:${value ? ` ${value}` : ""}`;
+    })
+    .join("\n");
 }
 
 export function renderFilledHumanDemoPassFail(value = "pass") {
